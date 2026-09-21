@@ -9,6 +9,11 @@ export interface RobotConfig {
   maxLinearAccel: number;   // 최대 선형 가속도 (inch/s^2)
   maxAngularAccel: number;  // 최대 각가속도 (rad/s^2)
 
+  // 초기 스폰 설정 (진영별 기본값 제공, 커스텀 가능)
+  spawnX: number;
+  spawnY: number;
+  spawnHeading: number;     // 라디안
+
   // 인테이크 옵션
   intakeDelay: number;      // 흡입 딜레이 (ms)
   canIntakeNectar: boolean; // Nectar 무시 전략 옵션
@@ -55,7 +60,7 @@ export interface FlowerState {
 }
 
 export interface HiveState {
-  upwardCell: 'AUDIENCE_SIDE' | 'OPPOSITE_SIDE'; // 현재 어느 쪽이 열려(UP) 있는지
+  upwardCell: 'AUDIENCE_CELL' | 'OPPOSITE_CELL'; // 현재 어느 쪽이 열려(UP) 있는지
   ballsInUpwardCell: number;
   isTipping: boolean;
   tipCount: number;
