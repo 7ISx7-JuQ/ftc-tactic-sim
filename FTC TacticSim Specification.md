@@ -112,7 +112,8 @@
 3. **충돌 엔진 역학 모델 (`src/core/collision.ts`):**
     - **로봇-환경 충돌:** 벽면 경계, HIVE AABB, 4개 FLOWER Circle에 대해 SAT 침투 보정(MTV). 벽을 파고드는 법선 속도는 0으로 차단하되, 접선 속도는 보존하여 미끄러짐 구현.
     - **로봇-로봇 충돌 (비탄성 슬라이딩):**
-        - 상호 위치 분할 보정: `r1`은 `-0.5 * MTV`, `r2`는 `+0.5 * MTV` 이동.
+        - 법선 부호 규약: `mtvNormal`은 `testOBBvsOBB(r1, r2)`가 반환하는 단위 법선으로, **r1을 r2 밖으로 밀어내는 방향(r2 → r1)**이다. `MTV = mtvNormal * depth`.
+        - 상호 위치 분할 보정: `r1`은 `+0.5 * MTV`, `r2`는 `-0.5 * MTV` 이동 (두 로봇이 서로 반대 방향으로 절반씩 분리).
         - 법선 상대 속도 상쇄: `vRel = v1 - v2`, `vn = dot(vRel, mtvNormal)` 계산 시 `vn < 0`(접근 중)이면:
         `r1.vx -= 0.5 * vn * mtvNormal.x`, `r1.vy -= 0.5 * vn * mtvNormal.y`, `r2.vx += 0.5 * vn * mtvNormal.x`, `r2.vy += 0.5 * vn * mtvNormal.y`
         (접선 속도는 100% 보존하여 차체 비비기 주행 허용).
@@ -122,7 +123,9 @@
         `v_ball -= (1 + e) * vn * normal` (e는 기물별 restitution 적용).
     - **공 vs 로봇 충돌 (Kinematic Pusher):**
         - 로봇은 무한 질량으로 간주되어 감속되지 않음. 공에만 100% MTV 가산.
-        - 충격량 속도 전달: `vRel = v_ball - v_robot`, `vn = dot(vRel, mtvNormal) < 0`일 때:
+        - 접촉점 유효 선속도 (회전 성분 포함): 접촉점 오프셋 `dx = ball.x - robot.x`, `dy = ball.y - robot.y`에 대해
+        `vEff.x = robot.vx - robot.omega * dy`, `vEff.y = robot.vy + robot.omega * dx`
+        - 충격량 속도 전달: `mtvNormal`은 로봇 → 공 방향. `vRel = v_ball - vEff`, `vn = dot(vRel, mtvNormal) < 0`일 때:
         `v_ball -= (1 + e) * vn * mtvNormal` 적용 (달리는 로봇 범퍼에 맞은 공이 전방으로 튕겨 굴러감).
     - **공 vs 공 충돌 (Circle vs Circle PBD):**
         - 중심 거리 `d < (rA + rB)`인 경우 겹침 깊이 `depth = (rA + rB) - d`.
