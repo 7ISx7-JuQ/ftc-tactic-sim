@@ -26,6 +26,10 @@ export interface RobotConfig {
   // FLOWER 득점 옵션
   flowerSetupDelay: number; // 초기 리프트/경사로 전개 준비 시간 (ms)
   flowerDropDelay: number;  // 연속으로 기물을 떨어뜨리는 간격 (ms)
+
+  // 전면 인테이크 판정 영역
+  intakeWidth?: number;     // 전면 인테이크 유효 너비 (inch)
+  intakeDepth?: number;     // 전면 흡입 감지 여유 깊이 (inch)
 }
 
 // 2. 득점 기물
@@ -35,6 +39,8 @@ export interface GamePiece {
   alliance: 'RED' | 'BLUE' | 'NONE';
   x: number;
   y: number;
+  vx: number;               // X방향 속도 (inch/s)
+  vy: number;               // Y방향 속도 (inch/s)
   state: 'ON_FIELD' | 'CONTROLLED' | 'IN_HIVE' | 'IN_FLOWER' | 'IN_GARDEN' | 'OUT_OF_BOUNDS';
 }
 
@@ -59,11 +65,21 @@ export interface FlowerState {
   bottomBonus: 'RED' | 'BLUE' | 'NONE';
 }
 
+export interface PendingDrop {
+  pieceId: string;
+  type: 'POLLEN' | 'NECTAR';
+  targetX: number;
+  targetY: number;
+  settleTime: number;       // 전복 시작 시점 기준 완전 정지 소요 시간 (초)
+}
+
 export interface HiveState {
   upwardCell: 'AUDIENCE_CELL' | 'OPPOSITE_CELL'; // 현재 어느 쪽이 열려(UP) 있는지
   ballsInUpwardCell: number;
   isTipping: boolean;
   tipCount: number;
+  tipProgressTimer: number;     // 전복 시작 후 누적 경과 시간 (초)
+  pendingDrops: PendingDrop[];  // 시차 낙하 대기열
 }
 
 // 5. 필드 통합 상태 및 RP
