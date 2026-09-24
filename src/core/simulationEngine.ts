@@ -15,6 +15,7 @@ import {
   resolveRobotEnvironmentCollisions,
   resolveRobotRobotCollision,
   stepPieceDynamics,
+  testOBBvsAABB,
   testOBBvsCircle,
 } from './collision';
 import type { AABB, OBB, RobotBody, Vector2D } from './collision';
@@ -174,19 +175,6 @@ function closestPointOnOBB(obb: OBB, p: Vector2D): Vector2D {
 function distancePointToOBB(obb: OBB, p: Vector2D): number {
   const c = closestPointOnOBB(obb, p);
   return Math.hypot(p.x - c.x, p.y - c.y);
-}
-
-function isOBBInsideAABB(obb: OBB, box: AABB): boolean {
-  const [u, v] = obb.axes;
-  const [hx, hy] = obb.halfExtents;
-  const extentX = hx * Math.abs(u.x) + hy * Math.abs(v.x);
-  const extentY = hx * Math.abs(u.y) + hy * Math.abs(v.y);
-  return (
-    obb.center.x - extentX >= box.minX - EPSILON &&
-    obb.center.x + extentX <= box.maxX + EPSILON &&
-    obb.center.y - extentY >= box.minY - EPSILON &&
-    obb.center.y + extentY <= box.maxY + EPSILON
-  );
 }
 
 // 가상 Intake Zone (명세서 3.3)
@@ -1080,9 +1068,11 @@ export class SimulationEngine {
         p.state === 'IN_GARDEN' && p.vx === 0 && p.vy === 0 && pointInAABB(p.x, p.y, garden),
     ).length;
 
+    // PARK: 차체 일부라도 아군 LOADING ZONE과 겹친 채 정지한 로봇 (FTC 룰: 부분 진입 인정)
     const zone = LOADING_ZONE_AABB[alliance];
     const parked = this.robotBodies().filter(
-      ({ state, config }) => isRobotStationary(state) && isOBBInsideAABB(getRobotOBB(state, config), zone),
+      ({ state, config }) =>
+        isRobotStationary(state) && testOBBvsAABB(getRobotOBB(state, config), zone).colliding,
     ).length;
     const parkScore = parked * PARK_POINTS;
 
