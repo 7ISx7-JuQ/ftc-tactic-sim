@@ -105,11 +105,12 @@ export function stepRobotKinematics(
   config: RobotConfig,
   dt: number,
 ): RobotState {
-  // 행동 수행 중에는 구동 목표를 0으로 강제하여 감속 정지 유도
-  const isIdle = current.actionState === 'IDLE';
-  const tVx = isIdle ? targetVx : 0;
-  const tVy = isIdle ? targetVy : 0;
-  const tOmega = isIdle ? targetOmega : 0;
+  // IDLE / INTAKING(Mobile Intake)은 주행 입력 유지,
+  // Stationary Lock 액션(SHOOTING / FLOWER_*)은 구동 목표를 0으로 강제하여 감속 정지 유도
+  const canDrive = current.actionState === 'IDLE' || current.actionState === 'INTAKING';
+  const tVx = canDrive ? targetVx : 0;
+  const tVy = canDrive ? targetVy : 0;
+  const tOmega = canDrive ? targetOmega : 0;
 
   const step = Math.max(0, finiteOr0(dt));
 
