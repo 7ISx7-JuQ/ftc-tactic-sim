@@ -166,7 +166,7 @@
 4. **GARDEN & PARK (경기 종료 판정):**
     - 경기 진행 중에는 실시간 점수로 가산하지 않음.
     - 경기 종료 틱(Tick 6000, 남은 시간 0초) 시점에 필드 상태를 검사하여 일괄 가산:
-        - **GARDEN:** 아군 GARDEN AABB 구역 내에 완전히 정지(`speed === 0, state === 'IN_GARDEN'`)해 있는 기물 개당 1점 가산.
+        - **GARDEN:** 기물을 -z 방향에서 바닥(xy 평면)에 수직 정사영한 원(기물 반지름)이 아군 GARDEN AABB와 일부라도 겹친 상태로 완전히 정지(`speed === 0, state === 'IN_GARDEN'`)해 있는 기물 개당 1점 가산. 중심점이 구역 밖이어도 걸쳐 있으면 인정하며, 경계에 접하기만 한 경우(겹침 깊이 0)는 불인정. (판정: `collision.ts`의 `testCircleVsAABB`)
         - **PARK:** 아군 LOADING ZONE AABB 구역과 차체(OBB) 일부라도 겹친 상태로 정지한 로봇당 5점 가산 (FTC 룰상 부분 진입도 주차로 인정).
 5. **랭킹 포인트 (RP):** SWARM (주차 10점) / POLLINATOR 1 (팁 4회) / POLLINATOR 2 (팁 7회).
 

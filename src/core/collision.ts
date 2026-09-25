@@ -288,7 +288,8 @@ function testCircleVsCircle(a: Circle, b: Circle): CollisionResult {
 }
 
 // 원 vs AABB: normal은 AABB → 원 (원을 밀어내는 방향)
-function testCircleVsAABB(circle: Circle, box: AABB): CollisionResult {
+// 겹침 깊이가 0 이하(경계에 접하기만 함)면 비충돌. 공 vs HIVE 반사, GARDEN 정사영 판정에 공용
+export function testCircleVsAABB(circle: Circle, box: AABB): CollisionResult {
   const { x: cx, y: cy } = circle.center;
   const px = clamp(cx, box.minX, box.maxX);
   const py = clamp(cy, box.minY, box.maxY);

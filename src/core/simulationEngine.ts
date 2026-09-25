@@ -18,6 +18,7 @@ import {
   resolveRobotEnvironmentCollisions,
   resolveRobotRobotCollision,
   stepPieceDynamics,
+  testCircleVsAABB,
   testOBBvsAABB,
   testOBBvsCircle,
 } from './collision';
@@ -143,8 +144,10 @@ function isFlowerAction(state: RobotState['actionState']): boolean {
   return state === 'FLOWER_SETUP' || state === 'FLOWER_DROPPING';
 }
 
-function pointInAABB(x: number, y: number, box: AABB): boolean {
-  return x >= box.minX && x <= box.maxX && y >= box.minY && y <= box.maxY;
+// GARDEN 판정: 기물을 바닥(xy 평면)에 수직 정사영한 원이 구역 사각형과 겹치면 인정 (걸침 포함)
+function pieceOverlapsAABB(piece: GamePiece, box: AABB): boolean {
+  const circle = { center: { x: piece.x, y: piece.y }, radius: PIECE_PHYSICS[piece.type].radius };
+  return testCircleVsAABB(circle, box).colliding;
 }
 
 // OBB 위에서 점 p에 가장 가까운 점 (p가 내부면 p 자신)
@@ -1030,11 +1033,11 @@ export class SimulationEngine {
     }
   }
 
-  // GARDEN AABB 내부에 완전히 정지한 바닥 기물은 IN_GARDEN으로 안착 처리
+  // 정사영이 GARDEN AABB에 걸친 채 완전히 정지한 바닥 기물은 IN_GARDEN으로 안착 처리
   private classifyGardenPieces(): void {
     for (const piece of this.pieces) {
       if (piece.state !== 'ON_FIELD' || piece.vx !== 0 || piece.vy !== 0) continue;
-      if (pointInAABB(piece.x, piece.y, GARDEN_AABB.RED) || pointInAABB(piece.x, piece.y, GARDEN_AABB.BLUE)) {
+      if (pieceOverlapsAABB(piece, GARDEN_AABB.RED) || pieceOverlapsAABB(piece, GARDEN_AABB.BLUE)) {
         piece.state = 'IN_GARDEN';
       }
     }
@@ -1058,7 +1061,7 @@ export class SimulationEngine {
     const garden = GARDEN_AABB[alliance];
     const gardenScore = this.pieces.filter(
       (p) =>
-        p.state === 'IN_GARDEN' && p.vx === 0 && p.vy === 0 && pointInAABB(p.x, p.y, garden),
+        p.state === 'IN_GARDEN' && p.vx === 0 && p.vy === 0 && pieceOverlapsAABB(p, garden),
     ).length;
 
     // PARK: 차체 일부라도 아군 LOADING ZONE과 겹친 채 정지한 로봇 (FTC 룰: 부분 진입 인정)
