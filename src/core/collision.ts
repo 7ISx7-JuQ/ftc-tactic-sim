@@ -41,6 +41,21 @@ export const FLOWER_CIRCLES: readonly Circle[] = [
   { center: { x: 96.0, y: 142.0 }, radius: FLOWER_RADIUS }, // Blue
 ];
 
+// FLOWER_CIRCLES와 동일 인덱스 순서의 식별자 / 소속 진영 (엔진 FlowerState.id, 렌더러 라벨과 공유)
+export const FLOWER_IDS = ['flower1', 'flower2', 'flower3', 'flower4'] as const;
+export const FLOWER_ALLIANCES = ['RED', 'RED', 'BLUE', 'BLUE'] as const;
+
+// 통과 가능 구역: GARDEN 23 × 2, LOADING ZONE 11 × 23 (충돌 없음, 득점/스폰 판정용)
+export const GARDEN_AABB: Readonly<Record<'RED' | 'BLUE', AABB>> = {
+  RED: { minX: 0, maxX: 23, minY: 142, maxY: 144 },
+  BLUE: { minX: 121, maxX: 144, minY: 0, maxY: 2 },
+};
+
+export const LOADING_ZONE_AABB: Readonly<Record<'RED' | 'BLUE', AABB>> = {
+  RED: { minX: 0, maxX: 11, minY: 24, maxY: 47 },
+  BLUE: { minX: 133, maxX: 144, minY: 97, maxY: 120 },
+};
+
 export interface PiecePhysics {
   radius: number;         // inch
   mass: number;           // g

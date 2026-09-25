@@ -4,9 +4,12 @@
 import {
   FIELD_SIZE,
   FLOWER_CIRCLES,
+  FLOWER_IDS,
   FLOWER_RADIUS,
+  GARDEN_AABB,
   HIVE_AABB,
   HIVE_CENTER_X,
+  LOADING_ZONE_AABB,
   PIECE_PHYSICS,
   STOP_SPEED_THRESHOLD,
   generateTippedPiecePlan,
@@ -82,17 +85,6 @@ const OFF_FIELD = -10;
 
 const DEFAULT_RNG_SEED = 0x5eed2026;
 
-// 통과 가능 구역 (명세서 2.2)
-export const GARDEN_AABB: Record<'RED' | 'BLUE', AABB> = {
-  RED: { minX: 0, maxX: 23, minY: 142, maxY: 144 },
-  BLUE: { minX: 121, maxX: 144, minY: 0, maxY: 2 },
-};
-
-export const LOADING_ZONE_AABB: Record<'RED' | 'BLUE', AABB> = {
-  RED: { minX: 0, maxX: 11, minY: 24, maxY: 47 },
-  BLUE: { minX: 133, maxX: 144, minY: 97, maxY: 120 },
-};
-
 // 진영별 기본 스폰 (명세서 2.3, UI 기본값 제공용)
 export const DEFAULT_SPAWN_POSES: Record<
   'RED' | 'BLUE',
@@ -107,9 +99,6 @@ export const DEFAULT_SPAWN_POSES: Record<
     robot2: { x: 135.0, y: 108.0, heading: Math.PI },
   },
 };
-
-// FLOWER_CIRCLES와 동일 순서의 FLOWER 식별자 (렌더러 FIELD_LAYOUT.flowers와 일치)
-const FLOWER_IDS = ['flower1', 'flower2', 'flower3', 'flower4'] as const;
 
 // ============================================================
 // 2. 외부 입력 타입

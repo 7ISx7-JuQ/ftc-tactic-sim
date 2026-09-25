@@ -1,12 +1,23 @@
 // Canvas 2D 렌더러 (React 비의존 순수 함수 모음)
 // 좌표계 (명세서 2.1): 좌상단 (0,0) ~ 우하단 (144,144), +x 오른쪽, +y 아래쪽, Y=144 방향이 AUDIENCE
 
-import { PIECE_PHYSICS } from '../core/collision';
+import {
+  FIELD_SIZE,
+  FLOWER_ALLIANCES,
+  FLOWER_CIRCLES,
+  FLOWER_IDS,
+  GARDEN_AABB,
+  HIVE_AABB,
+  HIVE_CENTER_X,
+  LOADING_ZONE_AABB,
+  PIECE_PHYSICS,
+} from '../core/collision';
+import type { AABB } from '../core/collision';
 import { HIVE_TIP_THRESHOLD } from '../core/types';
 import type { FlowerState, GamePiece } from '../core/types';
 
 // 1. 필드 스케일 상수 (명세서 2.1)
-export const FIELD_SIZE_INCH = 144;
+export const FIELD_SIZE_INCH = FIELD_SIZE;
 export const PX_PER_INCH = 5;
 export const CANVAS_SIZE_PX = FIELD_SIZE_INCH * PX_PER_INCH; // 720
 
@@ -47,16 +58,19 @@ export function toCanvasRect(rect: Rect): Rect {
 }
 
 // 3. 필드 구조물 배치 (명세서 2.2, 인치 단위)
+// 좌표의 단일 출처는 코어(collision.ts)이며, 렌더러는 이를 그리기용 Rect/Circle 형식으로만 변환
 // Red/Blue 구조물은 필드 중심 (72, 72) 기준 180° 점대칭: (x, y) ↔ (144 - x, 144 - y)
 export type Alliance = 'RED' | 'BLUE';
 export type HiveCell = 'OPPOSITE_CELL' | 'AUDIENCE_CELL';
 
+function aabbToRect(box: AABB): Rect {
+  return { x: box.minX, y: box.minY, width: box.maxX - box.minX, height: box.maxY - box.minY };
+}
+
 const FIELD_CENTER = FIELD_SIZE_INCH / 2;
-const HIVE_WIDTH = 49.46;
-const HIVE_HEIGHT = 38.95;
-const HIVE_LEFT = FIELD_CENTER - HIVE_WIDTH / 2;   // 47.27
-const HIVE_TOP = FIELD_CENTER - HIVE_HEIGHT / 2;   // 52.525
-const HIVE_CENTER_X: Record<Alliance, number> = { RED: 59.25, BLUE: 84.75 };
+const HIVE_LEFT = HIVE_AABB.minX;                  // 47.27
+const HIVE_TOP = HIVE_AABB.minY;                   // 52.525
+const HIVE_HEIGHT = HIVE_AABB.maxY - HIVE_AABB.minY; // 38.95
 // 진영별 HIVE 폭: 바깥 모서리는 전체 프레임에 맞추고 중심은 명세 좌표 유지 (가운데 약 2.9" 중앙 프레임)
 const HIVE_UNIT_WIDTH = 2 * (HIVE_CENTER_X.RED - HIVE_LEFT); // 23.96
 
@@ -71,28 +85,26 @@ function hiveCellRect(alliance: Alliance, cell: HiveCell): Rect {
 
 export const FIELD_LAYOUT = {
   // 솔리드 장애물: 정중앙 (72, 72) 중심 49.46 x 38.95 프레임
-  hive: { x: HIVE_LEFT, y: HIVE_TOP, width: HIVE_WIDTH, height: HIVE_HEIGHT } as Rect,
+  hive: aabbToRect(HIVE_AABB),
   // 진영별 HIVE 2-Cell (좌측 C열 Red, 우측 D열 Blue)
   hiveCells: {
     RED: { OPPOSITE_CELL: hiveCellRect('RED', 'OPPOSITE_CELL'), AUDIENCE_CELL: hiveCellRect('RED', 'AUDIENCE_CELL') },
     BLUE: { OPPOSITE_CELL: hiveCellRect('BLUE', 'OPPOSITE_CELL'), AUDIENCE_CELL: hiveCellRect('BLUE', 'AUDIENCE_CELL') },
   } as Record<Alliance, Record<HiveCell, Rect>>,
   // 솔리드 장애물: 반지름 2.0 원형
-  flowers: [
-    { id: 'flower1', side: 'RED', x: 2, y: 96, radius: 2 },
-    { id: 'flower2', side: 'RED', x: 48, y: 2, radius: 2 },
-    { id: 'flower3', side: 'BLUE', x: 142, y: 48, radius: 2 },
-    { id: 'flower4', side: 'BLUE', x: 96, y: 142, radius: 2 },
-  ] as (Circle & { id: string; side: Alliance })[],
+  flowers: FLOWER_CIRCLES.map((c, i) => ({
+    id: FLOWER_IDS[i],
+    side: FLOWER_ALLIANCES[i],
+    x: c.center.x,
+    y: c.center.y,
+    radius: c.radius,
+  })) as (Circle & { id: string; side: Alliance })[],
   // 통과 가능 구역: 23 x 2
-  gardens: {
-    RED: { x: 0, y: 142, width: 23, height: 2 },
-    BLUE: { x: 121, y: 0, width: 23, height: 2 },
-  } as Record<Alliance, Rect>,
+  gardens: { RED: aabbToRect(GARDEN_AABB.RED), BLUE: aabbToRect(GARDEN_AABB.BLUE) } as Record<Alliance, Rect>,
   // 통과 가능 구역: 11 x 23
   loadingZones: {
-    RED: { x: 0, y: 24, width: 11, height: 23 },
-    BLUE: { x: 133, y: 97, width: 11, height: 23 },
+    RED: aabbToRect(LOADING_ZONE_AABB.RED),
+    BLUE: aabbToRect(LOADING_ZONE_AABB.BLUE),
   } as Record<Alliance, Rect>,
 };
 
