@@ -60,7 +60,7 @@ export interface ScenarioConfig {
   hiveUpwardCell?: 'AUDIENCE_CELL' | 'OPPOSITE_CELL';
   hiveInitialPieces?: {
     pollenCount: number;    // 상향 셀 POLLEN (기본 0)
-    nectarCount: number;    // 상향 셀 NECTAR (기본 3). 합계는 HIVE_TIP_THRESHOLD 이하
+    nectarCount: number;    // 상향 셀 NECTAR (기본 3). {NECTAR, POLLEN}이 팁 임계(HIVE_TIP_POLLEN_BY_NECTAR) 미만이어야 함
   };
 
   // 텔레옵 시작 시 로봇 적재물 (순서 있는 목록, FIFO: 0번이 가장 먼저 나감)
@@ -77,7 +77,8 @@ export interface ScenarioConfig {
     opponent: number;
   };
 
-  // 오토 중 발생한 HIVE 팁 횟수 = 텔레옵 직전 휴먼 플레이어가 로딩 존에 투입하는 NECTAR 수 (기본 0)
+  // 오토 중 발생한 HIVE 팁 횟수 (기본 0): 텔레옵 직전 휴먼 플레이어가 그 수만큼 로딩 존에 NECTAR 투입,
+  // POLLINATOR RP 팁 횟수에 합산 (텔레옵 점수에는 미포함)
   autoTipCount?: number;
 
   // ※ 위에서 지정되지 않은 나머지 POLLEN / NECTAR는 모두 바닥에 무작위 산포 (지정 수량으로부터 자동 계산)
@@ -159,9 +160,11 @@ export interface FlowerState {
 
 export interface HiveState {
   upwardCell: 'AUDIENCE_CELL' | 'OPPOSITE_CELL'; // 현재 어느 쪽이 열려(UP) 있는지
-  ballsInUpwardCell: number;
+  nectarInUpwardCell: number;   // 상향 셀 NECTAR 수
+  pollenInUpwardCell: number;   // 상향 셀 POLLEN 수
   isTipping: boolean;
-  tipCount: number;
+  tipCount: number;             // 텔레옵 중 팁 횟수 (회당 20점)
+  autoTipCount: number;         // 오토 중 팁 횟수 (ScenarioConfig, RP 판정에만 합산)
   tipProgressTimer: number;     // 전복 시작 후 누적 경과 시간 (초)
   pendingDrops: PendingDrop[];  // 시차 낙하 대기열
 }
@@ -198,8 +201,32 @@ export interface TimelineFrame {
 // [Game Mechanics & Rule Tuning Constants]
 // ==========================================
 
-/** HIVE 팁(전복) 발동 상향 셀 누적 기물 수 */
-export const HIVE_TIP_THRESHOLD = 3;
+/**
+ * HIVE 팁(전복) 임계 테이블: 상향 셀 NECTAR 개수별 팁이 발동하는 POLLEN 개수
+ * Key: NECTAR 개수, Value: 팁 발동 POLLEN 개수 (FLOWER_MAX_POLLEN_BY_NECTAR와 같은 구조)
+ * 임계 조합 {NECTAR, POLLEN}: {5,0} {4,1} {3,3} {2,5} {1,6} {0,8}
+ * NECTAR가 테이블 최대 키(5) 이상이면 POLLEN 0개로 즉시 팁
+ */
+export const HIVE_TIP_POLLEN_BY_NECTAR: Record<number, number> = {
+  0: 8,
+  1: 6,
+  2: 5,
+  3: 3,
+  4: 1,
+  5: 0,
+};
+
+/** 상향 셀 {NECTAR, POLLEN}에서 팁이 발동하는 POLLEN 개수 */
+export function hiveTipPollenThreshold(nectar: number): number {
+  const maxKey = Math.max(...Object.keys(HIVE_TIP_POLLEN_BY_NECTAR).map(Number));
+  const key = Math.min(Math.max(0, Math.floor(nectar)), maxKey);
+  return HIVE_TIP_POLLEN_BY_NECTAR[key] ?? 0;
+}
+
+/** 상향 셀 {NECTAR, POLLEN}이 팁 임계에 도달했는지 */
+export function isHiveTipReached(nectar: number, pollen: number): boolean {
+  return pollen >= hiveTipPollenThreshold(nectar);
+}
 
 /** FLOWER 하단 연속 deQ 최소 중력 낙하 쿨다운 (초 단위) */
 export const FLOWER_DEQ_GRAVITY_COOLDOWN = 0.12;

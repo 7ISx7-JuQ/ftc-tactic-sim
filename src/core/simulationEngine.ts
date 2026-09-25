@@ -30,7 +30,8 @@ import {
   FLOWER_DEQ_GRAVITY_COOLDOWN,
   FLOWER_MAX_NECTAR_CAPACITY,
   FLOWER_MAX_POLLEN_BY_NECTAR,
-  HIVE_TIP_THRESHOLD,
+  hiveTipPollenThreshold,
+  isHiveTipReached,
 } from './types';
 import type {
   FieldState,
@@ -211,8 +212,8 @@ export function validateScenario(
   const hiveNectar = scenario.hiveInitialPieces?.nectarCount ?? DEFAULT_HIVE_NECTAR;
   if (!isCount(hivePollen, TOTAL_POLLEN) || !isCount(hiveNectar, NECTAR_IN_PLAY)) {
     add('HIVE_COUNT', `HIVE POLLEN은 0 이상, NECTAR는 0 ~ ${NECTAR_IN_PLAY} 정수여야 함 (POLLEN ${hivePollen}, NECTAR ${hiveNectar})`);
-  } else if (hivePollen + hiveNectar > HIVE_TIP_THRESHOLD) {
-    add('HIVE_OVER_THRESHOLD', `HIVE 상향 셀 기물 ${hivePollen + hiveNectar}개가 팁 임계값 ${HIVE_TIP_THRESHOLD}을 초과 (시작 전에 이미 전복된 상태)`);
+  } else if (isHiveTipReached(hiveNectar, hivePollen)) {
+    add('HIVE_OVER_THRESHOLD', `HIVE 상향 셀 {NECTAR ${hiveNectar}, POLLEN ${hivePollen}}이 팁 임계(NECTAR ${hiveNectar}개일 때 POLLEN ${hiveTipPollenThreshold(hiveNectar)}개)에 도달 (시작 전에 이미 전복된 상태)`);
   }
 
   let loadoutPollen = 0;
@@ -485,16 +486,13 @@ export class SimulationEngine {
       return { id: FLOWER_IDS[i], pieces: stack, owner: 'NONE', bottomBonus: 'NONE' };
     });
 
-    // (3) HIVE 상향 셀 (IN_HIVE): 합계가 팁 임계값을 넘지 않도록 제한
+    // (3) HIVE 상향 셀 (IN_HIVE): {NECTAR, POLLEN}이 팁 임계 미만이 되도록 제한 (NECTAR 먼저 확정)
     const upwardCell = sc?.hiveUpwardCell ?? (alliance === 'RED' ? 'AUDIENCE_CELL' : 'OPPOSITE_CELL');
     const cellCenter = hiveCellCenter(alliance, upwardCell);
-    const hivePollenCount = clampCount(sc?.hiveInitialPieces?.pollenCount, 0, HIVE_TIP_THRESHOLD);
-    const hiveNectarCount = clampCount(
-      sc?.hiveInitialPieces?.nectarCount,
-      DEFAULT_HIVE_NECTAR,
-      HIVE_TIP_THRESHOLD - hivePollenCount,
-    );
-    const hivePieces = [...takePollen(hivePollenCount), ...takeNectar(hiveNectarCount)];
+    const hiveNectar = takeNectar(clampCount(sc?.hiveInitialPieces?.nectarCount, DEFAULT_HIVE_NECTAR, NECTAR_IN_PLAY));
+    const hivePollenMax = Math.max(0, hiveTipPollenThreshold(hiveNectar.length) - 1);
+    const hivePollen = takePollen(clampCount(sc?.hiveInitialPieces?.pollenCount, 0, hivePollenMax));
+    const hivePieces = [...hivePollen, ...hiveNectar];
     for (const piece of hivePieces) {
       piece.state = 'IN_HIVE';
       piece.x = cellCenter.x;
@@ -525,9 +523,11 @@ export class SimulationEngine {
       matchPhase: 'TELEOP',
       hive: {
         upwardCell,
-        ballsInUpwardCell: hivePieces.length,
+        nectarInUpwardCell: hiveNectar.length,
+        pollenInUpwardCell: hivePollen.length,
         isTipping: false,
         tipCount: 0,
+        autoTipCount: clampCount(sc?.autoTipCount, 0, INITIAL_HUMAN_NECTAR_STOCK),
         tipProgressTimer: 0,
         pendingDrops: [],
       },
@@ -537,7 +537,7 @@ export class SimulationEngine {
     };
 
     // (5) 오토 팁 보상: 텔레옵 직전 휴먼 플레이어가 로딩 존에 NECTAR 투입 (결정론적 슬롯 배치, 산포보다 먼저)
-    this.releaseHumanNectar(clampCount(sc?.autoTipCount, 0, INITIAL_HUMAN_NECTAR_STOCK));
+    this.releaseHumanNectar(this.field.hive.autoTipCount);
 
     // (6) 지정되지 않은 나머지 POLLEN / 필드 NECTAR는 바닥에 무작위 산포 (ON_FIELD 정지)
     for (const piece of takePollen(TOTAL_POLLEN)) this.scatterPiece(piece);
@@ -1096,9 +1096,11 @@ export class SimulationEngine {
     piece.y = cellCenter.y;
     piece.vx = 0;
     piece.vy = 0;
-    hive.ballsInUpwardCell++;
+    if (piece.type === 'NECTAR') hive.nectarInUpwardCell++;
+    else hive.pollenInUpwardCell++;
 
-    if (hive.ballsInUpwardCell >= HIVE_TIP_THRESHOLD) this.tipHive();
+    // 임계 테이블 도달 시 같은 틱에 즉시 전복 시작 (전복 중 발사는 모두 빗맞음)
+    if (isHiveTipReached(hive.nectarInUpwardCell, hive.pollenInUpwardCell)) this.tipHive();
   }
 
   private tipHive(): void {
@@ -1117,7 +1119,8 @@ export class SimulationEngine {
       this.random,
     );
     hive.upwardCell = spilledCell === 'AUDIENCE_CELL' ? 'OPPOSITE_CELL' : 'AUDIENCE_CELL';
-    hive.ballsInUpwardCell = 0;
+    hive.nectarInUpwardCell = 0;
+    hive.pollenInUpwardCell = 0;
     if (hive.pendingDrops.length === 0) hive.isTipping = false;
 
     this.releaseHumanNectar(1);
@@ -1209,8 +1212,9 @@ export class SimulationEngine {
     this.totalScore = hiveScore + flowerScore + gardenScore + parkScore;
     this.rpAchieved = {
       swarm: parked === 2,
-      pollinator1: this.field.hive.tipCount >= 4,
-      pollinator2: this.field.hive.tipCount >= 7,
+      // POLLINATOR: 오토 + 텔레옵 팁 합산 (점수는 텔레옵 팁만)
+      pollinator1: this.field.hive.autoTipCount + this.field.hive.tipCount >= 4,
+      pollinator2: this.field.hive.autoTipCount + this.field.hive.tipCount >= 7,
     };
   }
 

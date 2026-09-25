@@ -13,7 +13,7 @@ import {
   PIECE_PHYSICS,
 } from '../core/collision';
 import type { AABB } from '../core/collision';
-import { HIVE_TIP_THRESHOLD } from '../core/types';
+import { hiveTipPollenThreshold } from '../core/types';
 import type { FlowerState, GamePiece } from '../core/types';
 
 // 1. 필드 스케일 상수 (명세서 2.1)
@@ -108,17 +108,16 @@ export const FIELD_LAYOUT = {
   } as Record<Alliance, Rect>,
 };
 
-// HIVE 표시용 상태 (엔진 연동 전 기본값: 명세서 2.5 초기 UP 상태)
-export const HIVE_CELL_CAPACITY = HIVE_TIP_THRESHOLD; // TIP 임계값 (types.ts 룰 튜닝 상수)
-
+// HIVE 표시용 상태 (엔진 연동 전 기본값: 명세서 2.6.1 초기 UP 상태)
 export interface HiveView {
   upwardCell: HiveCell;
-  ballsInUpwardCell: number;
+  nectarInUpwardCell: number;
+  pollenInUpwardCell: number;
 }
 
 export const INITIAL_HIVE_VIEW: Record<Alliance, HiveView> = {
-  RED: { upwardCell: 'AUDIENCE_CELL', ballsInUpwardCell: 0 },
-  BLUE: { upwardCell: 'OPPOSITE_CELL', ballsInUpwardCell: 0 },
+  RED: { upwardCell: 'AUDIENCE_CELL', nectarInUpwardCell: 0, pollenInUpwardCell: 0 },
+  BLUE: { upwardCell: 'OPPOSITE_CELL', nectarInUpwardCell: 0, pollenInUpwardCell: 0 },
 };
 
 // 4. 색상 팔레트
@@ -129,7 +128,6 @@ const COLORS = {
   hiveFrame: '#4b5563',
   hiveFrameStroke: '#1f2937',
   upHighlight: '#facc15',
-  slotEmpty: 'rgba(255, 255, 255, 0.55)',
   flowerFill: '#f28ad0',
   flowerStroke: '#8e2f6f',
   redFill: 'rgba(220, 38, 38, 0.30)',
@@ -263,7 +261,8 @@ function drawHiveCell(
     height: outer.height - HIVE_CELL_INSET * 2,
   };
   const isUp = view.upwardCell === cell;
-  const balls = isUp ? view.ballsInUpwardCell : 0;
+  const nectar = isUp ? view.nectarInUpwardCell : 0;
+  const pollen = isUp ? view.pollenInUpwardCell : 0;
   const isRed = alliance === 'RED';
   const upFill = isRed ? COLORS.redCellUp : COLORS.blueCellUp;
   const downFill = isRed ? COLORS.redCellDown : COLORS.blueCellDown;
@@ -288,27 +287,30 @@ function drawHiveCell(
     color: isUp ? COLORS.upHighlight : textColor,
   });
 
-  // 볼 슬롯 (NECTAR 크기 원, 채워진 개수만큼 채움)
-  const slotGap = NECTAR_RADIUS * 2 + 1.2;
-  const slotY = box.y + box.height / 2 + 0.3;
-  for (let i = 0; i < HIVE_CELL_CAPACITY; i++) {
-    const { pxX, pxY } = toCanvasPoint(cx + (i - (HIVE_CELL_CAPACITY - 1) / 2) * slotGap, slotY);
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(pxX, pxY, inchToPx(NECTAR_RADIUS), 0, Math.PI * 2);
-    ctx.fillStyle = i < balls ? upFill : COLORS.slotEmpty;
-    ctx.fill();
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash(i < balls ? [] : [3, 2]);
-    ctx.strokeStyle = isUp ? COLORS.labelOnDark : allianceStroke;
-    ctx.stroke();
-    ctx.restore();
-  }
+  // 셀 내부 기물: NECTAR 줄 / POLLEN 줄 (개수가 많으면 셀 폭에 맞춰 축소)
+  const drawRow = (count: number, radius: number, y: number, fill: string, stroke: string): void => {
+    if (count <= 0) return;
+    const gap = Math.min(radius * 2 + 0.6, (box.width - 1) / count);
+    const r = Math.min(radius, gap / 2 - 0.1);
+    for (let i = 0; i < count; i++) {
+      const { pxX, pxY } = toCanvasPoint(cx + (i - (count - 1) / 2) * gap, y);
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(pxX, pxY, inchToPx(r), 0, Math.PI * 2);
+      ctx.fillStyle = fill;
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = stroke;
+      ctx.stroke();
+      ctx.restore();
+    }
+  };
+  drawRow(nectar, NECTAR_RADIUS, box.y + box.height * 0.38, upFill, COLORS.labelOnDark);
+  drawRow(pollen, PIECE_PHYSICS.POLLEN.radius, box.y + box.height * 0.63, COLORS.pollenFill, COLORS.pollenStroke);
 
-  drawLabel(ctx, `${balls}/${HIVE_CELL_CAPACITY}`, { x: cx, y: box.y + box.height - 3 }, {
-    size: 11,
-    color: textColor,
-  });
+  // 개수 + 현재 NECTAR 수 기준 팁까지 필요한 POLLEN 수 (임계 테이블)
+  const label = isUp ? `N${nectar} P${pollen}/${hiveTipPollenThreshold(nectar)}` : '-';
+  drawLabel(ctx, label, { x: cx, y: box.y + box.height - 3 }, { size: 11, color: textColor });
 }
 
 // HIVE: 49.46 x 38.95 프레임 안에 Red(C열) / Blue(D열) x OPPOSITE / AUDIENCE 2x2 셀
