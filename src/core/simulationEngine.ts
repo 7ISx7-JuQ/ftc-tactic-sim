@@ -250,6 +250,17 @@ export function validateScenario(
   return issues;
 }
 
+// FLOWER 용량 테이블 판정: 기물 1개를 더 넣은 뒤에도 NECTAR/POLLEN 한도 이내인지 (slot[0] 포함 전체 개수 기준)
+function canFlowerAccept(flower: FlowerState, type: GamePiece['type']): boolean {
+  let nectar = type === 'NECTAR' ? 1 : 0;
+  let pollen = type === 'POLLEN' ? 1 : 0;
+  for (const p of flower.pieces) {
+    if (p?.type === 'NECTAR') nectar++;
+    else if (p?.type === 'POLLEN') pollen++;
+  }
+  return nectar <= FLOWER_MAX_NECTAR_CAPACITY && pollen <= (FLOWER_MAX_POLLEN_BY_NECTAR[nectar] ?? 0);
+}
+
 function isLockAction(state: RobotState['actionState']): boolean {
   return state === 'SHOOTING' || state === 'FLOWER_SETUP' || state === 'FLOWER_DROPPING';
 }
@@ -791,7 +802,8 @@ export class SimulationEngine {
     if (request === 'SHOOTING' && hasPieces) {
       return this.enterLock(robot, 'SHOOTING', config.shooterDelay);
     }
-    if (isFlowerAction(request) && hasPieces) {
+    // FLOWER 투입은 지금 당장 투입 가능한 경우에만 수락 (불가능하면 리프트 준비 없이 요청 거부 → IDLE 유지)
+    if (isFlowerAction(request) && this.findDropTarget(robot, config) >= 0) {
       return this.enterLock(robot, 'FLOWER_SETUP', config.flowerSetupDelay);
     }
 
@@ -1008,7 +1020,8 @@ export class SimulationEngine {
         return;
       case 'FLOWER_DROPPING': {
         const dropped = this.dropIntoFlower(robot, config);
-        if (dropped && isFlowerAction(input.actionState) && robot.controlledPieces.length > 0) {
+        // 연속 투입도 다음 기물이 투입 가능할 때만 재장전
+        if (dropped && isFlowerAction(input.actionState) && this.findDropTarget(robot, config) >= 0) {
           rearm('FLOWER_DROPPING', config.flowerDropDelay);
         } else {
           toIdle();
@@ -1036,31 +1049,27 @@ export class SimulationEngine {
     return targetIndex;
   }
 
-  // FLOWER 상단 투입: 대상 FLOWER 최상단에 적재 (용량/페이즈 검사)
-  private dropIntoFlower(robot: RobotState, config: RobotConfig): boolean {
+  // FLOWER 상단 투입 가능 판정: 적재함 맨 앞 기물(FIFO)을 지금 투입할 수 있는 FLOWER 인덱스 (불가능하면 -1)
+  //   ① 도달 거리 내 FLOWER 존재  ② NECTAR는 ENDGAME에만  ③ FLOWER 용량 테이블 이내
+  // 투입 요청 수락 시점과 투입 완료 시점(준비 중 상황 변화 대비 안전장치)에 모두 사용
+  private findDropTarget(robot: RobotState, config: RobotConfig): number {
+    const piece = robot.controlledPieces[0];
+    if (!piece) return -1;
+    if (piece.type === 'NECTAR' && this.field.matchPhase !== 'ENDGAME') return -1;
     const targetIndex = this.findDropTargetFlower(robot, config);
+    if (targetIndex < 0) return -1;
+    return canFlowerAccept(this.field.flowers[targetIndex], piece.type) ? targetIndex : -1;
+  }
+
+  // FLOWER 상단 투입: 대상 FLOWER 최상단에 적재. 투입 불가 시 아무 변화 없이 false
+  private dropIntoFlower(robot: RobotState, config: RobotConfig): boolean {
+    const targetIndex = this.findDropTarget(robot, config);
     if (targetIndex < 0) return false;
 
     const piece = robot.controlledPieces.shift(); // FIFO: 가장 먼저 적재된 기물부터 투입
     if (!piece) return false;
 
     const flower = this.field.flowers[targetIndex];
-    let nectar = piece.type === 'NECTAR' ? 1 : 0;
-    let pollen = piece.type === 'POLLEN' ? 1 : 0;
-    for (const p of flower.pieces) {
-      if (p?.type === 'NECTAR') nectar++;
-      else if (p?.type === 'POLLEN') pollen++;
-    }
-    const pollenLimit = FLOWER_MAX_POLLEN_BY_NECTAR[nectar] ?? 0;
-    const allowed =
-      (piece.type === 'POLLEN' || this.field.matchPhase === 'ENDGAME') &&
-      nectar <= FLOWER_MAX_NECTAR_CAPACITY &&
-      pollen <= pollenLimit;
-    if (!allowed) {
-      robot.controlledPieces.unshift(piece); // 투입 불가: 적재함 맨 앞으로 원복
-      return false;
-    }
-
     piece.state = 'IN_FLOWER';
     piece.x = FLOWER_CIRCLES[targetIndex].center.x;
     piece.y = FLOWER_CIRCLES[targetIndex].center.y;

@@ -185,7 +185,7 @@
         - 투입 대상: 로봇 OBB 외곽과 FLOWER 원통 간 최단 거리 1.0 in 이내인 FLOWER 중 가장 가까운 것 (버전 1에서는 투입 방향 무관). 대상이 없으면 투입 불가 및 상태 복귀.
         - (확장 예정) 투입 방향 제한이 필요해지면 인테이크 구역과 같은 `BumperZone` 구조의 투입 구역(`flowerDropZones`)으로 대상 판정만 교체.
         - NECTAR는 잔여 60초 이하(ENDGAME) 시점에만 투입 가능.
-        - 리프트 준비 완료 후 로봇 적재함 맨 앞 기물(FIFO, `controlledPieces.shift()`)을 FLOWER 최상단 슬롯에 추가 (`pieces.push(piece)`). 투입 불가(ENDGAME 전 NECTAR, 용량 초과) 시 기물은 적재함 맨 앞으로 되돌아가고 상태 복귀.
+        - 리프트 준비 완료 후 로봇 적재함 맨 앞 기물(FIFO, `controlledPieces.shift()`)을 FLOWER 최상단 슬롯에 추가 (`pieces.push(piece)`). 투입 가능 여부(① 도달 거리 내 FLOWER, ② NECTAR는 ENDGAME에만, ③ FLOWER 용량 테이블)는 **투입 요청 시점**에 검사하여 불가능하면 리프트 준비(`FLOWER_SETUP`)에 진입하지 않고 요청을 거부(IDLE 유지)한다. 연속 투입도 다음 기물이 투입 가능할 때만 이어간다. 준비 중 상황 변화에 대비해 투입 완료 시점에도 같은 조건을 재검사하며, 불가능하면 기물은 그대로 둔 채 상태만 복귀.
 4. **GARDEN & PARK (경기 종료 판정):**
     - 경기 진행 중에는 실시간 점수로 가산하지 않음.
     - 경기 종료 틱(Tick 6000, 남은 시간 0초) 시점에 필드 상태를 검사하여 일괄 가산:
