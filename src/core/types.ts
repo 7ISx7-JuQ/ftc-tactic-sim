@@ -172,7 +172,8 @@ export interface FieldState {
   matchPhase: 'TELEOP' | 'ENDGAME';
   hive: HiveState;
   flowers: FlowerState[];
-  nectarStock: number;      // 5개로 시작
+  nectarStock: number;      // 5개로 시작 (휴먼 플레이어가 아직 투입 결정하지 않은 재고)
+  pendingHumanNectar: number; // 투입이 결정됐으나 로딩 존 빈 자리를 기다리는 NECTAR 수 (자리가 나면 즉시 배치)
 }
 
 export interface RPState {

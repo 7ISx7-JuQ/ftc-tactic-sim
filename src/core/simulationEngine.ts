@@ -17,6 +17,7 @@ import {
   getRobotOBB,
   resolvePiecesCollisions,
   resolveRobotEnvironmentCollisions,
+  resolvePinnedPieces,
   resolveRobotRobotCollision,
   stepPieceDynamics,
   testCircleVsAABB,
@@ -532,10 +533,11 @@ export class SimulationEngine {
       },
       flowers,
       nectarStock: INITIAL_HUMAN_NECTAR_STOCK, // 휴먼 플레이어 재고 (OUT_OF_BOUNDS 대기)
+      pendingHumanNectar: 0,
     };
 
     // (5) 오토 팁 보상: 텔레옵 직전 휴먼 플레이어가 로딩 존에 NECTAR 투입 (결정론적 슬롯 배치, 산포보다 먼저)
-    this.spawnHumanNectar(clampCount(sc?.autoTipCount, 0, INITIAL_HUMAN_NECTAR_STOCK));
+    this.releaseHumanNectar(clampCount(sc?.autoTipCount, 0, INITIAL_HUMAN_NECTAR_STOCK));
 
     // (6) 지정되지 않은 나머지 POLLEN / 필드 NECTAR는 바닥에 무작위 산포 (ON_FIELD 정지)
     for (const piece of takePollen(TOTAL_POLLEN)) this.scatterPiece(piece);
@@ -584,6 +586,11 @@ export class SimulationEngine {
       this.pieces = resolvePiecesCollisions(this.pieces, bodies, 1);
     }
 
+    // Step 4-2: 끼인 공 역보정 (명세서 3.3): 밀려날 곳 없는 공에 막힌 로봇을 되밀어 정지
+    const pinned = resolvePinnedPieces(this.robotBodies(), this.pieces);
+    [this.r1, this.r2] = pinned.robots;
+    this.pieces = pinned.pieces;
+
     // Step 5: HIVE 시차 낙하 스폰
     this.stepHiveDrops();
 
@@ -595,8 +602,10 @@ export class SimulationEngine {
 
     if (this.currentTick >= ENDGAME_START_TICK && this.field.matchPhase === 'TELEOP') {
       this.field.matchPhase = 'ENDGAME';
-      this.spawnHumanNectar(this.field.nectarStock);
+      this.releaseHumanNectar(this.field.nectarStock);
     }
+    // 로딩 존이 막혀 대기 중인 휴먼 플레이어 NECTAR는 빈 자리가 생기는 즉시 투입
+    this.placePendingHumanNectar();
 
     this.syncCarriedPieces();
     this.classifyGardenPieces();
@@ -728,8 +737,19 @@ export class SimulationEngine {
     piece.vy = 0;
   }
 
-  // 휴먼 플레이어 NECTAR를 아군 로딩 존 내부 바닥에 정지 상태로 스폰 (벽쪽 슬롯 우선)
-  private spawnHumanNectar(count: number): void {
+  // 휴먼 플레이어 NECTAR 투입 결정: 재고 → 투입 대기 (실제 배치는 placePendingHumanNectar)
+  private releaseHumanNectar(count: number): void {
+    const released = Math.min(Math.max(0, count), this.field.nectarStock);
+    this.field.nectarStock -= released;
+    this.field.pendingHumanNectar += released;
+    this.placePendingHumanNectar();
+  }
+
+  // 투입 대기 NECTAR를 아군 로딩 존의 빈 슬롯(기물/로봇과 겹치지 않는 자리)에 벽쪽부터 정지 상태로 배치.
+  // 빈 슬롯이 없으면 남은 수량은 다음 틱까지 대기 (로봇이 로딩 존을 막고 있으면 비켜줄 때 투입)
+  private placePendingHumanNectar(): void {
+    if (this.field.pendingHumanNectar <= 0) return;
+
     const box = LOADING_ZONE_AABB[this.field.allianceColor];
     const r = PIECE_PHYSICS.NECTAR.radius;
     const slots: Vector2D[] = [];
@@ -739,25 +759,21 @@ export class SimulationEngine {
     const wallDist = (p: Vector2D): number => Math.min(p.x, FIELD_SIZE - p.x);
     slots.sort((a, b) => wallDist(a) - wallDist(b) || a.y - b.y);
 
-    const spawnCount = Math.min(Math.max(0, count), this.field.nectarStock);
-    for (let n = 0; n < spawnCount; n++) {
+    while (this.field.pendingHumanNectar > 0) {
+      const spot = slots.find((s) => !this.overlapsFieldPiece(s.x, s.y, r) && !this.overlapsRobot(s.x, s.y, r));
+      if (!spot) return;
       // 재고 NECTAR는 배열 뒤쪽에서 꺼냄 (앞쪽 NECTAR_IN_PLAY개는 시작 배분 대상)
       const piece = this.pieces.findLast((p) => p.type === 'NECTAR' && p.state === 'OUT_OF_BOUNDS');
-      if (!piece) break;
-
-      const spot =
-        slots.find((s) => !this.overlapsFieldPiece(s.x, s.y, r) && !this.overlapsRobot(s.x, s.y, r)) ??
-        slots.find((s) => !this.overlapsFieldPiece(s.x, s.y, r)) ?? {
-          x: (box.minX + box.maxX) / 2,
-          y: (box.minY + box.maxY) / 2,
-        };
-
+      if (!piece) {
+        this.field.pendingHumanNectar = 0;
+        return;
+      }
       piece.state = 'ON_FIELD';
       piece.x = spot.x;
       piece.y = spot.y;
       piece.vx = 0;
       piece.vy = 0;
-      this.field.nectarStock--;
+      this.field.pendingHumanNectar--;
     }
   }
 
@@ -1104,7 +1120,7 @@ export class SimulationEngine {
     hive.ballsInUpwardCell = 0;
     if (hive.pendingDrops.length === 0) hive.isTipping = false;
 
-    this.spawnHumanNectar(1);
+    this.releaseHumanNectar(1);
   }
 
   // 빗맞음: 로봇에 가장 가까운 HIVE 외곽 지점에서 바깥 방향 무작위 속도로 튕겨 나옴

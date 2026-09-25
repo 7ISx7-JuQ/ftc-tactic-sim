@@ -464,6 +464,88 @@ export function resolveRobotRobotCollision(
   };
 }
 
+// 끼인 공 역보정 허용 잔여 침투 (inch): 공-공 완화의 미소 잔차로 로봇이 떨리지 않도록 무시
+const PINNED_PIECE_TOLERANCE = 0.01;
+// 공이 두 번째 로봇에도 끼어 있는지 판정하는 접촉 여유 (inch)
+const PINNED_CONTACT_MARGIN = 0.05;
+
+// 로봇을 (dx, dy)만큼 되밀고 normal 방향으로 파고드는 속도를 차단한 뒤 환경 재침투를 보정
+function shiftRobot(state: RobotState, config: RobotConfig, dx: number, dy: number, normal: Vector2D): RobotState {
+  const { vx, vy } = blockNormalVelocity(finiteOr0(state.vx), finiteOr0(state.vy), normal);
+  return resolveRobotEnvironmentCollisions({ ...state, x: state.x + dx, y: state.y + dy, vx, vy }, config);
+}
+
+// 끼인 공 역보정 (공 충돌 완화 이후 호출, 명세서 3.3):
+//   로봇은 공에 대해 무한 질량(Kinematic Pusher)이지만, 벽/HIVE/FLOWER/다른 로봇에 막혀 더 밀려날 곳이 없는 공은
+//   완화 후에도 로봇과 겹친 채 남는다. 이런 공을 로봇 입장의 장애물로 간주하여 로봇을 되밀고,
+//   공 쪽으로 파고드는 법선 속도만 차단한다 (접선 슬라이딩 보존 → 공을 누른 채 옆으로 미끄러질 수 있음).
+//   - 공이 로봇 하나에만 닿음 (정적 장애물과의 끼임): 그 로봇이 겹침을 전부 양보
+//   - 공이 두 로봇 사이에 끼임: 가장 깊이 겹친 로봇이 절반 양보를 시도하고, 양보하지 못한 만큼(벽에 막힘 등)은
+//     공이 다른 로봇 쪽으로 밀려나 그 로봇이 양보 → 마주 오는 두 로봇은 대칭으로 정지, 벽에 붙은 로봇에 공을
+//     밀어넣는 경우에는 밀고 들어온 로봇이 정지
+export function resolvePinnedPieces(
+  robots: readonly RobotBody[],
+  pieces: readonly GamePiece[],
+): { robots: RobotState[]; pieces: GamePiece[] } {
+  const states = robots.map(({ state }) => state);
+  const result = pieces.slice();
+
+  for (let i = 0; i < result.length; i++) {
+    const piece = result[i];
+    if (piece.state !== 'ON_FIELD') continue;
+    const { radius } = PIECE_PHYSICS[piece.type];
+    const circle: Circle = { center: { x: piece.x, y: piece.y }, radius };
+
+    // normal은 공 → 로봇 방향 (로봇을 공 밖으로 밀어내는 방향)
+    const hits = states.map((state, k) => testOBBvsCircle(getRobotOBB(state, robots[k].config), circle));
+    let a = -1;
+    for (let k = 0; k < hits.length; k++) {
+      if (hits[k].colliding && hits[k].depth > PINNED_PIECE_TOLERANCE && (a < 0 || hits[k].depth > hits[a].depth)) a = k;
+    }
+    if (a < 0) continue;
+
+    const touchCircle: Circle = { center: circle.center, radius: radius + PINNED_CONTACT_MARGIN };
+    const others: number[] = [];
+    for (let k = 0; k < states.length; k++) {
+      if (k !== a && testOBBvsCircle(getRobotOBB(states[k], robots[k].config), touchCircle).colliding) others.push(k);
+    }
+
+    const hitA = hits[a];
+    if (others.length === 0) {
+      states[a] = shiftRobot(states[a], robots[a].config, hitA.mtv.x, hitA.mtv.y, hitA.normal);
+      continue;
+    }
+
+    // 두 로봇 사이 끼임: A가 절반 양보 시도 → 실제 양보량을 뺀 나머지만큼 공을 A 밖으로 이동
+    const n = hitA.normal;
+    const before = states[a];
+    states[a] = shiftRobot(before, robots[a].config, n.x * hitA.depth / 2, n.y * hitA.depth / 2, n);
+    const yielded = (states[a].x - before.x) * n.x + (states[a].y - before.y) * n.y;
+    const ballShift = Math.max(0, hitA.depth - yielded);
+    const moved: GamePiece = {
+      ...piece,
+      x: clamp(piece.x - n.x * ballShift, radius, FIELD_SIZE - radius),
+      y: clamp(piece.y - n.y * ballShift, radius, FIELD_SIZE - radius),
+    };
+    result[i] = moved;
+
+    // 밀려난 공에 닿은 다른 로봇이 나머지를 양보 (겹치지 않고 접촉만 하면 파고드는 속도만 차단)
+    for (const k of others) {
+      const cfg = robots[k].config;
+      const movedCircle: Circle = { center: { x: moved.x, y: moved.y }, radius };
+      const hit = testOBBvsCircle(getRobotOBB(states[k], cfg), movedCircle);
+      if (hit.colliding) {
+        states[k] = shiftRobot(states[k], cfg, hit.mtv.x, hit.mtv.y, hit.normal);
+      } else {
+        const touch = testOBBvsCircle(getRobotOBB(states[k], cfg), { center: movedCircle.center, radius: radius + PINNED_CONTACT_MARGIN });
+        if (touch.colliding) states[k] = { ...states[k], ...blockNormalVelocity(states[k].vx, states[k].vy, touch.normal) };
+      }
+    }
+  }
+
+  return { robots: states, pieces: result };
+}
+
 // ============================================================
 // 4. 기물 동역학 및 충돌 완화 (PBD)
 // ============================================================
