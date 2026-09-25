@@ -59,9 +59,17 @@ const EPSILON = 1e-9;
 // Stationary Lock 완전 정지 각속도 임계치 (rad/s)
 const ANGULAR_STOP_THRESHOLD = 0.05;
 
-const MAX_CONTROLLED_PIECES = 4;
-const TOTAL_POLLEN = 32;
-const TOTAL_NECTAR = 8;
+// 기물 총량 및 시작 상황 룰 (명세서 2.4)
+export const TOTAL_POLLEN = 32;
+export const TOTAL_NECTAR = 8;
+export const RULE_MAX_CONTROLLED_PIECES = 4;         // 룰상 로봇 적재 상한
+export const INITIAL_HUMAN_NECTAR_STOCK = 5;         // 경기 시작 시 휴먼 플레이어 NECTAR 재고
+export const NECTAR_IN_PLAY = TOTAL_NECTAR - INITIAL_HUMAN_NECTAR_STOCK; // 필드에 풀린 NECTAR (HIVE/로봇/바닥)
+export const FLOWER_MAX_START_PIECES = 4;            // 텔레옵 시작 시 FLOWER당 최대 POLLEN (오토 중 투입 불가)
+export const GARDEN_MAX_PIECES = 8;                  // GARDEN 물리적 수용 한도 (23in / POLLEN 직경 2.8in)
+const DEFAULT_FLOWER_PIECES = 4;
+const DEFAULT_GARDEN_PIECES = 4;
+const DEFAULT_HIVE_NECTAR = 3;
 
 // FLOWER 상단 투입 도달 거리: 로봇 OBB 외곽 ↔ FLOWER 원통 최단 거리 (inch)
 // (하단 추출은 인테이크 구역 겹침으로 판정하므로 이 값을 쓰지 않음)
@@ -136,6 +144,108 @@ function clamp(value: number, min: number, max: number): number {
 function clampCount(value: number | undefined, fallback: number, max: number): number {
   const v = value === undefined || !Number.isFinite(value) ? fallback : Math.floor(value);
   return clamp(v, 0, max);
+}
+
+// 로봇 적재 한도 = min(maxControlledPieces, 룰 상한 4), 0 이상 정수
+export function getCarryCapacity(config: RobotConfig): number {
+  return clampCount(config.maxControlledPieces, RULE_MAX_CONTROLLED_PIECES, RULE_MAX_CONTROLLED_PIECES);
+}
+
+// 시나리오 적재물 정규화: 미지정 시 한도만큼 POLLEN, NECTAR는 canIntakeNectar 로봇만, 길이는 한도 이내
+function resolveLoadout(loadout: readonly GamePiece['type'][] | undefined, config: RobotConfig): GamePiece['type'][] {
+  const capacity = getCarryCapacity(config);
+  if (!loadout) return Array.from({ length: capacity }, () => 'POLLEN' as const);
+  return loadout
+    .filter((type) => type === 'POLLEN' || (type === 'NECTAR' && config.canIntakeNectar))
+    .slice(0, capacity);
+}
+
+// ------------------------------------------------------------
+// 시나리오 검증 (GUI는 결과가 비어 있지 않으면 설정 확정을 비활성화, 명세서 2.4)
+// ------------------------------------------------------------
+
+export interface ScenarioIssue {
+  code:
+    | 'FLOWER_COUNT'
+    | 'GARDEN_COUNT'
+    | 'HIVE_COUNT'
+    | 'HIVE_OVER_THRESHOLD'
+    | 'LOADOUT_OVER_CAPACITY'
+    | 'LOADOUT_NECTAR_NOT_ALLOWED'
+    | 'NECTAR_IN_PLAY_EXCEEDED'
+    | 'POLLEN_TOTAL_EXCEEDED'
+    | 'AUTO_TIP_COUNT';
+  message: string;
+}
+
+function isCount(value: number, max: number): boolean {
+  return Number.isInteger(value) && value >= 0 && value <= max;
+}
+
+export function validateScenario(
+  scenario: ScenarioConfig,
+  r1Config: RobotConfig,
+  r2Config: RobotConfig,
+): ScenarioIssue[] {
+  const issues: ScenarioIssue[] = [];
+  const add = (code: ScenarioIssue['code'], message: string): void => {
+    issues.push({ code, message });
+  };
+
+  const flowers = scenario.flowerPiecesCount ?? [4, 4, 4, 4];
+  flowers.forEach((n, i) => {
+    if (!isCount(n, FLOWER_MAX_START_PIECES)) {
+      add('FLOWER_COUNT', `FLOWER ${i + 1} POLLEN 수는 0 ~ ${FLOWER_MAX_START_PIECES} 정수여야 함 (입력 ${n})`);
+    }
+  });
+
+  const garden = scenario.gardenPiecesCount ?? { ally: DEFAULT_GARDEN_PIECES, opponent: DEFAULT_GARDEN_PIECES };
+  for (const [side, n] of [['아군', garden.ally], ['상대', garden.opponent]] as const) {
+    if (!isCount(n, GARDEN_MAX_PIECES)) {
+      add('GARDEN_COUNT', `${side} GARDEN POLLEN 수는 0 ~ ${GARDEN_MAX_PIECES} 정수여야 함 (입력 ${n})`);
+    }
+  }
+
+  const hivePollen = scenario.hiveInitialPieces?.pollenCount ?? 0;
+  const hiveNectar = scenario.hiveInitialPieces?.nectarCount ?? DEFAULT_HIVE_NECTAR;
+  if (!isCount(hivePollen, TOTAL_POLLEN) || !isCount(hiveNectar, NECTAR_IN_PLAY)) {
+    add('HIVE_COUNT', `HIVE POLLEN은 0 이상, NECTAR는 0 ~ ${NECTAR_IN_PLAY} 정수여야 함 (POLLEN ${hivePollen}, NECTAR ${hiveNectar})`);
+  } else if (hivePollen + hiveNectar > HIVE_TIP_THRESHOLD) {
+    add('HIVE_OVER_THRESHOLD', `HIVE 상향 셀 기물 ${hivePollen + hiveNectar}개가 팁 임계값 ${HIVE_TIP_THRESHOLD}을 초과 (시작 전에 이미 전복된 상태)`);
+  }
+
+  let loadoutPollen = 0;
+  let loadoutNectar = 0;
+  const robots = [['R1', scenario.r1Loadout, r1Config], ['R2', scenario.r2Loadout, r2Config]] as const;
+  for (const [name, loadout, config] of robots) {
+    const resolved = loadout ?? resolveLoadout(undefined, config);
+    const capacity = getCarryCapacity(config);
+    if (resolved.length > capacity) {
+      add('LOADOUT_OVER_CAPACITY', `${name} 적재물 ${resolved.length}개가 적재 한도 ${capacity}개를 초과`);
+    }
+    if (!config.canIntakeNectar && resolved.includes('NECTAR')) {
+      add('LOADOUT_NECTAR_NOT_ALLOWED', `${name}는 NECTAR 흡입 불가 로봇이라 NECTAR를 적재할 수 없음`);
+    }
+    loadoutPollen += resolved.filter((t) => t === 'POLLEN').length;
+    loadoutNectar += resolved.filter((t) => t === 'NECTAR').length;
+  }
+
+  if (hiveNectar + loadoutNectar > NECTAR_IN_PLAY) {
+    add('NECTAR_IN_PLAY_EXCEEDED', `HIVE(${hiveNectar}) + 로봇(${loadoutNectar}) NECTAR가 필드에 풀린 NECTAR ${NECTAR_IN_PLAY}개를 초과`);
+  }
+
+  const flowerTotal = flowers.reduce((a, b) => a + b, 0);
+  const pollenTotal = loadoutPollen + flowerTotal + hivePollen + garden.ally + garden.opponent;
+  if (pollenTotal > TOTAL_POLLEN) {
+    add('POLLEN_TOTAL_EXCEEDED', `지정된 POLLEN 합계 ${pollenTotal}개가 총량 ${TOTAL_POLLEN}개를 초과`);
+  }
+
+  const autoTips = scenario.autoTipCount ?? 0;
+  if (!isCount(autoTips, INITIAL_HUMAN_NECTAR_STOCK)) {
+    add('AUTO_TIP_COUNT', `오토 팁 횟수는 0 ~ ${INITIAL_HUMAN_NECTAR_STOCK} 정수여야 함 (입력 ${autoTips})`);
+  }
+
+  return issues;
 }
 
 function isLockAction(state: RobotState['actionState']): boolean {
@@ -325,6 +435,8 @@ export class SimulationEngine {
     this.r2 = createRobotState(resolveSpawnPose(sc?.r2Spawn, DEFAULT_SPAWN_POSES[alliance].robot2));
 
     // --- 기물 생성 (POLLEN 32, 아군 NECTAR 8) ---
+    // 배분 순서 (명세서 2.4): 로봇 적재물 → FLOWER → HIVE → GARDEN → 오토 팁 NECTAR(로딩 존) → 나머지 바닥 무작위 산포
+    // 엔진은 validateScenario를 통과하지 못한 값도 아래 규칙으로 잘라서 수용 (GUI 검증의 안전장치)
     const pollen: GamePiece[] = [];
     for (let i = 0; i < TOTAL_POLLEN; i++) pollen.push(this.makePiece(`pollen-${i + 1}`, 'POLLEN', 'NONE'));
     const nectar: GamePiece[] = [];
@@ -334,34 +446,36 @@ export class SimulationEngine {
 
     let pollenCursor = 0;
     const takePollen = (count: number): GamePiece[] => {
-      const taken = pollen.slice(pollenCursor, pollenCursor + count);
+      const taken = pollen.slice(pollenCursor, pollenCursor + Math.max(0, count));
       pollenCursor += taken.length;
       return taken;
     };
+    // 필드에 풀린 NECTAR(배열 앞쪽 NECTAR_IN_PLAY개)만 배분 대상, 뒤쪽은 휴먼 플레이어 재고
     let nectarCursor = 0;
     const takeNectar = (count: number): GamePiece[] => {
-      const taken = nectar.slice(nectarCursor, nectarCursor + count);
+      const taken = nectar.slice(nectarCursor, Math.min(NECTAR_IN_PLAY, nectarCursor + Math.max(0, count)));
       nectarCursor += taken.length;
       return taken;
     };
 
-    // (1) 로봇 프리로드 (CONTROLLED)
-    const preload = (robot: RobotState, count: number | undefined): void => {
-      for (const piece of takePollen(clampCount(count, MAX_CONTROLLED_PIECES, MAX_CONTROLLED_PIECES))) {
+    // (1) 로봇 적재물 (CONTROLLED, FIFO 순서: 0번이 가장 먼저 나감)
+    const load = (robot: RobotState, loadout: readonly GamePiece['type'][] | undefined, config: RobotConfig): void => {
+      for (const type of resolveLoadout(loadout, config)) {
+        const [piece] = type === 'POLLEN' ? takePollen(1) : takeNectar(1);
+        if (!piece) continue; // 총량 소진 시 해당 항목 생략
         piece.state = 'CONTROLLED';
         piece.x = robot.x;
         piece.y = robot.y;
         robot.controlledPieces.push(piece);
       }
     };
-    preload(this.r1, sc?.r1PreloadCount);
-    preload(this.r2, sc?.r2PreloadCount);
+    load(this.r1, sc?.r1Loadout, this.r1Config);
+    load(this.r2, sc?.r2Loadout, this.r2Config);
 
     // (2) FLOWER 내부 (IN_FLOWER): pieces[0]은 지면 슬롯, [1..]은 내부 볼륨
     const flowerCounts = sc?.flowerPiecesCount ?? [4, 4, 4, 4];
-    const flowerMax = FLOWER_MAX_POLLEN_BY_NECTAR[0] ?? 0;
     const flowers: FlowerState[] = FLOWER_CIRCLES.map((circle, i) => {
-      const stack = takePollen(clampCount(flowerCounts[i], 4, flowerMax));
+      const stack = takePollen(clampCount(flowerCounts[i], DEFAULT_FLOWER_PIECES, FLOWER_MAX_START_PIECES));
       for (const piece of stack) {
         piece.state = 'IN_FLOWER';
         piece.x = circle.center.x;
@@ -370,34 +484,34 @@ export class SimulationEngine {
       return { id: FLOWER_IDS[i], pieces: stack, owner: 'NONE', bottomBonus: 'NONE' };
     });
 
-    // (3) HIVE 상향 셀 (IN_HIVE)
+    // (3) HIVE 상향 셀 (IN_HIVE): 합계가 팁 임계값을 넘지 않도록 제한
     const upwardCell = sc?.hiveUpwardCell ?? (alliance === 'RED' ? 'AUDIENCE_CELL' : 'OPPOSITE_CELL');
     const cellCenter = hiveCellCenter(alliance, upwardCell);
-    const hivePieces = [
-      ...takePollen(clampCount(sc?.hiveInitialPieces?.pollenCount, 0, TOTAL_POLLEN)),
-      ...takeNectar(clampCount(sc?.hiveInitialPieces?.nectarCount, 3, TOTAL_NECTAR)),
-    ];
+    const hivePollenCount = clampCount(sc?.hiveInitialPieces?.pollenCount, 0, HIVE_TIP_THRESHOLD);
+    const hiveNectarCount = clampCount(
+      sc?.hiveInitialPieces?.nectarCount,
+      DEFAULT_HIVE_NECTAR,
+      HIVE_TIP_THRESHOLD - hivePollenCount,
+    );
+    const hivePieces = [...takePollen(hivePollenCount), ...takeNectar(hiveNectarCount)];
     for (const piece of hivePieces) {
       piece.state = 'IN_HIVE';
       piece.x = cellCenter.x;
       piece.y = cellCenter.y;
     }
 
-    // (4) 자율주행 잔여 공: 데드존 회피 난수 산포 (ON_FIELD 정지)
-    const scattered: GamePiece[] = [];
-    if (sc?.groundPiecesCount) {
-      scattered.push(
-        ...takePollen(clampCount(sc.groundPiecesCount.pollen, 0, TOTAL_POLLEN)),
-        ...takeNectar(clampCount(sc.groundPiecesCount.nectar, 0, TOTAL_NECTAR)),
-      );
-    }
-
-    // (5) GARDEN: 아군 → 상대 순으로 최대 4개씩 (잔여 POLLEN 한도 내)
+    // (4) GARDEN (IN_GARDEN): 지정 수를 구역 길이에 균등 배치, 벽 밀착
+    const gardenCounts: Record<'RED' | 'BLUE', number> = {
+      RED: 0,
+      BLUE: 0,
+      [alliance]: clampCount(sc?.gardenPiecesCount?.ally, DEFAULT_GARDEN_PIECES, GARDEN_MAX_PIECES),
+      [opponent]: clampCount(sc?.gardenPiecesCount?.opponent, DEFAULT_GARDEN_PIECES, GARDEN_MAX_PIECES),
+    };
     for (const side of [alliance, opponent] as const) {
       const box = GARDEN_AABB[side];
-      const stack = takePollen(4);
+      const stack = takePollen(gardenCounts[side]);
       const r = PIECE_PHYSICS.POLLEN.radius;
-      const spacing = (box.maxX - box.minX) / 4;
+      const spacing = (box.maxX - box.minX) / Math.max(1, stack.length);
       stack.forEach((piece, i) => {
         piece.state = 'IN_GARDEN';
         piece.x = box.minX + spacing * (i + 0.5);
@@ -417,10 +531,15 @@ export class SimulationEngine {
         pendingDrops: [],
       },
       flowers,
-      nectarStock: TOTAL_NECTAR - nectarCursor, // 휴먼 플레이어 스톡 (OUT_OF_BOUNDS 대기)
+      nectarStock: INITIAL_HUMAN_NECTAR_STOCK, // 휴먼 플레이어 재고 (OUT_OF_BOUNDS 대기)
     };
 
-    for (const piece of scattered) this.scatterPiece(piece);
+    // (5) 오토 팁 보상: 텔레옵 직전 휴먼 플레이어가 로딩 존에 NECTAR 투입 (결정론적 슬롯 배치, 산포보다 먼저)
+    this.spawnHumanNectar(clampCount(sc?.autoTipCount, 0, INITIAL_HUMAN_NECTAR_STOCK));
+
+    // (6) 지정되지 않은 나머지 POLLEN / 필드 NECTAR는 바닥에 무작위 산포 (ON_FIELD 정지)
+    for (const piece of takePollen(TOTAL_POLLEN)) this.scatterPiece(piece);
+    for (const piece of takeNectar(NECTAR_IN_PLAY)) this.scatterPiece(piece);
 
     this.timeline = [];
     this.rngStates = [];
@@ -622,7 +741,8 @@ export class SimulationEngine {
 
     const spawnCount = Math.min(Math.max(0, count), this.field.nectarStock);
     for (let n = 0; n < spawnCount; n++) {
-      const piece = this.pieces.find((p) => p.type === 'NECTAR' && p.state === 'OUT_OF_BOUNDS');
+      // 재고 NECTAR는 배열 뒤쪽에서 꺼냄 (앞쪽 NECTAR_IN_PLAY개는 시작 배분 대상)
+      const piece = this.pieces.findLast((p) => p.type === 'NECTAR' && p.state === 'OUT_OF_BOUNDS');
       if (!piece) break;
 
       const spot =
@@ -733,7 +853,7 @@ export class SimulationEngine {
     const robot = this[slot];
     const config = slot === 'r1' ? this.r1Config : this.r2Config;
 
-    if (robot.actionState !== 'INTAKING' || robot.controlledPieces.length >= MAX_CONTROLLED_PIECES) {
+    if (robot.actionState !== 'INTAKING' || robot.controlledPieces.length >= getCarryCapacity(config)) {
       if (robot.intakeContactTimer !== 0 || robot.intakeTargetPieceId !== null) {
         this[slot] = { ...robot, intakeContactTimer: 0, intakeTargetPieceId: null };
       }
@@ -905,7 +1025,7 @@ export class SimulationEngine {
     const targetIndex = this.findDropTargetFlower(robot, config);
     if (targetIndex < 0) return false;
 
-    const piece = robot.controlledPieces.pop();
+    const piece = robot.controlledPieces.shift(); // FIFO: 가장 먼저 적재된 기물부터 투입
     if (!piece) return false;
 
     const flower = this.field.flowers[targetIndex];
@@ -921,7 +1041,7 @@ export class SimulationEngine {
       nectar <= FLOWER_MAX_NECTAR_CAPACITY &&
       pollen <= pollenLimit;
     if (!allowed) {
-      robot.controlledPieces.push(piece); // 투입 불가: 적재함 원복
+      robot.controlledPieces.unshift(piece); // 투입 불가: 적재함 맨 앞으로 원복
       return false;
     }
 
@@ -937,7 +1057,7 @@ export class SimulationEngine {
   }
 
   private fireShot(robot: RobotState, config: RobotConfig): void {
-    const piece = robot.controlledPieces.pop();
+    const piece = robot.controlledPieces.shift(); // FIFO: 가장 먼저 적재된 기물부터 발사
     if (!piece) return;
 
     const hive = this.field.hive;

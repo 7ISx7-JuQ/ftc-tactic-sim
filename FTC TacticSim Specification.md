@@ -50,24 +50,42 @@
 총 40개의 기물(Pollen 32개, Nectar 8개)을 초기화한다.
 
 1. **POLLEN (직경 2.8인치, 구형):** 총 32개.
-    - 로봇 프리로드 (8개): 내 동맹 로봇 2대에 각각 4개씩 적재 (`CONTROLLED`).
+    - 로봇 적재 (8개): 내 동맹 로봇 2대에 각각 4개씩 적재 (`CONTROLLED`). 로봇별 적재 한도(`maxControlledPieces`)가 4보다 작으면 한도만큼만 적재.
     - FLOWER 내부 (16개): 4개의 FLOWER에 4개씩 배치 (`IN_FLOWER`).
     - GARDEN (8개): Red GARDEN 4개, Blue GARDEN 4개 배치 (`IN_GARDEN`).
 2. **NECTAR (직경 3.6인치, 대형 구형/캡슐):** 아군 진영 색상 총 8개 (상대 진영 배제).
-    - HIVE 내부 (3개): 아군 HIVE의 위를 향하고 있는(UP) CELL 내부에 배치 (`IN_HIVE`).
-    - 휴먼 플레이어 스톡 (5개): 필드 밖 대기 (`OUT_OF_BOUNDS`). HIVE 팁 시 1개씩 로딩 존에 스폰되며, 60초 돌입(ENDGAME) 시 잔여 재고 전량 로딩 존 스폰.
+    - 필드에 풀린 NECTAR (3개, `NECTAR_IN_PLAY`): 경기 시작 시 아군 HIVE의 위를 향하고 있는(UP) CELL 내부에 배치 (`IN_HIVE`). 오토 이후에는 HIVE / 로봇 적재 / 바닥 중 어딘가에 있음.
+    - 휴먼 플레이어 스톡 (5개): 필드 밖 대기 (`OUT_OF_BOUNDS`). HIVE 팁 시 1개씩 로딩 존에 스폰되며, 60초 돌입(ENDGAME) 시 잔여 재고 전량 로딩 존 스폰. 오토 중 발생한 팁 보상분은 텔레옵 시작 직전에 로딩 존으로 투입(아래 `autoTipCount`).
 3. **텔레옵 시작 조건 및 자율주행(Autonomous) 시나리오 커스터마이징:**
     - 공식 경기 기본값(Default Setup):
         * HIVE 상향 셀: RED는 `AUDIENCE_CELL`, BLUE는 `OPPOSITE_CELL`
         * HIVE 내부 적재: 상향 셀에 NECTAR 3개
-        * 로봇 프리로드: R1 4개, R2 4개 (POLLEN)
+        * 로봇 적재물: R1, R2 각각 POLLEN 4개 (적재 한도가 4 미만이면 한도만큼)
         * FLOWER: 4개 플라워에 각각 POLLEN 4개씩 적재
-        * 바닥 잔여 공: GARDEN에 각각 4개씩 배치
+        * GARDEN: 아군/상대 각각 POLLEN 4개
+        * 오토 팁 횟수: 0 (로딩 존 투입 NECTAR 없음)
+        * 바닥 무작위 산포: 없음 (위 배치로 32 / 8개가 모두 소진됨)
     - 커스텀 시나리오(`ScenarioConfig` 전달 시):
         * HIVE 상향 셀 방향(`hiveUpwardCell`) 및 내부 기물 수(Pollen/Nectar)를 사용자 정의값으로 덮어씀.
-        * R1, R2의 초기 프리로드 수량(0~4개)을 개별 지정 가능.
+        * R1, R2의 적재물(`r1Loadout`, `r2Loadout`)을 **순서 있는 기물 종류 목록**으로 지정. 로봇 적재함은 FIFO(0번이 가장 먼저 발사/투입)이며, NECTAR 적재도 가능(오토 중 NECTAR를 흡입한 경우). 미지정 시 적재 한도만큼 POLLEN.
+        * GARDEN 잔여 POLLEN 수(`gardenPiecesCount`: 아군/상대), FLOWER 잔여 POLLEN 수(`flowerPiecesCount`)를 지정 (오토 중 로봇이 건드린 결과 반영).
+        * 오토 중 발생한 HIVE 팁 횟수(`autoTipCount`)를 지정하면 휴먼 플레이어가 텔레옵 시작 직전 그 수만큼 NECTAR를 재고에서 꺼내 로딩 존에 투입 (룰북 규정). 로딩 존 벽쪽 슬롯부터 결정론적으로 배치하며 무작위 산포보다 먼저 수행.
         * R1, R2의 시작 자세(`r1Spawn`, `r2Spawn`: 위치 x, y 및 헤딩)를 자율주행 종료 위치로 개별 지정 가능. 미지정 시 진영별 기본 스폰(2.3항) 적용.
-        * 자율주행 중 필드 바닥에 흩어진 잔여 공은 정적 장애물(HIVE AABB, FLOWER 원통, 로봇 스폰 OBB)과 겹치지 않는 안전 데드존 회피 난수 알고리즘을 통해 필드 바닥(`state: 'ON_FIELD', vx: 0, vy: 0`)에 자동 산포 스폰.
+        * **바닥 잔여 공은 자동 계산:** 위에서 지정되지 않은 나머지 기물은 모두 오토 중 바닥에 흩어진 공으로 간주하여, 정적 장애물(HIVE AABB, FLOWER 원통, 로봇 스폰 OBB) 및 이미 놓인 기물과 겹치지 않는 안전 데드존 회피 난수 알고리즘으로 필드 바닥(`state: 'ON_FIELD', vx: 0, vy: 0`)에 산포 스폰.
+            - 바닥 POLLEN = 32 − (로봇 적재 POLLEN + FLOWER + HIVE POLLEN + GARDEN)
+            - 바닥 NECTAR = 3(`NECTAR_IN_PLAY`) − (HIVE NECTAR + 로봇 적재 NECTAR). 남는 NECTAR는 휴먼 플레이어 재고로 돌아가지 않음.
+            - 휴먼 플레이어 재고 = 5 − `autoTipCount`
+            - (향후) GUI에서 바닥 잔여 공을 직접 배치하는 기능으로 무작위 산포를 대체 가능하게 확장 예정.
+        * **배치 순서:** 로봇 적재물 → FLOWER → HIVE → GARDEN → 오토 팁 NECTAR(로딩 존) → 바닥 무작위 산포.
+        * **시나리오 검증 (`validateScenario`, GUI 구현 시 필수 적용 메모):** 아래 중 하나라도 위반하면 GUI는 시나리오 설정 확정 버튼을 비활성화하여 입력을 막는다. 엔진은 GUI를 거치지 않은 값에 대비해 같은 규칙으로 잘라서 수용(안전장치)한다.
+            - FLOWER별 POLLEN 수: 0 ~ 4 정수 (오토 중 FLOWER 투입은 룰상 불가하므로 초기값 4를 넘을 수 없음) — `FLOWER_COUNT`
+            - GARDEN별 POLLEN 수: 0 ~ 8 정수 (GARDEN 23in / POLLEN 직경 2.8in 물리 한도) — `GARDEN_COUNT`
+            - HIVE 상향 셀 POLLEN + NECTAR ≤ `HIVE_TIP_THRESHOLD` (초과 시 시작 전에 이미 전복된 불가능 상태), NECTAR ≤ 3 — `HIVE_OVER_THRESHOLD`, `HIVE_COUNT`
+            - 로봇 적재물 길이 ≤ 해당 로봇 적재 한도 — `LOADOUT_OVER_CAPACITY`
+            - `canIntakeNectar = false` 로봇의 적재물에 NECTAR 금지 — `LOADOUT_NECTAR_NOT_ALLOWED`
+            - HIVE NECTAR + 로봇 적재 NECTAR ≤ 3 — `NECTAR_IN_PLAY_EXCEEDED`
+            - 지정 POLLEN 합계(로봇 적재 + FLOWER + HIVE + GARDEN) ≤ 32 — `POLLEN_TOTAL_EXCEEDED`
+            - `autoTipCount`: 0 ~ 5 정수 — `AUTO_TIP_COUNT`
         * 난수 시드(`rngSeed`)를 지정하면 잔여 공 산포, 슈팅 명중 판정, 빗맞음 방출, HIVE 낙하 분포가 모두 해당 시드로 재현됨. 미지정 시 엔진 기본 시드 사용.
 
 ### 2.5 기물 물리 상수 및 역학 (Physical Constants & Dynamics)
@@ -153,7 +171,7 @@
             - **하단 보너스:** 추가 5점 일괄 가산.
         - 유효 스코어링 볼륨 내 NECTAR가 0개인 경우 해당 FLOWER 득점은 0점.
     - **하단 추출(deQ) 및 중력 침하(Settling) FSM:**
-        - **추출 조건:** FLOWER 원통(반지름 2.0 in)의 바닥 정사영 원이 로봇의 인테이크 구역(`intakeZones`, 3.3항) 중 하나와 겹침 + `actionState === 'INTAKING'` + 로봇 적재 공간 여유(`controlledPieces.length < 4`). 인테이크 구역이 없는 면으로는 추출할 수 없음. 여러 FLOWER가 동시에 걸리면 차체에 가장 가까운 FLOWER를 우선.
+        - **추출 조건:** FLOWER 원통(반지름 2.0 in)의 바닥 정사영 원이 로봇의 인테이크 구역(`intakeZones`, 3.3항) 중 하나와 겹침 + `actionState === 'INTAKING'` + 로봇 적재 공간 여유(`controlledPieces.length < 적재 한도`, 적재 한도 = min(`maxControlledPieces`, 4)). 인테이크 구역이 없는 면으로는 추출할 수 없음. 여러 FLOWER가 동시에 걸리면 차체에 가장 가까운 FLOWER를 우선.
         - **deQ 실행:** `slot[0]`에 POLLEN이 존재하고 접촉 유지 시간(`intakeContactTimer`)이 최소 추출 쿨다운에 도달하면 `slot[0]` 기물을 로봇으로 회수 적재하고 `intakeContactTimer = 0` 리셋.
         - **연속 추출 중력 쿨다운:** 1회 추출 후 다음 기물 추출까지의 대기 시간은 `max(robotConfig.intakeDelay / 1000, 0.12초)`로 클램핑하여 중력에 의한 기물 낙하 한계 시간을 보장.
         - **NECTAR 하단 블로킹 (Jamming):** `slot[0]`이 비었을 때 상위 기물의 침하 판정:
@@ -164,7 +182,7 @@
         - 투입 대상: 로봇 OBB 외곽과 FLOWER 원통 간 최단 거리 1.0 in 이내인 FLOWER 중 가장 가까운 것 (버전 1에서는 투입 방향 무관). 대상이 없으면 투입 불가 및 상태 복귀.
         - (확장 예정) 투입 방향 제한이 필요해지면 인테이크 구역과 같은 `BumperZone` 구조의 투입 구역(`flowerDropZones`)으로 대상 판정만 교체.
         - NECTAR는 잔여 60초 이하(ENDGAME) 시점에만 투입 가능.
-        - 리프트 준비 완료 후 FLOWER 최상단 슬롯에 기물 추가 (`pieces.push(piece)`).
+        - 리프트 준비 완료 후 로봇 적재함 맨 앞 기물(FIFO, `controlledPieces.shift()`)을 FLOWER 최상단 슬롯에 추가 (`pieces.push(piece)`). 투입 불가(ENDGAME 전 NECTAR, 용량 초과) 시 기물은 적재함 맨 앞으로 되돌아가고 상태 복귀.
 4. **GARDEN & PARK (경기 종료 판정):**
     - 경기 진행 중에는 실시간 점수로 가산하지 않음.
     - 경기 종료 틱(Tick 6000, 남은 시간 0초) 시점에 필드 상태를 검사하여 일괄 가산:
@@ -200,7 +218,7 @@
             - `ANY`: 4면 구역 4개, 각 `width` = 해당 변 길이 + 2 × depth. 네 귀퉁이까지 덮어 차체를 사방으로 depth만큼 확장한 영역과 동일.
             - 프리셋 생성 후 로봇 크기가 바뀌면 프리셋을 다시 생성해야 함(설정에는 숫자 배열만 저장).
         - **Kinematic Pusher 흡착 트랩:** `actionState === 'INTAKING'` 가동 중 유효 Intake Zone에 걸친 공은 범퍼 밖으로 튕겨내는 반발 계수(restitution)를 0으로 감쇠하여 해당 범퍼 면에 안정적으로 머물도록 처리.
-        - **흡입 조건 판정:** Intake Zone 접촉 유지 시간(`intakeContactTimer`)이 `intakeDelay` 이상 지속되고 로봇 적재 공간(`controlledPieces.length < 4`)이 있을 때 `CONTROLLED` 상태로 전환.
+        - **흡입 조건 판정:** Intake Zone 접촉 유지 시간(`intakeContactTimer`)이 `intakeDelay` 이상 지속되고 로봇 적재 공간(`controlledPieces.length < 적재 한도`)이 있을 때 `CONTROLLED` 상태로 전환하여 적재함 맨 뒤에 추가 (FIFO).
     - **공 vs 정적 장애물 충돌:**
         - 위치 보정: 고정 장애물이므로 공 위치에만 100% MTV 가산.
         - 속도 반사: 공이 장애물로 파고드는 법선 속도 `vn = dot(v_ball, normal) < 0`일 때: `v_ball -= (1 + e) * vn * normal` (e는 기물별 restitution 적용).
@@ -251,7 +269,8 @@ export interface RobotConfig {
 
   // 인테이크 옵션
   intakeDelay: number; // 흡입 딜레이 (ms)
-  canIntakeNectar: boolean; // Nectar 무시 전략 옵션
+  canIntakeNectar: boolean; // Nectar 흡입 가능 여부 (false면 NECTAR 적재 불가)
+  maxControlledPieces: number; // 최대 적재 수 (POLLEN/NECTAR 합산). 실제 한도 = min(이 값, 룰 상한 4)
   intakeZones: BumperZone[]; // 인테이크 구역 목록 (개수 무제한, 빈 배열 = 흡입 불가). FRONT/ANY는 프리셋 함수로 생성
 
   // HIVE 득점 (슈터) 런타임 제원
@@ -284,22 +303,28 @@ export interface ScenarioConfig {
   // HIVE 초기 상태
   hiveUpwardCell?: 'AUDIENCE_CELL' | 'OPPOSITE_CELL';
   hiveInitialPieces?: {
-    pollenCount: number; // 0 ~ 8
-    nectarCount: number; // 0 ~ 5
+    pollenCount: number; // 상향 셀 POLLEN (기본 0)
+    nectarCount: number; // 상향 셀 NECTAR (기본 3). 합계는 HIVE_TIP_THRESHOLD 이하
   };
 
-  // 로봇 프리로드 수량 (0 ~ 4개)
-  r1PreloadCount?: number;
-  r2PreloadCount?: number;
+  // 텔레옵 시작 시 로봇 적재물 (순서 있는 목록, FIFO: 0번이 가장 먼저 나감)
+  // 미지정 시 적재 한도만큼 POLLEN. 길이 ≤ 적재 한도, NECTAR는 canIntakeNectar 로봇만
+  r1Loadout?: ('POLLEN' | 'NECTAR')[];
+  r2Loadout?: ('POLLEN' | 'NECTAR')[];
 
-  // 플라워 내부 적재 수량 (기본 각 4개)
+  // FLOWER 내부 POLLEN 수 (기본 각 4개, 각 0 ~ 4: 오토 중 투입 불가)
   flowerPiecesCount?: [number, number, number, number];
 
-  // 바닥에 랜덤 산포할 잔여 기물 수
-  groundPiecesCount?: {
-    pollen: number;
-    nectar: number;
+  // GARDEN에 남은 POLLEN 수 (기본 각 4개)
+  gardenPiecesCount?: {
+    ally: number;
+    opponent: number;
   };
+
+  // 오토 중 발생한 HIVE 팁 횟수 = 텔레옵 직전 휴먼 플레이어가 로딩 존에 투입하는 NECTAR 수 (기본 0)
+  autoTipCount?: number;
+
+  // ※ 위에서 지정되지 않은 나머지 POLLEN / NECTAR는 모두 바닥에 무작위 산포 (자동 계산)
 
   // 결정론적 난수 시드 (미지정 시 엔진 기본 시드). 동일 시드 + 동일 입력 = 동일 경기
   rngSeed?: number;
@@ -353,7 +378,7 @@ export interface RobotState {
   isBraking: boolean; // Stationary Lock 액션 진입 후 완전 정지 대기 중인지 여부
   intakeContactTimer: number; // 유효 흡입 영역 내 기물 접촉 유지 시간 누적치 (초 단위)
   intakeTargetPieceId: string | null; // 현재 접촉 흡입 중인 기물 식별자
-  controlledPieces: GamePiece[]; // 최대 4개
+  controlledPieces: GamePiece[]; // FIFO 적재함 (0번이 다음에 나감), 최대 길이 = 로봇 적재 한도
 }
 
 // 슈팅 판정 인터페이스
@@ -417,8 +442,8 @@ export interface TimelineFrame {
 1. **좌상단(0,0) 캔버스 좌표계 엄수:** 모든 기물 및 구역 좌표는 명세서 2.2항을 기준으로 작성하라.
 2. **필드 초기화 및 시나리오 지원:**
     - 선택된 얼라이언스 색상에 맞춰 32개의 POLLEN과 8개의 NECTAR를 생성하라.
-    - `ScenarioConfig`가 주어지지 않은 경우 기본 공식 룰(HIVE 상향 셀 기본 방향, NECTAR 3개 적재, 로봇당 4개 프리로드)로 초기화하라.
-    - `ScenarioConfig`가 제공된 경우 해당 파라미터(HIVE 방향/적재량, 로봇 프리로드 수, 로봇 시작 자세, 난수 시드)를 우선 반영하고, 지정된 바닥 잔여 기물(`groundPiecesCount`)은 HIVE/FLOWER/로봇 데드존을 회피하여 `ON_FIELD` 정지 상태로 필드에 무작위 스폰하라.
+    - `ScenarioConfig`가 주어지지 않은 경우 기본 공식 룰(HIVE 상향 셀 기본 방향, NECTAR 3개 적재, 로봇당 POLLEN 4개 적재(적재 한도 이내), FLOWER/GARDEN 각 4개)로 초기화하라.
+    - `ScenarioConfig`가 제공된 경우 해당 파라미터(HIVE 방향/적재량, 로봇 적재물, FLOWER/GARDEN 잔여 수, 오토 팁 횟수, 로봇 시작 자세, 난수 시드)를 우선 반영하고, 지정되지 않은 나머지 기물은 HIVE/FLOWER/로봇/기존 기물 데드존을 회피하여 `ON_FIELD` 정지 상태로 필드에 무작위 스폰하라 (2.4항 배치 순서 및 검증 규칙 준수).
     - 로봇 시작 자세는 `ScenarioConfig.r1Spawn` / `r2Spawn`을 우선 적용하고, 미지정 시 아래 진영별 기본 스폰을 적용하라.
     - Red 기본 스폰: R1 `(9, 36)`, R2 `(9, 108)`, Heading `0`.
     - Blue 기본 스폰: B1 `(135, 36)`, B2 `(135, 108)`, Heading `Math.PI`.

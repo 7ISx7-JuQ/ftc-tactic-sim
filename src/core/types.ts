@@ -23,7 +23,8 @@ export interface RobotConfig {
 
   // 인테이크 옵션
   intakeDelay: number;      // 흡입 딜레이 (ms)
-  canIntakeNectar: boolean; // Nectar 무시 전략 옵션
+  canIntakeNectar: boolean; // Nectar 흡입 가능 여부 (false면 NECTAR 적재 불가)
+  maxControlledPieces: number; // 최대 적재 수 (POLLEN/NECTAR 합산). 실제 한도 = min(이 값, 룰 상한 4)
   // 인테이크 구역 목록 (개수 무제한, 빈 배열 = 흡입 불가). 바닥 흡입과 FLOWER 하단 추출 모두 이 구역 기준
   // FRONT / ANY 등은 collision.ts의 createIntakeZonePreset()으로 생성
   intakeZones: BumperZone[];
@@ -58,22 +59,28 @@ export interface ScenarioConfig {
   // HIVE 초기 상태
   hiveUpwardCell?: 'AUDIENCE_CELL' | 'OPPOSITE_CELL';
   hiveInitialPieces?: {
-    pollenCount: number;    // 0 ~ 8
-    nectarCount: number;    // 0 ~ 5
+    pollenCount: number;    // 상향 셀 POLLEN (기본 0)
+    nectarCount: number;    // 상향 셀 NECTAR (기본 3). 합계는 HIVE_TIP_THRESHOLD 이하
   };
 
-  // 로봇 프리로드 수량 (0 ~ 4개)
-  r1PreloadCount?: number;
-  r2PreloadCount?: number;
+  // 텔레옵 시작 시 로봇 적재물 (순서 있는 목록, FIFO: 0번이 가장 먼저 나감)
+  // 미지정 시 적재 한도만큼 POLLEN. 길이 ≤ 적재 한도, NECTAR는 canIntakeNectar 로봇만
+  r1Loadout?: GamePiece['type'][];
+  r2Loadout?: GamePiece['type'][];
 
-  // 플라워 내부 적재 수량 (기본 각 4개)
+  // FLOWER 내부 POLLEN 수 (FLOWER_CIRCLES 순서, 기본 각 4개, 각 0 ~ 4: 오토 중 투입 불가)
   flowerPiecesCount?: [number, number, number, number];
 
-  // 바닥에 랜덤 산포할 잔여 기물 수
-  groundPiecesCount?: {
-    pollen: number;
-    nectar: number;
+  // GARDEN에 남은 POLLEN 수 (기본 각 4개)
+  gardenPiecesCount?: {
+    ally: number;
+    opponent: number;
   };
+
+  // 오토 중 발생한 HIVE 팁 횟수 = 텔레옵 직전 휴먼 플레이어가 로딩 존에 투입하는 NECTAR 수 (기본 0)
+  autoTipCount?: number;
+
+  // ※ 위에서 지정되지 않은 나머지 POLLEN / NECTAR는 모두 바닥에 무작위 산포 (지정 수량으로부터 자동 계산)
 
   // 결정론적 난수 시드 (미지정 시 엔진 기본 시드). 동일 시드 + 동일 입력 = 동일 경기
   rngSeed?: number;
@@ -127,7 +134,7 @@ export interface RobotState {
   isBraking: boolean;       // Stationary Lock 액션 진입 후 완전 정지 대기 중인지 여부
   intakeContactTimer: number; // 유효 흡입 영역 내 기물 접촉 유지 시간 누적치 (초)
   intakeTargetPieceId: string | null; // 현재 접촉 흡입 중인 기물 식별자
-  controlledPieces: GamePiece[]; // 최대 4개 제한
+  controlledPieces: GamePiece[]; // FIFO 적재함 (0번이 다음에 나감), 최대 길이 = 로봇 적재 한도
 }
 
 // 슈팅 판정 인터페이스: 0.0 ~ 1.0 명중 확률 반환
