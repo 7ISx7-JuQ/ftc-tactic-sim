@@ -83,7 +83,8 @@ const MAX_SCATTER_ATTEMPTS = 200;
 // 필드 밖 대기 좌표 (OUT_OF_BOUNDS 기물)
 const OFF_FIELD = -10;
 
-const DEFAULT_RNG_SEED = 0x5eed2026;
+// ScenarioConfig.rngSeed 미지정 시 사용하는 기본 시드 (UI 기본값 표시용으로 공개)
+export const DEFAULT_RNG_SEED = 0x5eed2026;
 
 // 진영별 기본 스폰 (명세서 2.3, UI 기본값 제공용)
 export const DEFAULT_SPAWN_POSES: Record<
@@ -278,9 +279,6 @@ export class SimulationEngine {
   // runFullMatch()가 사용하는 틱별 입력 스케줄 (없으면 정지 + IDLE)
   public inputProvider: DriveInputProvider | null = null;
 
-  // 결정론적 난수 시드 (reset 시 재적용)
-  public rngSeed: number = DEFAULT_RNG_SEED;
-
   private defaultAlliance: 'RED' | 'BLUE';
   private scenario: ScenarioConfig | undefined;
   private rngState = 0;
@@ -317,7 +315,9 @@ export class SimulationEngine {
     const alliance = sc?.allianceColor ?? this.defaultAlliance;
     const opponent = alliance === 'RED' ? 'BLUE' : 'RED';
 
-    this.rngState = this.rngSeed >>> 0;
+    // 시나리오 시드 우선, 미지정/비유한값이면 기본 시드. 32비트 부호 없는 정수로 정규화
+    const seed = sc?.rngSeed;
+    this.rngState = (typeof seed === 'number' && Number.isFinite(seed) ? Math.trunc(seed) : DEFAULT_RNG_SEED) >>> 0;
     this.currentTick = 0;
     this.totalScore = 0;
     this.rpAchieved = { swarm: false, pollinator1: false, pollinator2: false };

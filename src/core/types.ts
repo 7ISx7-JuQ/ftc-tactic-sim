@@ -56,6 +56,9 @@ export interface ScenarioConfig {
     pollen: number;
     nectar: number;
   };
+
+  // 결정론적 난수 시드 (미지정 시 엔진 기본 시드). 동일 시드 + 동일 입력 = 동일 경기
+  rngSeed?: number;
 }
 
 // 독립 모듈용 탄도학 설정 및 히트맵 타입

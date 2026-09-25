@@ -67,6 +67,7 @@
         * HIVE 상향 셀 방향(`hiveUpwardCell`) 및 내부 기물 수(Pollen/Nectar)를 사용자 정의값으로 덮어씀.
         * R1, R2의 초기 프리로드 수량(0~4개)을 개별 지정 가능.
         * 자율주행 중 필드 바닥에 흩어진 잔여 공은 정적 장애물(HIVE AABB, FLOWER 원통, 로봇 스폰 OBB)과 겹치지 않는 안전 데드존 회피 난수 알고리즘을 통해 필드 바닥(`state: 'ON_FIELD', vx: 0, vy: 0`)에 자동 산포 스폰.
+        * 난수 시드(`rngSeed`)를 지정하면 잔여 공 산포, 슈팅 명중 판정, 빗맞음 방출, HIVE 낙하 분포가 모두 해당 시드로 재현됨. 미지정 시 엔진 기본 시드 사용.
 
 ### 2.5 기물 물리 상수 및 역학 (Physical Constants & Dynamics)
 
@@ -271,6 +272,9 @@ export interface ScenarioConfig {
     pollen: number;
     nectar: number;
   };
+
+  // 결정론적 난수 시드 (미지정 시 엔진 기본 시드). 동일 시드 + 동일 입력 = 동일 경기
+  rngSeed?: number;
 }
 
 // 독립 모듈용 탄도학 설정 및 히트맵 타입
