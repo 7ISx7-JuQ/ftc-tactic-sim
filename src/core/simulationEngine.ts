@@ -35,6 +35,7 @@ import type {
   GamePiece,
   PendingDrop,
   RobotConfig,
+  RobotPose,
   RobotState,
   RPState,
   ScenarioConfig,
@@ -86,11 +87,8 @@ const OFF_FIELD = -10;
 // ScenarioConfig.rngSeed 미지정 시 사용하는 기본 시드 (UI 기본값 표시용으로 공개)
 export const DEFAULT_RNG_SEED = 0x5eed2026;
 
-// 진영별 기본 스폰 (명세서 2.3, UI 기본값 제공용)
-export const DEFAULT_SPAWN_POSES: Record<
-  'RED' | 'BLUE',
-  Record<'robot1' | 'robot2', { x: number; y: number; heading: number }>
-> = {
+// 진영별 기본 스폰 (명세서 2.3): ScenarioConfig.r1Spawn / r2Spawn 미지정 시 적용
+export const DEFAULT_SPAWN_POSES: Readonly<Record<'RED' | 'BLUE', Record<'robot1' | 'robot2', RobotPose>>> = {
   RED: {
     robot1: { x: 9.0, y: 36.0, heading: 0 },
     robot2: { x: 9.0, y: 108.0, heading: 0 },
@@ -200,14 +198,20 @@ function isRobotStationary(robot: RobotState): boolean {
   );
 }
 
-function createRobotState(config: RobotConfig): RobotState {
+// 시나리오 지정 자세가 유효(모든 성분 유한값)하면 사용, 아니면 진영별 기본 자세
+function resolveSpawnPose(pose: RobotPose | undefined, fallback: RobotPose): RobotPose {
+  if (pose && Number.isFinite(pose.x) && Number.isFinite(pose.y) && Number.isFinite(pose.heading)) return pose;
+  return fallback;
+}
+
+function createRobotState(pose: RobotPose): RobotState {
   return {
-    x: config.spawnX,
-    y: config.spawnY,
+    x: pose.x,
+    y: pose.y,
     vx: 0,
     vy: 0,
     omega: 0,
-    heading: config.spawnHeading,
+    heading: pose.heading,
     actionState: 'IDLE',
     stateTimer: 0,
     isBraking: false,
@@ -322,8 +326,8 @@ export class SimulationEngine {
     this.totalScore = 0;
     this.rpAchieved = { swarm: false, pollinator1: false, pollinator2: false };
 
-    this.r1 = createRobotState(this.r1Config);
-    this.r2 = createRobotState(this.r2Config);
+    this.r1 = createRobotState(resolveSpawnPose(sc?.r1Spawn, DEFAULT_SPAWN_POSES[alliance].robot1));
+    this.r2 = createRobotState(resolveSpawnPose(sc?.r2Spawn, DEFAULT_SPAWN_POSES[alliance].robot2));
 
     // --- 기물 생성 (POLLEN 32, 아군 NECTAR 8) ---
     const pollen: GamePiece[] = [];

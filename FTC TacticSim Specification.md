@@ -43,7 +43,7 @@
 - **초기 스폰 좌표 (타일 중앙 및 벽면 밀착):**
     - **Red 진영:** R1은 `(9.0, 36.0)`, R2는 `(9.0, 108.0)`. 헤딩은 `0` (오른쪽 방향).
     - **Blue 진영:** B1은 `(135.0, 36.0)`, B2는 `(135.0, 108.0)`. 헤딩은 `Math.PI` (왼쪽 방향).
-    - (※ UI에서 사용자가 수정할 수 있는 기본값으로 제공됨)
+    - (※ 로봇 시작 자세는 하드웨어 제원(`RobotConfig`)이 아닌 경기 시작 조건(`ScenarioConfig.r1Spawn` / `r2Spawn`)으로 지정하며, 미지정 시 선택된 진영의 위 기본 좌표가 자동 적용됨. 엔진은 이 표를 `DEFAULT_SPAWN_POSES`로 제공하여 UI 기본값으로 사용)
 
 ### 2.4 득점 기물 초기화 (Game Pieces Setup)
 
@@ -66,6 +66,7 @@
     - 커스텀 시나리오(`ScenarioConfig` 전달 시):
         * HIVE 상향 셀 방향(`hiveUpwardCell`) 및 내부 기물 수(Pollen/Nectar)를 사용자 정의값으로 덮어씀.
         * R1, R2의 초기 프리로드 수량(0~4개)을 개별 지정 가능.
+        * R1, R2의 시작 자세(`r1Spawn`, `r2Spawn`: 위치 x, y 및 헤딩)를 자율주행 종료 위치로 개별 지정 가능. 미지정 시 진영별 기본 스폰(2.3항) 적용.
         * 자율주행 중 필드 바닥에 흩어진 잔여 공은 정적 장애물(HIVE AABB, FLOWER 원통, 로봇 스폰 OBB)과 겹치지 않는 안전 데드존 회피 난수 알고리즘을 통해 필드 바닥(`state: 'ON_FIELD', vx: 0, vy: 0`)에 자동 산포 스폰.
         * 난수 시드(`rngSeed`)를 지정하면 잔여 공 산포, 슈팅 명중 판정, 빗맞음 방출, HIVE 낙하 분포가 모두 해당 시드로 재현됨. 미지정 시 엔진 기본 시드 사용.
 
@@ -225,11 +226,6 @@ export interface RobotConfig {
   maxLinearAccel: number; // 최대 선형 가속도 (inch/s^2)
   maxAngularAccel: number; // 최대 각가속도 (rad/s^2)
 
-  // 초기 스폰 설정
-  spawnX: number;
-  spawnY: number;
-  spawnHeading: number; // 라디안
-
   // 인테이크 옵션
   intakeDelay: number; // 흡입 딜레이 (ms)
   canIntakeNectar: boolean; // Nectar 무시 전략 옵션
@@ -249,9 +245,20 @@ export interface RobotConfig {
   flowerDropDelay: number; // 연속 투입 간격 (ms)
 }
 
+// 로봇 자세 (필드 좌표계 위치 + 헤딩)
+export interface RobotPose {
+  x: number; // inch
+  y: number; // inch
+  heading: number; // 라디안
+}
+
 // 텔레옵 시작 조건 (자율주행 결과 반영 시나리오 설정)
 export interface ScenarioConfig {
   allianceColor: 'RED' | 'BLUE';
+
+  // 로봇 시작 자세 (자율주행 종료 위치). 미지정 시 진영별 기본 스폰 적용
+  r1Spawn?: RobotPose;
+  r2Spawn?: RobotPose;
   
   // HIVE 초기 상태
   hiveUpwardCell?: 'AUDIENCE_CELL' | 'OPPOSITE_CELL';
@@ -390,7 +397,8 @@ export interface TimelineFrame {
 2. **필드 초기화 및 시나리오 지원:**
     - 선택된 얼라이언스 색상에 맞춰 32개의 POLLEN과 8개의 NECTAR를 생성하라.
     - `ScenarioConfig`가 주어지지 않은 경우 기본 공식 룰(HIVE 상향 셀 기본 방향, NECTAR 3개 적재, 로봇당 4개 프리로드)로 초기화하라.
-    - `ScenarioConfig`가 제공된 경우 해당 파라미터(HIVE 방향/적재량, 로봇 프리로드 수)를 우선 반영하고, 지정된 바닥 잔여 기물(`groundPiecesCount`)은 HIVE/FLOWER/로봇 데드존을 회피하여 `ON_FIELD` 정지 상태로 필드에 무작위 스폰하라.
+    - `ScenarioConfig`가 제공된 경우 해당 파라미터(HIVE 방향/적재량, 로봇 프리로드 수, 로봇 시작 자세, 난수 시드)를 우선 반영하고, 지정된 바닥 잔여 기물(`groundPiecesCount`)은 HIVE/FLOWER/로봇 데드존을 회피하여 `ON_FIELD` 정지 상태로 필드에 무작위 스폰하라.
+    - 로봇 시작 자세는 `ScenarioConfig.r1Spawn` / `r2Spawn`을 우선 적용하고, 미지정 시 아래 진영별 기본 스폰을 적용하라.
     - Red 기본 스폰: R1 `(9, 36)`, R2 `(9, 108)`, Heading `0`.
     - Blue 기본 스폰: B1 `(135, 36)`, B2 `(135, 108)`, Heading `Math.PI`.
     - HIVE 초기화: Red HIVE의 `upwardCell`은 `AUDIENCE_CELL`, Blue HIVE는 `OPPOSITE_CELL`.

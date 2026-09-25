@@ -9,11 +9,6 @@ export interface RobotConfig {
   maxLinearAccel: number;   // 최대 선형 가속도 (inch/s^2)
   maxAngularAccel: number;  // 최대 각가속도 (rad/s^2)
 
-  // 초기 스폰 설정 (진영별 기본값 제공, 커스텀 가능)
-  spawnX: number;
-  spawnY: number;
-  spawnHeading: number;     // 라디안
-
   // 인테이크 옵션
   intakeDelay: number;      // 흡입 딜레이 (ms)
   canIntakeNectar: boolean; // Nectar 무시 전략 옵션
@@ -33,9 +28,20 @@ export interface RobotConfig {
   flowerDropDelay: number;  // 연속으로 기물을 떨어뜨리는 간격 (ms)
 }
 
+// 로봇 자세 (필드 좌표계 위치 + 헤딩)
+export interface RobotPose {
+  x: number;                // inch
+  y: number;                // inch
+  heading: number;          // 라디안
+}
+
 // 텔레옵 시작 조건 (자율주행 결과 반영 시나리오 설정)
 export interface ScenarioConfig {
   allianceColor: 'RED' | 'BLUE';
+
+  // 로봇 시작 자세 (자율주행 종료 위치). 미지정 시 진영별 기본 스폰 적용
+  r1Spawn?: RobotPose;
+  r2Spawn?: RobotPose;
 
   // HIVE 초기 상태
   hiveUpwardCell?: 'AUDIENCE_CELL' | 'OPPOSITE_CELL';
