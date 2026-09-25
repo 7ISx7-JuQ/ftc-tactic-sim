@@ -13,6 +13,7 @@ import {
   PIECE_PHYSICS,
   STOP_SPEED_THRESHOLD,
   generateTippedPiecePlan,
+  getBumperZoneOBB,
   getRobotOBB,
   resolvePiecesCollisions,
   resolveRobotEnvironmentCollisions,
@@ -62,8 +63,9 @@ const MAX_CONTROLLED_PIECES = 4;
 const TOTAL_POLLEN = 32;
 const TOTAL_NECTAR = 8;
 
-// 로봇 OBB 외곽 ↔ FLOWER 원통 최단 거리 접촉 판정 (inch)
-const FLOWER_CONTACT_DISTANCE = 1.0;
+// FLOWER 상단 투입 도달 거리: 로봇 OBB 외곽 ↔ FLOWER 원통 최단 거리 (inch)
+// (하단 추출은 인테이크 구역 겹침으로 판정하므로 이 값을 쓰지 않음)
+const FLOWER_DROP_REACH = 1.0;
 
 // 공 충돌 완화 루프 호출 횟수 (Step 4)
 const PIECE_COLLISION_PASSES = 2;
@@ -168,30 +170,20 @@ function distancePointToOBB(obb: OBB, p: Vector2D): number {
   return Math.hypot(p.x - c.x, p.y - c.y);
 }
 
-// 가상 Intake Zone (명세서 3.3)
-//   FRONT: 전면 범퍼 앞 너비 intakeWidth × 깊이 intakeDepth 센서 박스
-//   ANY  : 차체 OBB를 사방으로 intakeDepth만큼 확장한 박스
-function getIntakeZone(robot: RobotState, config: RobotConfig): OBB | null {
-  const body = getRobotOBB(robot, config);
-  const depth = Math.max(0, config.intakeDepth);
-
-  if (config.intakeDirection === 'ANY') {
-    return {
-      center: body.center,
-      axes: body.axes,
-      halfExtents: [body.halfExtents[0] + depth, body.halfExtents[1] + depth],
-    };
+// 가상 Intake Zone (명세서 3.3): RobotConfig.intakeZones를 필드 좌표 OBB 목록으로 변환
+function getIntakeZoneOBBs(body: OBB, config: RobotConfig): OBB[] {
+  const zones: OBB[] = [];
+  for (const zone of config.intakeZones) {
+    const obb = getBumperZoneOBB(body, zone);
+    if (obb) zones.push(obb);
   }
+  return zones;
+}
 
-  const width = Math.max(0, config.intakeWidth);
-  if (depth <= 0 || width <= 0) return null;
-  const forward = body.axes[0];
-  const offset = body.halfExtents[0] + depth / 2;
-  return {
-    center: { x: body.center.x + forward.x * offset, y: body.center.y + forward.y * offset },
-    axes: body.axes,
-    halfExtents: [depth / 2, width / 2],
-  };
+// z축 정사영 판정: 기물/구조물의 바닥 투영 원이 구역 중 하나와 겹치면 true (접하기만 하면 false)
+function circleOverlapsAnyZone(zones: readonly OBB[], center: Vector2D, radius: number): boolean {
+  const circle = { center, radius };
+  return zones.some((zone) => testOBBvsCircle(zone, circle).colliding);
 }
 
 function isRobotStationary(robot: RobotState): boolean {
@@ -749,29 +741,28 @@ export class SimulationEngine {
     }
 
     const body = getRobotOBB(robot, config);
+    const zones = getIntakeZoneOBBs(body, config);
 
-    // (a) 바닥 기물: 유효 Intake Zone과 겹치는 ON_FIELD 기물
-    const zone = getIntakeZone(robot, config);
+    // (a) 바닥 기물: 정사영 원이 인테이크 구역 중 하나와 겹치는 ON_FIELD 기물
     const floorCandidates: GamePiece[] = [];
-    if (zone) {
-      for (const piece of this.pieces) {
-        if (piece.state !== 'ON_FIELD') continue;
-        if (piece.type === 'NECTAR' && !config.canIntakeNectar) continue;
-        const circle = { center: { x: piece.x, y: piece.y }, radius: PIECE_PHYSICS[piece.type].radius };
-        if (!testOBBvsCircle(zone, circle).colliding) continue;
-        this.trapPiece(piece, robot, body);
-        floorCandidates.push(piece);
-      }
+    for (const piece of this.pieces) {
+      if (piece.state !== 'ON_FIELD') continue;
+      if (piece.type === 'NECTAR' && !config.canIntakeNectar) continue;
+      if (!circleOverlapsAnyZone(zones, piece, PIECE_PHYSICS[piece.type].radius)) continue;
+      this.trapPiece(piece, robot, body);
+      floorCandidates.push(piece);
     }
 
-    // (b) FLOWER: 로봇 OBB 외곽 ↔ 원통 최단 거리 1.0in 이내 + slot[0] POLLEN
+    // (b) FLOWER: 원통 정사영 원이 인테이크 구역 중 하나와 겹침 + slot[0] POLLEN
     let flowerTarget: { flower: FlowerState; distance: number } | null = null;
     for (let i = 0; i < FLOWER_CIRCLES.length; i++) {
       const flower = this.field.flowers[i];
       const bottom = flower.pieces[0];
       if (!bottom || bottom.type !== 'POLLEN') continue; // slot[0] 비었으면 잼 (추출 차단)
-      const distance = distancePointToOBB(body, FLOWER_CIRCLES[i].center) - FLOWER_RADIUS;
-      if (distance > FLOWER_CONTACT_DISTANCE) continue;
+      const circle = FLOWER_CIRCLES[i];
+      if (!circleOverlapsAnyZone(zones, circle.center, circle.radius)) continue;
+      // 여러 FLOWER가 동시에 걸리면 차체에 가장 가까운 것을 우선
+      const distance = distancePointToOBB(body, circle.center) - FLOWER_RADIUS;
       if (!flowerTarget || distance < flowerTarget.distance) flowerTarget = { flower, distance };
     }
 
@@ -893,18 +884,25 @@ export class SimulationEngine {
     }
   }
 
-  // FLOWER 상단 투입: 접촉 중인 가장 가까운 FLOWER에 최상단 적재 (용량/페이즈 검사)
-  private dropIntoFlower(robot: RobotState, config: RobotConfig): boolean {
+  // FLOWER 상단 투입 대상 선정: 차체 외곽에서 FLOWER_DROP_REACH 이내의 가장 가까운 FLOWER 인덱스 (없으면 -1)
+  // 투입 방향 구역(flowerDropZones)을 도입할 경우 이 함수만 BumperZone 겹침 판정으로 교체
+  private findDropTargetFlower(robot: RobotState, config: RobotConfig): number {
     const body = getRobotOBB(robot, config);
     let targetIndex = -1;
     let best = Infinity;
     for (let i = 0; i < FLOWER_CIRCLES.length; i++) {
       const distance = distancePointToOBB(body, FLOWER_CIRCLES[i].center) - FLOWER_RADIUS;
-      if (distance <= FLOWER_CONTACT_DISTANCE && distance < best) {
+      if (distance <= FLOWER_DROP_REACH && distance < best) {
         best = distance;
         targetIndex = i;
       }
     }
+    return targetIndex;
+  }
+
+  // FLOWER 상단 투입: 대상 FLOWER 최상단에 적재 (용량/페이즈 검사)
+  private dropIntoFlower(robot: RobotState, config: RobotConfig): boolean {
+    const targetIndex = this.findDropTargetFlower(robot, config);
     if (targetIndex < 0) return false;
 
     const piece = robot.controlledPieces.pop();

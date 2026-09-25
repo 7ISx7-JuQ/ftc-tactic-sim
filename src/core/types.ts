@@ -1,3 +1,15 @@
+// 로봇 범퍼 면에 붙는 직사각형 구역 (로봇 기준 좌표, 명세서 3.3)
+//   중심점은 side 변 위에 놓이며, depth는 변에서 바깥 수직 방향, width는 변과 평행한 방향
+//   offset 부호: FRONT/BACK 변은 로봇 오른쪽이 +, LEFT/RIGHT 변은 로봇 앞쪽이 +
+export type BumperSide = 'FRONT' | 'BACK' | 'LEFT' | 'RIGHT';
+
+export interface BumperZone {
+  side: BumperSide;
+  offset: number;           // 변 중점 기준 변을 따른 이동 (inch). |offset| ≤ 변 길이 / 2
+  width: number;            // 변과 평행한 길이 (inch, > 0, 변 길이 초과 허용)
+  depth: number;            // 변에서 바깥 수직으로 뻗는 깊이 (inch, > 0)
+}
+
 // 1. 로봇 하드웨어 제원 (UI 입력값, RoadRunner 튜닝 상수 호환)
 export interface RobotConfig {
   id: 'robot1' | 'robot2';
@@ -12,9 +24,9 @@ export interface RobotConfig {
   // 인테이크 옵션
   intakeDelay: number;      // 흡입 딜레이 (ms)
   canIntakeNectar: boolean; // Nectar 무시 전략 옵션
-  intakeDirection: 'FRONT' | 'ANY'; // FRONT: 전면 센서 박스, ANY: 차체 4면 확장 영역
-  intakeWidth: number;      // 전면 인테이크 유효 너비 (inch)
-  intakeDepth: number;      // 흡입 감지 여유 깊이 (inch)
+  // 인테이크 구역 목록 (개수 무제한, 빈 배열 = 흡입 불가). 바닥 흡입과 FLOWER 하단 추출 모두 이 구역 기준
+  // FRONT / ANY 등은 collision.ts의 createIntakeZonePreset()으로 생성
+  intakeZones: BumperZone[];
 
   // HIVE 득점 (슈터) 런타임 제원
   shooterDelay: number;     // 한 발 발사 딜레이 (ms)

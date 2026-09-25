@@ -153,7 +153,7 @@
             - **하단 보너스:** 추가 5점 일괄 가산.
         - 유효 스코어링 볼륨 내 NECTAR가 0개인 경우 해당 FLOWER 득점은 0점.
     - **하단 추출(deQ) 및 중력 침하(Settling) FSM:**
-        - **추출 조건:** 로봇 OBB 외곽과 FLOWER 솔리드 원통 간 최단 거리 1.0 in 이내 접촉 + `actionState === 'INTAKING'` + 로봇 적재 공간 여유(`controlledPieces.length < 4`).
+        - **추출 조건:** FLOWER 원통(반지름 2.0 in)의 바닥 정사영 원이 로봇의 인테이크 구역(`intakeZones`, 3.3항) 중 하나와 겹침 + `actionState === 'INTAKING'` + 로봇 적재 공간 여유(`controlledPieces.length < 4`). 인테이크 구역이 없는 면으로는 추출할 수 없음. 여러 FLOWER가 동시에 걸리면 차체에 가장 가까운 FLOWER를 우선.
         - **deQ 실행:** `slot[0]`에 POLLEN이 존재하고 접촉 유지 시간(`intakeContactTimer`)이 최소 추출 쿨다운에 도달하면 `slot[0]` 기물을 로봇으로 회수 적재하고 `intakeContactTimer = 0` 리셋.
         - **연속 추출 중력 쿨다운:** 1회 추출 후 다음 기물 추출까지의 대기 시간은 `max(robotConfig.intakeDelay / 1000, 0.12초)`로 클램핑하여 중력에 의한 기물 낙하 한계 시간을 보장.
         - **NECTAR 하단 블로킹 (Jamming):** `slot[0]`이 비었을 때 상위 기물의 침하 판정:
@@ -161,6 +161,8 @@
             - 바로 위(`slot[1]`)가 NECTAR인 경우: NECTAR(3.6 in)는 하단 배출구(2.8 in)보다 커서 하단 턱에 걸림. NECTAR는 `slot[1]`에 영구 정지 고정되고 `slot[0]`은 빈 상태(`null`)로 유지됨.
             - `slot[0]`이 비어있는 상태에서는 추가 하단 deQ가 영구 차단됨 (물리적 잼 발생).
     - **상단 투입 (Drop):**
+        - 투입 대상: 로봇 OBB 외곽과 FLOWER 원통 간 최단 거리 1.0 in 이내인 FLOWER 중 가장 가까운 것 (버전 1에서는 투입 방향 무관). 대상이 없으면 투입 불가 및 상태 복귀.
+        - (확장 예정) 투입 방향 제한이 필요해지면 인테이크 구역과 같은 `BumperZone` 구조의 투입 구역(`flowerDropZones`)으로 대상 판정만 교체.
         - NECTAR는 잔여 60초 이하(ENDGAME) 시점에만 투입 가능.
         - 리프트 준비 완료 후 FLOWER 최상단 슬롯에 기물 추가 (`pieces.push(piece)`).
 4. **GARDEN & PARK (경기 종료 판정):**
@@ -184,10 +186,20 @@
         - 법선 부호 규약: `mtvNormal`은 `testOBBvsOBB(r1, r2)`가 반환하는 단위 법선으로, r1을 r2 밖으로 밀어내는 방향(r2 → r1)이다. `MTV = mtvNormal * depth`.
         - 상호 위치 분할 보정: `r1`은 `+0.5 * MTV`, `r2`는 `-0.5 * MTV` 이동 (두 로봇이 서로 반대 방향으로 절반씩 분리).
         - 법선 상대 속도 상쇄: `vRel = v1 - v2`, `vn = dot(vRel, mtvNormal)` 계산 시 `vn < 0`(접근 중)이면: `r1.vx -= 0.5 * vn * mtvNormal.x`, `r1.vy -= 0.5 * vn * mtvNormal.y`, `r2.vx += 0.5 * vn * mtvNormal.x`, `r2.vy += 0.5 * vn * mtvNormal.y` (접선 속도는 100% 보존하여 차체 비비기 주행 허용).
-    - **가상 Intake Zone 판정 메커니즘 구체화 (신설):**
-        - **`ANY` (4면 흡입):** 로봇 차체 OBB(18×18 in) 외곽 사방으로 `intakeDepth`만큼 확장된 영역에 공 중심이 접촉할 때 유효.
-        - **`FRONT` (전면 흡입):** 로봇 전면 범퍼 기준 너비 `intakeWidth`, 전방 돌출 깊이 `intakeDepth`의 가상 센서 OBB 박스 내에 공 중심이 접촉할 때 유효.
-        - **Kinematic Pusher 흡착 트랩:** `actionState === 'INTAKING'` 가동 중 유효 Intake Zone 내에 들어온 공은 범퍼 밖으로 튕겨내는 반발 계수(restitution)를 0으로 감쇠하여 차체 전면에 안정적으로 머물도록 처리.
+    - **가상 Intake Zone 판정 메커니즘 (`RobotConfig.intakeZones: BumperZone[]`):**
+        - **구역 정의 (`BumperZone`):** 로봇 범퍼 변 하나에 붙는 로봇 기준 직사각형. 개수 제한 없음(한 변에 여러 조각 가능, 구역 간 겹침 허용), 빈 배열이면 흡입 불가 로봇.
+            - `side`: 붙는 변 (`FRONT` / `BACK` / `LEFT` / `RIGHT`, 로봇 기준 앞뒤좌우).
+            - `offset`: 구역 중심점의 변 중점 기준 이동 거리(inch). 중심점은 항상 변 위에 있으며 `|offset| ≤ 변 길이 / 2`로 제한.
+            - **offset 부호 규약:** `FRONT` / `BACK` 변은 **로봇 오른쪽**이 +, `LEFT` / `RIGHT` 변은 **로봇 앞쪽**이 +.
+            - `width`: 변과 평행한 방향 길이(inch, > 0). 변 길이보다 길어도 됨(모서리 밖 돌출 허용).
+            - `depth`: 변에서 차체 바깥 수직 방향으로 뻗는 깊이(inch, > 0).
+            - 엔진은 로봇의 현재 위치/헤딩으로 각 구역을 필드 좌표 OBB로 변환(`getBumperZoneOBB`)하여 판정. 로봇 OBB 축은 `axes[0]` = 로봇 앞쪽, `axes[1]` = 로봇 오른쪽 (캔버스 y-down 좌표계).
+        - **판정 기준 (z축 정사영):** GARDEN 판정(2.6.4항)과 동일하게, 기물을 -z 방향에서 바닥(xy 평면)에 수직 정사영한 원(기물 반지름 포함)이 인테이크 구역 중 하나와 일부라도 겹치면 유효. 공 중심이 구역 밖이어도 걸치면 인정하며, 경계에 접하기만 한 경우(겹침 깊이 0)는 불인정. FLOWER 하단 추출도 FLOWER 원통 정사영 원과 인테이크 구역의 겹침으로 동일하게 판정.
+        - **프리셋 (`createIntakeZonePreset`):** `FRONT` / `ANY`는 별도 타입이 아니라 `BumperZone[]` 배열을 생성하는 편의 함수로 제공하며, 프리셋 기본 depth는 1.0 in.
+            - `FRONT`: `FRONT` 변 전체 폭(`width` = 로봇 너비) 구역 1개.
+            - `ANY`: 4면 구역 4개, 각 `width` = 해당 변 길이 + 2 × depth. 네 귀퉁이까지 덮어 차체를 사방으로 depth만큼 확장한 영역과 동일.
+            - 프리셋 생성 후 로봇 크기가 바뀌면 프리셋을 다시 생성해야 함(설정에는 숫자 배열만 저장).
+        - **Kinematic Pusher 흡착 트랩:** `actionState === 'INTAKING'` 가동 중 유효 Intake Zone에 걸친 공은 범퍼 밖으로 튕겨내는 반발 계수(restitution)를 0으로 감쇠하여 해당 범퍼 면에 안정적으로 머물도록 처리.
         - **흡입 조건 판정:** Intake Zone 접촉 유지 시간(`intakeContactTimer`)이 `intakeDelay` 이상 지속되고 로봇 적재 공간(`controlledPieces.length < 4`)이 있을 때 `CONTROLLED` 상태로 전환.
     - **공 vs 정적 장애물 충돌:**
         - 위치 보정: 고정 장애물이므로 공 위치에만 100% MTV 가산.
@@ -215,6 +227,17 @@
 ## 4. 데이터 인터페이스 명세 (`types.ts`)
 
 ```tsx
+// 로봇 범퍼 면에 붙는 직사각형 구역 (로봇 기준 좌표, 3.3항)
+// offset 부호: FRONT/BACK 변은 로봇 오른쪽이 +, LEFT/RIGHT 변은 로봇 앞쪽이 +
+export type BumperSide = 'FRONT' | 'BACK' | 'LEFT' | 'RIGHT';
+
+export interface BumperZone {
+  side: BumperSide;
+  offset: number; // 변 중점 기준 변을 따른 이동 (inch). |offset| ≤ 변 길이 / 2
+  width: number; // 변과 평행한 길이 (inch, > 0, 변 길이 초과 허용)
+  depth: number; // 변에서 바깥 수직으로 뻗는 깊이 (inch, > 0)
+}
+
 // 1. 로봇 하드웨어 제원 (RoadRunner 튜닝 상수 호환)
 export interface RobotConfig {
   id: 'robot1' | 'robot2';
@@ -229,9 +252,7 @@ export interface RobotConfig {
   // 인테이크 옵션
   intakeDelay: number; // 흡입 딜레이 (ms)
   canIntakeNectar: boolean; // Nectar 무시 전략 옵션
-  intakeDirection: 'FRONT' | 'ANY';
-  intakeWidth: number; // 전면 인테이크 유효 너비 (inch) - 필수
-  intakeDepth: number; // 전면 흡입 감지 여유 깊이 (inch) - 필수
+  intakeZones: BumperZone[]; // 인테이크 구역 목록 (개수 무제한, 빈 배열 = 흡입 불가). FRONT/ANY는 프리셋 함수로 생성
 
   // HIVE 득점 (슈터) 런타임 제원
   shooterDelay: number; // 발사 딜레이 (ms)
@@ -410,7 +431,7 @@ export interface TimelineFrame {
 5. **상태 전이(FSM) 타이머 및 주행 제어:** `actionState === 'INTAKING'`일 때는 주행 입력을 유지하여 Mobile Intake를 수행하고 공 접촉 타이머를 누적하도록 지시. `SHOOTING`, `FLOWER_SETUP`, `FLOWER_DROPPING`일 때는 감속 제동(`isBraking = true`) 후 정지 완료 시점에 `stateTimer`를 차감하도록 지시.
 6. **FLOWER 슬롯 구조 및 하단 추출/블로킹 구현:**
     - `flower.pieces[0]`을 지면 슬롯(`slot[0]`), `[1..N]`을 유효 스코어링 볼륨으로 취급하라.
-    - 로봇 인테이크 접촉 시 `slot[0]`의 POLLEN만 추출(`shift`) 가능하며, 추출 쿨다운은 `max(intakeDelay, 0.12s)`를 적용하라.
+    - 로봇 인테이크 구역(`intakeZones`)이 FLOWER 원통 정사영과 겹칠 때 `slot[0]`의 POLLEN만 추출(`shift`) 가능하며, 추출 쿨다운은 `max(intakeDelay, 0.12s)`를 적용하라.
     - 추출 후 바로 위 기물이 NECTAR인 경우 `slot[0]`을 `null`로 두고 NECTAR를 `slot[1]`에 고정시켜 추가 추출을 영구 차단하라.
     - FLOWER 득점 집계 시 `slot[0]`은 배제하고, `slot[1..N]` 내 NECTAR 존재 여부에 따라 소유권(개당 2점) 및 하단 보너스(5점)를 경기 종료 틱(Tick 6000)에 일괄 산출하라.
 7. **탄도 모델 분리:** 슈터 몬테카를로 히트맵 생성기는 오프라인/별도 모듈로 격리하고, 엔진 루프는 R1/R2 각각에 배정된 히트맵 LUT 및 조준 오차 판정 인터페이스를 통해 결정론적으로 동작하도록 지시.

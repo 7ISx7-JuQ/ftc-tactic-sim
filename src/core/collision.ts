@@ -1,4 +1,4 @@
-import type { GamePiece, PendingDrop, RobotConfig, RobotState } from './types';
+import type { BumperZone, GamePiece, PendingDrop, RobotConfig, RobotState } from './types';
 
 // 부동소수점 오차 허용 범위
 const EPSILON = 1e-9;
@@ -273,6 +273,70 @@ export function getRobotOBB(state: RobotState, config: RobotConfig): OBB {
       Math.max(0, finiteOr0(config.width)) / 2,
     ],
   };
+}
+
+// ------------------------------------------------------------
+// 로봇 범퍼 구역 (Intake Zone 등, 명세서 3.3)
+// ------------------------------------------------------------
+
+// 프리셋 구역의 기본 깊이 (inch)
+export const DEFAULT_PRESET_ZONE_DEPTH = 1.0;
+
+// 로봇 기준 BumperZone → 필드 좌표 OBB. width/depth가 0 이하면 null (구역 없음)
+//   로봇 OBB 축: axes[0] = 앞쪽(+), axes[1] = 오른쪽(+) (캔버스 y-down 좌표계에서 (-sin, cos))
+export function getBumperZoneOBB(body: OBB, zone: BumperZone): OBB | null {
+  const width = finiteOr0(zone.width);
+  const depth = finiteOr0(zone.depth);
+  if (width <= 0 || depth <= 0) return null;
+
+  const [forward, right] = body.axes;
+  const [halfLength, halfWidth] = body.halfExtents;
+  const isLongitudinal = zone.side === 'FRONT' || zone.side === 'BACK';
+
+  // 변의 법선(바깥 방향)과 변을 따라가는 방향(offset + 방향)
+  const outward =
+    zone.side === 'FRONT' ? forward
+    : zone.side === 'BACK' ? { x: -forward.x, y: -forward.y }
+    : zone.side === 'RIGHT' ? right
+    : { x: -right.x, y: -right.y };
+  const along = isLongitudinal ? right : forward;
+  const halfSide = isLongitudinal ? halfWidth : halfLength;   // 변 길이 / 2
+  const halfBody = isLongitudinal ? halfLength : halfWidth;   // 중심 → 변 거리
+
+  // 중심점은 변 위로 제한
+  const offset = clamp(finiteOr0(zone.offset), -halfSide, halfSide);
+  const normalDist = halfBody + depth / 2;
+
+  return {
+    center: {
+      x: body.center.x + outward.x * normalDist + along.x * offset,
+      y: body.center.y + outward.y * normalDist + along.y * offset,
+    },
+    axes: body.axes,
+    // axes[0](앞쪽) 방향 반길이, axes[1](오른쪽) 방향 반길이
+    halfExtents: isLongitudinal ? [depth / 2, width / 2] : [width / 2, depth / 2],
+  };
+}
+
+// 인테이크 구역 프리셋 생성
+//   FRONT: 전면 변 전체 폭 1개 구역
+//   ANY  : 4면 구역, width = 변 길이 + 2·depth (네 귀퉁이까지 덮어 차체를 depth만큼 확장한 영역과 동일)
+export function createIntakeZonePreset(
+  preset: 'FRONT' | 'ANY',
+  robot: Pick<RobotConfig, 'length' | 'width'>,
+  depth: number = DEFAULT_PRESET_ZONE_DEPTH,
+): BumperZone[] {
+  const d = Math.max(0, finiteOr0(depth));
+  const sideFrontBack = Math.max(0, finiteOr0(robot.width));
+  const sideLeftRight = Math.max(0, finiteOr0(robot.length));
+
+  if (preset === 'FRONT') return [{ side: 'FRONT', offset: 0, width: sideFrontBack, depth: d }];
+  return [
+    { side: 'FRONT', offset: 0, width: sideFrontBack + 2 * d, depth: d },
+    { side: 'BACK', offset: 0, width: sideFrontBack + 2 * d, depth: d },
+    { side: 'LEFT', offset: 0, width: sideLeftRight + 2 * d, depth: d },
+    { side: 'RIGHT', offset: 0, width: sideLeftRight + 2 * d, depth: d },
+  ];
 }
 
 // 원 vs 원: normal은 B → A (A를 밀어내는 방향)
