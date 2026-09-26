@@ -514,6 +514,7 @@ export interface TimelineFrame {
 | 03 | 기구학 (Slew Rate 가감속, 헤딩 적분) | `kinematics.ts` |
 | 04 | 충돌 엔진 (SAT, 로봇-환경/로봇-로봇, 기물 동역학, PBD, HIVE 시차 낙하 계획) | `collision.ts` |
 | 05 | 50Hz 결정론적 메인 루프 엔진 및 룰 전반 (아래 6.2) | `simulationEngine.ts` |
+| 5.5 | 테스트 인프라: Vitest 도입, 엔진 통합 회귀 테스트 스위트 저장소 편입 (아래 6.2) | `src/core/__tests__/simulationEngine.test.ts` |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
@@ -527,11 +528,20 @@ export interface TimelineFrame {
 - **시작 상황:** 적재물 순서 목록, FLOWER/GARDEN/HIVE 잔여 수, 오토 팁 NECTAR 로딩 존 투입, 미지정 기물 자동 산포(GARDEN/로딩 존 제외), `validateScenario()`(GUI 확정 버튼 비활성화용).
 - **득점:** Tick 0~5999는 텔레옵 팁(20점)만 실시간, Tick 6000에 FLOWER/GARDEN(정사영 걸침 인정)/PARK(로딩 존 부분 진입 인정) 확정.
 - **물리 보정:** 끼인 공 역보정(로봇-벽/장애물/로봇 사이), 휴먼 NECTAR는 로딩 존 빈 슬롯이 없으면 대기(`pendingHumanNectar`).
-- **검증:** 타입 체크(`tsc -b`), ESLint, 빌드, 통합 테스트 196 assertions 통과 (테스트 스크립트는 세션 임시 폴더에서 실행되어 저장소에 포함되지 않음 → 6.3 Step 5.5 참고).
+- **검증:** 타입 체크(`tsc -b`), ESLint, 빌드, 통합 테스트 통과.
+
+### 6.2.1 Step 5.5 (테스트 인프라) 완료 항목
+
+- **러너:** Vitest 5 (`devDependencies`), `npm test` = `vitest run`, `npm run test:watch` = `vitest`.
+- **스위트:** `src/core/__tests__/simulationEngine.test.ts` — 16개 테스트 그룹(A~P), 검증 196개(반복문 포함). 풀매치를 여러 번 돌리는 그룹이 있어 테스트당 제한 시간 120초, 전체 약 35초.
+    - A 시작 자세 / B 초기화 / C 슈팅·팁 / D FLOWER 추출·잼·투입 / E 바닥 흡입 / F PARK / G 시드 / H 풀매치 결정론·스크러빙·분기 / I GARDEN 정사영 / J BumperZone 인테이크 / K 시작 상황·검증 / L 끼인 공 역보정 / M HIVE 팁 테이블·RP / N FLOWER 투입 요청 시점 거부 / O FLOWER 용량 테이블·잼 / P 코드 리뷰 반영(읽기 전용 기록, 로봇 id, 로딩 존 대칭, 산포 제외).
+- **타입 검사 포함:** 테스트 파일도 `tsconfig.app.json`(`src` 포함) 대상이라 `tsc -b`로 함께 타입 검사됨.
+- **동작 확인:** 엔진 상수를 일부러 틀리게 바꿨을 때 해당 그룹이 실패 메시지와 함께 실패함을 확인.
 
 ### 6.3 남은 Step (권장 순서)
 
-- **Step 5.5 — 테스트 인프라 (권장 선행):** 저장소에 테스트 러너(예: Vitest)와 엔진 회귀 테스트 스위트를 추가 (시작 자세, 초기화, 슈팅/팁, FLOWER, 흡입, PARK/GARDEN, 시드/결정론/스크러빙, 인테이크 구역, 시나리오 검증, 끼인 공, 용량 테이블). 이후 Step의 회귀 방지용.
+> 모든 Step은 완료 시 `npm test`(엔진 회귀 테스트)가 통과해야 하며, 새로 추가한 규칙에는 테스트 그룹을 추가한다.
+
 - **Step 6 — 탄도 모듈 + 발사 비행 처리 (`src/core/ballistics.ts`):**
     - $v_0$ 역산, 시드 고정 몬테카를로로 로봇별 4셀 × 2 = 8장 72×72 LUT 생성, 4-Cell 대칭 변환.
     - `createLUTShotResolver(luts, r1Config, r2Config)`: 격자 조회 + 조준 판정(FIXED 허용 오차 / TURRET 회전 범위) → 엔진 생성자에 주입 (엔진 수정 불필요).
