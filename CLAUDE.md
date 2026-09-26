@@ -16,5 +16,6 @@
 
 ## 빌드 및 검증 커맨드
 - 개발 서버: `npm run dev`
-- 타입 체크: `npx tsc --noEmit`
+- 타입 체크: `npx tsc -b`
+  - (주의) 루트 `tsconfig.json`은 `files: []` + `references` 구조라 `npx tsc --noEmit`을 루트에서 실행하면 검사 대상이 없어 항상 통과함. 반드시 `tsc -b`(또는 `npx tsc --noEmit -p tsconfig.app.json`)로 검사할 것.
 - 빌드: `npm run build`
