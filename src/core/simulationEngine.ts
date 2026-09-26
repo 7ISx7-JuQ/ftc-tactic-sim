@@ -251,6 +251,9 @@ export function validateScenario(
 }
 
 // FLOWER 용량 테이블 판정: 기물 1개를 더 넣은 뒤에도 NECTAR/POLLEN 한도 이내인지 (slot[0] 포함 전체 개수 기준)
+// NECTAR 잼 상태(slot[0] = null, slot[1] = NECTAR)는 빈 slot[0]을 POLLEN 1개로 계산 (명세서 2.6.3):
+//   출구 턱 높이 = POLLEN 직경(2.8in)이므로 턱에 걸린 NECTAR는 slot[0] POLLEN 위에 놓인 것과 같은 높이에서 적층이 시작됨.
+//   턱(링) 위 받침과 공 위 받침의 지그재그 적층 미세 차이는 단순화를 위해 의도적으로 무시함.
 function canFlowerAccept(flower: FlowerState, type: GamePiece['type']): boolean {
   let nectar = type === 'NECTAR' ? 1 : 0;
   let pollen = type === 'POLLEN' ? 1 : 0;
@@ -258,6 +261,9 @@ function canFlowerAccept(flower: FlowerState, type: GamePiece['type']): boolean 
     if (p?.type === 'NECTAR') nectar++;
     else if (p?.type === 'POLLEN') pollen++;
   }
+  // 이미 잼 상태이거나, 빈 원통에 NECTAR를 넣어 잼 상태가 되는 경우 빈 slot[0]을 POLLEN으로 계산
+  const jammed = flower.pieces.length > 0 ? flower.pieces[0] === null : type === 'NECTAR';
+  if (jammed) pollen++;
   return nectar <= FLOWER_MAX_NECTAR_CAPACITY && pollen <= (FLOWER_MAX_POLLEN_BY_NECTAR[nectar] ?? 0);
 }
 

@@ -233,13 +233,23 @@ export const FLOWER_DEQ_GRAVITY_COOLDOWN = 0.12;
 
 /**
  * FLOWER 내부 NECTAR 수량에 따른 최대 POLLEN 수용 한도 테이블
- * Key: NECTAR 개수, Value: 최대 POLLEN 개수
+ * 바닥(slot[0] 포함)부터 높이 21.5in 원통에 최대로 채울 수 있는 조합
+ * {POLLEN, NECTAR} = {9,0} {8,1} {6,2} {5,3} {3,4} {2,5} {1,6} {0,7}
+ * (지그재그 적층 + 최상단 기물이 일부라도 원통 내부에 걸치면 인정하는 기준의 계산값. 실측 가능 시 교체 예정)
+ * Key: NECTAR 개수, Value: 최대 POLLEN 개수 (slot[0] 포함 원통 내 전체 개수 기준)
+ * NECTAR 잼 상태(slot[0] = null)에서는 빈 slot[0]을 POLLEN 1개로 계산하여 같은 테이블 사용
+ * (턱 위 받침과 공 위 받침의 미세 차이는 단순화를 위해 의도적으로 무시, 명세서 2.6.3)
  */
 export const FLOWER_MAX_POLLEN_BY_NECTAR: Record<number, number> = {
-  0: 5,
-  1: 4,
-  2: 2,
+  0: 9,
+  1: 8,
+  2: 6,
+  3: 5,
+  4: 3,
+  5: 2,
+  6: 1,
+  7: 0,
 };
 
-/** FLOWER에 투입 가능한 최대 NECTAR 수량 */
-export const FLOWER_MAX_NECTAR_CAPACITY = 2;
+/** FLOWER에 투입 가능한 최대 NECTAR 수량 (용량 테이블 최대 키) */
+export const FLOWER_MAX_NECTAR_CAPACITY = 7;

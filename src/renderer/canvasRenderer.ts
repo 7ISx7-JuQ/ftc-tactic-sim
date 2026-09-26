@@ -344,7 +344,7 @@ export function drawHive(
 
 // FLOWER 슬롯 게이지: 탑다운 뷰에서는 수직 적재 높이를 표현할 수 없으므로 FLOWER 옆에 측면 단면 미니 게이지를 그림
 const FLOWER_GAUGE_SCALE = 0.5;        // 게이지 1인치 = 필드 0.5인치
-const FLOWER_GAUGE_TUBE_HEIGHT = 18;   // 게이지 원통 표시 높이 (inch, 실제 스케일)
+const FLOWER_GAUGE_TUBE_HEIGHT = 21.5; // 게이지 원통 표시 높이 (inch, FLOWER 원통 실제 높이, 용량 테이블 기준)
 // 하단 출구 턱 높이 = slot[0] POLLEN 직경. slot[0]이 비어도(null) 이 높이는 유지됨
 const FLOWER_EXIT_LIP_HEIGHT = PIECE_PHYSICS.POLLEN.radius * 2;
 
