@@ -34,6 +34,7 @@ import {
   isHiveTipReached,
 } from './types';
 import type {
+  DeepReadonly,
   FieldState,
   FlowerState,
   GamePiece,
@@ -93,6 +94,9 @@ const MISS_SPAWN_GAP = 0.1;              // HIVE 외곽과의 여유 (inch)
 
 // 자율주행 잔여 공 산포 최대 시도 횟수
 const MAX_SCATTER_ATTEMPTS = 200;
+// 산포 실패 시 기준점 주변 링 탐색 간격 (inch) / 최대 링 수 (반경 = 링 × 간격)
+const SCATTER_FALLBACK_STEP = 3;
+const SCATTER_FALLBACK_RINGS = 40;
 
 // 필드 밖 대기 좌표 (OUT_OF_BOUNDS 기물)
 const OFF_FIELD = -10;
@@ -390,7 +394,13 @@ function cloneSnapshot(src: SimSnapshot, pieceIndex: ReadonlyMap<string, number>
 
 export class SimulationEngine {
   // 타임라인 프레임 배열 (0번 프레임부터 6000번 프레임까지 순차 축적)
-  public timeline: TimelineFrame[] = [];
+  // 외부에는 읽기 전용으로만 공개 (기록 오염 방지). reset() 시 새 배열로 교체되므로
+  // UI는 참조를 보관하지 말고 매번 engine.timeline / getFrame()으로 새로 읽을 것
+  private frames: TimelineFrame[] = [];
+
+  public get timeline(): readonly DeepReadonly<TimelineFrame>[] {
+    return this.frames;
+  }
 
   // 현재 시뮬레이션 내부 런타임 상태 (가변 작업본, 프레임에는 복제본만 기록)
   public currentTick: number = 0;
@@ -422,13 +432,14 @@ export class SimulationEngine {
     scenario?: ScenarioConfig,
     shotResolver?: ShotProbabilityResolver,
   ) {
-    this.r1Config = r1Config;
-    this.r2Config = r2Config;
+    // 로봇 식별자는 슬롯으로 고정 (사용자 입력 id와 무관하게 r1 = 'robot1', r2 = 'robot2')
+    this.r1Config = { ...r1Config, id: 'robot1' };
+    this.r2Config = { ...r2Config, id: 'robot2' };
     this.defaultAlliance = allianceColor;
     this.scenario = scenario;
     this.shotResolver =
       shotResolver ??
-      ((robotId) => (robotId === this.r2Config.id ? this.r2Config : this.r1Config).shooterAccuracy);
+      ((robotId) => (robotId === 'robot2' ? this.r2Config : this.r1Config).shooterAccuracy);
     this.reset();
   }
 
@@ -560,7 +571,7 @@ export class SimulationEngine {
     for (const piece of takePollen(TOTAL_POLLEN)) this.scatterPiece(piece);
     for (const piece of takeNectar(NECTAR_IN_PLAY)) this.scatterPiece(piece);
 
-    this.timeline = [];
+    this.frames = [];
     this.rngStates = [];
     this.recordFrame();
   }
@@ -569,12 +580,12 @@ export class SimulationEngine {
    * 외부 조작 입력을 주입받아 다음 1틱(0.02초)을 계산하고 새 프레임을 타임라인에 추가.
    * 경기 종료(Tick 6000) 이후에는 마지막 프레임을 그대로 반환.
    */
-  public step(r1Input?: RobotDriveInput, r2Input?: RobotDriveInput): TimelineFrame {
-    if (this.currentTick >= MATCH_TICKS) return this.timeline[this.timeline.length - 1];
+  public step(r1Input?: RobotDriveInput, r2Input?: RobotDriveInput): DeepReadonly<TimelineFrame> {
+    if (this.currentTick >= MATCH_TICKS) return this.frames[this.frames.length - 1];
 
     // 스크러빙으로 과거 틱에서 재개한 경우 미래 프레임을 폐기하고 분기
-    if (this.timeline.length > this.currentTick + 1) {
-      this.timeline.length = this.currentTick + 1;
+    if (this.frames.length > this.currentTick + 1) {
+      this.frames.length = this.currentTick + 1;
       this.rngStates.length = this.currentTick + 1;
     }
 
@@ -644,9 +655,9 @@ export class SimulationEngine {
   }
 
   /** 특정 틱의 스냅샷 조회 (O(1)) */
-  public getFrame(tick: number): TimelineFrame | undefined {
+  public getFrame(tick: number): DeepReadonly<TimelineFrame> | undefined {
     if (!Number.isInteger(tick) || tick < 0) return undefined;
-    return this.timeline[tick];
+    return this.frames[tick];
   }
 
   /**
@@ -654,9 +665,9 @@ export class SimulationEngine {
    * 미래 프레임은 다음 step() 호출 전까지 보존되어 앞으로 다시 스크러빙 가능.
    */
   public scrubTo(tick: number): void {
-    if (this.timeline.length === 0) return;
-    const target = clamp(Math.floor(Number.isFinite(tick) ? tick : 0), 0, this.timeline.length - 1);
-    const frame = this.timeline[target];
+    if (this.frames.length === 0) return;
+    const target = clamp(Math.floor(Number.isFinite(tick) ? tick : 0), 0, this.frames.length - 1);
+    const frame = this.frames[target];
 
     const restored = cloneSnapshot(frame, this.pieceIndex);
     this.r1 = restored.r1;
@@ -717,10 +728,13 @@ export class SimulationEngine {
     );
   }
 
-  // HIVE AABB, FLOWER 원통, 로봇 스폰 OBB, 기존 기물을 회피하는 안전 난수 좌표에 정지 스폰
+  // HIVE AABB, FLOWER 원통, GARDEN, 로딩 존, 로봇 스폰 OBB, 기존 기물을 회피하는 안전 난수 좌표에 정지 스폰
+  // (GARDEN: 시나리오 지정 수량 보존 / 로딩 존: 휴먼 NECTAR 슬롯·주차 구역 보호, 양 진영 모두 제외)
   private scatterPiece(piece: GamePiece): void {
     const r = PIECE_PHYSICS[piece.type].radius;
+    const noScatterZones = [GARDEN_AABB.RED, GARDEN_AABB.BLUE, LOADING_ZONE_AABB.RED, LOADING_ZONE_AABB.BLUE];
     const isSafe = (x: number, y: number): boolean => {
+      if (x < r || x > FIELD_SIZE - r || y < r || y > FIELD_SIZE - r) return false;
       if (
         x > HIVE_AABB.minX - r &&
         x < HIVE_AABB.maxX + r &&
@@ -730,6 +744,8 @@ export class SimulationEngine {
         return false;
       }
       if (FLOWER_CIRCLES.some((f) => Math.hypot(f.center.x - x, f.center.y - y) < f.radius + r)) return false;
+      const circle = { center: { x, y }, radius: r };
+      if (noScatterZones.some((zone) => testCircleVsAABB(circle, zone).colliding)) return false;
       return !this.overlapsRobot(x, y, r) && !this.overlapsFieldPiece(x, y, r);
     };
 
@@ -741,10 +757,26 @@ export class SimulationEngine {
       y = this.uniform(r, FIELD_SIZE - r);
       found = isSafe(x, y);
     }
-    // 시도 한도 초과: HIVE와 로봇 스폰 라인 사이 필드 중앙 하단 안전 좌표
+    // 시도 한도 초과: HIVE 아래 필드 중앙 하단 기준점에서 바깥으로 링을 넓혀가며 첫 안전 좌표 탐색 (결정론적)
     if (!found) {
-      x = FIELD_SIZE / 2;
-      y = HIVE_AABB.maxY + (FIELD_SIZE - HIVE_AABB.maxY) / 2;
+      const cx = FIELD_SIZE / 2;
+      const cy = HIVE_AABB.maxY + (FIELD_SIZE - HIVE_AABB.maxY) / 2;
+      x = cx;
+      y = cy;
+      for (let ring = 0; ring <= SCATTER_FALLBACK_RINGS && !found; ring++) {
+        const dist = ring * SCATTER_FALLBACK_STEP;
+        const samples = ring === 0 ? 1 : ring * 8;
+        for (let k = 0; k < samples && !found; k++) {
+          const angle = (2 * Math.PI * k) / samples;
+          const px = cx + dist * Math.cos(angle);
+          const py = cy + dist * Math.sin(angle);
+          if (isSafe(px, py)) {
+            x = px;
+            y = py;
+            found = true;
+          }
+        }
+      }
     }
 
     piece.state = 'ON_FIELD';
@@ -767,14 +799,17 @@ export class SimulationEngine {
   private placePendingHumanNectar(): void {
     if (this.field.pendingHumanNectar <= 0) return;
 
-    const box = LOADING_ZONE_AABB[this.field.allianceColor];
+    // RED 로딩 존(좌측 벽)에서 벽쪽 열부터 슬롯을 만들고, BLUE는 필드 중심 (72, 72) 점대칭으로 변환
+    // → 두 진영의 슬롯 배치와 투입 순서가 완전히 대칭 (BLUE 로딩 존 = RED 로딩 존의 점대칭)
+    const box = LOADING_ZONE_AABB.RED;
     const r = PIECE_PHYSICS.NECTAR.radius;
-    const slots: Vector2D[] = [];
+    const redSlots: Vector2D[] = [];
     for (let x = box.minX + r; x <= box.maxX - r + EPSILON; x += 2 * r + 0.4) {
-      for (let y = box.minY + r; y <= box.maxY - r + EPSILON; y += 2 * r + 0.4) slots.push({ x, y });
+      for (let y = box.minY + r; y <= box.maxY - r + EPSILON; y += 2 * r + 0.4) redSlots.push({ x, y });
     }
-    const wallDist = (p: Vector2D): number => Math.min(p.x, FIELD_SIZE - p.x);
-    slots.sort((a, b) => wallDist(a) - wallDist(b) || a.y - b.y);
+    const slots = this.field.allianceColor === 'RED'
+      ? redSlots
+      : redSlots.map((p) => ({ x: FIELD_SIZE - p.x, y: FIELD_SIZE - p.y }));
 
     while (this.field.pendingHumanNectar > 0) {
       const spot = slots.find((s) => !this.overlapsFieldPiece(s.x, s.y, r) && !this.overlapsRobot(s.x, s.y, r));
@@ -1013,7 +1048,7 @@ export class SimulationEngine {
 
     switch (robot.actionState) {
       case 'SHOOTING': {
-        this.fireShot(robot, config);
+        this.fireShot(robot, slot === 'r1' ? 'robot1' : 'robot2');
         if (input.actionState === 'SHOOTING' && robot.controlledPieces.length > 0) {
           rearm('SHOOTING', config.shooterDelay);
         } else {
@@ -1087,13 +1122,14 @@ export class SimulationEngine {
     return true;
   }
 
-  private fireShot(robot: RobotState, config: RobotConfig): void {
+  private fireShot(robot: RobotState, robotId: 'robot1' | 'robot2'): void {
     const piece = robot.controlledPieces.shift(); // FIFO: 가장 먼저 적재된 기물부터 발사
     if (!piece) return;
 
     const hive = this.field.hive;
     const alliance = this.field.allianceColor;
-    const rawP = this.shotResolver(config.id, robot.x, robot.y, robot.heading, alliance, hive.upwardCell);
+    // 슬롯 기반 식별자 전달 (config.id에 의존하지 않음)
+    const rawP = this.shotResolver(robotId, robot.x, robot.y, robot.heading, alliance, hive.upwardCell);
     const p = Number.isFinite(rawP) ? clamp(rawP, 0, 1) : 0;
     // 난수는 항상 1회 소비하여 전복 여부와 무관하게 RNG 시퀀스를 일정하게 유지
     const roll = this.random();
@@ -1245,7 +1281,7 @@ export class SimulationEngine {
       totalScore: this.totalScore,
       rpAchieved: { ...this.rpAchieved },
     };
-    this.timeline[this.currentTick] = frame;
+    this.frames[this.currentTick] = frame;
     this.rngStates[this.currentTick] = this.rngState;
     return frame;
   }

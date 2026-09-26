@@ -12,7 +12,7 @@ export interface BumperZone {
 
 // 1. 로봇 하드웨어 제원 (UI 입력값, RoadRunner 튜닝 상수 호환)
 export interface RobotConfig {
-  id: 'robot1' | 'robot2';
+  id: 'robot1' | 'robot2';  // 엔진이 슬롯에 따라 강제 (r1 = 'robot1', r2 = 'robot2'), 사용자 입력 아님
   name: string;
   width: number;            // 가로 (inch)
   length: number;           // 세로 (inch)
@@ -184,6 +184,13 @@ export interface RPState {
   pollinator1: boolean;
   pollinator2: boolean;
 }
+
+// 읽기 전용 깊은 타입: 엔진이 외부로 공개하는 기록(타임라인 프레임)의 수정을 타입 수준에서 차단
+export type DeepReadonly<T> = T extends (infer U)[]
+  ? readonly DeepReadonly<U>[]
+  : T extends object
+    ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
+    : T;
 
 // 6. 타임라인 프레임 스냅샷
 export interface TimelineFrame {
