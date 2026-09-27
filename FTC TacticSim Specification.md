@@ -192,13 +192,18 @@
         - **명목 궤적:** 편차 없는 포물선 (발사구 $z_0$, 기물 종류의 v0, 발사각 θ). 발사 방향은 고정형이면 로봇 헤딩, 터렛형이면 조준 방향.
         - **도착 규칙:**
             - **명중:** 궤적과 무관하게 조준점에 도착 (LUT 결과 우선). 비행 시간 $T = D / (v_0\cos\theta)$.
-            - **빗맞음 + HIVE 충돌:** 지면 직선을 따라 HIVE AABB 안에서 공 중심 높이가 `HIVE_HEIGHT`(≈ 65.62) 이하가 되는 첫 지점이 있으면 (옆면으로 들어오거나 윗면으로 떨어짐) 그 지점에서 HIVE에 부딪힌 것으로 보고, 가장 가까운 HIVE 외곽으로 반사 방출 (현재 `ejectMissedShot` 방출 규칙을 이 지점 기준으로 적용).
+            - **빗맞음 + HIVE 충돌 (`intersectHiveBox`):** HIVE 직육면체를 기물 반지름만큼 확장(xy 경계 ± r, 높이 `HIVE_HEIGHT` + r, 공 표면 접촉 기준)하고, 지면 직선이 확장 AABB 안에 있는 구간(착지 전까지)에서 공 중심 높이가 확장 높이 이하가 되는 첫 지점이 있으면 (진입 순간 이미 낮으면 옆면 `SIDE`, 위로 들어와 구간 안에서 내려오면 윗면 `TOP`) 그 지점에서 HIVE에 부딪힌 것으로 보고, 가장 가까운 HIVE 외곽으로 반사 방출 (현재 `ejectMissedShot` 방출 규칙을 이 지점 기준으로 적용).
             - **빗맞음 + HIVE를 넘어가거나 닿지 않음:** 공 중심 높이가 기물 반지름이 되는 시점의 수평 거리 R 지점에 착지 (필드 밖이면 벽 앞에서 정지). 착지 후 발사 방향 수평 속도 = $v_0\cos\theta$ × `landingSpeedRetention`(2.5항)을 가진 `ON_FIELD` 기물로 전환되고, 이후는 기존 물리가 처리.
             - 고정형 슈터는 조준 이탈 시 확률 0이고 직선도 조준점을 비껴가므로 판정과 연출이 일치한다.
         - **비행 대기열 (`pendingDrops`와 같은 구조):** 발사 시 `{pieceId, 기물 종류, 발사 로봇, 출발점 (x, y, z), 도착점 (x, y, z), 발사 틱, 도착 틱, v0, 발사각, 결과(명중 / HIVE 충돌 / 바닥 착지), 착지 속도}`를 `FieldState`의 비행 대기열에 넣고 기물 상태를 `IN_FLIGHT`로 전환. 도착 틱에 명중이면 HIVE 셀 개수 증가 및 팁 판정, 빗맞음이면 도착 지점에 기물 스폰.
             - 비행 중 기물은 로봇 / 기물 위를 지나므로 충돌하지 않는다.
             - 도착 시점에 HIVE가 팁 진행 중이면 빗맞음과 같이 반사 방출 (팁 판정이 실제 도착 시점에 일어남).
         - **렌더링 (Step 8):** 렌더러는 프레임의 비행 대기열로 출발점 → 도착점을 선형 보간하고, 기록된 v0 · 발사각으로 높이 $z(t)$를 기물 크기 / 그림자 오프셋으로 연출한다. 필요한 정보가 모두 프레임에 있으므로 스크러빙 / 분기 재생에서도 동일하게 재현된다.
+        - **탄도 계산 함수 (`ballistics.ts`, 06-2 구현 완료):** 궤적은 `Trajectory {x, y, z, heading, v0, pitch}`(발사구 위치 + 수평 방향)로 표현하고, 수평 거리 d의 높이 $z(d) = z_0 + d\tan\theta - g d^2 / (2 v_0^2 \cos^2\theta)$, 시간 $t(d) = d / (v_0\cos\theta)$로 조회한다.
+            - 발사구 / 조준: `launchHeight`(53.5 − dz), `launchPoint`(조준 방향 `shooterOffset`), `bearingTo`.
+            - 닫힌 해: `solveLaunchSpeed(D, Δz, θ)`(해 없으면 null), `solveAimLaunchSpeed`(로봇 위치 → 조준점), `sweetSpotLaunchSpeed`(스윗스팟 → `RED_AUDIENCE` 조준점, 06-3 v0 탐색 초기값 / 스윗스팟 닫힌 해 검증), `createAimTrajectory`.
+            - 궤적 조회: `heightAtDistance`, `timeAtDistance`, `pointAtDistance`, `descendingDistanceAtHeight`(하강하며 높이에 도달하는 큰 근), `landingDistance` / `landingPoint`(공 중심 높이 = 반지름, 필드 경계 무시 — 벽 처리는 06-5 엔진).
+            - HIVE 교차: `intersectHiveBox(traj, pieceRadius)` → `{x, y, z, distance, time, face}` 또는 null(넘어감 / 못 미침 / 비껴감).
         - **예상 변경 범위 (Step 6):** `types.ts`(기물 상태 `IN_FLIGHT`, `PendingShot`, `FieldState` 비행 대기열), `ballistics.ts`(v0 역산 / 탐색, 몬테카를로 LUT, 대칭 변환, `createLUTShotResolver`, 사거리 · 비행 시간 · HIVE 직육면체 교차), 엔진(발사 / 도착 분리, 기존 빗맞음 즉시 방출 대체).
 3. **FLOWER (꽃) 기물 조작 및 하단 추출 메커니즘:**
     - **슬롯 구조 및 유효 득점 볼륨(Scoring Volume) 분리:**
@@ -547,6 +552,7 @@ export interface TimelineFrame {
 | 05 | 50Hz 결정론적 메인 루프 엔진 및 룰 전반 (아래 6.2) | `simulationEngine.ts` |
 | 5.5 | 테스트 인프라: Vitest 도입, 엔진 통합 회귀 테스트 스위트 저장소 편입 (아래 6.2) | `src/core/__tests__/simulationEngine.test.ts` |
 | 06-1 | 탄도 모듈 명세 구체화 및 기존 코드 정비 (아래 6.2.2) | `collision.ts`, `types.ts`, `simulationEngine.ts` |
+| 06-2 | 탄도 계산 함수 (v0 닫힌 해, 비행 시간, 사거리, HIVE 직육면체 교차) (아래 6.2.3) | `ballistics.ts`, `__tests__/ballistics.test.ts` |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
@@ -582,12 +588,18 @@ export interface TimelineFrame {
 - **물리 상수:** `GRAVITY` ≈ 386.09 in/s², `landingSpeedRetention` 0.3 (실측 방법 2.5항).
 - **엔진:** HIVE 내부 기물을 조준점 바닥 정사영에 배치. 테스트 그룹 Q 추가 (셀 기하 / 대칭 / 기물별 판정 함수 / 조준점 배치).
 
+### 6.2.3 Step 06-2 (탄도 계산 함수) 완료 항목
+
+- **`src/core/ballistics.ts` 신설:** 2.6.2항 "탄도 계산 함수" 목록 (발사구 / 조준, v0 닫힌 해, 궤적 조회, 사거리, HIVE 직육면체 교차). 순수 함수, 엔진 미연결.
+- **HIVE 직육면체 교차 규칙 구체화:** 공 표면 기준(반지름만큼 박스 확장), 슬랩 방식 지면 구간 + 포물선 하강 근으로 옆면 / 윗면 판정, 착지 이후 구간 제외, 발사구가 박스 안이면 거리 0 옆면 충돌.
+- **테스트:** `src/core/__tests__/ballistics.test.ts` 5개 그룹 (A 발사구 / 조준, B v0 닫힌 해 역대입 · 해 없음, C 스윗스팟 명목 궤적이 조준점 통과, D 비행 시간 · 높이 · 사거리 하강 근, E HIVE 옆면 / 넘어감 / 윗면 낙하 / 못 미침 / 비껴감 / 반지름 확장 / 박스 안 발사). 하강 근 대신 작은 근을 쓰거나 반지름 확장을 빼면 실패함을 확인.
+
 ### 6.3 남은 Step (권장 순서)
 
 > 모든 Step은 완료 시 `npm test`(엔진 회귀 테스트)가 통과해야 하며, 새로 추가한 규칙에는 테스트 그룹을 추가한다.
 
-- **Step 6 — 탄도 모듈 + 발사 비행 처리 (`src/core/ballistics.ts`):** 06-1(명세) 완료, 아래는 권장 세부 순서.
-    - 06-2: 탄도 계산 함수 ($v_0$ 닫힌 해, 비행 시간, 사거리 R, HIVE 직육면체 교차) + 테스트.
+- **Step 6 — 탄도 모듈 + 발사 비행 처리 (`src/core/ballistics.ts`):** 06-1(명세), 06-2(탄도 계산) 완료, 아래는 권장 세부 순서.
+    - ~~06-2: 탄도 계산 함수 ($v_0$ 닫힌 해, 비행 시간, 사거리 R, HIVE 직육면체 교차) + 테스트.~~ (완료, 6.2.3)
     - 06-3: 몬테카를로 명중 판정, 기물 종류별 v0 탐색, 기준 셀 72 × 72 LUT 생성, 4-Cell 대칭 복사 (로봇당 8장, 합계 16장).
     - 06-4: `createLUTShotResolver(luts, r1Config, r2Config)`: 격자 조회 + 조준 판정(FIXED 허용 오차 / TURRET 회전 범위) → 엔진 생성자에 주입 (엔진 수정 불필요).
     - 06-5: 2.6.2항의 발사 비행 처리 구현 (`IN_FLIGHT`, 비행 대기열, 도착 규칙, 착지 속도) + 엔진 회귀 테스트.
