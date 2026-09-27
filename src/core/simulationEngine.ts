@@ -8,13 +8,13 @@ import {
   FLOWER_RADIUS,
   GARDEN_AABB,
   HIVE_AABB,
-  HIVE_CENTER_X,
   LOADING_ZONE_AABB,
   PIECE_PHYSICS,
   STOP_SPEED_THRESHOLD,
   generateTippedPiecePlan,
   getBumperZoneOBB,
   getRobotOBB,
+  hiveCellAimPoint,
   resolvePiecesCollisions,
   resolveRobotEnvironmentCollisions,
   resolvePinnedPieces,
@@ -349,10 +349,10 @@ function createRobotState(pose: RobotPose): RobotState {
   };
 }
 
+// HIVE 내부 기물의 표시 위치: 상향 셀 조준점(투입구 오각형 면적 중심)의 바닥 정사영
 function hiveCellCenter(alliance: 'RED' | 'BLUE', cell: 'AUDIENCE_CELL' | 'OPPOSITE_CELL'): Vector2D {
-  const quarter = (HIVE_AABB.maxY - HIVE_AABB.minY) / 4;
-  const midY = (HIVE_AABB.minY + HIVE_AABB.maxY) / 2;
-  return { x: HIVE_CENTER_X[alliance], y: cell === 'AUDIENCE_CELL' ? midY + quarter : midY - quarter };
+  const aim = hiveCellAimPoint(alliance, cell);
+  return { x: aim.x, y: aim.y };
 }
 
 // 타임라인 스냅샷용 깊은 복사: 기물은 1회만 복제하고, 로봇 적재함/FLOWER 슬롯은
@@ -411,7 +411,7 @@ export class SimulationEngine {
   public r1Config: RobotConfig;
   public r2Config: RobotConfig;
 
-  // 외부 주입 슈터 명중률 해결자 (기본값: 로봇 shooterAccuracy 고정 확률)
+  // 외부 주입 슈터 명중률 해결자 (필수: 실제 경기는 탄도 LUT 기반, 테스트는 고정 확률)
   public shotResolver: ShotProbabilityResolver;
 
   // runFullMatch()가 사용하는 틱별 입력 스케줄 (없으면 정지 + IDLE)
@@ -428,18 +428,16 @@ export class SimulationEngine {
   constructor(
     r1Config: RobotConfig,
     r2Config: RobotConfig,
+    shotResolver: ShotProbabilityResolver,
     allianceColor: 'RED' | 'BLUE' = 'RED',
     scenario?: ScenarioConfig,
-    shotResolver?: ShotProbabilityResolver,
   ) {
     // 로봇 식별자는 슬롯으로 고정 (사용자 입력 id와 무관하게 r1 = 'robot1', r2 = 'robot2')
     this.r1Config = { ...r1Config, id: 'robot1' };
     this.r2Config = { ...r2Config, id: 'robot2' };
     this.defaultAlliance = allianceColor;
     this.scenario = scenario;
-    this.shotResolver =
-      shotResolver ??
-      ((robotId) => (robotId === 'robot2' ? this.r2Config : this.r1Config).shooterAccuracy);
+    this.shotResolver = shotResolver;
     this.reset();
   }
 
@@ -1129,7 +1127,7 @@ export class SimulationEngine {
     const hive = this.field.hive;
     const alliance = this.field.allianceColor;
     // 슬롯 기반 식별자 전달 (config.id에 의존하지 않음)
-    const rawP = this.shotResolver(robotId, robot.x, robot.y, robot.heading, alliance, hive.upwardCell);
+    const rawP = this.shotResolver(robotId, piece.type, robot.x, robot.y, robot.heading, alliance, hive.upwardCell);
     const p = Number.isFinite(rawP) ? clamp(rawP, 0, 1) : 0;
     // 난수는 항상 1회 소비하여 전복 여부와 무관하게 RNG 시퀀스를 일정하게 유지
     const roll = this.random();

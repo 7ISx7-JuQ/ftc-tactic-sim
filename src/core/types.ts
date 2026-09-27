@@ -30,11 +30,13 @@ export interface RobotConfig {
   intakeZones: BumperZone[];
 
   // HIVE 득점 (슈터) 런타임 제원
+  // 명중률은 로봇 제원이 아니라 탄도 LUT(ShotProbabilityResolver)가 결정 (명세서 2.6.2)
   shooterDelay: number;     // 한 발 발사 딜레이 (ms)
-  shooterAccuracy: number;  // 0.0 ~ 1.0 (명중률)
   turretType: 'FIXED' | 'TURRET';
-  turretRange: [number, number]; // 터렛 회전 한계 [α, β] (rad, 차체 헤딩 기준)
-  aimTolerance: number;     // 고정형 슈터 허용 조준 오차 (rad, 기본 ±3°)
+  // 터렛 회전 한계 [α, β] (rad, 차체 헤딩 기준 상대각, [-π, π] 정규화)
+  // α ≤ β: α ~ β 구간, α > β: ±π를 가로지르는 구간 (예: 후방 터렛 [2.5, -2.5]), 360° 터렛 = [-π, π]
+  turretRange: [number, number];
+  aimTolerance: number;     // 고정형 슈터 허용 조준 오차 (rad, 차체 헤딩 기준 ±, 기본 3° ≈ 0.0524)
 
   // FLOWER 득점 옵션
   flowerSetupDelay: number; // 초기 리프트/경사로 전개 준비 시간 (ms)
@@ -87,19 +89,25 @@ export interface ScenarioConfig {
   rngSeed?: number;
 }
 
-// 독립 모듈용 탄도학 설정 및 히트맵 타입
+// 독립 모듈용 탄도학 설정 및 히트맵 타입 (로봇별 1개, 명세서 2.6.2)
 export interface BallisticsConfig {
-  dz: number;               // 림 높이 - 발사구 지상고 (inch)
+  dz: number;               // 림 높이(HIVE_RIM_Z = 53.5) - 발사구 지상고 (inch). 발사구 z = 53.5 - dz
   shooterPitch: number;     // 발사각 (rad)
-  sweetSpot: { x: number; y: number }; // 전술 거점 좌표
-  shooterOffset: number;    // 차체 중심 기준 발사구 전방 오프셋 (inch)
+  // 스윗스팟: 기준 셀 RED_AUDIENCE를 가장 잘 넣는 로봇 중심 좌표 한 점 (inch).
+  // 이 점에서 기물 종류별로 명중률이 최대인 v0를 탐색하고, 나머지 3셀은 대칭 변환으로 매핑
+  sweetSpot: { x: number; y: number };
+  shooterOffset: number;    // 차체 중심 기준 발사구 오프셋 (inch, 조준 방향)
   v0NoisePercent?: number;  // 속도 편차 (기본 0.02)
   headingNoiseRad?: number; // 방위각 편차 (기본 0.02 rad)
   pitchNoiseRad?: number;   // 피치각 편차 (기본 0.006 rad)
 }
 
 export type HiveCellKey = 'RED_AUDIENCE' | 'RED_OPPOSITE' | 'BLUE_AUDIENCE' | 'BLUE_OPPOSITE';
-export type HeatmapLUTSet = Record<HiveCellKey, number[][]>; // 72x72 배열 (0.0 ~ 1.0)
+// 72 × 72 격자(2 in 해상도) 명중률 (0.0 ~ 1.0). 인덱스 = gy * 72 + gx, 격자 중심 = (2·gx + 1, 2·gy + 1)
+export type HeatmapLUT = Float32Array;
+export type HeatmapLUTSet = Record<HiveCellKey, HeatmapLUT>;
+// 로봇 1대의 LUT: 기물 종류별 × 4셀 = 8장 (R1, R2 합계 16장)
+export type RobotHeatmapLUTs = Record<GamePiece['type'], HeatmapLUTSet>;
 
 // HIVE 시차 낙하 예약 대기열
 export interface PendingDrop {
@@ -138,9 +146,11 @@ export interface RobotState {
   controlledPieces: GamePiece[]; // FIFO 적재함 (0번이 다음에 나감), 최대 길이 = 로봇 적재 한도
 }
 
-// 슈팅 판정 인터페이스: 0.0 ~ 1.0 명중 확률 반환
+// 슈팅 판정 인터페이스: 0.0 ~ 1.0 명중 확률 반환 (엔진 생성자 필수 인자)
+// 실제 경기는 탄도 LUT 기반 구현(createLUTShotResolver, Step 6)을 주입하고, 테스트는 고정 확률 함수를 주입
 export type ShotProbabilityResolver = (
   robotId: 'robot1' | 'robot2',
+  pieceType: GamePiece['type'], // 발사하는 기물 종류 (종류별 LUT 선택)
   robotX: number,
   robotY: number,
   heading: number,

@@ -32,6 +32,50 @@ export const HIVE_CENTER_X = {
   BLUE: 84.75,
 } as const;
 
+// HIVE 셀 투입구 기하 (명세서 2.2, 바닥 z = 0, 상향 셀 기준)
+//   투입구 표면: 밑변이 림인 오각형 = 20 × 7.61 직사각형 + 밑변 20 · 높이 6.39 이등변 삼각형 (길이는 표면 기준)
+//   림에서 HIVE 중심 방향으로 올라가며 지면과 60°를 이룸 (표면이 HIVE 바깥 위를 향함)
+//   림 x 범위 = HIVE_CENTER_X ± 10, 4개 셀은 x = 72 / y = 72 기준 대칭
+export const HIVE_RIM_Z = 53.5;
+export const HIVE_CELL_TILT = Math.PI / 3; // 투입구 표면과 지면 사이 각 (rad)
+export const HIVE_OPENING_WIDTH = 20.0;
+export const HIVE_OPENING_RECT_HEIGHT = 7.61;
+export const HIVE_OPENING_HEIGHT = 14.0;
+export const HIVE_RIM_Y = {
+  OPPOSITE_CELL: 52.74,
+  AUDIENCE_CELL: FIELD_SIZE - 52.74, // 91.26
+} as const;
+
+// 빗맞음 비행 판정용 HIVE 직육면체 높이 = 상향 셀 오각형 꼭짓점 z (≈ 65.62). 밑면은 HIVE_AABB
+export const HIVE_HEIGHT = HIVE_RIM_Z + HIVE_OPENING_HEIGHT * Math.sin(HIVE_CELL_TILT);
+
+// 오각형 면적 중심의 림 기준 표면 거리 (≈ 5.560 in): 조준점 산출용
+export const HIVE_OPENING_CENTROID_S = (() => {
+  const w = HIVE_OPENING_WIDTH;
+  const hRect = HIVE_OPENING_RECT_HEIGHT;
+  const hTri = HIVE_OPENING_HEIGHT - hRect;
+  const rectArea = w * hRect;
+  const triArea = (w * hTri) / 2;
+  return (rectArea * (hRect / 2) + triArea * (hRect + hTri / 3)) / (rectArea + triArea);
+})();
+
+/**
+ * HIVE 셀 조준점: 투입구 오각형의 면적 중심 (필드 좌표 + 높이)
+ * 조준 방위(Δψ) 판정, v0 역산, 명중 기물 배치 위치의 기준 (명세서 2.6.2)
+ */
+export function hiveCellAimPoint(
+  alliance: 'RED' | 'BLUE',
+  cell: 'AUDIENCE_CELL' | 'OPPOSITE_CELL',
+): { x: number; y: number; z: number } {
+  const inward = cell === 'OPPOSITE_CELL' ? 1 : -1; // 림에서 HIVE 중심 방향 (y)
+  const s = HIVE_OPENING_CENTROID_S;
+  return {
+    x: HIVE_CENTER_X[alliance],
+    y: HIVE_RIM_Y[cell] + inward * s * Math.cos(HIVE_CELL_TILT),
+    z: HIVE_RIM_Z + s * Math.sin(HIVE_CELL_TILT),
+  };
+}
+
 // FLOWER 솔리드 원형 장애물 (반지름 2.0)
 export const FLOWER_RADIUS = 2.0;
 export const FLOWER_CIRCLES: readonly Circle[] = [
@@ -61,12 +105,19 @@ export interface PiecePhysics {
   mass: number;           // g
   frictionDecel: number;  // 쿨롱 마찰 감속도 (inch/s^2)
   restitution: number;    // 반발 계수 e
+  // 발사 비행 후 바닥 착지 시 수평 속도 유지 비율 (0 ~ 1): 착지 바운스/타일 충격 손실 반영.
+  // 비행 중에는 공기 저항을 무시하므로 수평 속도가 v0·cosθ로 유지되고, 손실은 착지 순간에만 적용 (명세서 2.5)
+  landingSpeedRetention: number;
 }
 
+// landingSpeedRetention 0.3은 실측 전 임시값 (실측 방법: 명세서 2.5)
 export const PIECE_PHYSICS: Record<GamePiece['type'], PiecePhysics> = {
-  POLLEN: { radius: 1.4, mass: 24.95, frictionDecel: 65.0, restitution: 0.35 },
-  NECTAR: { radius: 1.8, mass: 41.28, frictionDecel: 85.0, restitution: 0.25 },
+  POLLEN: { radius: 1.4, mass: 24.95, frictionDecel: 65.0, restitution: 0.35, landingSpeedRetention: 0.3 },
+  NECTAR: { radius: 1.8, mass: 41.28, frictionDecel: 85.0, restitution: 0.25, landingSpeedRetention: 0.3 },
 };
+
+// 중력 가속도 (inch/s^2): 표준 중력 9.80665 m/s^2 환산 (≈ 386.09). 공기 저항 / 공 회전 무시
+export const GRAVITY = 9.80665 / 0.0254;
 
 // 정지 임계 속도 (inch/s): 미만 시 속도 0 스냅
 export const STOP_SPEED_THRESHOLD = 0.5;

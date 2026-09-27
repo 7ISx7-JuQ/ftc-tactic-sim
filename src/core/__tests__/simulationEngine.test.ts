@@ -1,17 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { SimulationEngine, DEFAULT_RNG_SEED, DEFAULT_SPAWN_POSES, validateScenario, getCarryCapacity } from '../simulationEngine';
 import type { RobotDriveInput } from '../simulationEngine';
-import type { BumperZone, RobotConfig, RobotPose, ScenarioConfig } from '../types';
-import { GARDEN_AABB, LOADING_ZONE_AABB, testCircleVsAABB, createIntakeZonePreset, getBumperZoneOBB, getRobotOBB, testOBBvsCircle, DEFAULT_PRESET_ZONE_DEPTH } from '../collision';
+import type { BumperZone, RobotConfig, RobotPose, ScenarioConfig, ShotProbabilityResolver } from '../types';
+import { GARDEN_AABB, LOADING_ZONE_AABB, testCircleVsAABB, createIntakeZonePreset, getBumperZoneOBB, getRobotOBB, testOBBvsCircle, DEFAULT_PRESET_ZONE_DEPTH, HIVE_AABB, HIVE_HEIGHT, HIVE_OPENING_CENTROID_S, HIVE_RIM_Y, GRAVITY, PIECE_PHYSICS, hiveCellAimPoint } from '../collision';
 
 const cfg = (id: 'robot1' | 'robot2', over: Partial<RobotConfig> = {}): RobotConfig => ({
   id, name: id, width: 18, length: 18, maxSpeed: 60, maxTurnRate: 4, maxLinearAccel: 120, maxAngularAccel: 10,
   intakeDelay: 100, canIntakeNectar: true, intakeZones: createIntakeZonePreset('FRONT', { length: 18, width: 18 }, 3),
-  shooterDelay: 300, shooterAccuracy: 1, turretType: 'FIXED', turretRange: [0, 0], aimTolerance: 0.05,
+  shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0], aimTolerance: 0.05,
   flowerSetupDelay: 500, flowerDropDelay: 200, maxControlledPieces: 4, ...over,
 });
 const pose = (x: number, y: number, heading = 0): RobotPose => ({ x, y, heading });
 const C1 = cfg('robot1'), C2 = cfg('robot2');
+// 고정 명중 확률 판정 함수 (탄도 LUT 대신 주입): R1 = p1, R2 = p2
+const fixedP = (p1: number, p2 = p1): ShotProbabilityResolver => (id) => (id === 'robot1' ? p1 : p2);
+const ALWAYS_HIT = fixedP(1);
 // 로봇을 빈 상태로 시작하되 빠진 POLLEN 4개를 아군 GARDEN으로 돌려 무작위 산포가 생기지 않게 함
 const EMPTY_R1: Partial<ScenarioConfig> = { r1Loadout: [], gardenPiecesCount: { ally: 8, opponent: 4 } };
 const EMPTY_R2: Partial<ScenarioConfig> = { r2Loadout: [], gardenPiecesCount: { ally: 8, opponent: 4 } };
@@ -23,8 +26,8 @@ const fillFlower1 = (e: SimulationEngine, n: number) => {
     f.pieces.push(p);
   }
 };
-const eng = (sc: Partial<ScenarioConfig> = {}, c1 = C1, c2 = C2) =>
-  new SimulationEngine(c1, c2, sc.allianceColor ?? 'RED', { allianceColor: 'RED', ...sc });
+const eng = (sc: Partial<ScenarioConfig> = {}, c1 = C1, c2 = C2, resolver = ALWAYS_HIT) =>
+  new SimulationEngine(c1, c2, resolver, sc.allianceColor ?? 'RED', { allianceColor: 'RED', ...sc });
 // 각 검증은 메시지와 함께 expect로 확인 (실패 시 어떤 조건이 깨졌는지 메시지로 표시)
 const assert = (c: boolean, m: string) => {
   expect(c, m).toBe(true);
@@ -39,7 +42,7 @@ const TEST_TIMEOUT_MS = 120_000;
 describe('SimulationEngine 통합 회귀 테스트', () => {
   it('A. 스폰 자세 (ScenarioConfig 이전)', () => {
     {
-      const e = new SimulationEngine(C1, C2); // 시나리오 없음 → RED 기본
+      const e = new SimulationEngine(C1, C2, ALWAYS_HIT); // 시나리오 없음 → RED 기본
       assert(e.r1.x === 9 && e.r1.y === 36 && e.r1.heading === 0 && e.r2.x === 9 && e.r2.y === 108, 'no scenario -> RED default spawn');
       const b = eng({ allianceColor: 'BLUE' });
       assert(b.r1.x === 135 && b.r1.y === 36 && b.r1.heading === Math.PI && b.r2.y === 108, 'BLUE alliance -> BLUE default spawn (auto)');
@@ -50,7 +53,7 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       assert(d.r1.x === 9 && d.r1.y === 36 && d.r2.y === 108, 'non-finite pose -> default fallback');
       assert(d.getFrame(0)!.r1.x === 9, 'frame 0 records spawn');
       // 동일 RobotConfig를 진영만 바꿔 재사용 (과거 버그 시나리오)
-      const e2 = new SimulationEngine(C1, C2, 'RED');
+      const e2 = new SimulationEngine(C1, C2, ALWAYS_HIT, 'RED');
       e2.reset({ allianceColor: 'BLUE' });
       assert(e2.r1.x === 135 && e2.field.allianceColor === 'BLUE', 'reset(BLUE) with same configs moves robots to BLUE side');
       assert(DEFAULT_SPAWN_POSES.RED.robot1.x === 9, 'DEFAULT_SPAWN_POSES untouched');
@@ -127,7 +130,7 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
 
   it('G. 시드', () => {
     {
-      const run = (sc: Partial<ScenarioConfig>) => { const e = eng({ flowerPiecesCount: [1, 1, 4, 4], hiveInitialPieces: { pollenCount: 0, nectarCount: 2 }, ...sc }, cfg('robot1', { shooterAccuracy: 0.5 }));
+      const run = (sc: Partial<ScenarioConfig>) => { const e = eng({ flowerPiecesCount: [1, 1, 4, 4], hiveInitialPieces: { pollenCount: 0, nectarCount: 2 }, ...sc }, C1, C2, fixedP(0.5, 1));
         e.inputProvider = (t) => ({ r1: t % 300 < 150 ? SHOOT : inp('INTAKING', 20, 10 * Math.sin(t / 40), 0.3), r2: SHOOT }); e.runFullMatch(); return JSON.stringify(e.timeline); };
       const def = run({});
       assert(def === run({ rngSeed: DEFAULT_RNG_SEED }), 'no seed == default');
@@ -638,17 +641,14 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
 
   it('P. 코드 리뷰 반영 (읽기 전용 기록 / 로봇 id / 로딩 존 대칭 / 산포 제외 구역)', () => {
     {
-      // 로봇 id는 슬롯으로 강제: 두 설정 id가 같아도 각자 자기 명중률 사용
+      // 로봇 id는 슬롯으로 강제: 두 설정 id가 같아도 판정 함수에는 슬롯 id 전달
       {
         const shots: string[] = [];
-        const same1 = cfg('robot1', { shooterAccuracy: 1 }), same2 = cfg('robot1', { shooterAccuracy: 0 });   // 둘 다 'robot1'
-        const e = new SimulationEngine(same1, same2, 'RED', { allianceColor: 'RED', r2Spawn: pose(100, 20) }, (id) => { shots.push(id); return id === 'robot1' ? 1 : 0; });
+        const same1 = cfg('robot1'), same2 = cfg('robot1');   // 둘 다 'robot1'
+        const e = new SimulationEngine(same1, same2, (id) => { shots.push(id); return id === 'robot1' ? 1 : 0; }, 'RED', { allianceColor: 'RED', r2Spawn: pose(100, 20) });
         assert(e.r1Config.id === 'robot1' && e.r2Config.id === 'robot2', 'config ids forced by slot (r1 = robot1, r2 = robot2)');
         for (let i = 0; i < 15; i++) e.step(SHOOT, SHOOT);
         assert(shots.join() === 'robot1,robot2', `resolver receives slot ids (${shots.join()})`);
-        const d = new SimulationEngine(same1, same2, 'RED', { allianceColor: 'RED', hiveInitialPieces: { nectarCount: 3, pollenCount: 2 }, r2Spawn: pose(100, 20) });
-        for (let i = 0; i < 15; i++) d.step(SHOOT);
-        assert(d.field.hive.tipCount === 1, 'default resolver: R1 uses its own accuracy 1.0 even when both input ids are robot1');
       }
       // 로딩 존 휴먼 NECTAR 슬롯: RED/BLUE 점대칭
       {
@@ -674,6 +674,36 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
         }
         assert(bad === 0 && checked === 40 * 27, `scattered pieces avoid GARDEN / loading zones (${checked} pieces, ${bad} violations)`);
       }
+    }
+  }, TEST_TIMEOUT_MS);
+
+  it('Q. 탄도 준비 (HIVE 셀 투입구 기하 / 기물별 판정 함수 / 조준점 배치)', () => {
+    const near = (a: number, b: number, tol = 1e-3) => Math.abs(a - b) < tol;
+    {
+      // 투입구 기하: 지면과 60°, 오각형 면적 중심 표면 거리 5.560, 꼭짓점 z = HIVE 직육면체 높이 65.62
+      assert(near(HIVE_OPENING_CENTROID_S, 5.5599) && near(HIVE_HEIGHT, 65.6244), `centroid ${HIVE_OPENING_CENTROID_S}, hive height ${HIVE_HEIGHT}`);
+      const ro = hiveCellAimPoint('RED', 'OPPOSITE_CELL');
+      assert(near(ro.x, 59.25) && near(ro.y, 55.520) && near(ro.z, 58.315), `RED_OPPOSITE aim (${ro.x}, ${ro.y}, ${ro.z})`);
+      // 4셀 대칭: RED_AUDIENCE = (x, 144 - y), BLUE_OPPOSITE = (144 - x, y), BLUE_AUDIENCE = (144 - x, 144 - y)
+      const ra = hiveCellAimPoint('RED', 'AUDIENCE_CELL'), bo = hiveCellAimPoint('BLUE', 'OPPOSITE_CELL'), ba = hiveCellAimPoint('BLUE', 'AUDIENCE_CELL');
+      assert(near(ra.x, ro.x, 1e-9) && near(ra.y, 144 - ro.y, 1e-9) && near(bo.x, 144 - ro.x, 1e-9) && near(bo.y, ro.y, 1e-9)
+        && near(ba.x, 144 - ro.x, 1e-9) && near(ba.y, 144 - ro.y, 1e-9) && [ra, bo, ba].every(a => near(a.z, ro.z, 1e-9)), 'aim points symmetric across 4 cells');
+      assert(HIVE_RIM_Y.OPPOSITE_CELL > HIVE_AABB.minY && HIVE_RIM_Y.AUDIENCE_CELL < HIVE_AABB.maxY, 'rims lie inside HIVE AABB');
+      assert(near(GRAVITY, 386.09, 0.01), `gravity ${GRAVITY} in/s^2`);
+      assert((['POLLEN', 'NECTAR'] as const).every(t => PIECE_PHYSICS[t].landingSpeedRetention > 0 && PIECE_PHYSICS[t].landingSpeedRetention <= 1), 'landing speed retention in (0, 1]');
+    }
+    {
+      // 판정 함수는 발사 기물 종류를 받음 (FIFO 순서): 종류별 확률 (POLLEN 1, NECTAR 0)
+      const types: string[] = [];
+      const byType: ShotProbabilityResolver = (_id, type) => { types.push(type); return type === 'POLLEN' ? 1 : 0; };
+      const e = eng({ r1Loadout: ['NECTAR', 'POLLEN'], hiveInitialPieces: { pollenCount: 0, nectarCount: 2 } }, C1, C2, byType);
+      for (let i = 0; i < 40; i++) e.step(SHOOT);
+      assert(types.join() === 'NECTAR,POLLEN', `resolver receives piece types in FIFO order (${types.join()})`);
+      assert(e.field.hive.nectarInUpwardCell === 2 && e.field.hive.pollenInUpwardCell === 1, 'NECTAR missed (p = 0), POLLEN hit (p = 1)');
+      // HIVE 내부 기물은 상향 셀 조준점 바닥 정사영에 배치
+      const aim = hiveCellAimPoint('RED', e.field.hive.upwardCell);
+      const inHive = e.pieces.filter(p => p.state === 'IN_HIVE');
+      assert(inHive.length === 3 && inHive.every(p => near(p.x, aim.x, 1e-9) && near(p.y, aim.y, 1e-9)), 'IN_HIVE pieces placed at aim point projection');
     }
   }, TEST_TIMEOUT_MS);
 });
