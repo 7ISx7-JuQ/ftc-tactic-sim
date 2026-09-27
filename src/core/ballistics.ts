@@ -2,7 +2,6 @@
 // 공기 저항 / 공 회전을 무시한 진공 포물선. 모든 궤적은 "지면 직선 + 높이 함수"로 표현한다.
 //   수평 이동 거리 d에서 높이 z(d) = z0 + d·tanθ − g·d² / (2·v0²·cos²θ), 시간 t(d) = d / (v0·cosθ)
 // 좌표계: 필드 (x, y) inch, 높이 z inch (바닥 z = 0)
-// ※ LUT 판정 함수(06-4)는 이 파일에 이어서 추가 예정
 
 import {
   FIELD_SIZE,
@@ -23,7 +22,18 @@ import {
   testOBBvsFieldBounds,
 } from './collision';
 import type { OBB } from './collision';
-import type { BallisticsConfig, GamePiece, HeatmapLUT, HeatmapLUTSet, RobotConfig, RobotHeatmapLUTs } from './types';
+import { angleDifference, normalizeAngle } from './kinematics';
+import type {
+  BallisticsConfig,
+  GamePiece,
+  HeatmapLUT,
+  HeatmapLUTSet,
+  HiveCellKey,
+  MatchHeatmapLUTs,
+  RobotConfig,
+  RobotHeatmapLUTs,
+  ShotProbabilityResolver,
+} from './types';
 
 // 부동소수점 오차 허용 범위
 const EPSILON = 1e-9;
@@ -908,3 +918,58 @@ export function generateRobotLUTs(
   });
   return result;
 }
+
+// ============================================================
+// 8. 런타임 명중 확률 판정 함수 (엔진 주입용, 명세서 2.6.2)
+// ============================================================
+
+/** 진영 + 상향 셀 → LUT 셀 키 */
+export function hiveCellKey(alliance: 'RED' | 'BLUE', cell: HiveCell): HiveCellKey {
+  return `${alliance}_${cell === 'AUDIENCE_CELL' ? 'AUDIENCE' : 'OPPOSITE'}`;
+}
+
+/**
+ * 조준 판정: 조준점 방위와 로봇 헤딩의 상대각 Δψ (rad, [-π, π])가 슈터 조준 가능 범위 안인지
+ * - FIXED: |Δψ| ≤ aimTolerance (비유한 / 음수 허용 오차는 0으로 취급 → 정확히 정렬될 때만)
+ * - TURRET: turretRange [α, β]를 [-π, π]로 정규화하여 α ≤ β면 α ≤ Δψ ≤ β,
+ *   α > β면 ±π를 가로지르는 구간 (Δψ ≥ α 또는 Δψ ≤ β). 360° 터렛은 [-π, π]
+ */
+export function isAimWithinShooterRange(
+  deltaPsi: number,
+  config: Pick<RobotConfig, 'turretType' | 'turretRange' | 'aimTolerance'>,
+): boolean {
+  if (!Number.isFinite(deltaPsi)) return false;
+  if (config.turretType === 'TURRET') {
+    const [rawLo, rawHi] = config.turretRange;
+    if (!Number.isFinite(rawLo) || !Number.isFinite(rawHi)) return false;
+    const alpha = normalizeAngle(rawLo); // normalizeAngle은 ±π를 보존하므로 360° 터렛 [-π, π] 유지
+    const beta = normalizeAngle(rawHi);
+    return alpha <= beta ? deltaPsi >= alpha && deltaPsi <= beta : deltaPsi >= alpha || deltaPsi <= beta;
+  }
+  const tolerance = Number.isFinite(config.aimTolerance) ? Math.max(0, config.aimTolerance) : 0;
+  return Math.abs(deltaPsi) <= tolerance;
+}
+
+/**
+ * LUT 기반 명중 확률 판정 함수 (SimulationEngine 생성자에 주입, 엔진 수정 불필요)
+ * P_final = (조준 가능 ? P_spatial : 0), P_spatial = 발사 로봇 · 기물 종류 · 아군 상향 셀 LUT를 로봇 중심에서 쌍선형 보간
+ * 조준점 방위는 로봇 중심 → 상향 셀 조준점(투입구 오각형 면적 중심). 설정값은 생성 시점에 복사해 고정 (결정론)
+ */
+export function createLUTShotResolver(
+  luts: MatchHeatmapLUTs,
+  r1Config: Pick<RobotConfig, 'turretType' | 'turretRange' | 'aimTolerance'>,
+  r2Config: Pick<RobotConfig, 'turretType' | 'turretRange' | 'aimTolerance'>,
+): ShotProbabilityResolver {
+  const shooters = {
+    robot1: { turretType: r1Config.turretType, turretRange: [...r1Config.turretRange] as [number, number], aimTolerance: r1Config.aimTolerance },
+    robot2: { turretType: r2Config.turretType, turretRange: [...r2Config.turretRange] as [number, number], aimTolerance: r2Config.aimTolerance },
+  };
+  return (robotId, pieceType, robotX, robotY, heading, alliance, upwardCell) => {
+    const aim = hiveCellAimPoint(alliance, upwardCell);
+    const deltaPsi = angleDifference(bearingTo(robotX, robotY, aim.x, aim.y), heading);
+    if (!isAimWithinShooterRange(deltaPsi, shooters[robotId])) return 0;
+    const p = sampleLUT(luts[robotId][pieceType][hiveCellKey(alliance, upwardCell)], robotX, robotY);
+    return Number.isFinite(p) ? Math.min(1, Math.max(0, p)) : 0;
+  };
+}
+

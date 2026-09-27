@@ -192,13 +192,52 @@
             - `RED_OPPOSITE`: y = 72 직선 기준 대칭 (x, 144 − y) → $g_y' = 143 - g_y$
             - `BLUE_AUDIENCE`: x = 72 직선 기준 대칭 (144 − x, y) → $g_x' = 143 - g_x$
             - `BLUE_OPPOSITE`: (72, 72) 점대칭 (144 − x, 144 − y) → 두 인덱스 모두 반전
-        - **연산량 / 메모리:** 격자당 2000샘플 기준 최대 4 × 20,736 × 2000 ≈ 1.66억 샘플 (도달 불가 격자 생략 전). 구현 측정(Node V8, 단일 스레드, 스윗스팟 (60.5, 134.5), 발사구 14 in): 로봇 1대(8장) 발사각 55° 약 33초, 70° 약 61초 (v0 탐색 포함, 고각일수록 입구 근처까지 가는 샘플이 많아 ③ 판정 비용 증가). 격자별 독립 난수 구간 덕분에 Web Worker로 격자를 나눠도 결과가 같으므로 병렬화로 단축 가능. 메모리는 16 × 20,736 × 4 B ≈ 1.3 MB. UI가 멈추지 않도록 Web Worker에서 생성하고, 탄도 설정이 바뀔 때만 재생성한다. 저장 레시피(Step 10)에는 LUT 대신 탄도 설정 + 시드를 저장해 재생성한다.
-    - **런타임 판정 (`createLUTShotResolver(luts, r1Config, r2Config)`):**
-        - 발사 기물 종류 + 아군 상향 셀 키의 LUT를 로봇 중심 좌표에서 **쌍선형 보간**(`sampleLUT`)으로 조회해 $P_{\text{spatial}}$: 둘러싼 격자 중심 4개 값을 거리 비례로 섞음 (필드 가장자리 격자 중심 바깥은 가장자리 값). 최근접 조회의 계단 / 경계 급변이 없고, 발사 1회당 상수 비용이며 결정론적.
-        - 조준 오차 $\Delta\psi$ = `angleDifference(조준점 방위, heading)` (`kinematics.ts`의 [-π, π] 정규화 재사용). 로봇 헤딩 기준 상대각, 단위 rad.
-        - **고정형(`FIXED`):** $|\Delta\psi| \le$ `aimTolerance`(기본 3° ≈ 0.0524 rad)이면 $P_{\text{final}} = P_{\text{spatial}}$, 아니면 0.
-        - **터렛형(`TURRET`):** $\Delta\psi \in$ `turretRange` $[\alpha, \beta]$이면 $P_{\text{spatial}}$, 아니면 0. $\alpha > \beta$이면 ±π를 가로지르는 구간 ($\Delta\psi \ge \alpha$ 또는 $\Delta\psi \le \beta$), 360° 터렛은 $[-\pi, \pi]$.
-    - **발사 비행 처리 (설계 확정, 미구현 — 로드맵 Step 6):**
+        - **연산량 / 메모리:** 격자당 2000샘플 기준 최대 4 × 20,736 × 2000 ≈ 1.66억 샘플 (도달 불가 격자 생략 전). 구현 측정(Node V8, 단일 스레드, 스윗스팟 (60.5, 134.5), 발사구 14 in): 로봇 1대(8장) 발사각 55° 약 33초, 70° 약 61초 (v0 탐색 포함, 고각일수록 입구 근처까지 가는 샘플이 많아 ③ 판정 비용 증가). 격자별 독립 난수 구간 덕분에 Web Worker로 격자를 나눠도 결과가 같으므로 병렬화로 단축 가능. 메모리는 16 × 20,736 × 4 B ≈ 1.3 MB. 실행 방식(Worker 풀 / 진행 표시 / 비차단 흐름 / 캐시)은 바로 아래 "LUT 생성 실행 / 사용자 경험" 참고. 저장 레시피(Step 10)에는 LUT 대신 탄도 설정 + 시드를 저장해 재생성한다.
+    - **LUT 생성 실행 / 사용자 경험 (설계 확정, 미구현 — Step 9에서 구현):** 로봇 1대 단일 스레드 약 30~60초를 "멈춰서 기다리는 시간"이 아니라 "다른 입력을 하는 동안 진행되는 시간"으로 만든다. 아래 1~4를 모두 적용한다 (저정밀 미리보기는 불채택, 6.4항).
+        1. **Web Worker 풀 병렬 생성:**
+            - **Worker 모듈:** `src/workers/lutWorker.ts` (Vite `new Worker(new URL('./lutWorker.ts', import.meta.url), { type: 'module' })`). `ballistics.ts`의 순수 함수만 import하고 DOM / React 비의존.
+            - **풀 크기:** `max(1, min(navigator.hardwareConcurrency − 1, 8))` (UI 스레드용 코어 1개 남김). 풀은 앱 수명 동안 재사용.
+            - **작업 단위:** (로봇, 기물 종류, 단계). 단계 ① v0 탐색 = 작업 1개 (분할 없음, 약 1~2초) → 단계 ② 기준 셀 LUT = 격자 행 묶음 작업 (기본 4행 = 576격자). 로봇 2대 × 기물 2종의 작업을 한 대기열에 넣고, 유휴 Worker가 다음 작업을 가져가는 동적 분배 (명중 띠가 지나는 행은 ③ 판정 비용이 커서 정적 분할보다 균형이 좋음). 같은 (로봇, 기물)의 ② 작업은 ① 완료 후 v0가 정해져야 대기열에 들어감.
+            - **결정론:** 격자별 독립 난수 구간(2.6.2항 LUT 생성)이므로 어떤 분할 / 순서 / Worker 수로 계산해도 결과가 `generateRobotLUTs` 단일 스레드 결과와 비트 단위로 같다.
+            - **`ballistics.ts` 사전 준비 (Step 9 첫 작업):**
+                - `generateReferenceLUTRows(config, robotSize, pieceType, v0, samples, seed, gyStart, gyEnd, options) → Float32Array((gyEnd − gyStart) × 144)`: `generateReferenceLUT`의 행 범위 버전. 격자 인덱스 / 난수 구간 계산은 전체 LUT 기준 그대로.
+                - `generateReferenceLUT`는 `generateReferenceLUTRows(…, 0, 144)`로 재작성하여 코드 중복 제거.
+                - 용도별 시드 파생(`deriveSeed(seed, 2i)` 탐색, `deriveSeed(seed, 2i + 1)` LUT)을 공개 함수(예: `robotLUTSeeds(seed)`)로 노출하여 Worker 작업 계획이 `generateRobotLUTs`와 같은 시드를 쓰게 함.
+                - 테스트: 임의 행 분할(예: 1행 / 7행 / 불균등)로 계산해 합친 LUT === `generateReferenceLUT` 결과, 작업 계획으로 만든 16장 === `generateRobotLUTs` 결과.
+            - **메시지 규약:** 메인 → Worker `{ kind: 'search' | 'rows', jobId, generation, robotId, pieceType, config, robotSize, samples, seed, gyStart?, gyEnd?, v0? }`, Worker → 메인 `{ kind: 'progress', jobId, cellsDone }` (행 1개마다) / `{ kind: 'result', jobId, generation, v0?, hitRate?, rows? }` / `{ kind: 'error', jobId, message }`. 결과 `Float32Array`는 transferable로 넘겨 복사 비용 0.
+            - **조립:** 메인 스레드가 (로봇, 기물)별 기준 LUT `Float32Array(144 × 144)`에 행 결과를 복사하고, 모든 행이 모이면 `mirrorLUTSet`으로 4셀을 만들어 `RobotHeatmapLUTs` 완성.
+            - **예상 시간:** 8코어 기준 로봇 1대 약 8~10초, 4코어 약 15~20초 (단일 스레드 30~60초 ÷ Worker 수 + 분배 오버헤드). 두 로봇이 동시에 진행되므로 전체 대기도 비슷한 수준. 모바일은 더 느림.
+        2. **진행 상황 표시:**
+            - **v0 결과 선표시:** 단계 ① 완료 즉시 기물 종류별 v0와 스윗스팟 명중률(`sweetSpotHitRate`) 표시. 0이면 경고 ("이 스윗스팟에서는 명중 불가 — 설정 확인"), 생성은 계속 진행.
+            - **진행 막대:** 로봇별 `완료 격자 / 전체 격자` (기물 2종 합산, 전체 = 2 × 20,736). HIVE 겹침 / 도달 불가로 생략되는 격자는 행 처리 시 즉시 완료로 집계. 단계 ① 동안은 "v0 탐색 중" 표시.
+            - **남은 시간:** `경과 시간 × (남은 격자 / 완료 격자)`를 지수 평활해 표시하고, 5% 완료 전에는 표시하지 않음 (초반 추정 불안정).
+            - **점진 히트맵:** 로봇별 미리보기 캔버스에 기준 셀(`RED_AUDIENCE`) LUT를 행 묶음이 도착할 때마다 그림 (미계산 행은 회색 빗금, 기물 종류 전환 가능). 사용자가 명중 띠가 드러나는 과정을 직접 보며 설정이 맞는지 판단할 수 있게 함. 필드 윤곽 / HIVE / 조준점 / 스윗스팟을 함께 표시.
+            - **갱신 빈도:** 진행 / 히트맵 갱신은 `requestAnimationFrame`으로 모아 최대 약 10 Hz (메시지마다 React 상태를 바꾸지 않음).
+        3. **비차단 작업 흐름:**
+            - **로봇별 상태 머신:** `IDLE`(설정 없음 / 검증 실패) → `QUEUED` → `SEARCHING`(단계 ①) → `GENERATING`(단계 ②, 진행률) → `READY` | `ERROR`. 설정 변경 시 `CANCELLED`를 거쳐 다시 `QUEUED`.
+            - **시작 시점:** 탄도 설정 확정 버튼(검증 `validateBallisticsConfig` 통과 시에만 활성화)을 누를 때. 입력 중 자동 재생성은 하지 않음.
+            - **무효화 조건:** 해당 로봇의 `BallisticsConfig`, 로봇 `length` / `width`(HIVE 겹침 격자 / 검증에 영향), 기준 시드, 샘플 수가 바뀔 때만. 그 외 `RobotConfig` 변경(속도, 인테이크 등)과 시나리오 변경은 LUT를 무효화하지 않음.
+            - **취소:** 로봇별 세대 번호(`generation`)를 올리고, 대기열의 이전 세대 작업을 제거, 실행 중인 작업의 결과 / 진행 메시지는 세대가 다르면 무시. 행 묶음이 작아(수백 ms) Worker 강제 종료는 하지 않음 (종료 시 풀 재생성 비용 발생).
+            - **막는 동작:** 시뮬레이션 시작(및 LUT가 필요한 경기 재생 / 분기 실행)만 두 로봇이 모두 `READY`일 때 활성화하고, 비활성 사유를 표시 ("로봇 2 확률표 생성 중 63%"). 로봇 / 시나리오 / 스윗스팟 편집, 필드 탐색 등 나머지는 모두 계속 가능.
+            - **사용 흐름 예:** 로봇 1 탄도 확정 → 생성 시작 → 그동안 로봇 2 입력 / 확정 → 시나리오 입력 → 대부분 입력이 끝날 즈음 생성 완료.
+        4. **IndexedDB 캐시:**
+            - **캐시 키:** `crypto.subtle.digest('SHA-256')`로 만든 정규화 JSON의 해시 — `{ BALLISTICS_MODEL_VERSION, BallisticsConfig(스윗스팟은 스냅한 좌표, 편차 미지정 값은 기본값으로 채움), robot length / width, seed, samples, searchSamples }`. `skipUnreachable`은 결과가 같으므로 키에서 제외.
+            - **`BALLISTICS_MODEL_VERSION`:** `ballistics.ts`에 둘 정수 상수. 명중 판정 / LUT 생성 규칙 / 투입구 기하가 바뀌는 커밋마다 올려서 이전 캐시를 자동 무효화 (예: 06-4의 진입 면 / 림 벽 판정 변경은 버전 증가 대상).
+            - **저장 형식:** DB `ftc-tactic-sim`, 저장소 `lutCache`, 레코드 `{ key, modelVersion, createdAt, lastUsedAt, v0: {POLLEN, NECTAR}, sweetSpotHitRate: {POLLEN, NECTAR}, reference: {POLLEN: ArrayBuffer, NECTAR: ArrayBuffer} }`. 기준 셀 LUT만 저장(로봇당 2 × 82,944 B ≈ 166 KB)하고, 불러올 때 `mirrorLUTSet`으로 4셀 복원 (복원 비용 무시 가능).
+            - **정리:** `lastUsedAt` 기준 LRU로 최대 20개(약 3.3 MB) 유지, 초과분은 저장 시 삭제.
+            - **조회 흐름:** 확정 시 캐시 먼저 조회 → 적중하면 즉시 `READY` (Worker 미사용) → 없으면 생성 후 저장.
+            - **저장 레시피(Step 10)와의 관계:** 레시피에는 LUT 대신 탄도 설정 + 시드 + 샘플 수 + `BALLISTICS_MODEL_VERSION`을 저장. 불러올 때 캐시가 있으면 즉시, 없으면 위 생성 흐름을 탐. 레시피의 모델 버전이 현재와 다르면 "재생성한 확률표로 결과가 달라질 수 있음"을 경고.
+            - **실패 허용:** IndexedDB를 쓸 수 없으면(사생활 보호 모드, 용량 초과 등) 캐시 없이 매번 생성하며 기능은 동일.
+    - **런타임 판정 (`createLUTShotResolver(luts, r1Config, r2Config)`, 06-5 구현 완료):** 엔진 생성자에 주입하는 `ShotProbabilityResolver` (엔진 수정 없음). 엔진은 발사 완료 틱에 `(robotId, pieceType, robot.x, robot.y, robot.heading, alliance, upwardCell)`로 호출하고, 반환 확률과 시드 난수 1회로 명중을 정한다.
+        - **입력:** `luts: MatchHeatmapLUTs` (로봇 슬롯별 `RobotHeatmapLUTs`), `r1Config` / `r2Config`의 `turretType` / `turretRange` / `aimTolerance`. 슈터 설정은 생성 시점에 복사해 고정한다 (이후 원본 객체 변경이 경기 중 판정에 새지 않음 → 결정론).
+        - **$P_{\text{spatial}}$:** `luts[robotId][pieceType][hiveCellKey(alliance, upwardCell)]`를 로봇 중심 좌표에서 **쌍선형 보간**(`sampleLUT`)으로 조회. 둘러싼 격자 중심 4개 값을 거리 비례로 섞고, 필드 가장자리 격자 중심 바깥은 가장자리 값. 셀 키 = `${alliance}_${AUDIENCE | OPPOSITE}`. 팁으로 상향 셀이 바뀌면 다음 발사부터 새 셀의 LUT와 조준점을 쓴다.
+        - **조준 오차:** $\Delta\psi$ = `angleDifference(조준점 방위, heading)` = 조준점 방위 − 헤딩, [-π, π] (`kinematics.ts` 재사용). 조준점 방위는 로봇 중심 → 상향 셀 조준점(투입구 오각형 면적 중심). 부호: + = 로봇 오른쪽 (캔버스 y-down에서 각도가 커지는 방향).
+        - **조준 판정 (`isAimWithinShooterRange`):**
+            - **고정형(`FIXED`):** $|\Delta\psi| \le$ `aimTolerance`(기본 3° ≈ 0.0524 rad, 경계 포함)이면 $P_{\text{final}} = P_{\text{spatial}}$, 아니면 0. 허용 오차가 비유한값 / 음수면 0으로 취급 (정확히 정렬될 때만).
+            - **터렛형(`TURRET`):** `turretRange` $[\alpha, \beta]$를 [-π, π]로 정규화 (`normalizeAngle`은 ±π를 보존하므로 360° 터렛 [-π, π] 유지). $\alpha \le \beta$면 $\alpha \le \Delta\psi \le \beta$, $\alpha > \beta$면 ±π를 가로지르는 구간 ($\Delta\psi \ge \alpha$ 또는 $\Delta\psi \le \beta$, 예: 후방 터렛 [2.5, −2.5]). 범위가 비유한값이면 조준 불가.
+            - 한계: 허용 오차 / 터렛 범위 안이면 조준 오차에 따른 명중률 감소는 반영하지 않는다 (LUT는 정면 조준 가정). 고정형은 허용 오차가 작아(±3°) 영향이 작다.
+        - **안전장치:** LUT 값이 비유한값이면 0, 결과는 [0, 1]로 제한 (엔진도 한 번 더 제한).
+    - **발사 비행 처리 (설계 확정, 미구현 — 로드맵 06-6):**
         - **목표:** 발사 순간 공이 HIVE로 순간이동하는 부자연스러움을 없애되, 결과(명중 여부)는 LUT 판정을 그대로 따르고, 3D 물리 엔진 없이 닫힌 해로 계산한다.
         - **범위 분리:** Step 6은 궤도 결과(도착 지점, 도착 시점, 착지 속도)를 발사 시점에 계산해 기록한다. 이 기록으로 출발점 → 도착점을 보간하는 렌더링은 Step 8.
         - **결과 선확정:** 명중 여부는 발사 완료 틱에 판정 함수 확률과 시드 PRNG 난수로 확정한다 (난수는 발사 시점에만 소비 → 결정론 유지).
@@ -352,7 +391,7 @@ export interface RobotConfig {
   // HIVE 득점 (슈터) 런타임 제원 (명중률은 탄도 LUT 판정 함수가 결정)
   shooterDelay: number; // 발사 딜레이 (ms)
   turretType: 'FIXED' | 'TURRET';
-  // 터렛 회전 한계 [α, β] (rad, 차체 헤딩 기준 상대각, [-π, π] 정규화)
+  // 터렛 회전 한계 [α, β] (rad, 차체 헤딩 기준 상대각 Δψ = 목표 방위 − 헤딩, + = 로봇 오른쪽, [-π, π] 정규화)
   // α > β이면 ±π를 가로지르는 구간, 360° 터렛 = [-π, π]
   turretRange: [number, number];
   aimTolerance: number; // 고정형 허용 조준 오차 (rad, 헤딩 기준 ±, 기본 3° ≈ 0.0524)
@@ -424,6 +463,7 @@ export type HiveCellKey = 'RED_AUDIENCE' | 'RED_OPPOSITE' | 'BLUE_AUDIENCE' | 'B
 export type HeatmapLUT = Float32Array;
 export type HeatmapLUTSet = Record<HiveCellKey, HeatmapLUT>;
 export type RobotHeatmapLUTs = Record<'POLLEN' | 'NECTAR', HeatmapLUTSet>; // 로봇당 8장, 합계 16장
+export type MatchHeatmapLUTs = Record<'robot1' | 'robot2', RobotHeatmapLUTs>; // 경기 1회분 (createLUTShotResolver 입력)
 
 // HIVE 시차 낙하 예약 대기열
 export interface PendingDrop {
@@ -568,6 +608,7 @@ export interface TimelineFrame {
 | 06-2 | 탄도 계산 함수 (v0 닫힌 해, 비행 시간, 사거리, HIVE 직육면체 교차) (아래 6.2.3) | `ballistics.ts`, `__tests__/ballistics.test.ts` |
 | 06-3 | 몬테카를로 명중 판정, v0 탐색, LUT 생성 / 4셀 대칭 복사 (아래 6.2.4) | `ballistics.ts`, `__tests__/ballistics.test.ts` |
 | 06-4 | HIVE 진입 면 / 림 아래 벽 정확 판정, 1 in 격자 · 샘플 수 상향 · 보간 조회, 격자별 독립 난수 · 도달 불가 격자 생략 (아래 6.2.5) | `ballistics.ts`, `types.ts`, `__tests__/ballistics.test.ts` |
+| 06-5 | LUT 명중 확률 판정 함수(`createLUTShotResolver`) + LUT 생성 실행 / 사용자 경험 명세 (아래 6.2.6) | `ballistics.ts`, `types.ts`, 두 테스트 파일 |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
@@ -624,14 +665,21 @@ export interface TimelineFrame {
 - **격자별 독립 난수 구간 + 도달 불가 격자 생략:** `createRng(seed, skip)` O(1) 점프, `RNG_DRAWS_PER_SAMPLE = 6`, `canPossiblyHit`(±6σ 보수 판정, 생략해도 결과 동일). 생략 비율 약 11~16%.
 - **테스트:** 기존 F~J를 1 in 격자 / 몬테카를로 기준 설정(발사구 14 in, 발사각 70°, 스윗스팟 (60.5, 134.5))으로 갱신, K(진입 면: 옆면 / 프레임 차단, 앞면 / 윗면 진입), L(쌍선형 보간), M(난수 점프 / 격자별 구간 / 생략 동일성) 추가. 진입 면 제거, 벽 판정 제거, 모서리 판정 제거, 최근접 조회, 난수 점프 무시, 전부 생략, 과도한 생략(0.5σ), 공유 난수 스트림 각각에서 실패함을 확인.
 
+### 6.2.6 Step 06-5 (LUT 명중 확률 판정 함수) 완료 항목
+
+- **`createLUTShotResolver(luts, r1Config, r2Config)`:** 로봇 슬롯 · 기물 종류 · 아군 상향 셀 LUT를 쌍선형 보간으로 조회 + 조준 판정(고정형 허용 오차 / 터렛 범위). 보조 함수 `hiveCellKey`, `isAimWithinShooterRange`. 타입 `MatchHeatmapLUTs`. 엔진 수정 없이 생성자에 주입.
+- **조준 규약 확정:** Δψ = 조준점 방위 − 헤딩 (+ = 로봇 오른쪽), 경계 포함, 비정상 허용 오차는 0, 비정상 터렛 범위는 조준 불가, 슈터 설정은 생성 시점 복사.
+- **LUT 생성 실행 / 사용자 경험 명세 (Step 9 구현):** Web Worker 풀 병렬 생성, 진행 표시(v0 선표시 / 진행 막대 / 남은 시간 / 점진 히트맵), 비차단 작업 흐름(로봇별 상태 머신 / 취소 / 시뮬레이션 시작만 잠금), IndexedDB 캐시(`BALLISTICS_MODEL_VERSION`) — 2.6.2항. 저정밀 미리보기는 불채택 (6.4항).
+- **테스트:** `ballistics.test.ts` N(합성 LUT로 슬롯 / 기물 / 셀 매핑, 보간, 고정형 경계 / 각도 감김 / 비정상 허용 오차, 터렛 전방 / 후방(±π 가로지름) / 정규화 / 360° / 부호, 비정상 LUT, 설정 복사), `simulationEngine.test.ts` R(생성한 LUT를 엔진에 주입: 스윗스팟 정면 사격 고확률 · 득점 · 팁 후 상향 셀 전환 반영, 조준 이탈 / 명중 띠 밖은 확률 0). 조준 판정 제거, 셀 키 고정, 후방 구간 논리 오류, Δψ 부호 반전, 최근접 조회, 설정 미복사 각각에서 실패함을 확인.
+
 ### 6.3 남은 Step (권장 순서)
 
 > 모든 Step은 완료 시 `npm test`(엔진 회귀 테스트)가 통과해야 하며, 새로 추가한 규칙에는 테스트 그룹을 추가한다.
 
-- **Step 6 — 탄도 모듈 + 발사 비행 처리 (`src/core/ballistics.ts`):** 06-1(명세), 06-2(탄도 계산), 06-3(LUT 생성), 06-4(판정 / LUT 정밀화) 완료, 아래는 권장 세부 순서.
+- **Step 6 — 탄도 모듈 + 발사 비행 처리 (`src/core/ballistics.ts`):** 06-1(명세), 06-2(탄도 계산), 06-3(LUT 생성), 06-4(판정 / LUT 정밀화), 06-5(판정 함수) 완료, 아래는 권장 세부 순서.
     - ~~06-2: 탄도 계산 함수 ($v_0$ 닫힌 해, 비행 시간, 사거리 R, HIVE 직육면체 교차) + 테스트.~~ (완료, 6.2.3)
     - ~~06-3: 몬테카를로 명중 판정, 기물 종류별 v0 탐색, 기준 셀 72 × 72 LUT 생성, 4-Cell 대칭 복사 (로봇당 8장, 합계 16장).~~ (완료, 6.2.4)
-    - 06-5: `createLUTShotResolver(luts, r1Config, r2Config)`: 쌍선형 보간 조회(`sampleLUT`) + 조준 판정(FIXED 허용 오차 / TURRET 회전 범위) → 엔진 생성자에 주입 (엔진 수정 불필요).
+    - ~~06-5: `createLUTShotResolver(luts, r1Config, r2Config)`: 쌍선형 보간 조회(`sampleLUT`) + 조준 판정(FIXED 허용 오차 / TURRET 회전 범위) → 엔진 생성자에 주입 (엔진 수정 불필요).~~ (완료, 6.2.6)
     - 06-6: 2.6.2항의 발사 비행 처리 구현 (`IN_FLIGHT`, 비행 대기열, 도착 규칙, 착지 속도) + 엔진 회귀 테스트.
 - **Step 7 — 입력 계층 및 실시간 루프:**
     - Gamepad API → `RobotDriveInput` 변환: 필드 기준 속도(`스틱 × maxSpeed`, `오른쪽 스틱 X × maxTurnRate`), 데드존, 드라이버 시점 회전, 버튼 → `actionState`(우선순위 고정, 짧은 탭 래치).
@@ -641,8 +689,9 @@ export interface TimelineFrame {
 - **Step 9 — 웹 GUI (React):**
     - 로봇 설정 폼: 제원, `BumperZone` 편집기(면/offset/width/depth, FRONT/ANY 프리셋, 로봇 기준 앞이 위인 미리보기), `maxControlledPieces`.
     - 시나리오 설정: 진영, 시작 자세 드래그/회전(배치 검증), 적재물 목록, FLOWER/GARDEN/HIVE 잔여 수, 오토 팁, 시드 — `validateScenario()` 결과가 비어 있지 않으면 확정 버튼 비활성화.
-    - 로봇별 탄도 설정(`BallisticsConfig`) 및 스윗스팟 한 점 입력(144 × 144 격자(1 in) 클릭, 조준점을 향한 로봇 몸체 윤곽 / 검증 실패 사유 미리보기, 검증 규칙 2.6.2항), LUT 생성 진행 표시(Web Worker), 스크러버/재생 컨트롤, 스코어보드/RP.
-- **Step 10 — 분기 타임라인 및 경기 저장/공유:** 분기 트리(부모 프레임 공유, 분기 이후 프레임만 생성), 저장 레시피(설정 + 시나리오 + 시드 + 양자화 입력 로그 + 탄도 설정 + 엔진 버전 + 상태 체크섬). 레시피 약 50 KB 수준으로 파일/IndexedDB 저장 가능.
+    - 로봇별 탄도 설정(`BallisticsConfig`) 및 스윗스팟 한 점 입력(144 × 144 격자(1 in) 클릭, 조준점을 향한 로봇 몸체 윤곽 / 검증 실패 사유 미리보기, 검증 규칙 2.6.2항), 스크러버/재생 컨트롤, 스코어보드/RP.
+    - LUT 생성 실행 / 사용자 경험 (2.6.2항 "LUT 생성 실행 / 사용자 경험" 1~4): ① `ballistics.ts` 사전 준비(`generateReferenceLUTRows`, 시드 파생 공개, 분할 동일성 테스트) → ② Worker 풀 + 작업 대기열 + 조립 → ③ 로봇별 상태 머신 / 취소 / 시뮬레이션 시작 버튼 잠금 → ④ v0 선표시 / 진행 막대 / 남은 시간 / 점진 히트맵 → ⑤ IndexedDB 캐시(`BALLISTICS_MODEL_VERSION` 포함) 순서로 구현.
+- **Step 10 — 분기 타임라인 및 경기 저장/공유:** 분기 트리(부모 프레임 공유, 분기 이후 프레임만 생성), 저장 레시피(설정 + 시나리오 + 시드 + 양자화 입력 로그 + 탄도 설정 / LUT 시드 / 샘플 수 / `BALLISTICS_MODEL_VERSION` + 엔진 버전 + 상태 체크섬, LUT 자체는 저장하지 않고 캐시 또는 재생성). 레시피 약 50 KB 수준으로 파일/IndexedDB 저장 가능.
 
 ### 6.4 보류 / 후속 검토 항목
 
@@ -651,4 +700,5 @@ export interface TimelineFrame {
 - **FLOWER 투입 방향 구역(`flowerDropZones`):** v1은 방향 무관(도달 거리 1.0 in). 필드 테스트 후 필요 시 `BumperZone` 재사용.
 - **바닥 잔여 공 직접 배치 GUI:** v1 이후 (현재는 무작위 산포).
 - **실측 보정:** FLOWER 용량 테이블, HIVE 팁 임계 테이블, 빗맞음 방출 파라미터, 착지 속도 유지 비율(`landingSpeedRetention`, 실측 방법 2.5항), 슈터 편차 파라미터(실측 명중률로 보정)는 실측 데이터 확보 시 교체.
+- **저정밀 LUT 미리보기 (불채택):** 샘플을 줄인 빠른 미리보기 LUT를 먼저 보여주고 정밀본으로 교체하는 방식은 채택하지 않음. 미리보기로 경기를 돌리면 저장 레시피 재현 시 결과가 달라져 결정론이 깨지고, 표시용으로만 제한해도 정밀본과 달라 보이는 혼란이 생김. 대신 정밀본을 행 단위로 점진 표시 (2.6.2항 진행 상황 표시).
 - **교차 브라우저 결정론:** `Math.sin/cos/hypot` 등 초월함수 결과가 JS 엔진마다 최하위 비트에서 다를 수 있어, 다른 브라우저 간 리플레이는 비트 단위 동일성이 보장되지 않음 (저장 레시피에 상태 체크섬 포함 권장).

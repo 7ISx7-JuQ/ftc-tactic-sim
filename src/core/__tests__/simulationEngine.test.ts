@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SimulationEngine, DEFAULT_RNG_SEED, DEFAULT_SPAWN_POSES, validateScenario, getCarryCapacity } from '../simulationEngine';
 import type { RobotDriveInput } from '../simulationEngine';
 import type { BumperZone, RobotConfig, RobotPose, ScenarioConfig, ShotProbabilityResolver } from '../types';
+import { createLUTShotResolver, generateRobotLUTs, bearingTo } from '../ballistics';
 import { GARDEN_AABB, LOADING_ZONE_AABB, testCircleVsAABB, createIntakeZonePreset, getBumperZoneOBB, getRobotOBB, testOBBvsCircle, DEFAULT_PRESET_ZONE_DEPTH, HIVE_AABB, HIVE_HEIGHT, HIVE_OPENING_CENTROID_S, HIVE_RIM_Y, GRAVITY, PIECE_PHYSICS, hiveCellAimPoint } from '../collision';
 
 const cfg = (id: 'robot1' | 'robot2', over: Partial<RobotConfig> = {}): RobotConfig => ({
@@ -706,4 +707,32 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       assert(inHive.length === 3 && inHive.every(p => near(p.x, aim.x, 1e-9) && near(p.y, aim.y, 1e-9)), 'IN_HIVE pieces placed at aim point projection');
     }
   }, TEST_TIMEOUT_MS);
+
+  it('R. LUT 명중 확률 판정 함수 주입 (탄도 LUT → 엔진)', () => {
+    // 고각 슈터 (발사구 14 in, 발사각 70°), 스윗스팟 (60.5, 134.5). 샘플 수를 줄여 빠르게 생성
+    const ballistics = { dz: 39.5, shooterPitch: (70 * Math.PI) / 180, sweetSpot: { x: 60.5, y: 134.5 }, shooterOffset: 6 };
+    const robotLUTs = generateRobotLUTs(ballistics, { length: 18, width: 18 }, { samples: 20, searchSamples: 300 });
+    assert(robotLUTs.issues.length === 0, 'LUT generated');
+    const lut = createLUTShotResolver({ robot1: robotLUTs.luts, robot2: robotLUTs.luts }, C1, C2);
+    const aim = hiveCellAimPoint('RED', 'AUDIENCE_CELL');
+    // 사격 결과: 판정 함수가 반환한 확률 기록 + HIVE 적재 / 팁
+    const shoot = (x: number, y: number, heading: number) => {
+      const ps: number[] = [];
+      const e = eng({ r1Spawn: pose(x, y, heading), r2Spawn: pose(20, 20) }, C1, C2, (...args) => { const p = lut(...args); ps.push(p); return p; });
+      for (let i = 0; i < 80; i++) e.step(SHOOT);
+      return { ps, tips: e.field.hive.tipCount, scored: e.field.hive.tipCount * 3 + e.field.hive.pollenInUpwardCell, upward: e.field.hive.upwardCell };
+    };
+    const onTarget = bearingTo(60.5, 134.5, aim.x, aim.y);
+    const sweet = shoot(60.5, 134.5, onTarget);
+    // 기본 HIVE {N3, P0}: POLLEN 3발 명중 → 팁 → 상향 셀이 OPPOSITE로 바뀌어 4번째 발은 (Audience 쪽을 보는 로봇이라) 확률 0
+    assert(sweet.ps.length === 4 && sweet.ps.slice(0, 3).every(p => p > 0.8), `sweet spot on target -> high P (${sweet.ps.map(p => p.toFixed(2))})`);
+    assert(sweet.tips === 1 && sweet.upward === 'OPPOSITE_CELL' && sweet.ps[3] === 0, 'after the tip the resolver uses the new upward cell (not aimable from here)');
+    // 조준 이탈 (허용 오차 0.05 rad 초과) → 확률 0, 득점 없음
+    const offAim = shoot(60.5, 134.5, onTarget + 0.1);
+    assert(offAim.ps.length >= 3 && offAim.ps.every(p => p === 0) && offAim.scored === 0, 'FIXED shooter off aim -> P 0, no score');
+    // 명중 띠 밖 (HIVE 반대편 구석) → 확률 0
+    const far = shoot(20.5, 20.5, bearingTo(20.5, 20.5, aim.x, aim.y));
+    assert(far.ps.length >= 3 && far.ps.every(p => p === 0) && far.scored === 0, 'outside the hit band -> P 0');
+  }, TEST_TIMEOUT_MS);
 });
+

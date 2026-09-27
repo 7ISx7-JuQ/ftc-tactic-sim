@@ -33,7 +33,7 @@ export interface RobotConfig {
   // 명중률은 로봇 제원이 아니라 탄도 LUT(ShotProbabilityResolver)가 결정 (명세서 2.6.2)
   shooterDelay: number;     // 한 발 발사 딜레이 (ms)
   turretType: 'FIXED' | 'TURRET';
-  // 터렛 회전 한계 [α, β] (rad, 차체 헤딩 기준 상대각, [-π, π] 정규화)
+  // 터렛 회전 한계 [α, β] (rad, 차체 헤딩 기준 상대각 Δψ = 목표 방위 − 헤딩, + = 로봇 오른쪽(캔버스 y-down), [-π, π] 정규화)
   // α ≤ β: α ~ β 구간, α > β: ±π를 가로지르는 구간 (예: 후방 터렛 [2.5, -2.5]), 360° 터렛 = [-π, π]
   turretRange: [number, number];
   aimTolerance: number;     // 고정형 슈터 허용 조준 오차 (rad, 차체 헤딩 기준 ±, 기본 3° ≈ 0.0524)
@@ -109,6 +109,8 @@ export type HeatmapLUT = Float32Array;
 export type HeatmapLUTSet = Record<HiveCellKey, HeatmapLUT>;
 // 로봇 1대의 LUT: 기물 종류별 × 4셀 = 8장 (R1, R2 합계 16장)
 export type RobotHeatmapLUTs = Record<GamePiece['type'], HeatmapLUTSet>;
+// 경기 1회분 LUT: 로봇 슬롯별 (createLUTShotResolver 입력)
+export type MatchHeatmapLUTs = Record<'robot1' | 'robot2', RobotHeatmapLUTs>;
 
 // HIVE 시차 낙하 예약 대기열
 export interface PendingDrop {
