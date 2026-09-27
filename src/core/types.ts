@@ -112,6 +112,16 @@ export type RobotHeatmapLUTs = Record<GamePiece['type'], HeatmapLUTSet>;
 // 경기 1회분 LUT: 로봇 슬롯별 (createLUTShotResolver 입력)
 export type MatchHeatmapLUTs = Record<'robot1' | 'robot2', RobotHeatmapLUTs>;
 
+// 엔진 발사 비행 처리용 슈터 탄도 (로봇별, 명세서 2.6.2 발사 비행 처리)
+// v0 미지정 기물은 발사마다 조준점을 향한 닫힌 해로 결정 (자동 슈터, 해가 없으면 사거리 = 조준점 거리인 속도)
+export interface ShooterBallistics {
+  dz: number;               // 림 높이(53.5) - 발사구 지상고 (inch)
+  shooterPitch: number;     // 발사각 (rad, (0, π/2) 밖이면 엔진 기본값)
+  shooterOffset: number;    // 차체 중심 기준 발사구 오프셋 (inch, 발사 방향)
+  v0?: Partial<Record<GamePiece['type'], number>>; // 기물별 사출 속도 (generateRobotLUTs 결과)
+}
+export type MatchShooterBallistics = Record<'robot1' | 'robot2', ShooterBallistics>;
+
 // HIVE 시차 낙하 예약 대기열
 export interface PendingDrop {
   pieceId: string;
@@ -130,7 +140,8 @@ export interface GamePiece {
   y: number;
   vx: number;               // X방향 속도 (inch/s)
   vy: number;               // Y방향 속도 (inch/s)
-  state: 'ON_FIELD' | 'CONTROLLED' | 'IN_HIVE' | 'IN_FLOWER' | 'IN_GARDEN' | 'OUT_OF_BOUNDS';
+  // IN_FLIGHT: 발사 후 도착 전 (FieldState.pendingShots에 비행 정보, 좌표는 발사 지점, 충돌 / 물리 제외)
+  state: 'ON_FIELD' | 'CONTROLLED' | 'IN_HIVE' | 'IN_FLOWER' | 'IN_GARDEN' | 'OUT_OF_BOUNDS' | 'IN_FLIGHT';
 }
 
 // 3. 로봇 동역학 및 행동 상태
@@ -183,6 +194,30 @@ export interface HiveState {
 }
 
 // 5. 필드 통합 상태 및 RP
+// 발사 비행 대기열 (명세서 2.6.2): 결과와 도착 지점은 발사 시점에 확정, 도착 틱에 반영
+export interface PendingShot {
+  pieceId: string;
+  pieceType: 'POLLEN' | 'NECTAR';
+  robotId: 'robot1' | 'robot2';
+  result: 'HIT' | 'MISS_HIVE' | 'MISS_FLOOR'; // 명중 / HIVE 직육면체 충돌 후 반사 방출 / 바닥 착지
+  targetCell: 'AUDIENCE_CELL' | 'OPPOSITE_CELL'; // 발사 시점 상향 셀 (도착 시 바뀌었으면 명중 무효)
+  launchTick: number;
+  arriveTick: number;       // 도착 틱 (≥ launchTick + 1)
+  fromX: number;            // 발사구 (inch)
+  fromY: number;
+  fromZ: number;
+  toX: number;              // 도착 지점: 명중 = 조준점, HIVE 충돌 = 첫 접촉점, 바닥 = 착지점
+  toY: number;
+  toZ: number;
+  heading: number;          // 명목 궤적 수평 방향 (rad)
+  v0: number;               // 명목 사출 속도 (inch/s) — 렌더러 높이 연출용
+  pitch: number;            // 명목 발사각 (rad)
+  landingVx: number;        // 바닥 착지 직후 속도 (inch/s, MISS_FLOOR)
+  landingVy: number;
+  ejectSpeedRoll: number;   // HIVE 반사 방출 난수 [0, 1) (발사 시점에 소비, 도착 시 사용)
+  ejectAngleRoll: number;
+}
+
 export interface FieldState {
   allianceColor: 'RED' | 'BLUE';
   matchPhase: 'TELEOP' | 'ENDGAME';
@@ -190,6 +225,7 @@ export interface FieldState {
   flowers: FlowerState[];
   nectarStock: number;      // 5개로 시작 (휴먼 플레이어가 아직 투입 결정하지 않은 재고)
   pendingHumanNectar: number; // 투입이 결정됐으나 로딩 존 빈 자리를 기다리는 NECTAR 수 (자리가 나면 즉시 배치)
+  pendingShots: PendingShot[]; // 비행 중인 발사 (발사 순서)
 }
 
 export interface RPState {

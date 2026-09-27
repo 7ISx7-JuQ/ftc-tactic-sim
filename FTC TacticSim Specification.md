@@ -133,7 +133,7 @@
 1. **HIVE (벌집) 팁 및 시차 낙하 로직:**
     - **초기 상태:** Red는 `AUDIENCE_CELL`이 위(UP)를, Blue는 `OPPOSITE_CELL`이 위(UP)를 향하도록 고정 시작.
     - **팁 임계 테이블 (`HIVE_TIP_POLLEN_BY_NECTAR`, FLOWER 용량 테이블과 같은 구조):** 상향 셀의 NECTAR 개수별로 팁이 발동하는 POLLEN 개수. 임계 조합 {NECTAR, POLLEN} = {5, 0}, {4, 1}, {3, 3}, {2, 5}, {1, 6}, {0, 8}. 상향 셀 POLLEN ≥ 해당 NECTAR 개수의 임계 POLLEN이면 팁 (NECTAR 5개 이상이면 POLLEN 0개로 즉시 팁). 상향 셀 개수는 NECTAR / POLLEN 별도 집계(`nectarInUpwardCell`, `pollenInUpwardCell`).
-    - **팁 발동 시점:** 명중으로 상향 셀이 임계에 도달한 **같은 틱**에 즉시 팁 상태(`isTipping = true`, `tipProgressTimer = 0`)로 전환. 팁 진행 중(낙하 대기열 방출 완료 전)에 발사된 공은 명중 확률과 무관하게 **전부 빗맞음** 처리되어 튕겨 나옴.
+    - **팁 발동 시점:** 명중한 공이 **도착한 틱**(발사 비행 처리, 2.6.2항)에 상향 셀이 임계에 도달하면 그 틱에 즉시 팁 상태(`isTipping = true`, `tipProgressTimer = 0`)로 전환. 팁 진행 중(낙하 대기열 방출 완료 전)에 발사된 공은 명중 확률과 무관하게 **전부 빗맞음**이며, 팁 전에 명중으로 발사됐더라도 도착 시점에 팁 진행 중이거나 상향 셀이 발사 시점과 달라졌으면 빗맞음과 같이 반사 방출된다.
     - **TIP 30도 틸트 기반 시차 낙하 (Staggered Drop Queue):**
         - **기준점(Lip Origin) 산출:**
             - 기준 X: 아군 진영 중심선 `Lip_X = (alliance === 'RED') ? 59.25 : 84.75`
@@ -237,26 +237,34 @@
             - **터렛형(`TURRET`):** `turretRange` $[\alpha, \beta]$를 [-π, π]로 정규화 (`normalizeAngle`은 ±π를 보존하므로 360° 터렛 [-π, π] 유지). $\alpha \le \beta$면 $\alpha \le \Delta\psi \le \beta$, $\alpha > \beta$면 ±π를 가로지르는 구간 ($\Delta\psi \ge \alpha$ 또는 $\Delta\psi \le \beta$, 예: 후방 터렛 [2.5, −2.5]). 범위가 비유한값이면 조준 불가.
             - 한계: 허용 오차 / 터렛 범위 안이면 조준 오차에 따른 명중률 감소는 반영하지 않는다 (LUT는 정면 조준 가정). 고정형은 허용 오차가 작아(±3°) 영향이 작다.
         - **안전장치:** LUT 값이 비유한값이면 0, 결과는 [0, 1]로 제한 (엔진도 한 번 더 제한).
-    - **발사 비행 처리 (설계 확정, 미구현 — 로드맵 06-6):**
+    - **발사 비행 처리 (06-6 구현 완료):**
         - **목표:** 발사 순간 공이 HIVE로 순간이동하는 부자연스러움을 없애되, 결과(명중 여부)는 LUT 판정을 그대로 따르고, 3D 물리 엔진 없이 닫힌 해로 계산한다.
-        - **범위 분리:** Step 6은 궤도 결과(도착 지점, 도착 시점, 착지 속도)를 발사 시점에 계산해 기록한다. 이 기록으로 출발점 → 도착점을 보간하는 렌더링은 Step 8.
-        - **결과 선확정:** 명중 여부는 발사 완료 틱에 판정 함수 확률과 시드 PRNG 난수로 확정한다 (난수는 발사 시점에만 소비 → 결정론 유지).
-        - **명목 궤적:** 편차 없는 포물선 (발사구 $z_0$, 기물 종류의 v0, 발사각 θ). 발사 방향은 고정형이면 로봇 헤딩, 터렛형이면 조준 방향.
+        - **범위 분리:** 엔진은 궤도 결과(도착 지점, 도착 시점, 착지 속도)를 발사 시점에 계산해 비행 대기열에 기록하고 도착 틱에 반영한다. 이 기록으로 출발점 → 도착점을 보간하는 렌더링은 Step 8.
+        - **슈터 탄도 입력:** 엔진 생성자 선택 인자 `SimulationEngine(r1, r2, shotResolver, alliance?, scenario?, shooters?: MatchShooterBallistics)`. 로봇별 `ShooterBallistics {dz, shooterPitch, shooterOffset, v0?: {POLLEN?, NECTAR?}}` — LUT 생성 결과에서 `shooterBallisticsFrom(config, generateRobotLUTs 결과)`로 만든다 (판정 LUT와 같은 발사구 / 발사각 / 탐색 v0). 미지정 시 기본 자동 슈터 `DEFAULT_SHOOTER_BALLISTICS`(발사구 14 in, 발사각 60°, 오프셋 0, v0는 발사마다 조준점 닫힌 해). 생성 시점에 복사해 고정.
+        - **결과 선확정 / 난수:** 발사 완료 틱에 판정 함수 확률과 시드 PRNG 난수로 명중을 확정한다. 난수는 발사마다 **항상 3회**(명중 판정, 반사 방출 속도, 반사 방출 각도) 소비하고 도착 시점에는 쓰지 않는다 → 결과와 무관하게 RNG 시퀀스 일정, 결정론 유지. 팁 진행 중 발사는 발사 시점에 빗맞음.
+        - **명목 궤적 (`planShotFlight`, 편차 없는 포물선, 발사 1회당 상수 시간):**
+            - 발사 방향 (`shotLaunchHeading`): 고정형 = 로봇 헤딩, 터렛형 = 조준점 방위 (터렛 범위 밖이면 가까운 한계각으로 제한).
+            - 발사구 = 로봇 중심 + 발사 방향 × `shooterOffset`, 높이 53.5 − dz. 발사각이 (0, π/2) 밖이면 기본값.
+            - v0 우선순위: 탄도 설정의 기물별 v0 → 조준점 닫힌 해 → (해가 없으면) 평지 사거리 = 조준점 거리인 속도 $\sqrt{g D / \sin 2\theta}$.
         - **도착 규칙:**
-            - **명중:** 궤적과 무관하게 조준점에 도착 (LUT 결과 우선). 비행 시간 $T = D / (v_0\cos\theta)$.
-            - **빗맞음 + HIVE 충돌 (`intersectHiveBox`):** HIVE 직육면체를 기물 반지름만큼 확장(xy 경계 ± r, 높이 `HIVE_HEIGHT` + r, 공 표면 접촉 기준)하고, 지면 직선이 확장 AABB 안에 있는 구간(착지 전까지)에서 공 중심 높이가 확장 높이 이하가 되는 첫 지점이 있으면 (진입 순간 이미 낮으면 옆면 `SIDE`, 위로 들어와 구간 안에서 내려오면 윗면 `TOP`) 그 지점에서 HIVE에 부딪힌 것으로 보고, 가장 가까운 HIVE 외곽으로 반사 방출 (현재 `ejectMissedShot` 방출 규칙을 이 지점 기준으로 적용).
-            - **빗맞음 + HIVE를 넘어가거나 닿지 않음:** 공 중심 높이가 기물 반지름이 되는 시점의 수평 거리 R 지점에 착지 (필드 밖이면 벽 앞에서 정지). 착지 후 발사 방향 수평 속도 = $v_0\cos\theta$ × `landingSpeedRetention`(2.5항)을 가진 `ON_FIELD` 기물로 전환되고, 이후는 기존 물리가 처리.
+            - **명중:** 궤적과 무관하게 조준점에 도착 (LUT 결과 우선). 비행 시간 $T = D / (v_0\cos\theta)$ (D = 발사구 → 조준점 수평 거리).
+            - **빗맞음 + HIVE 충돌 (`intersectHiveBox`):** HIVE 직육면체를 기물 반지름만큼 확장(xy 경계 ± r, 높이 `HIVE_HEIGHT` + r, 공 표면 접촉 기준)하고, 지면 직선이 확장 AABB 안에 있는 구간(착지 전까지)에서 공 중심 높이가 확장 높이 이하가 되는 첫 지점이 있으면 (진입 순간 이미 낮으면 옆면 `SIDE`, 위로 들어와 구간 안에서 내려오면 윗면 `TOP`) 그 접촉점에 도착한 뒤 반사 방출.
+            - **빗맞음 + HIVE를 넘어가거나 닿지 않음:** 공 중심 높이가 기물 반지름이 되는 시점의 수평 거리 R 지점에 착지. 착지 후 발사 방향 수평 속도 = $v_0\cos\theta$ × `landingSpeedRetention`(2.5항)을 가진 `ON_FIELD` 기물로 전환되고, 이후는 기존 물리가 처리. 지면 직선이 착지 전에 필드 벽(반지름 여유)에 닿으면 벽 앞에서 속도 0으로 정지.
             - 고정형 슈터는 조준 이탈 시 확률 0이고 직선도 조준점을 비껴가므로 판정과 연출이 일치한다.
-        - **비행 대기열 (`pendingDrops`와 같은 구조):** 발사 시 `{pieceId, 기물 종류, 발사 로봇, 출발점 (x, y, z), 도착점 (x, y, z), 발사 틱, 도착 틱, v0, 발사각, 결과(명중 / HIVE 충돌 / 바닥 착지), 착지 속도}`를 `FieldState`의 비행 대기열에 넣고 기물 상태를 `IN_FLIGHT`로 전환. 도착 틱에 명중이면 HIVE 셀 개수 증가 및 팁 판정, 빗맞음이면 도착 지점에 기물 스폰.
-            - 비행 중 기물은 로봇 / 기물 위를 지나므로 충돌하지 않는다.
-            - 도착 시점에 HIVE가 팁 진행 중이면 빗맞음과 같이 반사 방출 (팁 판정이 실제 도착 시점에 일어남).
+        - **반사 방출 (`ejectFromHive`):** 접촉 지점이 HIVE AABB 밖(옆면)이면 가장 가까운 외곽 지점과 그 면의 바깥 법선, 안(윗면 낙하 / 도착 시 무효가 된 명중의 조준점)이면 가장 가까운 면의 외곽 지점과 바깥 법선을 쓴다. 외곽 + (반지름 + 0.1 in)에 스폰, 속도 20~60 in/s, 방향 = 법선 ± 60° — 속도 / 각도는 발사 시점에 뽑아 둔 난수로 결정.
+        - **비행 대기열 (`FieldState.pendingShots: PendingShot[]`, 발사 순서):** `{pieceId, pieceType, robotId, result('HIT' | 'MISS_HIVE' | 'MISS_FLOOR'), targetCell(발사 시점 상향 셀), launchTick, arriveTick, fromX/Y/Z, toX/Y/Z, heading, v0, pitch, landingVx/Vy, ejectSpeedRoll, ejectAngleRoll}`. 발사 시 기물 상태를 `IN_FLIGHT`로 바꾸고 좌표는 발사구 지면 투영, 속도 0.
+            - 도착 틱 = 발사 틱 + max(1, round(T / dt)).
+            - 파이프라인 Step 5-2(HIVE 시차 낙하 다음)에서 도착 틱이 된 발사를 발사 순서대로 처리: 바닥 착지는 착지점 / 착지 속도로 `ON_FIELD`, 명중은 **도착 시점에 전복 중이 아니고 상향 셀이 발사 시점과 같을 때만** HIVE 적재 + 팁 판정 (같은 틱에 두 발이 도착하면 앞 발의 팁이 뒤 발을 무효화), 그 외(HIVE 충돌 / 무효 명중)는 반사 방출.
+            - 비행 중 기물은 로봇 / 기물 / FLOWER 위를 지나므로 충돌하지 않는다 (물리 / 충돌은 `ON_FIELD`만 대상). 착지 / 방출 지점이 로봇이나 기물과 겹치면 다음 틱 충돌 처리로 밀려남.
+            - 경기 종료(6000틱)까지 도착하지 못한 비행은 득점에 반영하지 않는다 (기물은 `IN_FLIGHT`로 남음).
+            - 타임라인 스냅샷은 대기열 배열 / 항목을 복제해 기록 보호.
         - **렌더링 (Step 8):** 렌더러는 프레임의 비행 대기열로 출발점 → 도착점을 선형 보간하고, 기록된 v0 · 발사각으로 높이 $z(t)$를 기물 크기 / 그림자 오프셋으로 연출한다. 필요한 정보가 모두 프레임에 있으므로 스크러빙 / 분기 재생에서도 동일하게 재현된다.
         - **탄도 계산 함수 (`ballistics.ts`, 06-2 구현 완료):** 궤적은 `Trajectory {x, y, z, heading, v0, pitch}`(발사구 위치 + 수평 방향)로 표현하고, 수평 거리 d의 높이 $z(d) = z_0 + d\tan\theta - g d^2 / (2 v_0^2 \cos^2\theta)$, 시간 $t(d) = d / (v_0\cos\theta)$로 조회한다.
             - 발사구 / 조준: `launchHeight`(53.5 − dz), `launchPoint`(조준 방향 `shooterOffset`), `bearingTo`.
             - 닫힌 해: `solveLaunchSpeed(D, Δz, θ)`(해 없으면 null), `solveAimLaunchSpeed`(로봇 위치 → 조준점), `sweetSpotLaunchSpeed`(스윗스팟 → `RED_AUDIENCE` 조준점, 06-3 v0 탐색 초기값 / 스윗스팟 닫힌 해 검증), `createAimTrajectory`.
             - 궤적 조회: `heightAtDistance`, `timeAtDistance`, `pointAtDistance`, `descendingDistanceAtHeight`(하강하며 높이에 도달하는 큰 근), `landingDistance` / `landingPoint`(공 중심 높이 = 반지름, 필드 경계 무시 — 벽 처리는 06-6 엔진).
             - HIVE 교차: `intersectHiveBox(traj, pieceRadius)` → `{x, y, z, distance, time, face}` 또는 null(넘어감 / 못 미침 / 비껴감).
-        - **예상 변경 범위 (Step 6):** `types.ts`(기물 상태 `IN_FLIGHT`, `PendingShot`, `FieldState` 비행 대기열), `ballistics.ts`(v0 역산 / 탐색, 몬테카를로 LUT, 대칭 변환, `createLUTShotResolver`, 사거리 · 비행 시간 · HIVE 직육면체 교차), 엔진(발사 / 도착 분리, 기존 빗맞음 즉시 방출 대체).
+        - **변경 범위 (Step 6 완료):** `types.ts`(기물 상태 `IN_FLIGHT`, `PendingShot`, `FieldState.pendingShots`, `ShooterBallistics`), `ballistics.ts`(v0 역산 / 탐색, 몬테카를로 LUT, 대칭 변환, `createLUTShotResolver`, 사거리 · 비행 시간 · HIVE 직육면체 교차, `planShotFlight` / `shotLaunchHeading` / `shooterBallisticsFrom`), 엔진(발사 / 도착 분리, 기존 빗맞음 즉시 방출 대체).
 3. **FLOWER (꽃) 기물 조작 및 하단 추출 메커니즘:**
     - **슬롯 구조 및 유효 득점 볼륨(Scoring Volume) 분리:**
         - FLOWER는 수직 원통 구조물로, 하단 출구 밖으로 빠져나와 경기장 바닥 타일에 직접 맞닿아 있는 최하단 기물은 공식 룰상 득점 인정 영역 밖으로 판정됨.
@@ -354,7 +362,8 @@
     - Step 3: 필드 위 공(`ON_FIELD`) 마찰 감속 및 위치 적분 (`stepPieceDynamics`)
     - Step 4: 공 충돌 완화 루프 (공 vs 환경/로봇/공 충돌 해결, 2회 반복)
     - Step 4-2: 끼인 공 역보정 (`resolvePinnedPieces`): 완화 후에도 로봇과 겹친 공에 막힌 로봇을 되밀어 정지
-    - Step 5: HIVE `tipProgressTimer += dt` 누적 및 `settleTime` 도달 공 순차 `ON_FIELD` 방출
+    - Step 5: HIVE `tipProgressTimer += dt` 누적 및 `settleTime` 도달 공 순차 `ON_FIELD` 방출
+    - Step 5-2: 발사 비행 도착 (`stepShotArrivals`): 도착 틱이 된 발사를 발사 순서대로 명중 적재 / 반사 방출 / 바닥 착지 (2.6.2항)
 5. **Slew Rate Limiter:** RoadRunner / Pedro Pathing 오도메트리 제원 기반 속도 선형 보간.
 
 ## 4. 데이터 인터페이스 명세 (`types.ts`)
@@ -465,6 +474,15 @@ export type HeatmapLUTSet = Record<HiveCellKey, HeatmapLUT>;
 export type RobotHeatmapLUTs = Record<'POLLEN' | 'NECTAR', HeatmapLUTSet>; // 로봇당 8장, 합계 16장
 export type MatchHeatmapLUTs = Record<'robot1' | 'robot2', RobotHeatmapLUTs>; // 경기 1회분 (createLUTShotResolver 입력)
 
+// 엔진 발사 비행 처리용 슈터 탄도 (로봇별). v0 미지정 기물은 발사마다 조준점 닫힌 해
+export interface ShooterBallistics {
+  dz: number; // 림 높이(53.5) - 발사구 지상고 (in)
+  shooterPitch: number; // 발사각 (rad)
+  shooterOffset: number; // 차체 중심 기준 발사구 오프셋 (in, 발사 방향)
+  v0?: Partial<Record<'POLLEN' | 'NECTAR', number>>; // 기물별 사출 속도 (generateRobotLUTs 결과)
+}
+export type MatchShooterBallistics = Record<'robot1' | 'robot2', ShooterBallistics>;
+
 // HIVE 시차 낙하 예약 대기열
 export interface PendingDrop {
   pieceId: string;
@@ -483,7 +501,7 @@ export interface GamePiece {
   y: number;
   vx: number; // X방향 속도 (inch/s)
   vy: number; // Y방향 속도 (inch/s)
-  state: 'ON_FIELD' | 'CONTROLLED' | 'IN_HIVE' | 'IN_FLOWER' | 'IN_GARDEN' | 'OUT_OF_BOUNDS';
+  state: 'ON_FIELD' | 'CONTROLLED' | 'IN_HIVE' | 'IN_FLOWER' | 'IN_GARDEN' | 'OUT_OF_BOUNDS' | 'IN_FLIGHT'; // IN_FLIGHT: 발사 후 도착 전
 }
 
 // 3. 로봇 동역학 및 행동 상태
@@ -534,6 +552,22 @@ export interface HiveState {
 }
 
 // 5. 필드 통합 상태 및 RP
+// 발사 비행 대기열 (결과 / 도착 지점은 발사 시점에 확정, 도착 틱에 반영)
+export interface PendingShot {
+  pieceId: string;
+  pieceType: 'POLLEN' | 'NECTAR';
+  robotId: 'robot1' | 'robot2';
+  result: 'HIT' | 'MISS_HIVE' | 'MISS_FLOOR';
+  targetCell: 'AUDIENCE_CELL' | 'OPPOSITE_CELL'; // 발사 시점 상향 셀
+  launchTick: number;
+  arriveTick: number;
+  fromX: number; fromY: number; fromZ: number; // 발사구
+  toX: number; toY: number; toZ: number; // 도착 지점
+  heading: number; v0: number; pitch: number; // 명목 궤적 (렌더러 높이 연출)
+  landingVx: number; landingVy: number; // 바닥 착지 직후 속도
+  ejectSpeedRoll: number; ejectAngleRoll: number; // HIVE 반사 방출 난수 [0, 1) (발사 시점 소비)
+}
+
 export interface FieldState {
   allianceColor: 'RED' | 'BLUE';
   matchPhase: 'TELEOP' | 'ENDGAME';
@@ -541,6 +575,7 @@ export interface FieldState {
   flowers: FlowerState[];
   nectarStock: number; // 5개로 시작 (휴먼 플레이어가 아직 투입 결정하지 않은 재고)
   pendingHumanNectar: number; // 투입이 결정됐으나 로딩 존 빈 자리를 기다리는 NECTAR 수 (자리가 나면 즉시 배치)
+  pendingShots: PendingShot[]; // 비행 중인 발사 (발사 순서)
 }
 
 export interface RPState {
@@ -609,12 +644,13 @@ export interface TimelineFrame {
 | 06-3 | 몬테카를로 명중 판정, v0 탐색, LUT 생성 / 4셀 대칭 복사 (아래 6.2.4) | `ballistics.ts`, `__tests__/ballistics.test.ts` |
 | 06-4 | HIVE 진입 면 / 림 아래 벽 정확 판정, 1 in 격자 · 샘플 수 상향 · 보간 조회, 격자별 독립 난수 · 도달 불가 격자 생략 (아래 6.2.5) | `ballistics.ts`, `types.ts`, `__tests__/ballistics.test.ts` |
 | 06-5 | LUT 명중 확률 판정 함수(`createLUTShotResolver`) + LUT 생성 실행 / 사용자 경험 명세 (아래 6.2.6) | `ballistics.ts`, `types.ts`, 두 테스트 파일 |
+| 06-6 | 발사 비행 처리 (발사 / 도착 분리, `IN_FLIGHT`, 비행 대기열, 명중 / HIVE 반사 / 바닥 착지) (아래 6.2.7) | `ballistics.ts`, `simulationEngine.ts`, `types.ts`, 두 테스트 파일 |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
 - **엔진 API:** `reset / step / runFullMatch / getFrame / scrubTo`, `inputProvider`, 읽기 전용 타임라인(`DeepReadonly<TimelineFrame>`), 스크러빙 후 `step()` 시 미래 프레임 폐기 분기.
 - **결정론:** Mulberry32 시드 PRNG(`ScenarioConfig.rngSeed`), 틱별 PRNG 상태 기록으로 스크러빙 후 재시뮬레이션 완전 재현 (동일 JS 엔진 기준).
-- **틱 파이프라인:** 기구학/Stationary Lock → 로봇 충돌 → 기물 동역학 → 기물 충돌 2회 → 끼인 공 역보정(Step 4-2) → HIVE 시차 낙하 → 흡입/추출 → 액션 완료 → 엔드게임/휴먼 NECTAR 투입 → GARDEN 안착 → 점수.
+- **틱 파이프라인:** 기구학/Stationary Lock → 로봇 충돌 → 기물 동역학 → 기물 충돌 2회 → 끼인 공 역보정(Step 4-2) → HIVE 시차 낙하 → 발사 비행 도착(Step 5-2, 06-6) → 흡입/추출 → 액션 완료 → 엔드게임/휴먼 NECTAR 투입 → GARDEN 안착 → 점수.
 - **로봇:** `RobotConfig`(하드웨어) / `ScenarioConfig`(시작 조건) 분리, 시작 자세는 시나리오(미지정 시 진영 기본), 적재 한도 `min(maxControlledPieces, 4)`, FIFO 적재함, 로봇 id 슬롯 강제.
 - **인테이크:** `BumperZone[]`(면/offset/width/depth) 일반화, FRONT/ANY 프리셋, z축 정사영 원-사각형 판정, FLOWER 하단 추출도 인테이크 구역 기준.
 - **HIVE:** {NECTAR, POLLEN} 팁 임계 테이블, 도달 즉시 팁, 팁 중 발사 전부 빗맞음(현실 연사 재현을 위해 의도적으로 유지), 오토 팁은 RP에만 합산.
@@ -672,15 +708,23 @@ export interface TimelineFrame {
 - **LUT 생성 실행 / 사용자 경험 명세 (Step 9 구현):** Web Worker 풀 병렬 생성, 진행 표시(v0 선표시 / 진행 막대 / 남은 시간 / 점진 히트맵), 비차단 작업 흐름(로봇별 상태 머신 / 취소 / 시뮬레이션 시작만 잠금), IndexedDB 캐시(`BALLISTICS_MODEL_VERSION`) — 2.6.2항. 저정밀 미리보기는 불채택 (6.4항).
 - **테스트:** `ballistics.test.ts` N(합성 LUT로 슬롯 / 기물 / 셀 매핑, 보간, 고정형 경계 / 각도 감김 / 비정상 허용 오차, 터렛 전방 / 후방(±π 가로지름) / 정규화 / 360° / 부호, 비정상 LUT, 설정 복사), `simulationEngine.test.ts` R(생성한 LUT를 엔진에 주입: 스윗스팟 정면 사격 고확률 · 득점 · 팁 후 상향 셀 전환 반영, 조준 이탈 / 명중 띠 밖은 확률 0). 조준 판정 제거, 셀 키 고정, 후방 구간 논리 오류, Δψ 부호 반전, 최근접 조회, 설정 미복사 각각에서 실패함을 확인.
 
+### 6.2.7 Step 06-6 (발사 비행 처리) 완료 항목
+
+- **발사 / 도착 분리:** 발사 시점에 명중 확정(난수 3회 고정 소비) + `planShotFlight`로 명목 궤적 / 도착 지점 / 비행 시간 계산 → `IN_FLIGHT` + `pendingShots` 등록 → Step 5-2에서 도착 틱에 반영. 기존 즉시 적재 / 로봇 기준 즉시 빗맞음 방출(`ejectMissedShot`)을 대체 (`ejectFromHive`: 접촉 지점 기준).
+- **명중 유효성:** 도착 시점에 전복 중이거나 상향 셀이 발사 시점과 달라졌으면 반사 방출. 팁은 명중 도착 틱에 발동.
+- **슈터 탄도:** 엔진 생성자 선택 인자 `shooters`(`MatchShooterBallistics`), 기본 자동 슈터 `DEFAULT_SHOOTER_BALLISTICS`, 생성 결과 변환 `shooterBallisticsFrom`, 발사 방향 `shotLaunchHeading`(터렛 한계각 제한).
+- **바닥 착지:** 사거리 지점, 착지 속도 = 발사 방향 v0·cosθ × `landingSpeedRetention`, 착지 전 벽에 닿으면 벽 앞 정지. 경기 종료까지 도착하지 못한 비행은 무득점.
+- **테스트:** 엔진 C / K / M / Q / R을 도착 기준으로 갱신(비행 대기 헬퍼 `settle`), 엔진 S(발사 대기열 / IN_FLIGHT / 도착 틱 공식 / 도착 틱 적재 / 프레임 기록 보호 / HIVE 충돌 반사 방향 / 바닥 착지 속도 / 난수 소비 고정 / 비행 중 스크러빙 재시뮬레이션 동일 / 종료 시 비행 무득점), 탄도 O(발사 방향 · 터렛 제한, 명중 비행 시간, v0 우선순위, 발사각 기본값, HIVE 충돌 / 바닥 착지 / 벽 정지, 탄도 변환). 도착 시 유효성 검사 제거, 명중 시 난수 미소비, 즉시 도착, 착지 감쇠 제거, 대기열 미복제, 벽 정지 제거, 반사 방향 반전 각각에서 실패함을 확인.
+
 ### 6.3 남은 Step (권장 순서)
 
 > 모든 Step은 완료 시 `npm test`(엔진 회귀 테스트)가 통과해야 하며, 새로 추가한 규칙에는 테스트 그룹을 추가한다.
 
-- **Step 6 — 탄도 모듈 + 발사 비행 처리 (`src/core/ballistics.ts`):** 06-1(명세), 06-2(탄도 계산), 06-3(LUT 생성), 06-4(판정 / LUT 정밀화), 06-5(판정 함수) 완료, 아래는 권장 세부 순서.
+- **Step 6 — 탄도 모듈 + 발사 비행 처리 (`src/core/ballistics.ts`):** 06-1(명세), 06-2(탄도 계산), 06-3(LUT 생성), 06-4(판정 / LUT 정밀화), 06-5(판정 함수), 06-6(비행 처리) 완료 — Step 6 완료.
     - ~~06-2: 탄도 계산 함수 ($v_0$ 닫힌 해, 비행 시간, 사거리 R, HIVE 직육면체 교차) + 테스트.~~ (완료, 6.2.3)
     - ~~06-3: 몬테카를로 명중 판정, 기물 종류별 v0 탐색, 기준 셀 72 × 72 LUT 생성, 4-Cell 대칭 복사 (로봇당 8장, 합계 16장).~~ (완료, 6.2.4)
     - ~~06-5: `createLUTShotResolver(luts, r1Config, r2Config)`: 쌍선형 보간 조회(`sampleLUT`) + 조준 판정(FIXED 허용 오차 / TURRET 회전 범위) → 엔진 생성자에 주입 (엔진 수정 불필요).~~ (완료, 6.2.6)
-    - 06-6: 2.6.2항의 발사 비행 처리 구현 (`IN_FLIGHT`, 비행 대기열, 도착 규칙, 착지 속도) + 엔진 회귀 테스트.
+    - ~~06-6: 2.6.2항의 발사 비행 처리 구현 (`IN_FLIGHT`, 비행 대기열, 도착 규칙, 착지 속도) + 엔진 회귀 테스트.~~ (완료, 6.2.7)
 - **Step 7 — 입력 계층 및 실시간 루프:**
     - Gamepad API → `RobotDriveInput` 변환: 필드 기준 속도(`스틱 × maxSpeed`, `오른쪽 스틱 X × maxTurnRate`), 데드존, 드라이버 시점 회전, 버튼 → `actionState`(우선순위 고정, 짧은 탭 래치).
     - **입력 양자화는 입력 수신 시점에 수행** (저장 시점 양자화는 재생 궤적을 어긋나게 함), 틱별 입력 로그 기록.
@@ -696,7 +740,8 @@ export interface TimelineFrame {
 ### 6.4 보류 / 후속 검토 항목
 
 - **시작 자세 배치 검증:** `validateRobotPlacement()`(필드 경계/HIVE/FLOWER/다른 로봇/기물 겹침, `collision.ts` 재사용)와 `reset()` 사전 보정(0번 프레임 이전 겹침 해소) — Step 9 GUI와 함께 구현 권장.
-- **1프레임 겹침 스폰:** HIVE 팁 낙하 착지 지점이 그 사이 이동한 로봇 위일 수 있음 (다음 틱에 밀려남). 빗맞음 방출 겹침은 Step 6 비행 처리로 대체 예정.
+- **1프레임 겹침 스폰:** HIVE 팁 낙하 착지 지점, 발사 비행의 바닥 착지 / 반사 방출 지점이 그 사이 이동한 로봇이나 기물 위일 수 있음 (다음 틱 충돌 처리로 밀려남). 비행 중 FLOWER 원통과의 충돌도 무시.
+- **조준 오차에 따른 비행 연출:** 고정형 슈터가 허용 오차 안에서 비스듬히 쏜 명중도 조준점으로 도착 처리 (LUT 결과 우선). 연출상 지면 직선과 조준점 사이 최대 약 ±3° 어긋남.
 - **FLOWER 투입 방향 구역(`flowerDropZones`):** v1은 방향 무관(도달 거리 1.0 in). 필드 테스트 후 필요 시 `BumperZone` 재사용.
 - **바닥 잔여 공 직접 배치 GUI:** v1 이후 (현재는 무작위 산포).
 - **실측 보정:** FLOWER 용량 테이블, HIVE 팁 임계 테이블, 빗맞음 방출 파라미터, 착지 속도 유지 비율(`landingSpeedRetention`, 실측 방법 2.5항), 슈터 편차 파라미터(실측 명중률로 보정)는 실측 데이터 확보 시 교체.

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { SimulationEngine, DEFAULT_RNG_SEED, DEFAULT_SPAWN_POSES, validateScenario, getCarryCapacity } from '../simulationEngine';
+import { SimulationEngine, DEFAULT_RNG_SEED, DEFAULT_SPAWN_POSES, validateScenario, getCarryCapacity, DT } from '../simulationEngine';
 import type { RobotDriveInput } from '../simulationEngine';
 import type { BumperZone, RobotConfig, RobotPose, ScenarioConfig, ShotProbabilityResolver } from '../types';
-import { createLUTShotResolver, generateRobotLUTs, bearingTo } from '../ballistics';
+import { createLUTShotResolver, generateRobotLUTs, bearingTo, shooterBallisticsFrom, planShotFlight, DEFAULT_SHOOTER_BALLISTICS } from '../ballistics';
 import { GARDEN_AABB, LOADING_ZONE_AABB, testCircleVsAABB, createIntakeZonePreset, getBumperZoneOBB, getRobotOBB, testOBBvsCircle, DEFAULT_PRESET_ZONE_DEPTH, HIVE_AABB, HIVE_HEIGHT, HIVE_OPENING_CENTROID_S, HIVE_RIM_Y, GRAVITY, PIECE_PHYSICS, hiveCellAimPoint } from '../collision';
 
 const cfg = (id: 'robot1' | 'robot2', over: Partial<RobotConfig> = {}): RobotConfig => ({
@@ -36,6 +36,10 @@ const assert = (c: boolean, m: string) => {
 const count = (e: SimulationEngine, s: string) => e.pieces.filter(p => p.state === s).length;
 const inp = (actionState: RobotDriveInput['actionState'], vx = 0, vy = 0, w = 0): RobotDriveInput => ({ targetVx: vx, targetVy: vy, targetOmega: w, actionState });
 const SHOOT = inp('SHOOTING'), INTAKE = inp('INTAKING'), DROP = inp('FLOWER_DROPPING');
+// 비행 중인 발사가 모두 도착할 때까지 입력 없이 진행 (발사 → 도착 분리, 명세서 2.6.2)
+const settle = (e: SimulationEngine) => { let guard = 0; while (e.field.pendingShots.length > 0 && guard++ < 500) e.step(); };
+// 발사 틱에 기록된 비행의 도착 틱 (그 틱에 발사가 없으면 -1)
+const arrivalOf = (e: SimulationEngine, launchTick: number) => e.getFrame(launchTick)?.field.pendingShots.find(s => s.launchTick === launchTick)?.arriveTick ?? -1;
 
 // 풀매치(6000틱) 시뮬레이션을 여러 번 돌리는 그룹이 있어 기본 5초보다 넉넉하게
 const TEST_TIMEOUT_MS = 120_000;
@@ -81,7 +85,8 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       const e = eng();
       let tip = -1;
       for (let i = 0; i < 200; i++) { e.step(SHOOT); if (tip < 0 && e.field.hive.tipCount === 1) tip = e.currentTick; }
-      assert(tip === 45, 'default hive {N3,P0}: 3rd POLLEN hit (tick 45 = 3 × 300ms) reaches {3,3} and tips');
+      const third = arrivalOf(e, 45);
+      assert(third > 46 && tip === third, `default hive {N3,P0}: 3rd POLLEN (fired tick 45 = 3 × 300ms) reaches {3,3} and tips on arrival (tick ${tip}, arrive ${third})`);
       assert(e.timeline[tip].totalScore === 20, 'tip score 20 live');
       assert(e.field.hive.upwardCell === 'OPPOSITE_CELL' && e.field.nectarStock === 4, 'cell flipped, human nectar spawned');
       assert(!e.field.hive.isTipping && e.r1.controlledPieces.length === 0, 'drops finished, all shot');
@@ -330,7 +335,9 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
           'TELEOP: NECTAR at front -> drop request refused (never enters FLOWER_SETUP), loadout untouched');
         const g = eng({ r1Loadout: ['NECTAR', 'POLLEN', 'POLLEN'], hiveInitialPieces: { pollenCount: 0, nectarCount: 2 } });
         for (let i = 0; i < 15; i++) g.step(SHOOT);
-        assert(g.r1.controlledPieces.map(p => p.type).join() === 'POLLEN,POLLEN' && g.pieces.filter(p => p.type === 'NECTAR' && p.state === 'IN_HIVE').length === 3, 'FIFO shooting: NECTAR (index 0) fired first');
+        assert(g.r1.controlledPieces.map(p => p.type).join() === 'POLLEN,POLLEN' && g.field.pendingShots.map(s => s.pieceType).join() === 'NECTAR', 'FIFO shooting: NECTAR (index 0) fired first');
+        settle(g);   // 사격은 잠금 동작이라 15틱에 예약된 둘째 발(POLLEN)도 발사됨
+        assert(g.pieces.filter(p => p.type === 'NECTAR' && p.state === 'IN_HIVE').length === 3, 'NECTAR arrives in HIVE');
       }
 
       // 오토 팁 2회: 로딩 존에 NECTAR 2개 결정론 배치, 재고 3, 산포는 그 뒤 (겹치지 않음)
@@ -482,32 +489,39 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       for (const [n, p] of [[0, 8], [1, 6], [2, 5], [3, 3]]) {
         const e = eng({ flowerPiecesCount: [0, 0, 0, 0], hiveInitialPieces: { nectarCount: n, pollenCount: p - 1 } });
         for (let i = 0; i < 15; i++) e.step(SHOOT);
-        const f = e.getFrame(15)!;
-        assert(f.field.hive.tipCount === 1 && f.field.hive.isTipping && e.getFrame(14)!.field.hive.tipCount === 0,
-          `{N${n},P${p - 1}} + 1 POLLEN hit -> tip on the same tick (tick 15)`);
+        settle(e);
+        const arrive = arrivalOf(e, 15);
+        const f = e.getFrame(arrive)!;
+        assert(f.field.hive.tipCount === 1 && f.field.hive.isTipping && e.getFrame(arrive - 1)!.field.hive.tipCount === 0,
+          `{N${n},P${p - 1}} + 1 POLLEN hit -> tip on the arrival tick (${arrive})`);
       }
       // NECTAR 4, 5개 구간: 런타임 상태를 직접 설정해 확인
       {
         const e = eng({ flowerPiecesCount: [0, 0, 0, 0], hiveInitialPieces: { nectarCount: 3, pollenCount: 0 } });
         e.field.hive.nectarInUpwardCell = 4;
         for (let i = 0; i < 15; i++) e.step(SHOOT);
+        settle(e);
         assert(e.field.hive.tipCount === 1, '{N4,P0} + 1 POLLEN -> {4,1} tips');
         const e5 = eng({ r1Loadout: ['NECTAR', 'POLLEN'], flowerPiecesCount: [0, 0, 0, 0], hiveInitialPieces: { nectarCount: 2, pollenCount: 0 } });
         e5.field.hive.nectarInUpwardCell = 4;
         for (let i = 0; i < 15; i++) e5.step(SHOOT);
-        assert(e5.field.hive.tipCount === 1 && e5.timeline[15].field.hive.tipCount === 1, '{N4,P0} + 1 NECTAR -> {5,0} tips with zero POLLEN');
+        settle(e5);
+        assert(e5.field.hive.tipCount === 1 && e5.timeline[arrivalOf(e5, 15)].field.hive.tipCount === 1, '{N4,P0} + 1 NECTAR -> {5,0} tips with zero POLLEN');
       }
       // 상향 셀 개수는 종류별로 집계, 임계 미도달이면 팁 없음
       {
         const e = eng({ r1Loadout: ['NECTAR', 'POLLEN'], hiveInitialPieces: { nectarCount: 0, pollenCount: 0 }, flowerPiecesCount: [0, 0, 0, 0] });
         for (let i = 0; i < 30; i++) e.step(SHOOT);
+        settle(e);
         assert(e.field.hive.nectarInUpwardCell === 1 && e.field.hive.pollenInUpwardCell === 1 && e.field.hive.tipCount === 0, 'counts tracked per type: {N1,P1}, no tip');
       }
-      // 팁 진행 중 발사는 명중률 100%여도 전부 빗맞음
+      // 팁 진행 중 발사 / 도착은 명중률 100%여도 전부 빗맞음
+      // (1발째 15틱 발사 → 도착 틱에 팁, 2~4발째는 팁 전에 발사됐어도 전복 중에 도착하면 반사 방출, 팁 후 발사는 발사 시점에 빗맞음)
       {
         const e = eng({ flowerPiecesCount: [0, 0, 0, 0], hiveInitialPieces: { nectarCount: 3, pollenCount: 2 } });
-        for (let i = 0; i < 60; i++) e.step(SHOOT);   // 1발째(15틱) 팁, 2~4발째(30, 45, 60틱)는 전복 중
-        const f = e.getFrame(60)!;
+        for (let i = 0; i < 60; i++) e.step(SHOOT);
+        settle(e);
+        const f = e.getFrame(e.currentTick)!;
         const rebounds = f.pieces.filter(p => p.type === 'POLLEN' && p.state === 'ON_FIELD' && p.id.startsWith('pollen-')).length;
         assert(f.field.hive.isTipping && f.field.hive.tipCount === 1 && f.field.hive.pollenInUpwardCell === 0 && e.r1.controlledPieces.length === 0 && rebounds >= 3,
           `shots during tipping all miss (accuracy 1.0, ${rebounds} rebounds, new cell still empty)`);
@@ -699,6 +713,7 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       const byType: ShotProbabilityResolver = (_id, type) => { types.push(type); return type === 'POLLEN' ? 1 : 0; };
       const e = eng({ r1Loadout: ['NECTAR', 'POLLEN'], hiveInitialPieces: { pollenCount: 0, nectarCount: 2 } }, C1, C2, byType);
       for (let i = 0; i < 40; i++) e.step(SHOOT);
+      settle(e);
       assert(types.join() === 'NECTAR,POLLEN', `resolver receives piece types in FIFO order (${types.join()})`);
       assert(e.field.hive.nectarInUpwardCell === 2 && e.field.hive.pollenInUpwardCell === 1, 'NECTAR missed (p = 0), POLLEN hit (p = 1)');
       // HIVE 내부 기물은 상향 셀 조준점 바닥 정사영에 배치
@@ -714,25 +729,121 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
     const robotLUTs = generateRobotLUTs(ballistics, { length: 18, width: 18 }, { samples: 20, searchSamples: 300 });
     assert(robotLUTs.issues.length === 0, 'LUT generated');
     const lut = createLUTShotResolver({ robot1: robotLUTs.luts, robot2: robotLUTs.luts }, C1, C2);
+    // 비행 처리도 같은 슈터 탄도(발사구 / 발사각 / 탐색한 v0)를 사용
+    const shooter = shooterBallisticsFrom(ballistics, robotLUTs);
     const aim = hiveCellAimPoint('RED', 'AUDIENCE_CELL');
-    // 사격 결과: 판정 함수가 반환한 확률 기록 + HIVE 적재 / 팁
+    // 사격 결과: 판정 함수가 반환한 확률 기록 + HIVE 적재 / 팁 (시작 HIVE {N3, P2}: POLLEN 1발 명중으로 팁)
     const shoot = (x: number, y: number, heading: number) => {
       const ps: number[] = [];
-      const e = eng({ r1Spawn: pose(x, y, heading), r2Spawn: pose(20, 20) }, C1, C2, (...args) => { const p = lut(...args); ps.push(p); return p; });
+      const e = new SimulationEngine(C1, C2, (...args) => { const p = lut(...args); ps.push(p); return p; }, 'RED',
+        { allianceColor: 'RED', r1Spawn: pose(x, y, heading), r2Spawn: pose(20, 20), hiveInitialPieces: { nectarCount: 3, pollenCount: 2 } },
+        { robot1: shooter, robot2: shooter });
       for (let i = 0; i < 80; i++) e.step(SHOOT);
-      return { ps, tips: e.field.hive.tipCount, scored: e.field.hive.tipCount * 3 + e.field.hive.pollenInUpwardCell, upward: e.field.hive.upwardCell };
+      settle(e);
+      // 득점 없음 = 팁 0회 + 상향 셀 POLLEN이 시작값 2 그대로
+      return { e, ps, tips: e.field.hive.tipCount, scoredNothing: e.field.hive.tipCount === 0 && e.field.hive.pollenInUpwardCell === 2, upward: e.field.hive.upwardCell };
     };
     const onTarget = bearingTo(60.5, 134.5, aim.x, aim.y);
     const sweet = shoot(60.5, 134.5, onTarget);
-    // 기본 HIVE {N3, P0}: POLLEN 3발 명중 → 팁 → 상향 셀이 OPPOSITE로 바뀌어 4번째 발은 (Audience 쪽을 보는 로봇이라) 확률 0
-    assert(sweet.ps.length === 4 && sweet.ps.slice(0, 3).every(p => p > 0.8), `sweet spot on target -> high P (${sweet.ps.map(p => p.toFixed(2))})`);
-    assert(sweet.tips === 1 && sweet.upward === 'OPPOSITE_CELL' && sweet.ps[3] === 0, 'after the tip the resolver uses the new upward cell (not aimable from here)');
+    // 1발째(15틱) 명중 도착 → 팁 → 상향 셀 OPPOSITE. 팁 전에 발사한 발(15k < 팁 틱)은 고확률이지만 전복 중 도착 → 반사 방출,
+    // 팁 후에 발사한 발은 판정 함수가 새 상향 셀(이 위치에서 조준 불가)로 확률 0
+    const tipTick = arrivalOf(sweet.e, 15);
+    const launches = [15, 30, 45, 60];
+    assert(tipTick > 15 && tipTick < 60 && sweet.ps.length === 4, `first shot arrives before the 4th launch (tip tick ${tipTick})`);
+    assert(sweet.ps.every((p, k) => (launches[k] < tipTick ? p > 0.8 : p === 0)) && sweet.ps[0] > 0.8 && sweet.ps[3] === 0,
+      `P high before the tip, 0 after (upward cell switched) (${sweet.ps.map(p => p.toFixed(2))})`);
+    assert(sweet.tips === 1 && sweet.upward === 'OPPOSITE_CELL' && sweet.e.field.hive.pollenInUpwardCell === 0, 'one tip; shots arriving during the tip are rejected');
     // 조준 이탈 (허용 오차 0.05 rad 초과) → 확률 0, 득점 없음
     const offAim = shoot(60.5, 134.5, onTarget + 0.1);
-    assert(offAim.ps.length >= 3 && offAim.ps.every(p => p === 0) && offAim.scored === 0, 'FIXED shooter off aim -> P 0, no score');
+    assert(offAim.ps.length >= 3 && offAim.ps.every(p => p === 0) && offAim.scoredNothing, 'FIXED shooter off aim -> P 0, no score');
     // 명중 띠 밖 (HIVE 반대편 구석) → 확률 0
     const far = shoot(20.5, 20.5, bearingTo(20.5, 20.5, aim.x, aim.y));
-    assert(far.ps.length >= 3 && far.ps.every(p => p === 0) && far.scored === 0, 'outside the hit band -> P 0');
+    assert(far.ps.length >= 3 && far.ps.every(p => p === 0) && far.scoredNothing, 'outside the hit band -> P 0');
+  }, TEST_TIMEOUT_MS);
+
+  it('S. 발사 비행 처리 (발사 / 도착 분리, IN_FLIGHT, 비행 대기열)', () => {
+    const near = (a: number, b: number, tol: number) => Math.abs(a - b) < tol;
+    const aim = hiveCellAimPoint('RED', 'AUDIENCE_CELL');
+    const front = pose(60.5, 130.5, bearingTo(60.5, 130.5, aim.x, aim.y));
+    // 명중 (P = 1): 발사 틱에 IN_FLIGHT + 대기열 등록, 도착 틱에 HIVE 적재
+    {
+      const e = eng({ r1Spawn: front, r1Loadout: ['POLLEN'] });
+      for (let i = 0; i < 15; i++) e.step(SHOOT);
+      const shot = e.field.pendingShots[0];
+      const piece = e.pieces.find(p => p.id === shot?.pieceId)!;
+      assert(shot !== undefined && shot.result === 'HIT' && shot.launchTick === 15 && shot.targetCell === 'AUDIENCE_CELL', 'hit shot queued at launch');
+      assert(piece.state === 'IN_FLIGHT' && near(piece.x, shot.fromX, 1e-9) && near(piece.y, shot.fromY, 1e-9) && piece.vx === 0, 'piece IN_FLIGHT at the launch point');
+      assert(near(shot.toX, aim.x, 1e-9) && near(shot.toY, aim.y, 1e-9) && near(shot.toZ, aim.z, 1e-9), 'hit arrives at the aim point');
+      const T = Math.hypot(aim.x - shot.fromX, aim.y - shot.fromY) / (shot.v0 * Math.cos(shot.pitch));
+      assert(shot.arriveTick === 15 + Math.max(1, Math.round(T / DT)), `arrive tick = launch + round(T / dt) (T ${T.toFixed(3)} s)`);
+      settle(e);
+      const before = e.getFrame(shot.arriveTick - 1)!, at = e.getFrame(shot.arriveTick)!;
+      assert(before.pieces.find(p => p.id === shot.pieceId)!.state === 'IN_FLIGHT' && before.field.hive.pollenInUpwardCell === 0, 'still in flight one tick before arrival');
+      assert(at.pieces.find(p => p.id === shot.pieceId)!.state === 'IN_HIVE' && at.field.hive.pollenInUpwardCell === 1 && at.field.pendingShots.length === 0, 'scored on the arrival tick');
+      // 기록 보호: 발사 틱 프레임의 대기열은 이후 변경과 분리 (스냅샷 복제)
+      assert(e.getFrame(14)!.field.pendingShots.length === 0 && e.getFrame(15)!.field.pendingShots.length === 1 && e.getFrame(15)!.pieces.find(p => p.id === shot.pieceId)!.state === 'IN_FLIGHT',
+        'past frames keep their own flight queue snapshot (before launch empty, launch tick 1)');
+      {
+        // 기록 보호: 프레임의 대기열 / 항목은 엔진 작업본과 별개 객체
+        const live = eng({ r1Spawn: front, r1Loadout: ['POLLEN'] });
+        for (let i = 0; i < 15; i++) live.step(SHOOT);
+        const frameShots = live.getFrame(15)!.field.pendingShots;
+        assert(frameShots !== live.field.pendingShots && frameShots[0] !== live.field.pendingShots[0], 'recorded flight queue is a copy of the live queue');
+      }
+    }
+    // 빗맞음 + HIVE 충돌 (P = 0, 정면): 첫 접촉점에서 바깥으로 반사 방출
+    {
+      const e = eng({ r1Spawn: front, r1Loadout: ['POLLEN'] }, C1, C2, fixedP(0));
+      for (let i = 0; i < 15; i++) e.step(SHOOT);
+      const shot = e.field.pendingShots[0];
+      assert(shot.result === 'MISS_HIVE' && near(shot.toY, HIVE_AABB.maxY + PIECE_PHYSICS.POLLEN.radius, 1e-6), `miss hits the HIVE front face (y ${shot.toY.toFixed(3)})`);
+      settle(e);
+      const piece = e.getFrame(shot.arriveTick)!.pieces.find(p => p.id === shot.pieceId)!;
+      assert(piece.state === 'ON_FIELD' && piece.y > HIVE_AABB.maxY && piece.vy > 0, 'ejected outward from the HIVE face');
+    }
+    // 빗맞음 + 바닥 착지 (HIVE 반대쪽을 향한 고정형): 사거리 지점에 착지, 수평 속도 × landingSpeedRetention
+    {
+      const e = eng({ r1Spawn: pose(72, 110, 0), r1Loadout: ['POLLEN'] }, C1, C2, fixedP(0));
+      for (let i = 0; i < 15; i++) e.step(SHOOT);
+      const shot = e.field.pendingShots[0];
+      const plan = planShotFlight({ robotX: e.r1.x, robotY: e.r1.y, robotHeading: e.r1.heading, shooter: C1, ballistics: DEFAULT_SHOOTER_BALLISTICS, pieceType: 'POLLEN', alliance: 'RED', upwardCell: 'AUDIENCE_CELL', hit: false });
+      assert(shot.result === 'MISS_FLOOR' && plan.result === 'MISS_FLOOR' && near(shot.toX, plan.to.x, 1e-9) && near(shot.landingVx, plan.landingVx, 1e-9), 'engine uses planShotFlight');
+      settle(e);
+      const piece = e.getFrame(shot.arriveTick)!.pieces.find(p => p.id === shot.pieceId)!;
+      // 착지 틱에 물리가 한 번 더 돌기 전 상태로 배치되므로 도착 프레임의 속도는 착지 속도
+      assert(piece.state === 'ON_FIELD' && near(piece.x, shot.toX, 1e-9) && near(piece.vx, shot.landingVx, 1e-9) && shot.landingVx > 0, 'lands on the floor with retained horizontal speed');
+    }
+    // 난수는 발사마다 3회: 첫 발의 명중 여부와 무관하게 둘째 발의 반사 난수가 같음
+    {
+      const second = (p1: number) => {
+        let n = 0;
+        const e = eng({ r1Spawn: front, r1Loadout: ['POLLEN', 'POLLEN'] }, C1, C2, () => (n++ === 0 ? p1 : 0));
+        for (let i = 0; i < 30; i++) e.step(SHOOT);
+        return e.field.pendingShots.find(s => s.launchTick === 30)!;
+      };
+      const a = second(1), b = second(0);
+      assert(a.ejectSpeedRoll === b.ejectSpeedRoll && a.ejectAngleRoll === b.ejectAngleRoll, 'RNG consumption per shot is outcome independent');
+    }
+    // 스크러빙: 비행 중 틱으로 되감아 같은 입력으로 재시뮬레이션하면 동일
+    {
+      const e = eng({ r1Spawn: front });
+      for (let i = 0; i < 70; i++) e.step(SHOOT);
+      settle(e);
+      const original = JSON.stringify(e.timeline);
+      const mid = e.timeline.findIndex(f => f.field.pendingShots.length > 0) + 3;
+      e.scrubTo(mid);
+      while (e.currentTick < 70) e.step(SHOOT);
+      settle(e);
+      assert(JSON.stringify(e.timeline) === original, `re-simulation from a mid-flight tick (${mid}) is identical`);
+    }
+    // 경기 종료 시 비행 중인 공은 득점에 반영되지 않음 (도착이 6000틱 이후)
+    {
+      const e = eng({ r1Spawn: front, r1Loadout: ['POLLEN'], hiveInitialPieces: { nectarCount: 3, pollenCount: 2 } });
+      while (e.currentTick < 5985) e.step();
+      while (e.currentTick < 6000) e.step(SHOOT);
+      const last = e.getFrame(6000)!;
+      assert(last.field.pendingShots.length === 1 && last.field.pendingShots[0].arriveTick > 6000 && last.field.hive.tipCount === 0, 'flight still pending at the final tick -> not scored');
+    }
   }, TEST_TIMEOUT_MS);
 });
 

@@ -4,6 +4,7 @@ import {
   canPossiblyHit,
   createAimTrajectory,
   createLUTShotResolver,
+  DEFAULT_SHOOTER_BALLISTICS,
   createRng,
   descendingDistanceAtHeight,
   estimateHitRate,
@@ -19,9 +20,12 @@ import {
   lutIndex,
   lutGridIndex,
   mirrorLUTSet,
+  planShotFlight,
   RNG_DRAWS_PER_SAMPLE,
   sampleLUT,
   searchLaunchSpeed,
+  shooterBallisticsFrom,
+  shotLaunchHeading,
   snapSweetSpot,
   validateBallisticsConfig,
   landingDistance,
@@ -35,8 +39,9 @@ import {
   timeAtDistance,
 } from '../ballistics';
 import type { Trajectory } from '../ballistics';
-import { GRAVITY, HIVE_AABB, HIVE_CELL_TILT, HIVE_CENTER_X, HIVE_HEIGHT, HIVE_RIM_Y, HIVE_RIM_Z, PIECE_PHYSICS, hiveCellAimPoint } from '../collision';
-import type { BallisticsConfig, HeatmapLUTSet, HiveCellKey, MatchHeatmapLUTs, RobotConfig } from '../types';
+import { normalizeAngle } from '../kinematics';
+import { FIELD_SIZE, GRAVITY, HIVE_AABB, HIVE_CELL_TILT, HIVE_CENTER_X, HIVE_HEIGHT, HIVE_RIM_Y, HIVE_RIM_Z, PIECE_PHYSICS, hiveCellAimPoint } from '../collision';
+import type { BallisticsConfig, HeatmapLUTSet, HiveCellKey, MatchHeatmapLUTs, RobotConfig, ShooterBallistics } from '../types';
 
 // 각 검증은 메시지와 함께 expect로 확인 (실패 시 어떤 조건이 깨졌는지 메시지로 표시)
 const assert = (c: boolean, m: string) => {
@@ -467,6 +472,74 @@ describe('몬테카를로 / LUT 생성 (06-3)', () => {
       const r = createLUTShotResolver(luts, mutable, mutable);
       mutable.aimTolerance = 0;
       assert(near(r('robot1', 'POLLEN', x, y, facing('RED', 'AUDIENCE_CELL') + deg(2), 'RED', 'AUDIENCE_CELL'), expected(0, 0, 0), 1e-6), 'shooter settings snapshotted at creation');
+    }
+  });
+});
+
+describe('발사 비행 계획 (06-6)', () => {
+  it('O. planShotFlight / shotLaunchHeading', () => {
+    const aim = hiveCellAimPoint('RED', 'AUDIENCE_CELL');
+    const FIXED = { turretType: 'FIXED' as const, turretRange: [0, 0] as [number, number] };
+    const TURRET = (range: [number, number]) => ({ turretType: 'TURRET' as const, turretRange: range });
+    // 발사 방향: 고정형 = 헤딩, 터렛 = 조준 방위 (범위 밖이면 가까운 한계각)
+    assert(shotLaunchHeading(FIXED, 0.3, 1.2) === 0.3, 'FIXED launches along the robot heading');
+    assert(shotLaunchHeading(TURRET([-Math.PI, Math.PI]), 0.3, 1.2) === 1.2, 'TURRET within range launches at the aim bearing');
+    assert(near(shotLaunchHeading(TURRET([-0.5, 0.5]), 0, Math.PI / 2), 0.5, 1e-12) && near(shotLaunchHeading(TURRET([-0.5, 0.5]), 0, -Math.PI / 2), -0.5, 1e-12), 'TURRET out of range clamps to the nearest limit');
+    // 후방 터렛 [2.5, −2.5]: Δψ = +0.3이면 가까운 한계 2.5, −0.3이면 −2.5
+    assert(near(shotLaunchHeading(TURRET([2.5, -2.5]), 0, 0.3), 2.5, 1e-12) && near(shotLaunchHeading(TURRET([2.5, -2.5]), 0, -0.3), -2.5, 1e-12), 'rear turret clamps toward the nearer rear limit');
+    assert(near(shotLaunchHeading(TURRET([2.5, -2.5]), 1, 1 + Math.PI), normalizeAngle(1 + Math.PI), 1e-12), 'rear turret within range launches at the aim bearing');
+
+    const plan = (x: number, y: number, heading: number, hit: boolean, ballistics: ShooterBallistics = DEFAULT_SHOOTER_BALLISTICS, shooter: Pick<RobotConfig, 'turretType' | 'turretRange'> = FIXED, pieceType: 'POLLEN' | 'NECTAR' = 'POLLEN') =>
+      planShotFlight({ robotX: x, robotY: y, robotHeading: heading, shooter, ballistics, pieceType, alliance: 'RED', upwardCell: 'AUDIENCE_CELL', hit });
+    const onAim = (x: number, y: number) => bearingTo(x, y, aim.x, aim.y);
+
+    // 명중: 조준점 도착, 비행 시간 = 수평 거리 / (v0·cosθ). v0 미지정이면 조준점 닫힌 해 (명목 궤적이 조준점을 지남)
+    {
+      const h = onAim(60.5, 130.5);
+      const p = plan(60.5, 130.5, h, true);
+      const D = Math.hypot(aim.x - p.from.x, aim.y - p.from.y);
+      assert(p.result === 'HIT' && near(p.to.x, aim.x, 1e-12) && near(p.to.y, aim.y, 1e-12) && near(p.to.z, aim.z, 1e-12), 'hit -> aim point');
+      assert(near(p.flightTime, D / (p.v0 * Math.cos(p.pitch)), 1e-12) && p.pitch === DEFAULT_SHOOTER_BALLISTICS.shooterPitch, 'hit flight time');
+      assert(near(p.v0, solveAimLaunchSpeed(60.5, 130.5, aim, { ...DEFAULT_SHOOTER_BALLISTICS })!, 1e-9) && near(p.from.z, HIVE_RIM_Z - DEFAULT_SHOOTER_BALLISTICS.dz, 1e-12), 'auto shooter v0 = closed form to the aim point');
+      const traj = { ...p.from, heading: p.heading, v0: p.v0, pitch: p.pitch };
+      assert(near(heightAtDistance(traj, D), aim.z, 1e-9), 'nominal trajectory passes the aim point');
+      // v0 우선순위: 기물별 지정값 > 닫힌 해 > 평지 사거리 = 조준점 거리
+      assert(plan(60.5, 130.5, h, true, { ...DEFAULT_SHOOTER_BALLISTICS, v0: { POLLEN: 321 } }).v0 === 321, 'given v0 used');
+      assert(near(plan(60.5, 130.5, h, true, { ...DEFAULT_SHOOTER_BALLISTICS, v0: { NECTAR: 321 } }).v0, p.v0, 1e-9), 'v0 of the other piece type ignored');
+      const low = plan(59.5, 101.5, onAim(59.5, 101.5), true, { dz: 39.5, shooterPitch: deg(20), shooterOffset: 0 });
+      const dLow = Math.hypot(aim.x - low.from.x, aim.y - low.from.y);
+      assert(near(low.v0, Math.sqrt((GRAVITY * dLow) / Math.sin(2 * deg(20))), 1e-9), 'no closed form -> range-matched v0');
+      assert(plan(60.5, 130.5, h, true, { dz: 39.5, shooterPitch: deg(95), shooterOffset: 0 }).pitch === DEFAULT_SHOOTER_BALLISTICS.shooterPitch, 'invalid pitch -> default pitch');
+    }
+    // 빗맞음 + HIVE 충돌: intersectHiveBox의 첫 접촉점
+    {
+      const p = plan(60.5, 130.5, onAim(60.5, 130.5), false);
+      const box = intersectHiveBox({ ...p.from, heading: p.heading, v0: p.v0, pitch: p.pitch }, R_POLLEN)!;
+      assert(p.result === 'MISS_HIVE' && box !== null && near(p.to.x, box.x, 1e-12) && near(p.to.y, box.y, 1e-12) && near(p.flightTime, box.time, 1e-12), 'miss -> first HIVE box contact');
+    }
+    // 빗맞음 + 바닥 착지: 사거리 지점, 수평 속도 × landingSpeedRetention (기물별)
+    for (const type of ['POLLEN', 'NECTAR'] as const) {
+      const p = plan(72, 110, 0, false, DEFAULT_SHOOTER_BALLISTICS, FIXED, type);
+      const traj = { ...p.from, heading: p.heading, v0: p.v0, pitch: p.pitch };
+      const R = landingDistance(traj, PIECE_PHYSICS[type].radius)!;
+      const vh = p.v0 * Math.cos(p.pitch) * PIECE_PHYSICS[type].landingSpeedRetention;
+      assert(p.result === 'MISS_FLOOR' && near(p.to.x, p.from.x + R, 1e-9) && near(p.to.z, PIECE_PHYSICS[type].radius, 1e-9) && near(p.landingVx, vh, 1e-9) && near(p.landingVy, 0, 1e-9), `${type} floor landing with retained speed`);
+      assert(near(p.flightTime, timeAtDistance(traj, R), 1e-12), `${type} landing time`);
+    }
+    // 착지 전에 벽에 닿으면 벽 앞(반지름 여유)에서 정지
+    {
+      const p = plan(125, 72, 0, false);
+      assert(p.result === 'MISS_FLOOR' && near(p.to.x, FIELD_SIZE - R_POLLEN, 1e-9) && p.landingVx === 0 && p.landingVy === 0, 'blocked by the wall -> stops at the wall');
+    }
+    // 터렛: 로봇이 반대쪽을 봐도 조준 방위로 발사
+    {
+      const p = plan(60.5, 130.5, onAim(60.5, 130.5) + Math.PI, true, DEFAULT_SHOOTER_BALLISTICS, TURRET([-Math.PI, Math.PI]));
+      assert(near(p.heading, onAim(60.5, 130.5), 1e-12), '360° turret launches at the aim bearing');
+    }
+    // 생성 결과 → 엔진 슈터 탄도
+    {
+      const s = shooterBallisticsFrom(MC, { v0: { POLLEN: 200, NECTAR: null } } as Parameters<typeof shooterBallisticsFrom>[1]);
+      assert(s.dz === MC.dz && s.shooterPitch === MC.shooterPitch && s.shooterOffset === MC.shooterOffset && s.v0?.POLLEN === 200 && s.v0?.NECTAR === undefined, 'shooterBallisticsFrom copies config and found v0');
     }
   });
 });

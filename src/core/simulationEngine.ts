@@ -25,6 +25,7 @@ import {
   testOBBvsCircle,
 } from './collision';
 import type { AABB, OBB, RobotBody, Vector2D } from './collision';
+import { DEFAULT_SHOOTER_BALLISTICS, planShotFlight } from './ballistics';
 import { stepRobotKinematics } from './kinematics';
 import {
   FLOWER_DEQ_GRAVITY_COOLDOWN,
@@ -38,7 +39,9 @@ import type {
   FieldState,
   FlowerState,
   GamePiece,
+  MatchShooterBallistics,
   PendingDrop,
+  PendingShot,
   RobotConfig,
   RobotPose,
   RobotState,
@@ -382,6 +385,7 @@ function cloneSnapshot(src: SimSnapshot, pieceIndex: ReadonlyMap<string, number>
     field: {
       ...field,
       hive: { ...field.hive, pendingDrops: field.hive.pendingDrops.map((d) => ({ ...d })) },
+      pendingShots: field.pendingShots.map((shot) => ({ ...shot })),
       flowers: field.flowers.map((f) => ({ ...f, pieces: f.pieces.map((p) => (p ? relink(p) : null)) })),
     },
     pieces,
@@ -414,6 +418,9 @@ export class SimulationEngine {
   // 외부 주입 슈터 명중률 해결자 (필수: 실제 경기는 탄도 LUT 기반, 테스트는 고정 확률)
   public shotResolver: ShotProbabilityResolver;
 
+  // 발사 비행 처리용 슈터 탄도 (미주입 시 기본 자동 슈터: 발사마다 조준점 닫힌 해 v0)
+  public shooters: MatchShooterBallistics;
+
   // runFullMatch()가 사용하는 틱별 입력 스케줄 (없으면 정지 + IDLE)
   public inputProvider: DriveInputProvider | null = null;
 
@@ -431,6 +438,7 @@ export class SimulationEngine {
     shotResolver: ShotProbabilityResolver,
     allianceColor: 'RED' | 'BLUE' = 'RED',
     scenario?: ScenarioConfig,
+    shooters?: MatchShooterBallistics,
   ) {
     // 로봇 식별자는 슬롯으로 고정 (사용자 입력 id와 무관하게 r1 = 'robot1', r2 = 'robot2')
     this.r1Config = { ...r1Config, id: 'robot1' };
@@ -438,6 +446,12 @@ export class SimulationEngine {
     this.defaultAlliance = allianceColor;
     this.scenario = scenario;
     this.shotResolver = shotResolver;
+    // 생성 시점 복사 (경기 중 원본 변경이 판정에 새지 않도록)
+    const copyShooter = (b: MatchShooterBallistics['robot1'] | undefined) => {
+      const src = b ?? DEFAULT_SHOOTER_BALLISTICS;
+      return { ...src, v0: src.v0 ? { ...src.v0 } : undefined };
+    };
+    this.shooters = { robot1: copyShooter(shooters?.robot1), robot2: copyShooter(shooters?.robot2) };
     this.reset();
   }
 
@@ -560,6 +574,7 @@ export class SimulationEngine {
       flowers,
       nectarStock: INITIAL_HUMAN_NECTAR_STOCK, // 휴먼 플레이어 재고 (OUT_OF_BOUNDS 대기)
       pendingHumanNectar: 0,
+      pendingShots: [],
     };
 
     // (5) 오토 팁 보상: 텔레옵 직전 휴먼 플레이어가 로딩 존에 NECTAR 투입 (결정론적 슬롯 배치, 산포보다 먼저)
@@ -619,6 +634,9 @@ export class SimulationEngine {
 
     // Step 5: HIVE 시차 낙하 스폰
     this.stepHiveDrops();
+
+    // Step 5-2: 발사 비행 도착 (명중 반영 / HIVE 반사 방출 / 바닥 착지)
+    this.stepShotArrivals();
 
     // --- 게임 룰 인터랙션 ---
     this.processIntake('r1');
@@ -1120,6 +1138,7 @@ export class SimulationEngine {
     return true;
   }
 
+  // 발사: 명중 여부와 비행 궤적을 발사 시점에 확정하고 비행 대기열에 등록 (도착은 stepShotArrivals)
   private fireShot(robot: RobotState, robotId: 'robot1' | 'robot2'): void {
     const piece = robot.controlledPieces.shift(); // FIFO: 가장 먼저 적재된 기물부터 발사
     if (!piece) return;
@@ -1129,17 +1148,91 @@ export class SimulationEngine {
     // 슬롯 기반 식별자 전달 (config.id에 의존하지 않음)
     const rawP = this.shotResolver(robotId, piece.type, robot.x, robot.y, robot.heading, alliance, hive.upwardCell);
     const p = Number.isFinite(rawP) ? clamp(rawP, 0, 1) : 0;
-    // 난수는 항상 1회 소비하여 전복 여부와 무관하게 RNG 시퀀스를 일정하게 유지
+    // 난수는 발사마다 항상 3회 소비 (명중 판정, 반사 방출 속도 / 각도): 결과와 무관하게 RNG 시퀀스를 일정하게 유지하고,
+    // 도착 시점에는 난수를 쓰지 않음 (결과론 불변)
     const roll = this.random();
+    const ejectSpeedRoll = this.random();
+    const ejectAngleRoll = this.random();
     // 전복 진행 중(낙하 대기열 방출 전)에는 새 득점을 수용하지 않음
     const hit = !hive.isTipping && roll < p;
 
-    if (!hit) {
-      this.ejectMissedShot(piece, robot);
-      return;
-    }
+    const config = robotId === 'robot1' ? this.r1Config : this.r2Config;
+    const plan = planShotFlight({
+      robotX: robot.x,
+      robotY: robot.y,
+      robotHeading: robot.heading,
+      shooter: config,
+      ballistics: this.shooters[robotId],
+      pieceType: piece.type,
+      alliance,
+      upwardCell: hive.upwardCell,
+      hit,
+    });
+    const flightTicks = Number.isFinite(plan.flightTime) ? Math.max(1, Math.round(plan.flightTime / DT)) : 1;
 
-    const cellCenter = hiveCellCenter(alliance, hive.upwardCell);
+    piece.state = 'IN_FLIGHT';
+    piece.x = plan.from.x;
+    piece.y = plan.from.y;
+    piece.vx = 0;
+    piece.vy = 0;
+    this.field.pendingShots.push({
+      pieceId: piece.id,
+      pieceType: piece.type,
+      robotId,
+      result: plan.result,
+      targetCell: hive.upwardCell,
+      launchTick: this.currentTick,
+      arriveTick: this.currentTick + flightTicks,
+      fromX: plan.from.x,
+      fromY: plan.from.y,
+      fromZ: plan.from.z,
+      toX: plan.to.x,
+      toY: plan.to.y,
+      toZ: plan.to.z,
+      heading: plan.heading,
+      v0: plan.v0,
+      pitch: plan.pitch,
+      landingVx: plan.landingVx,
+      landingVy: plan.landingVy,
+      ejectSpeedRoll,
+      ejectAngleRoll,
+    });
+  }
+
+  // 비행 도착: 도착 틱이 된 발사를 발사 순서대로 반영
+  // 명중은 도착 시점에 HIVE가 전복 중이 아니고 상향 셀이 발사 시점과 같을 때만 인정 (아니면 반사 방출)
+  private stepShotArrivals(): void {
+    const remaining: PendingShot[] = [];
+    const arrived: PendingShot[] = [];
+    for (const shot of this.field.pendingShots) {
+      (shot.arriveTick <= this.currentTick ? arrived : remaining).push(shot);
+    }
+    this.field.pendingShots = remaining;
+
+    const hive = this.field.hive;
+    for (const shot of arrived) {
+      const piece = this.getPiece(shot.pieceId);
+      if (!piece) continue;
+      if (shot.result === 'MISS_FLOOR') {
+        piece.state = 'ON_FIELD';
+        piece.x = shot.toX;
+        piece.y = shot.toY;
+        piece.vx = shot.landingVx;
+        piece.vy = shot.landingVy;
+        continue;
+      }
+      if (shot.result === 'HIT' && !hive.isTipping && hive.upwardCell === shot.targetCell) {
+        this.scoreInHive(piece);
+        continue;
+      }
+      this.ejectFromHive(piece, shot.toX, shot.toY, shot.ejectSpeedRoll, shot.ejectAngleRoll);
+    }
+  }
+
+  // 명중 기물을 상향 셀에 적재하고, 임계 테이블 도달 시 같은 틱에 즉시 전복 시작 (전복 중 발사 / 도착은 모두 빗맞음)
+  private scoreInHive(piece: GamePiece): void {
+    const hive = this.field.hive;
+    const cellCenter = hiveCellCenter(this.field.allianceColor, hive.upwardCell);
     piece.state = 'IN_HIVE';
     piece.x = cellCenter.x;
     piece.y = cellCenter.y;
@@ -1147,8 +1240,6 @@ export class SimulationEngine {
     piece.vy = 0;
     if (piece.type === 'NECTAR') hive.nectarInUpwardCell++;
     else hive.pollenInUpwardCell++;
-
-    // 임계 테이블 도달 시 같은 틱에 즉시 전복 시작 (전복 중 발사는 모두 빗맞음)
     if (isHiveTipReached(hive.nectarInUpwardCell, hive.pollenInUpwardCell)) this.tipHive();
   }
 
@@ -1175,29 +1266,35 @@ export class SimulationEngine {
     this.releaseHumanNectar(1);
   }
 
-  // 빗맞음: 로봇에 가장 가까운 HIVE 외곽 지점에서 바깥 방향 무작위 속도로 튕겨 나옴
-  private ejectMissedShot(piece: GamePiece, robot: RobotState): void {
+  // HIVE 반사 방출: 접촉 지점(x, y)에서 가장 가까운 HIVE 외곽 지점 바깥으로, 발사 시점에 뽑아 둔 난수로 속도 / 방향 결정
+  // 접촉 지점이 HIVE AABB 밖(옆면 충돌)이면 그 면의 바깥 법선, 안(윗면 낙하 / 도착 시 무효 명중)이면 가장 가까운 면의 바깥 법선
+  private ejectFromHive(piece: GamePiece, x: number, y: number, speedRoll: number, angleRoll: number): void {
     const r = PIECE_PHYSICS[piece.type].radius;
-    const edgeX = clamp(robot.x, HIVE_AABB.minX, HIVE_AABB.maxX);
-    const edgeY = clamp(robot.y, HIVE_AABB.minY, HIVE_AABB.maxY);
-    let nx = robot.x - edgeX;
-    let ny = robot.y - edgeY;
+    let edgeX = clamp(x, HIVE_AABB.minX, HIVE_AABB.maxX);
+    let edgeY = clamp(y, HIVE_AABB.minY, HIVE_AABB.maxY);
+    let nx = x - edgeX;
+    let ny = y - edgeY;
     let len = Math.hypot(nx, ny);
     if (len < EPSILON) {
-      nx = robot.x - (HIVE_AABB.minX + HIVE_AABB.maxX) / 2;
-      ny = robot.y - (HIVE_AABB.minY + HIVE_AABB.maxY) / 2;
-      len = Math.hypot(nx, ny);
-      if (len < EPSILON) {
-        nx = 0;
-        ny = 1;
-        len = 1;
-      }
+      // AABB 내부: 가장 가까운 면 (동률은 minX → maxX → minY → maxY 순)
+      const faces = [
+        { d: x - HIVE_AABB.minX, ex: HIVE_AABB.minX, ey: y, nx: -1, ny: 0 },
+        { d: HIVE_AABB.maxX - x, ex: HIVE_AABB.maxX, ey: y, nx: 1, ny: 0 },
+        { d: y - HIVE_AABB.minY, ex: x, ey: HIVE_AABB.minY, nx: 0, ny: -1 },
+        { d: HIVE_AABB.maxY - y, ex: x, ey: HIVE_AABB.maxY, nx: 0, ny: 1 },
+      ];
+      const face = faces.reduce((a, b) => (b.d < a.d ? b : a));
+      edgeX = face.ex;
+      edgeY = face.ey;
+      nx = face.nx;
+      ny = face.ny;
+      len = 1;
     }
     nx /= len;
     ny /= len;
 
-    const angle = Math.atan2(ny, nx) + this.uniform(-MISS_SPREAD_RAD, MISS_SPREAD_RAD);
-    const speed = this.uniform(MISS_SPEED_MIN, MISS_SPEED_MAX);
+    const angle = Math.atan2(ny, nx) + (-MISS_SPREAD_RAD + 2 * MISS_SPREAD_RAD * angleRoll);
+    const speed = MISS_SPEED_MIN + (MISS_SPEED_MAX - MISS_SPEED_MIN) * speedRoll;
     piece.state = 'ON_FIELD';
     piece.x = clamp(edgeX + nx * (r + MISS_SPAWN_GAP), r, FIELD_SIZE - r);
     piece.y = clamp(edgeY + ny * (r + MISS_SPAWN_GAP), r, FIELD_SIZE - r);

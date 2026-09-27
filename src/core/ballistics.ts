@@ -32,6 +32,7 @@ import type {
   MatchHeatmapLUTs,
   RobotConfig,
   RobotHeatmapLUTs,
+  ShooterBallistics,
   ShotProbabilityResolver,
 } from './types';
 
@@ -970,6 +971,136 @@ export function createLUTShotResolver(
     if (!isAimWithinShooterRange(deltaPsi, shooters[robotId])) return 0;
     const p = sampleLUT(luts[robotId][pieceType][hiveCellKey(alliance, upwardCell)], robotX, robotY);
     return Number.isFinite(p) ? Math.min(1, Math.max(0, p)) : 0;
+  };
+}
+
+// ============================================================
+// 9. 발사 비행 계획 (엔진 발사 / 도착 분리, 명세서 2.6.2 발사 비행 처리)
+// ============================================================
+
+// 엔진 기본 슈터 (탄도 설정 미주입 시): 발사구 14 in, 발사각 60°, 오프셋 0, v0는 발사마다 조준점 닫힌 해
+export const DEFAULT_SHOOTER_BALLISTICS: ShooterBallistics = { dz: HIVE_RIM_Z - 14, shooterPitch: Math.PI / 3, shooterOffset: 0 };
+
+/** generateRobotLUTs 결과 → 엔진 슈터 탄도 (탐색한 기물별 v0 포함) */
+export function shooterBallisticsFrom(config: BallisticsConfig, result: RobotBallisticsResult): ShooterBallistics {
+  const v0: Partial<Record<PieceType, number>> = {};
+  for (const type of PIECE_TYPES) {
+    const v = result.v0[type];
+    if (v !== null) v0[type] = v;
+  }
+  return { dz: config.dz, shooterPitch: config.shooterPitch, shooterOffset: config.shooterOffset, v0 };
+}
+
+/**
+ * 명목 발사 방향: 고정형은 로봇 헤딩, 터렛형은 조준점 방위 (터렛 범위 밖이면 가까운 한계각으로 제한, [-π, π])
+ */
+export function shotLaunchHeading(
+  shooter: Pick<RobotConfig, 'turretType' | 'turretRange'>,
+  robotHeading: number,
+  aimBearing: number,
+): number {
+  if (shooter.turretType !== 'TURRET') return robotHeading;
+  const delta = angleDifference(aimBearing, robotHeading);
+  if (isAimWithinShooterRange(delta, { ...shooter, aimTolerance: 0 })) return normalizeAngle(aimBearing);
+  const [rawLo, rawHi] = shooter.turretRange;
+  if (!Number.isFinite(rawLo) || !Number.isFinite(rawHi)) return robotHeading;
+  const lo = normalizeAngle(rawLo);
+  const hi = normalizeAngle(rawHi);
+  const toLo = Math.abs(angleDifference(lo, delta));
+  const toHi = Math.abs(angleDifference(hi, delta));
+  return normalizeAngle(robotHeading + (toLo <= toHi ? lo : hi));
+}
+
+export interface ShotFlightPlan {
+  result: 'HIT' | 'MISS_HIVE' | 'MISS_FLOOR';
+  from: Vector3D;         // 발사구
+  to: Vector3D;           // 도착 지점 (명중 = 조준점, HIVE 충돌 = 첫 접촉점, 바닥 = 착지점)
+  flightTime: number;     // 초
+  heading: number;        // 명목 궤적
+  v0: number;
+  pitch: number;
+  landingVx: number;      // 바닥 착지 직후 속도 (MISS_FLOOR, 벽에 막히면 0)
+  landingVy: number;
+}
+
+export interface ShotFlightInput {
+  robotX: number;
+  robotY: number;
+  robotHeading: number;
+  shooter: Pick<RobotConfig, 'turretType' | 'turretRange'>;
+  ballistics: ShooterBallistics;
+  pieceType: PieceType;
+  alliance: 'RED' | 'BLUE';
+  upwardCell: HiveCell;
+  hit: boolean;           // 판정 함수 + 난수로 발사 시점에 확정된 명중 여부
+}
+
+/**
+ * 발사 1회의 비행 계획 (편차 없는 명목 포물선, 닫힌 해, 발사 1회당 상수 시간)
+ * - 명중: 궤적과 무관하게 조준점 도착, 비행 시간 = 발사구 → 조준점 수평 거리 / (v0·cosθ)
+ * - 빗맞음 + HIVE 직육면체 충돌 (intersectHiveBox, 반지름 확장): 첫 접촉점 도착 (엔진이 그 지점에서 반사 방출)
+ * - 빗맞음 + HIVE를 넘어가거나 닿지 않음: 공 중심 높이 = 반지름인 사거리 지점 착지, 착지 속도 = 발사 방향 v0·cosθ × landingSpeedRetention.
+ *   지면 직선이 착지 전에 필드 벽(반지름 여유)에 닿으면 벽 앞에서 정지 (속도 0)
+ * - v0: 탄도 설정의 기물별 값 → 없으면 조준점 닫힌 해 → 그것도 없으면 평지 사거리 = 조준점 거리인 속도
+ */
+export function planShotFlight(input: ShotFlightInput): ShotFlightPlan {
+  const { robotX, robotY, ballistics, pieceType } = input;
+  const aim = hiveCellAimPoint(input.alliance, input.upwardCell);
+  const bearing = bearingTo(robotX, robotY, aim.x, aim.y);
+  const heading = shotLaunchHeading(input.shooter, input.robotHeading, bearing);
+  const pitch =
+    Number.isFinite(ballistics.shooterPitch) && ballistics.shooterPitch > 0 && ballistics.shooterPitch < Math.PI / 2
+      ? ballistics.shooterPitch
+      : DEFAULT_SHOOTER_BALLISTICS.shooterPitch;
+  const cfg = {
+    dz: Number.isFinite(ballistics.dz) ? ballistics.dz : DEFAULT_SHOOTER_BALLISTICS.dz,
+    shooterOffset: Number.isFinite(ballistics.shooterOffset) ? ballistics.shooterOffset : 0,
+    shooterPitch: pitch,
+  };
+  const origin = launchPoint(robotX, robotY, heading, cfg);
+  const aimDistance = Math.max(EPSILON, Math.hypot(aim.x - origin.x, aim.y - origin.y));
+
+  const given = ballistics.v0?.[pieceType];
+  const v0 =
+    given !== undefined && Number.isFinite(given) && given > 0
+      ? given
+      : (solveAimLaunchSpeed(robotX, robotY, aim, cfg) ?? Math.sqrt((GRAVITY * aimDistance) / Math.sin(2 * pitch)));
+  const traj: Trajectory = { ...origin, heading, v0, pitch };
+  const radius = PIECE_PHYSICS[pieceType].radius;
+  const base = { from: { ...origin }, heading, v0, pitch, landingVx: 0, landingVy: 0 };
+
+  if (input.hit) {
+    return { ...base, result: 'HIT', to: { ...aim }, flightTime: timeAtDistance(traj, aimDistance) };
+  }
+
+  const box = intersectHiveBox(traj, radius);
+  if (box) {
+    return { ...base, result: 'MISS_HIVE', to: { x: box.x, y: box.y, z: box.z }, flightTime: box.time };
+  }
+
+  // 바닥 착지 (해가 없으면 발사구 바로 아래)
+  const range = landingDistance(traj, radius) ?? 0;
+  const cos = Math.cos(heading);
+  const sin = Math.sin(heading);
+  // 지면 직선이 필드 벽(반지름 여유)에 닿는 거리
+  let wall = Infinity;
+  const axis = (p: number, d: number) => {
+    if (d > EPSILON) wall = Math.min(wall, (FIELD_SIZE - radius - p) / d);
+    else if (d < -EPSILON) wall = Math.min(wall, (radius - p) / d);
+  };
+  axis(origin.x, cos);
+  axis(origin.y, sin);
+  const blocked = wall < range;
+  const d = Math.max(0, blocked ? wall : range);
+  const clampXY = (v: number) => Math.min(FIELD_SIZE - radius, Math.max(radius, v));
+  const vh = v0 * Math.cos(pitch) * PIECE_PHYSICS[pieceType].landingSpeedRetention;
+  return {
+    ...base,
+    result: 'MISS_FLOOR',
+    to: { x: clampXY(origin.x + d * cos), y: clampXY(origin.y + d * sin), z: blocked ? heightAtDistance(traj, d) : radius },
+    flightTime: timeAtDistance(traj, d),
+    landingVx: blocked ? 0 : vh * cos,
+    landingVy: blocked ? 0 : vh * sin,
   };
 }
 
