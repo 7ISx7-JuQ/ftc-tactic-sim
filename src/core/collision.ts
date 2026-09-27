@@ -783,8 +783,8 @@ const DROP_DISTRIBUTION: Record<GamePiece['type'], DropDistribution> = {
   NECTAR: { meanDistance: 20.2, sigmaDistance: 7.0, sigmaLateral: 5.9, settleMin: 1.36, settleMax: 2.08 },
 };
 
-// Box-Muller 변환 기반 정규분포 난수
-function sampleNormal(mean: number, sigma: number, rng: () => number): number {
+// Box-Muller 변환 기반 정규분포 난수 (탄도 몬테카를로에서도 재사용)
+export function sampleNormal(mean: number, sigma: number, rng: () => number): number {
   const u1 = 1 - rng(); // (0, 1] 범위로 변환하여 log(0) 방지
   const u2 = rng();
   const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
