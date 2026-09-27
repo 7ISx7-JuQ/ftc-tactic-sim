@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   bearingTo,
+  canPossiblyHit,
   createAimTrajectory,
   createRng,
   descendingDistanceAtHeight,
@@ -15,6 +16,8 @@ import {
   lutIndex,
   lutGridIndex,
   mirrorLUTSet,
+  RNG_DRAWS_PER_SAMPLE,
+  sampleLUT,
   searchLaunchSpeed,
   snapSweetSpot,
   validateBallisticsConfig,
@@ -163,21 +166,24 @@ const openingPoint = (alliance: 'RED' | 'BLUE', cell: 'AUDIENCE_CELL' | 'OPPOSIT
 const shotAt = (robotX: number, robotY: number, target: { x: number; y: number; z: number }, cfg: BallisticsConfig = BC) =>
   createAimTrajectory(robotX, robotY, target, solveAimLaunchSpeed(robotX, robotY, target, cfg)!, cfg);
 const NO_NOISE = { v0NoisePercent: 0, headingNoiseRad: 0, pitchNoiseRad: 0 };
+// 몬테카를로 기준 설정: 발사구 14 in, 발사각 70°, Audience 벽에 붙은 스윗스팟 (정면 고각 사격, 하강 진입)
+// (BC의 근거리 상승 사격은 조준점 명목 궤적이 림 모서리를 0.97 in 거리로 스쳐 걸리므로 몬테카를로 기준으로 쓰지 않음)
+const MC: BallisticsConfig = { dz: 39.5, shooterPitch: deg(70), sweetSpot: { x: 60.5, y: 134.5 }, shooterOffset: 6 };
 const SIZE = { length: 18, width: 18 };
 const R_NECTAR = PIECE_PHYSICS.NECTAR.radius;
 
 describe('몬테카를로 / LUT 생성 (06-3)', () => {
   it('F. 투입구 명중 판정 (isShotInHiveCell)', () => {
     // 4셀 대칭: 대칭 위치에서 각 셀 조준점을 정확히 지나는 궤적은 명중
-    for (const [alliance, cell, x, y] of [['RED', 'AUDIENCE_CELL', 59.25, 130], ['RED', 'OPPOSITE_CELL', 59.25, 14], ['BLUE', 'AUDIENCE_CELL', 84.75, 130], ['BLUE', 'OPPOSITE_CELL', 84.75, 14]] as const) {
-      const traj = shotAt(x, y, hiveCellAimPoint(alliance, cell));
+    for (const [alliance, cell, x, y] of [['RED', 'AUDIENCE_CELL', 60.5, 134.5], ['RED', 'OPPOSITE_CELL', 60.5, 9.5], ['BLUE', 'AUDIENCE_CELL', 83.5, 134.5], ['BLUE', 'OPPOSITE_CELL', 83.5, 9.5]] as const) {
+      const traj = shotAt(x, y, hiveCellAimPoint(alliance, cell), MC);
       assert(isShotInHiveCell(traj, alliance, cell, R_POLLEN), `aim point hit ${alliance} ${cell}`);
       const other = cell === 'AUDIENCE_CELL' ? 'OPPOSITE_CELL' : 'AUDIENCE_CELL';
       assert(!isShotInHiveCell(traj, alliance, other, R_POLLEN), `not counted for the other cell ${alliance} ${other}`);
     }
-    // 원거리 대각 사격 (발사각 60°): 공이 내려오며 입구에 들어가므로 림 통과 높이와 무관하게 변 판정만 검사
-    const FC: BallisticsConfig = { ...BC, shooterPitch: deg(60) };
-    const hit = (u: number, s: number, r = R_POLLEN) => isShotInHiveCell(shotAt(20, 140, openingPoint('RED', 'AUDIENCE_CELL', u, s), FC), 'RED', 'AUDIENCE_CELL', r);
+    // 정면 원거리 고각 사격 (발사각 70°, 목표 바로 앞 y = 140): 공이 내려오며 셀 앞면 개구부로 들어오므로 입구 변 판정만 검사
+    const FC: BallisticsConfig = { ...BC, shooterPitch: deg(70) };
+    const hit = (u: number, s: number, r = R_POLLEN) => isShotInHiveCell(shotAt(59.25 + u, 140, openingPoint('RED', 'AUDIENCE_CELL', u, s), FC), 'RED', 'AUDIENCE_CELL', r);
     // 좌우 세로 변: 반폭 10 - r (POLLEN 8.6, NECTAR 8.2)
     assert(hit(8.55, 3) && !hit(8.65, 3) && hit(-8.55, 3) && !hit(-8.65, 3), 'side edges inset by POLLEN radius');
     assert(hit(8.4, 3, R_POLLEN) && !hit(8.4, 3, R_NECTAR), 'NECTAR (larger) needs more margin than POLLEN');
@@ -187,15 +193,21 @@ describe('몬테카를로 / LUT 생성 (06-3)', () => {
     assert(hit(0, 12.2) && !hit(0, 12.5), 'slanted edges inset by radius');
     // 너무 짧게 / 길게 쏜 공은 빗맞음
     const aim = hiveCellAimPoint('RED', 'AUDIENCE_CELL');
-    const base = shotAt(20, 140, aim, FC);
+    const base = shotAt(59.25, 140, aim, FC);
     assert(!isShotInHiveCell({ ...base, v0: base.v0 * 0.9 }, 'RED', 'AUDIENCE_CELL', R_POLLEN) && !isShotInHiveCell({ ...base, v0: base.v0 * 1.2 }, 'RED', 'AUDIENCE_CELL', R_POLLEN), 'short / long shots miss');
     // 뒷면 통과: HIVE 반대편(Opposite 쪽)에서 쏜 공은 조준점을 지나도 빗맞음
     assert(!isShotInHiveCell(shotAt(59.25, 20, aim), 'RED', 'AUDIENCE_CELL', R_POLLEN), 'crossing from the back side is a miss');
-    // 근거리 상승 사격 (BC: 거리 약 35 in, 도달 시 아직 상승 중): 입구 아래쪽(s = 3)을 노리면 림에 걸리고, 가운데는 명중
+    // 근거리 상승 사격 (BC: 거리 약 35 in, 약 50°로 상승하며 도달): 공이 벽 윗모서리를 비스듬히 지나므로
+    // 모서리까지의 수직 거리는 높이 여유 × cos(상승각). 입구 아래쪽 / 조준점(s ≈ 5.6)은 걸리고, 입구 위쪽(s = 11)은 명중
     {
       const low = shotAt(59.25, 130, openingPoint('RED', 'AUDIENCE_CELL', 0, 3));
       assert(heightAtDistance(low, low.y - HIVE_RIM_Y.AUDIENCE_CELL) < HIVE_RIM_Z + R_POLLEN && !isShotInHiveCell(low, 'RED', 'AUDIENCE_CELL', R_POLLEN), 'rising shot to the lower opening clips the rim');
-      assert(isShotInHiveCell(shotAt(59.25, 130, openingPoint('RED', 'AUDIENCE_CELL', 0, 7)), 'RED', 'AUDIENCE_CELL', R_POLLEN), 'rising shot to the mid opening clears the rim');
+      assert(!isShotInHiveCell(shotAt(59.25, 130, aim), 'RED', 'AUDIENCE_CELL', R_POLLEN), 'rising shot to the aim point passes within r of the rim corner');
+      assert(isShotInHiveCell(shotAt(59.25, 130, openingPoint('RED', 'AUDIENCE_CELL', 0, 11)), 'RED', 'AUDIENCE_CELL', R_POLLEN), 'rising shot to the upper opening clears the wall corner');
+      // s = 9: 벽 윗면 띠(앞면 y, 림 y)에서는 림 z + r 위를 지나지만, 바깥 윗모서리까지의 수직 거리가 r 미만 → 모서리에서만 걸림
+      const mid = shotAt(59.25, 130, openingPoint('RED', 'AUDIENCE_CELL', 0, 9));
+      assert(heightAtDistance(mid, mid.y - HIVE_AABB.maxY) > HIVE_RIM_Z + R_POLLEN && heightAtDistance(mid, mid.y - HIVE_RIM_Y.AUDIENCE_CELL) > HIVE_RIM_Z + R_POLLEN, 's = 9 clears the wall top band');
+      assert(!isShotInHiveCell(mid, 'RED', 'AUDIENCE_CELL', R_POLLEN), 's = 9 clips the outer wall corner (rounded Minkowski corner)');
     }
     // 림 통과 높이: 입구 안쪽(s = 3.85)을 지나지만 림 y에서 림 아래(z 52.05)를 지나는 가파른 궤적은 빗맞음
     {
@@ -207,19 +219,19 @@ describe('몬테카를로 / LUT 생성 (06-3)', () => {
   });
 
   it('G. 몬테카를로 명중률 (estimateHitRate)', () => {
-    const v0 = sweetSpotLaunchSpeed(BC)!;
-    const { x, y } = BC.sweetSpot;
-    assert(estimateHitRate(x, y, v0, { ...BC, ...NO_NOISE }, 'POLLEN', 50, createRng(1)) === 1, 'no noise + closed-form v0 -> 100%');
-    const p1 = estimateHitRate(x, y, v0, BC, 'POLLEN', 2000, createRng(7));
-    assert(p1 === estimateHitRate(x, y, v0, BC, 'POLLEN', 2000, createRng(7)), 'same seed -> same rate');
+    const v0 = sweetSpotLaunchSpeed(MC)!;
+    const { x, y } = MC.sweetSpot;
+    assert(estimateHitRate(x, y, v0, { ...MC, ...NO_NOISE }, 'POLLEN', 50, createRng(1)) === 1, 'no noise + closed-form v0 -> 100%');
+    const p1 = estimateHitRate(x, y, v0, MC, 'POLLEN', 2000, createRng(7));
+    assert(p1 === estimateHitRate(x, y, v0, MC, 'POLLEN', 2000, createRng(7)), 'same seed -> same rate');
     assert(p1 > 0.5 && p1 < 1, `noisy rate at sweet spot in (0.5, 1): ${p1}`);
     // 같은 난수 스트림이면 같은 궤적이므로 NECTAR(반지름 큼) 명중은 POLLEN 명중의 부분집합
-    assert(estimateHitRate(x, y, v0, BC, 'NECTAR', 2000, createRng(7)) <= p1, 'NECTAR rate ≤ POLLEN rate for identical samples');
+    assert(estimateHitRate(x, y, v0, MC, 'NECTAR', 2000, createRng(7)) <= p1, 'NECTAR rate ≤ POLLEN rate for identical samples');
     // 점대칭 (RED_AUDIENCE ↔ BLUE_OPPOSITE): 180° 회전이면 편차 부호가 보존되어 샘플 단위로 일치
-    const pb = estimateHitRate(144 - x, 144 - y, v0, BC, 'POLLEN', 2000, createRng(7), 'BLUE', 'OPPOSITE_CELL');
+    const pb = estimateHitRate(144 - x, 144 - y, v0, MC, 'POLLEN', 2000, createRng(7), 'BLUE', 'OPPOSITE_CELL');
     assert(Math.abs(pb - p1) <= 2 / 2000, `point-symmetric rate equal (${p1} vs ${pb})`);
     // 조준점에서 멀리 떨어지면 (고정 v0) 명중률 0
-    assert(estimateHitRate(x, y - 10, v0, BC, 'POLLEN', 500, createRng(3)) === 0, 'off the sweet distance (10 in closer) -> 0');
+    assert(estimateHitRate(x, y - 25, v0, MC, 'POLLEN', 500, createRng(3)) === 0, 'off the sweet distance (25 in closer) -> 0');
     // PRNG: [0, 1) 균일, 시드별 스트림
     const r = createRng(123);
     const xs = Array.from({ length: 1000 }, r);
@@ -228,17 +240,17 @@ describe('몬테카를로 / LUT 생성 (06-3)', () => {
   });
 
   it('H. v0 탐색 (searchLaunchSpeed)', () => {
-    const closed = sweetSpotLaunchSpeed(BC)!;
+    const closed = sweetSpotLaunchSpeed(MC)!;
     // 편차 없음: 닫힌 해에서 이미 100%이고 동률은 닫힌 해 우선 → 닫힌 해 그대로
-    const exact = searchLaunchSpeed({ ...BC, ...NO_NOISE }, 'POLLEN', 50)!;
+    const exact = searchLaunchSpeed({ ...MC, ...NO_NOISE }, 'POLLEN', 50)!;
     assert(exact.v0 === closed && exact.hitRate === 1, `no noise -> closed-form v0 kept (${exact.v0} vs ${closed})`);
     // 편차 있음: 탐색 결과는 닫힌 해 ±21% 이내, 닫힌 해 명중률 이상 (같은 시드 공통 난수)
     for (const type of ['POLLEN', 'NECTAR'] as const) {
-      const found = searchLaunchSpeed(BC, type, 1000, 99)!;
-      const atClosed = estimateHitRate(BC.sweetSpot.x, BC.sweetSpot.y, closed, BC, type, 1000, createRng(99));
+      const found = searchLaunchSpeed(MC, type, 1000, 99)!;
+      const atClosed = estimateHitRate(MC.sweetSpot.x, MC.sweetSpot.y, closed, MC, type, 1000, createRng(99));
       assert(Math.abs(found.v0 / closed - 1) <= 0.21 + 1e-9, `${type} v0 within search range (${found.v0 / closed})`);
       assert(found.hitRate >= atClosed && found.hitRate > 0.5, `${type} search improves on closed form (${atClosed} -> ${found.hitRate})`);
-      const again = searchLaunchSpeed(BC, type, 1000, 99)!;
+      const again = searchLaunchSpeed(MC, type, 1000, 99)!;
       assert(again.v0 === found.v0 && again.hitRate === found.hitRate, `${type} deterministic`);
     }
     assert(searchLaunchSpeed({ ...BC, sweetSpot: { x: 59.25, y: 100 }, shooterOffset: 0, shooterPitch: deg(30) }, 'POLLEN') === null, 'no closed form -> null');
@@ -246,8 +258,8 @@ describe('몬테카를로 / LUT 생성 (06-3)', () => {
 
   it('I. 탄도 설정 / 스윗스팟 검증', () => {
     const codes = (cfg: BallisticsConfig, size = SIZE) => validateBallisticsConfig(cfg, size).map(i => i.code).join();
-    // 검증은 격자 중심으로 스냅한 스윗스팟 기준: y 134.9 → 135 (몸체가 벽을 넘음), y 133.9 → 133 (필드 안)
-    assert(codes({ ...BC, sweetSpot: { x: 59.25, y: 134.9 } }) === 'SWEET_SPOT_OUT_OF_FIELD' && codes({ ...BC, sweetSpot: { x: 59.25, y: 133.9 } }) === '', 'validation uses snapped sweet spot');
+    // 검증은 격자 중심으로 스냅한 스윗스팟 기준: y 134.9 → 134.5 (몸체 끝 약 143.55, 필드 안), y 135 → 135.5 (몸체가 벽을 넘음)
+    assert(codes({ ...BC, sweetSpot: { x: 59.25, y: 134.9 } }) === '' && codes({ ...BC, sweetSpot: { x: 59.25, y: 135 } }) === 'SWEET_SPOT_OUT_OF_FIELD', 'validation uses snapped sweet spot');
     assert(codes(BC) === '', 'valid config');
     assert(codes({ ...BC, sweetSpot: { x: 59.25, y: 140 } }) === 'SWEET_SPOT_OUT_OF_FIELD', 'robot body crosses the audience wall');
     assert(codes({ ...BC, sweetSpot: { x: 59.25, y: 96 } }).includes('SWEET_SPOT_IN_HIVE'), 'robot body overlaps HIVE');
@@ -263,49 +275,122 @@ describe('몬테카를로 / LUT 생성 (06-3)', () => {
       const ref = Float32Array.from({ length: n * n }, (_, i) => i);
       const set = mirrorLUTSet(ref);
       let ok = true;
-      for (const [gx, gy] of [[0, 0], [3, 70], [71, 5], [29, 64]]) {
+      for (const [gx, gy] of [[0, 0], [3, 140], [143, 5], [59, 130]]) {
         ok &&= set.RED_AUDIENCE[lutIndex(gx, gy)] === ref[lutIndex(gx, gy)]
           && set.RED_OPPOSITE[lutIndex(gx, gy)] === ref[lutIndex(gx, n - 1 - gy)]
           && set.BLUE_AUDIENCE[lutIndex(gx, gy)] === ref[lutIndex(n - 1 - gx, gy)]
           && set.BLUE_OPPOSITE[lutIndex(gx, gy)] === ref[lutIndex(n - 1 - gx, n - 1 - gy)];
       }
       assert(ok && set.RED_AUDIENCE !== ref, 'mirror index mapping (y = 72, x = 72, point symmetry), reference copied');
-      assert(lutCellCenter(0) === 1 && lutCellCenter(71) === 143 && lutIndex(1, 2) === 2 * n + 1, 'grid centers / index');
-      assert(lutGridIndex(0) === 0 && lutGridIndex(1.99) === 0 && lutGridIndex(2) === 1 && lutGridIndex(144) === 71 && lutGridIndex(-5) === 0 && lutGridIndex(NaN) === 0, 'grid index clamp');
+      assert(n === 144 && lutCellCenter(0) === 0.5 && lutCellCenter(143) === 143.5 && lutIndex(1, 2) === 2 * n + 1, '1 in grid centers / index');
+      assert(lutGridIndex(0) === 0 && lutGridIndex(0.99) === 0 && lutGridIndex(1) === 1 && lutGridIndex(144) === 143 && lutGridIndex(-5) === 0 && lutGridIndex(NaN) === 0, 'grid index clamp');
       const ss = snapSweetSpot({ x: 59.25, y: 130 });
-      assert(ss.x === 59 && ss.y === 131, `sweet spot snapped to grid center (${ss.x}, ${ss.y})`);
+      assert(ss.x === 59.5 && ss.y === 130.5, `sweet spot snapped to grid center (${ss.x}, ${ss.y})`);
     }
     // 로봇 1대 LUT 8장 (샘플 수를 줄여 빠르게)
     const opts = { samples: 40, searchSamples: 300, seed: 5 };
-    const res = generateRobotLUTs(BC, SIZE, opts);
+    const res = generateRobotLUTs(MC, SIZE, opts);
     assert(res.issues.length === 0 && res.v0.POLLEN !== null && res.v0.NECTAR !== null, 'valid -> v0 per piece type');
     assert(res.sweetSpotHitRate.POLLEN > 0.5 && res.sweetSpotHitRate.NECTAR > 0.5, `sweet spot hit rates ${JSON.stringify(res.sweetSpotHitRate)}`);
     for (const type of ['POLLEN', 'NECTAR'] as const) {
       const set = res.luts[type];
       const ref = set.RED_AUDIENCE;
-      assert(Object.values(set).every(l => l.length === n * n && l.every(v => v >= 0 && v <= 1)), `${type} 4 LUTs of 72x72 in [0, 1]`);
+      assert(Object.values(set).every(l => l.length === n * n && l.every(v => v >= 0 && v <= 1)), `${type} 4 LUTs of 144x144 in [0, 1]`);
       let mirrored = true;
       for (let gy = 0; gy < n; gy++) for (let gx = 0; gx < n; gx++) {
         mirrored &&= set.RED_OPPOSITE[lutIndex(gx, gy)] === ref[lutIndex(gx, n - 1 - gy)] && set.BLUE_OPPOSITE[lutIndex(gx, gy)] === ref[lutIndex(n - 1 - gx, n - 1 - gy)];
       }
       assert(mirrored, `${type} cells are exact mirrors of the reference`);
-      // 기준 셀 LUT는 채택한 v0로 만든 generateReferenceLUT와 같음 (시드 파생 규칙 포함 결정론)
-      assert(ref[lutIndex(36, 36)] === 0 && ref[lutIndex(29, 43)] === 0, `${type} robot overlapping HIVE -> 0`);
-      // 스윗스팟 (59.25, 130) → 격자 (29, 65) 중심 (59, 131)에서 v0를 탐색하므로 그 격자 값이 높음
-      const atSweet = ref[lutIndex(29, 65)];
+      assert(ref[lutIndex(72, 72)] === 0 && ref[lutIndex(59, 86)] === 0, `${type} robot overlapping HIVE -> 0`);
+      // 스윗스팟 (60.5, 134.5) = 격자 (60, 134) 중심에서 v0를 탐색하므로 그 격자 값이 높음
+      const atSweet = ref[lutIndex(60, 134)];
       assert(atSweet > 0.5, `${type} high at the sweet spot grid (${atSweet})`);
-      assert(ref[lutIndex(29, 70)] < atSweet && ref[lutIndex(29, 55)] === 0, `${type} falls off away from the sweet distance`);
+      assert(ref[lutIndex(60, 143)] < atSweet && ref[lutIndex(60, 108)] === 0, `${type} falls off away from the sweet distance`);
     }
-    const again = generateRobotLUTs(BC, SIZE, opts);
+    const again = generateRobotLUTs(MC, SIZE, opts);
     assert(again.v0.POLLEN === res.v0.POLLEN && again.luts.NECTAR.BLUE_AUDIENCE.every((v, i) => v === res.luts.NECTAR.BLUE_AUDIENCE[i]), 'same seed -> identical LUTs');
-    const other = generateRobotLUTs(BC, SIZE, { ...opts, seed: 6 });
+    const other = generateRobotLUTs(MC, SIZE, { ...opts, seed: 6 });
     assert(other.luts.POLLEN.RED_AUDIENCE.some((v, i) => v !== res.luts.POLLEN.RED_AUDIENCE[i]), 'different seed -> different samples');
-    const refA = generateReferenceLUT(BC, SIZE, 'POLLEN', res.v0.POLLEN!, 40, 11);
-    const refB = generateReferenceLUT(BC, SIZE, 'POLLEN', res.v0.POLLEN!, 40, 11);
+    const refA = generateReferenceLUT(MC, SIZE, 'POLLEN', res.v0.POLLEN!, 40, 11);
+    const refB = generateReferenceLUT(MC, SIZE, 'POLLEN', res.v0.POLLEN!, 40, 11);
     assert(refA.every((v, i) => v === refB[i]), 'reference LUT deterministic');
     // 검증 실패: LUT 전부 0, v0 null
-    const bad = generateRobotLUTs({ ...BC, sweetSpot: { x: 59.25, y: 96 } }, SIZE, opts);
+    const bad = generateRobotLUTs({ ...MC, sweetSpot: { x: 59.25, y: 96 } }, SIZE, opts);
     assert(bad.issues.length > 0 && bad.v0.POLLEN === null && Object.values(bad.luts.POLLEN).every(l => l.every(v => v === 0)), 'invalid -> all-zero LUTs');
   }, 60_000);
-});
 
+  it('K. HIVE 직육면체 진입 면 (셀 앞면 개구부 / 윗면만 허용)', () => {
+    const aim = hiveCellAimPoint('RED', 'AUDIENCE_CELL');
+    const LOB = MC;
+    // HIVE 옆(x < 47)에서 조준점을 정확히 지나는 궤적: 입구 판정 ①~③은 통과하지만 HIVE 옆면을 뚫고 오므로 빗맞음
+    for (const y of [85.5, 89.5, 93.5, 97.5]) {
+      const traj = shotAt(9.5, y, aim, LOB);
+      const box = intersectHiveBox(traj, R_POLLEN);
+      assert(box !== null && box.face === 'SIDE' && near(box.x, HIVE_AABB.minX - R_POLLEN, 1e-6) && box.z < HIVE_HEIGHT, `side approach from y ${y} enters through the HIVE side face (z ${box?.z.toFixed(1)})`);
+      assert(!isShotInHiveCell(traj, 'RED', 'AUDIENCE_CELL', R_POLLEN), `side approach from y ${y} blocked (no y = 93 stripe)`);
+    }
+    // 앞쪽 대각선에서 입구 가장자리를 노리면 셀 폭 밖(프레임)으로 앞면에 진입 → 차단, 정면에서는 같은 지점이 명중
+    const FC: BallisticsConfig = { ...BC, shooterPitch: deg(70) };
+    const edge = openingPoint('RED', 'AUDIENCE_CELL', -8.5, 3);
+    assert(!isShotInHiveCell(shotAt(20, 140, edge, FC), 'RED', 'AUDIENCE_CELL', R_POLLEN), 'diagonal shot to the opening edge hits the frame beside the cell');
+    assert(isShotInHiveCell(shotAt(59.25 - 8.5, 140, edge, FC), 'RED', 'AUDIENCE_CELL', R_POLLEN), 'straight shot to the same edge point enters');
+    // 셀 앞면 개구부 진입 (정면 스윗스팟) / 윗면 진입 (발사각 80°, 앞면 도달 높이 67.3 > 박스 높이 + r)
+    assert(isShotInHiveCell(shotAt(60.5, 134.5, aim, LOB), 'RED', 'AUDIENCE_CELL', R_POLLEN), 'front window entry');
+    {
+      const steep = shotAt(59.25, 124, aim, { ...LOB, shooterPitch: deg(80) });
+      assert(heightAtDistance(steep, steep.y - (HIVE_AABB.maxY + R_POLLEN)) > HIVE_HEIGHT + R_POLLEN, 'steep lob is above the box at the front face');
+      assert(isShotInHiveCell(steep, 'RED', 'AUDIENCE_CELL', R_POLLEN), 'top window entry');
+    }
+    // LUT: HIVE 옆 격자는 0, 앞쪽 띠는 유지
+    const v0 = searchLaunchSpeed(LOB, 'POLLEN', 2000)!.v0;
+    assert([85.5, 89.5, 93.5, 97.5].every(y => estimateHitRate(9.5, y, v0, LOB, 'POLLEN', 500, createRng(1)) === 0), 'side cells -> 0');
+    assert(estimateHitRate(60.5, 134.5, v0, LOB, 'POLLEN', 500, createRng(1)) > 0.9, 'front sweet spot keeps a high rate');
+  });
+
+  it('L. LUT 쌍선형 보간 조회 (sampleLUT)', () => {
+    const n = LUT_GRID_SIZE;
+    // 선형 함수는 격자 사이에서도 정확히 재현 (격자 중심 = g + 0.5)
+    const linear = Float32Array.from({ length: n * n }, (_, i) => 0.001 * (i % n) + 0.002 * Math.floor(i / n));
+    const f = (x: number, y: number) => 0.001 * (x - 0.5) + 0.002 * (y - 0.5);
+    assert([[10.5, 20.5], [10.8, 20.2], [60.25, 130.75], [0.5, 0.5], [143.5, 143.5]].every(([x, y]) => near(sampleLUT(linear, x, y), f(x, y), 1e-5)), 'bilinear reproduces a linear field');
+    // 필드 가장자리 격자 중심 바깥은 가장자리 값, 비유한 좌표는 0으로 처리
+    assert(near(sampleLUT(linear, 0.1, 50.5), f(0.5, 50.5), 1e-6) && near(sampleLUT(linear, 200, 50.5), f(143.5, 50.5), 1e-6) && near(sampleLUT(linear, NaN, 0.5), f(0.5, 0.5), 1e-6), 'edge clamp');
+    // 단일 봉우리: 중심 1, 반 칸 옆 0.5, 대각 반 칸 0.25 (최근접 조회와 달리 연속)
+    const spike = new Float32Array(n * n);
+    spike[lutIndex(10, 10)] = 1;
+    assert(sampleLUT(spike, 10.5, 10.5) === 1 && near(sampleLUT(spike, 11, 10.5), 0.5, 1e-9) && near(sampleLUT(spike, 11, 11), 0.25, 1e-9) && sampleLUT(spike, 11.5, 10.5) === 0, 'bilinear weights');
+  });
+
+  it('M. 격자별 독립 난수 구간 / 도달 불가 격자 생략', () => {
+    // 난수 건너뛰기: createRng(seed, k)의 첫 값 = createRng(seed)의 k+1번째 값
+    {
+      const r = createRng(42);
+      const xs = Array.from({ length: 1001 }, () => r());
+      assert([0, 1, 5, 1000].every(k => createRng(42, k)() === xs[k]), 'rng jump-ahead matches sequential stream');
+      // 샘플 1개당 난수 6개 소비: n샘플 후 다음 값 = createRng(seed, 6n)의 첫 값
+      const s = createRng(7);
+      estimateHitRate(59.5, 130.5, sweetSpotLaunchSpeed(BC)!, BC, 'POLLEN', 25, s);
+      assert(s() === createRng(7, 25 * RNG_DRAWS_PER_SAMPLE)(), 'estimateHitRate consumes RNG_DRAWS_PER_SAMPLE draws per sample');
+    }
+    const LOB = MC;
+    for (const [name, cfg] of [['BC', BC], ['LOB', LOB]] as const) {
+      const v0 = searchLaunchSpeed(cfg, 'POLLEN', 1000)!.v0;
+      const on = generateReferenceLUT(cfg, SIZE, 'POLLEN', v0, 30, 9, { skipUnreachable: true });
+      const off = generateReferenceLUT(cfg, SIZE, 'POLLEN', v0, 30, 9, { skipUnreachable: false });
+      assert(on.every((v, i) => v === off[i]), `${name}: skipping unreachable cells changes nothing`);
+      let unreachable = 0, nonzero = 0;
+      for (let gy = 0; gy < LUT_GRID_SIZE; gy++) for (let gx = 0; gx < LUT_GRID_SIZE; gx++) {
+        if (!canPossiblyHit(lutCellCenter(gx), lutCellCenter(gy), v0, cfg)) unreachable++;
+        if (off[lutIndex(gx, gy)] > 0) nonzero++;
+      }
+      assert(unreachable > 0 && nonzero > 0, `${name}: some cells skipped (${unreachable}), band present (${nonzero})`);
+      // 격자 값은 자기 난수 구간만 사용 (다른 격자 / 계산 순서와 무관)
+      const gx = 59, gy = name === 'BC' ? 130 : 134;
+      const i = lutIndex(gx, gy);
+      assert(off[i] === Math.fround(estimateHitRate(lutCellCenter(gx), lutCellCenter(gy), v0, cfg, 'POLLEN', 30, createRng(9, i * 30 * RNG_DRAWS_PER_SAMPLE))), `${name}: cell uses its own RNG segment`);
+    }
+    // 판정 전제를 벗어나면 (속도 편차 6σ ≥ 100%) 생략하지 않음, 조준점 바로 앞은 도달 불가
+    assert(canPossiblyHit(10.5, 10.5, 200, { ...BC, v0NoisePercent: 0.2 }), 'huge speed noise -> never skipped');
+    assert(!canPossiblyHit(59.5, 100.5, sweetSpotLaunchSpeed(BC)!, BC), 'too close to the HIVE for BC -> unreachable');
+  }, 60_000);
+});

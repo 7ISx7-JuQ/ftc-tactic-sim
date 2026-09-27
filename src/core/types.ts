@@ -103,7 +103,8 @@ export interface BallisticsConfig {
 }
 
 export type HiveCellKey = 'RED_AUDIENCE' | 'RED_OPPOSITE' | 'BLUE_AUDIENCE' | 'BLUE_OPPOSITE';
-// 72 × 72 격자(2 in 해상도) 명중률 (0.0 ~ 1.0). 인덱스 = gy * 72 + gx, 격자 중심 = (2·gx + 1, 2·gy + 1)
+// 144 × 144 격자(1 in 해상도) 명중률 (0.0 ~ 1.0). 인덱스 = gy * 144 + gx, 격자 중심 = (gx + 0.5, gy + 0.5)
+// 런타임 조회는 쌍선형 보간 (ballistics.ts sampleLUT)
 export type HeatmapLUT = Float32Array;
 export type HeatmapLUTSet = Record<HiveCellKey, HeatmapLUT>;
 // 로봇 1대의 LUT: 기물 종류별 × 4셀 = 8장 (R1, R2 합계 16장)

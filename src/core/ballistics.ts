@@ -281,7 +281,9 @@ export const DEFAULT_PITCH_NOISE_RAD = 0.006;
  * 궤적이 셀 투입구로 들어가는지 (몬테카를로 샘플 1개의 명중 판정)
  * ① 공 중심이 투입구 평면을 앞면에서 통과 (통과 순간 속도 · 바깥 법선 < 0)
  * ② 통과점이 오각형을 기물 반지름만큼 안쪽으로 줄인 영역 내부 (공 전체가 들어감)
- * ③ 통과 전 공 중심이 림 y를 지나는 순간 z ≥ 림 z + 반지름 (림 / 림 아래 외벽에 걸리지 않음)
+ * ③ 통과 전 공이 림 아래 벽(단면: 림 y ~ HIVE 앞면 y, 림 z 이하)과 반지름 이상 떨어져 있음 (림 모서리 / 벽에 걸리지 않음)
+ * ④ 통과 전 공이 HIVE 직육면체(반지름만큼 확장)에 처음 들어오는 곳이 셀 앞면(셀 폭 안) 또는 셀 위 윗면
+ *    (HIVE 옆면 / 뒷면 / 셀 옆 프레임을 뚫고 오는 궤적 차단)
  */
 export function isShotInHiveCell(
   traj: Trajectory,
@@ -318,15 +320,151 @@ export function isShotInHiveCell(
   const u = traj.x + vx * t - HIVE_CENTER_X[alliance];
   if (!isInsideInsetOpening(u, s, r)) return false;
 
-  // ③ 림 통과 높이
-  if (Math.abs(vy) > EPSILON) {
-    const tRim = (rimY - traj.y) / vy;
-    if (tRim >= 0 && tRim < t) {
-      const zRim = traj.z + vz * tRim - 0.5 * GRAVITY * tRim * tRim;
-      if (zRim < HIVE_RIM_Z + r) return false;
+  // ③ 림 아래 벽 여유
+  if (!clearsRimWall(traj, vy, vz, t, cell, r)) return false;
+
+  // ④ HIVE 직육면체 진입 면
+  return entersThroughCellWindow(traj, vx, vy, vz, t, alliance, cell, r);
+}
+
+const GOLDEN_ITERATIONS = 60;
+
+/**
+ * 림 아래 벽과의 여유: y–z 단면에서 벽 R = [림 y, HIVE 앞면 y] × (−∞, 림 z]를 반지름 r만큼 넓힌 영역
+ * (옆 띠 y ∈ [wLo − r, wHi + r]·z < 림 z, 윗면 띠 y ∈ [wLo, wHi]·z < 림 z + r, 윗모서리 원 2개)에
+ * 통과 시각 이전의 공 중심 경로가 들어가지 않아야 한다. 벽은 셀 폭 방향(x)으로 이어져 있다고 본다 (셀 폭 밖은 ④가 차단).
+ * - 띠: 공 높이는 시간에 대해 오목 → 구간 양 끝에서 최소이므로 끝점 검사로 정확
+ * - 모서리: 경로 곡률 반경(수백 in)이 r보다 훨씬 커서 거리 함수가 단봉 → 황금분할 탐색
+ */
+function clearsRimWall(traj: Trajectory, vy: number, vz: number, tCross: number, cell: HiveCell, r: number): boolean {
+  const rimY = HIVE_RIM_Y[cell];
+  const faceY = cell === 'AUDIENCE_CELL' ? HIVE_AABB.maxY : HIVE_AABB.minY;
+  const wLo = Math.min(rimY, faceY);
+  const wHi = Math.max(rimY, faceY);
+  const zAt = (time: number) => traj.z + vz * time - 0.5 * GRAVITY * time * time;
+  const yAt = (time: number) => traj.y + vy * time;
+  // y ∈ [lo, hi]인 시각 구간 ∩ [0, tCross]
+  const timesInY = (lo: number, hi: number): [number, number] | null => {
+    if (Math.abs(vy) < EPSILON) return traj.y >= lo && traj.y <= hi ? [0, tCross] : null;
+    const a = (lo - traj.y) / vy;
+    const b = (hi - traj.y) / vy;
+    const t1 = Math.max(0, Math.min(a, b));
+    const t2 = Math.min(tCross, Math.max(a, b));
+    return t1 <= t2 ? [t1, t2] : null;
+  };
+  const minZ = (span: [number, number]) => Math.min(zAt(span[0]), zAt(span[1]));
+
+  const side = timesInY(wLo - r, wHi + r);
+  if (side && minZ(side) < HIVE_RIM_Z) return false;
+  const top = timesInY(wLo, wHi);
+  if (top && minZ(top) < HIVE_RIM_Z + r) return false;
+
+  for (const cy of [wLo, wHi]) {
+    const span = timesInY(cy - r, cy + r);
+    if (!span) continue;
+    const distSq = (time: number) => (yAt(time) - cy) ** 2 + (zAt(time) - HIVE_RIM_Z) ** 2;
+    let lo = span[0];
+    let hi = span[1];
+    if (Math.abs(vy) < EPSILON) {
+      // y 고정: 높이 오프셋 |z − 림 z|의 최소 (오목한 z가 림 z를 지나면 0)
+      const tPeak = Math.min(hi, Math.max(lo, vz / GRAVITY));
+      const zs = [zAt(lo), zAt(hi), zAt(tPeak)];
+      const zMin = Math.min(...zs);
+      const zMax = Math.max(...zs);
+      const dz = zMin <= HIVE_RIM_Z && HIVE_RIM_Z <= zMax ? 0 : Math.min(...zs.map(z => Math.abs(z - HIVE_RIM_Z)));
+      if ((traj.y - cy) ** 2 + dz * dz < r * r) return false;
+      continue;
     }
+    // 황금분할 탐색으로 최소 거리 시각
+    const phi = (Math.sqrt(5) - 1) / 2;
+    let m1 = hi - phi * (hi - lo);
+    let m2 = lo + phi * (hi - lo);
+    let f1 = distSq(m1);
+    let f2 = distSq(m2);
+    for (let i = 0; i < GOLDEN_ITERATIONS; i++) {
+      if (f1 <= f2) {
+        hi = m2;
+        m2 = m1;
+        f2 = f1;
+        m1 = hi - phi * (hi - lo);
+        f1 = distSq(m1);
+      } else {
+        lo = m1;
+        m1 = m2;
+        f1 = f2;
+        m2 = lo + phi * (hi - lo);
+        f2 = distSq(m2);
+      }
+    }
+    if (Math.min(f1, f2, distSq(span[0]), distSq(span[1])) < r * r) return false;
   }
   return true;
+}
+
+/**
+ * 공 중심이 투입구 통과 시각 tCross 이전에 HIVE 직육면체(xy ± r, 높이 HIVE_HEIGHT + r)에 처음 들어오는 곳이
+ * (a) 셀 앞면: 앞면(AUDIENCE y = maxY + r, OPPOSITE y = minY − r), 셀 폭 안(x ∈ 셀 범위 ± r 안쪽)
+ *     (앞면의 림 아래 부분에 대한 충돌은 ③ 림 아래 벽 여유가 정확히 판정)
+ * (b) 셀 위 윗면: z = HIVE_HEIGHT + r, 셀 폭 안, 꼭짓점보다 앞쪽(투입구 앞 공간)
+ * 중 하나인지. 통과점은 항상 직육면체 안이므로 진입은 반드시 존재하고, xy 이동이 직선이라 진입점과 통과점이 모두
+ * 셀 폭 안이면 그 사이 경로도 셀 폭 안이다.
+ */
+function entersThroughCellWindow(
+  traj: Trajectory,
+  vx: number,
+  vy: number,
+  vz: number,
+  tCross: number,
+  alliance: 'RED' | 'BLUE',
+  cell: HiveCell,
+  r: number,
+): boolean {
+  const inward = cell === 'OPPOSITE_CELL' ? 1 : -1;
+  const half = HIVE_OPENING_WIDTH / 2;
+  const windowMinX = HIVE_CENTER_X[alliance] - half + r;
+  const windowMaxX = HIVE_CENTER_X[alliance] + half - r;
+  const inWindowX = (x: number) => x >= windowMinX && x <= windowMaxX;
+  const topZ = HIVE_HEIGHT + r;
+  const rimY = HIVE_RIM_Y[cell];
+  const apexY = rimY + inward * HIVE_OPENING_HEIGHT * Math.cos(HIVE_CELL_TILT);
+  const zAt = (time: number) => traj.z + vz * time - 0.5 * GRAVITY * time * time;
+
+  // 지면 투영이 확장 AABB 안에 들어오는 시각 (슬랩 방식). 통과 시각에는 반드시 안쪽
+  const slabs: [number, number, number, number][] = [
+    [traj.x, vx, HIVE_AABB.minX - r, HIVE_AABB.maxX + r],
+    [traj.y, vy, HIVE_AABB.minY - r, HIVE_AABB.maxY + r],
+  ];
+  let tIn = 0;
+  let enterAxis = -1; // 0 = x 면, 1 = y 면, -1 = 발사구가 이미 지면 투영 안
+  slabs.forEach(([p0, v, lo, hi], axis) => {
+    if (Math.abs(v) < EPSILON) return; // 이 축으로 움직이지 않음: 통과점이 안쪽이므로 항상 안쪽
+    const t1 = Math.min((lo - p0) / v, (hi - p0) / v);
+    if (t1 > tIn) {
+      tIn = t1;
+      enterAxis = axis;
+    }
+  });
+
+  if (tIn > tCross + EPSILON) return false; // 이론상 불가능 (통과점은 박스 안): 수치 안전장치
+
+  if (zAt(tIn) > topZ) {
+    // (b) 윗면 위로 들어와 내려옴: 윗면 높이로 내려오는 시각(큰 근)의 위치
+    const disc = vz * vz - 2 * GRAVITY * (topZ - traj.z);
+    if (disc < 0) return false;
+    const tTop = (vz + Math.sqrt(disc)) / GRAVITY;
+    if (tTop > tCross + EPSILON) return false;
+    const xTop = traj.x + vx * tTop;
+    const yTop = traj.y + vy * tTop;
+    return inWindowX(xTop) && inward * (yTop - apexY) <= 0;
+  }
+
+  const xIn = traj.x + vx * tIn;
+  if (enterAxis === -1) {
+    // 발사구가 이미 확장 박스 안 (HIVE에 밀착): 앞면 앞 공간(림 바깥, 셀 폭 안)일 때만 허용
+    return inWindowX(xIn) && inward * (traj.y - rimY) <= 0;
+  }
+  // (a) 옆면 진입: 앞면(안쪽으로 이동하며 y 면으로 진입)이고 셀 폭 안
+  return enterAxis === 1 && inward * vy > 0 && inWindowX(xIn);
 }
 
 // 오각형(표면 좌표 u, s)을 반지름 r만큼 안쪽으로 줄인 영역 내부인지: 볼록 다각형의 각 변을 r만큼 이동한 반평면의 교집합
@@ -341,9 +479,16 @@ function isInsideInsetOpening(u: number, s: number, r: number): boolean {
   return hTri * (au - half) + half * (s - hRect) <= -r * Math.hypot(hTri, half);
 }
 
-/** Mulberry32 시드 PRNG (엔진과 같은 알고리즘, 몬테카를로 전용 독립 스트림) */
-export function createRng(seed: number): () => number {
-  let state = seed | 0;
+/** 몬테카를로 샘플 1개가 소비하는 난수 개수 (sampleNormal 3회 × 2) */
+export const RNG_DRAWS_PER_SAMPLE = 6;
+
+/**
+ * Mulberry32 시드 PRNG (엔진과 같은 알고리즘, 몬테카를로 전용 독립 스트림)
+ * skip: 처음 skip개의 난수를 건너뛴 위치에서 시작 (상태가 고정 증분 수열이라 O(1) 점프).
+ * 한 스트림을 칸마다 겹치지 않는 구간으로 나눠 쓰는 데 사용 (칸 순서 / 건너뛰기 / 병렬 분할과 무관하게 같은 결과)
+ */
+export function createRng(seed: number, skip = 0): () => number {
+  let state = (seed + Math.imul(skip, 0x6d2b79f5)) | 0;
   return () => {
     state = (state + 0x6d2b79f5) | 0;
     let t = state;
@@ -397,10 +542,15 @@ export function estimateHitRate(
 // 7. 스윗스팟 검증 / v0 탐색 / LUT 생성 (명세서 2.6.2)
 // ============================================================
 
-export const LUT_GRID_SIZE = 72;                          // 72 × 72 격자
-export const LUT_CELL_SIZE = FIELD_SIZE / LUT_GRID_SIZE; // 2 in
-export const DEFAULT_LUT_SAMPLES = 500;                   // 격자당 샘플 수
-export const DEFAULT_V0_SEARCH_SAMPLES = 2000;            // v0 후보당 샘플 수
+export const LUT_GRID_SIZE = 144;                         // 144 × 144 격자
+export const LUT_CELL_SIZE = FIELD_SIZE / LUT_GRID_SIZE; // 1 in
+export const DEFAULT_LUT_SAMPLES = 2000;                  // 격자당 샘플 수
+export const DEFAULT_V0_SEARCH_SAMPLES = 20000;           // v0 후보당 샘플 수
+
+// 도달 불가 격자 판정의 편차 범위 (±6σ 밖 확률은 차원당 약 2e-9로 무시 가능)
+const REACH_NOISE_SIGMA = 6;
+// 도달 불가 판정의 수평 거리 탐색 간격 (inch)
+const REACH_DISTANCE_STEP = 0.05;
 export const DEFAULT_BALLISTICS_SEED = 0x0ba1157;
 
 // v0 탐색 범위: 닫힌 해 ±20% (1% 간격) → 최고점 ±1% (0.1% 간격)
@@ -426,8 +576,27 @@ export function lutGridIndex(v: number): number {
 }
 
 /**
+ * LUT 쌍선형 보간 조회: 필드 좌표를 둘러싼 격자 중심 4개의 값을 거리 비례로 섞음
+ * 필드 가장자리 격자 중심 바깥은 가장자리 값으로 고정 (런타임 판정 함수가 사용)
+ */
+export function sampleLUT(lut: HeatmapLUT, x: number, y: number): number {
+  const n = LUT_GRID_SIZE;
+  const fx = Math.min(n - 1, Math.max(0, (Number.isFinite(x) ? x : 0) / LUT_CELL_SIZE - 0.5));
+  const fy = Math.min(n - 1, Math.max(0, (Number.isFinite(y) ? y : 0) / LUT_CELL_SIZE - 0.5));
+  const x0 = Math.min(n - 2, Math.floor(fx));
+  const y0 = Math.min(n - 2, Math.floor(fy));
+  const wx = fx - x0;
+  const wy = fy - y0;
+  const p00 = lut[lutIndex(x0, y0)];
+  const p10 = lut[lutIndex(x0 + 1, y0)];
+  const p01 = lut[lutIndex(x0, y0 + 1)];
+  const p11 = lut[lutIndex(x0 + 1, y0 + 1)];
+  return (p00 * (1 - wx) + p10 * wx) * (1 - wy) + (p01 * (1 - wx) + p11 * wx) * wy;
+}
+
+/**
  * 스윗스팟을 그 점을 담는 격자의 중심으로 스냅
- * LUT는 2 in 격자 중심에서만 명중률을 계산하므로, v0를 격자 중심 기준으로 탐색해야 스윗스팟 격자의 LUT 값이
+ * LUT는 격자 중심에서만 명중률을 계산하므로, v0를 격자 중심 기준으로 탐색해야 스윗스팟 격자의 LUT 값이
  * 탐색 명중률과 일치한다 (근거리 상승 사격은 명중 띠가 격자 폭보다 좁을 수 있음). GUI 격자 클릭 입력은 이미 격자 중심.
  */
 export function snapSweetSpot(p: { x: number; y: number }): { x: number; y: number } {
@@ -530,9 +699,110 @@ export function searchLaunchSpeed(
   return { v0: bestV0, hitRate: bestRate };
 }
 
+// 투입구 오각형의 지면 투영 꼭짓점 (볼록 다각형)
+function openingFootprint(alliance: 'RED' | 'BLUE', cell: HiveCell): { x: number; y: number }[] {
+  const inward = cell === 'OPPOSITE_CELL' ? 1 : -1;
+  const cx = HIVE_CENTER_X[alliance];
+  const half = HIVE_OPENING_WIDTH / 2;
+  const rimY = HIVE_RIM_Y[cell];
+  const cos = Math.cos(HIVE_CELL_TILT);
+  const shoulderY = rimY + inward * HIVE_OPENING_RECT_HEIGHT * cos;
+  return [
+    { x: cx - half, y: rimY },
+    { x: cx + half, y: rimY },
+    { x: cx + half, y: shoulderY },
+    { x: cx, y: rimY + inward * HIVE_OPENING_HEIGHT * cos },
+    { x: cx - half, y: shoulderY },
+  ];
+}
+
+// 점에서 볼록 다각형까지의 최소 / 최대 거리 (점이 안쪽이면 최소 0)
+function polygonDistanceRange(px: number, py: number, poly: { x: number; y: number }[]): [number, number] {
+  let min = Infinity;
+  let max = 0;
+  let inside = true;
+  let sign = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const ex = b.x - a.x;
+    const ey = b.y - a.y;
+    const cross = ex * (py - a.y) - ey * (px - a.x);
+    if (cross !== 0) {
+      if (sign === 0) sign = Math.sign(cross);
+      else if (Math.sign(cross) !== sign) inside = false;
+    }
+    const len2 = ex * ex + ey * ey;
+    const t = len2 > 0 ? Math.min(1, Math.max(0, ((px - a.x) * ex + (py - a.y) * ey) / len2)) : 0;
+    min = Math.min(min, Math.hypot(px - (a.x + t * ex), py - (a.y + t * ey)));
+    max = Math.max(max, Math.hypot(px - a.x, py - a.y));
+  }
+  return [inside ? 0 : min, max];
+}
+
 /**
- * 기준 셀 RED_AUDIENCE LUT (72 × 72): 격자 중심에서 조준점을 정면 조준한 몬테카를로 명중률
- * 조준점을 바라보는 로봇 몸체가 HIVE AABB와 겹치는 격자는 0
+ * 도달 가능성 보수 판정 (false면 명중 확률이 사실상 0이라 몬테카를로 생략 가능)
+ * 명중하려면 투입구 통과점이 오각형 위에 있어야 하므로, 발사구에서 오각형 지면 투영까지의 수평 거리 d ∈ [dMin, dMax]
+ * (방위 편차와 무관) 중 어딘가에서 공 높이가 오각형 높이 범위 [림 z, 꼭짓점 z] 안에 들어올 수 있어야 한다.
+ * 속도 / 발사각 편차 ±6σ 상자에서 높이의 최댓값·최솟값을 닫힌 형태로 구하고 (속도에 단조, tanθ에 오목),
+ * d를 0.05 in 간격으로 훑되 립시츠 상수로 여유를 둔다. ±6σ 밖을 버리는 오차는 샘플당 약 6e-9.
+ */
+export function canPossiblyHit(
+  robotX: number,
+  robotY: number,
+  v0: number,
+  config: BallisticsConfig,
+  alliance: 'RED' | 'BLUE' = 'RED',
+  cell: HiveCell = 'AUDIENCE_CELL',
+): boolean {
+  const aim = hiveCellAimPoint(alliance, cell);
+  const origin = launchPoint(robotX, robotY, bearingTo(robotX, robotY, aim.x, aim.y), config);
+  const k = REACH_NOISE_SIGMA;
+  const dv = k * (config.v0NoisePercent ?? DEFAULT_V0_NOISE_PERCENT);
+  const dp = k * (config.pitchNoiseRad ?? DEFAULT_PITCH_NOISE_RAD);
+  const pitchLo = config.shooterPitch - dp;
+  const pitchHi = config.shooterPitch + dp;
+  // 판정 전제를 벗어나면 (속도 하한 ≤ 0, 수직 이상 발사각) 생략하지 않음
+  if (!(v0 > 0) || dv >= 1 || pitchLo <= -Math.PI / 2 + EPSILON || pitchHi >= Math.PI / 2 - EPSILON) return true;
+
+  const vMin = v0 * (1 - dv);
+  const vMax = v0 * (1 + dv);
+  const tanLo = Math.tan(pitchLo);
+  const tanHi = Math.tan(pitchHi);
+  const tanAbs = Math.max(Math.abs(tanLo), Math.abs(tanHi));
+  const zLo = HIVE_RIM_Z;
+  const zHi = HIVE_RIM_Z + HIVE_OPENING_HEIGHT * Math.sin(HIVE_CELL_TILT);
+  const [dMin, dMax] = polygonDistanceRange(origin.x, origin.y, openingFootprint(alliance, cell));
+
+  // z(d; v, T) = z0 + d·T − g·d²·(1 + T²) / (2v²), T = tanθ
+  const height = (d: number, v: number, T: number) => origin.z + d * T - (GRAVITY * d * d * (1 + T * T)) / (2 * v * v);
+  // |∂z/∂d| 상한 → 간격 사이 변화량 여유
+  const lipschitz = tanAbs + (GRAVITY * dMax * (1 + tanAbs * tanAbs)) / (vMin * vMin);
+  const margin = lipschitz * REACH_DISTANCE_STEP;
+
+  const steps = Math.max(1, Math.ceil((dMax - dMin) / REACH_DISTANCE_STEP));
+  for (let i = 0; i <= steps; i++) {
+    const d = Math.min(dMax, dMin + i * REACH_DISTANCE_STEP);
+    // 최댓값: 속도 상한, tanθ는 꼭짓점 T* = v²/(g·d)를 [tanLo, tanHi]로 제한 / 최솟값: 속도 하한, tanθ 양 끝
+    const tStar = d > EPSILON ? (vMax * vMax) / (GRAVITY * d) : tanHi;
+    const zMax = height(d, vMax, Math.min(tanHi, Math.max(tanLo, tStar)));
+    const zMin = Math.min(height(d, vMin, tanLo), height(d, vMin, tanHi));
+    if (zMax + margin >= zLo && zMin - margin <= zHi) return true;
+  }
+  return false;
+}
+
+export interface ReferenceLUTOptions {
+  skipUnreachable?: boolean; // 도달 불가 격자 몬테카를로 생략 (기본 true, 결과는 생략하지 않은 경우와 동일)
+}
+
+/**
+ * 기준 셀 RED_AUDIENCE LUT (144 × 144): 격자 중심에서 조준점을 정면 조준한 몬테카를로 명중률
+ * - 조준점을 바라보는 로봇 몸체가 HIVE AABB와 겹치는 격자는 0
+ * - 격자마다 독립 난수 구간: 격자 i는 스트림의 [i · samples · 6, (i + 1) · samples · 6) 구간을 사용 (겹침 없음).
+ *   따라서 도달 불가 격자를 건너뛰어도, 계산 순서나 병렬 분할이 달라도 각 격자 값은 같다.
+ *   (144² 격자 × 샘플 × 6이 2³²를 넘지 않아야 구간이 겹치지 않음: 샘플 수 ≤ 약 34,000)
+ * - 도달 불가 격자(canPossiblyHit = false)는 몬테카를로를 생략하고 0
  */
 export function generateReferenceLUT(
   config: BallisticsConfig,
@@ -541,23 +811,28 @@ export function generateReferenceLUT(
   v0: number,
   samples = DEFAULT_LUT_SAMPLES,
   seed = DEFAULT_BALLISTICS_SEED,
+  options: ReferenceLUTOptions = {},
 ): HeatmapLUT {
+  const skipUnreachable = options.skipUnreachable ?? true;
+  const n = Math.max(1, Math.floor(samples));
   const lut = new Float32Array(LUT_GRID_SIZE * LUT_GRID_SIZE);
   const aim = hiveCellAimPoint('RED', 'AUDIENCE_CELL');
-  const rng = createRng(seed);
   for (let gy = 0; gy < LUT_GRID_SIZE; gy++) {
     for (let gx = 0; gx < LUT_GRID_SIZE; gx++) {
       const x = lutCellCenter(gx);
       const y = lutCellCenter(gy);
       if (testOBBvsAABB(aimingRobotOBB(x, y, aim, robotSize), HIVE_AABB).colliding) continue;
-      lut[lutIndex(gx, gy)] = estimateHitRate(x, y, v0, config, pieceType, samples, rng);
+      if (skipUnreachable && !canPossiblyHit(x, y, v0, config)) continue;
+      const index = lutIndex(gx, gy);
+      const rng = createRng(seed, index * n * RNG_DRAWS_PER_SAMPLE);
+      lut[index] = estimateHitRate(x, y, v0, config, pieceType, n, rng);
     }
   }
   return lut;
 }
 
 /**
- * 기준 셀 LUT → 4셀 LUT 세트 (격자 인덱스 대칭 복사, 셀 기하가 정확히 대칭이므로 오차 없음)
+ * 기준 셀 LUT → 4셀 LUT 세트 (격자 인덱스 대칭 복사, 셀 기하가 정확히 대칭이므로 오차 없음, g' = 143 − g)
  * RED_OPPOSITE: y = 72 대칭, BLUE_AUDIENCE: x = 72 대칭, BLUE_OPPOSITE: (72, 72) 점대칭
  */
 export function mirrorLUTSet(reference: HeatmapLUT): HeatmapLUTSet {
@@ -579,9 +854,9 @@ export function mirrorLUTSet(reference: HeatmapLUT): HeatmapLUTSet {
   };
 }
 
-export interface RobotLUTOptions {
-  samples?: number;       // 격자당 샘플 수 (기본 500)
-  searchSamples?: number; // v0 후보당 샘플 수 (기본 2000)
+export interface RobotLUTOptions extends ReferenceLUTOptions {
+  samples?: number;       // 격자당 샘플 수 (기본 2000)
+  searchSamples?: number; // v0 후보당 샘플 수 (기본 20000)
   seed?: number;          // 기준 시드 (기본 DEFAULT_BALLISTICS_SEED)
 }
 
@@ -628,7 +903,7 @@ export function generateRobotLUTs(
     if (!found) return;
     result.v0[type] = found.v0;
     result.sweetSpotHitRate[type] = found.hitRate;
-    const reference = generateReferenceLUT(config, robotSize, type, found.v0, options.samples, deriveSeed(seed, 2 * i + 1));
+    const reference = generateReferenceLUT(config, robotSize, type, found.v0, options.samples, deriveSeed(seed, 2 * i + 1), options);
     result.luts[type] = mirrorLUTSet(reference);
   });
   return result;
