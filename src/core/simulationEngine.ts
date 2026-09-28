@@ -259,7 +259,11 @@ export function validateScenario(
 // NECTAR 잼 상태(slot[0] = null, slot[1] = NECTAR)는 빈 slot[0]을 POLLEN 1개로 계산 (명세서 2.6.3):
 //   출구 턱 높이 = POLLEN 직경(2.8in)이므로 턱에 걸린 NECTAR는 slot[0] POLLEN 위에 놓인 것과 같은 높이에서 적층이 시작됨.
 //   턱(링) 위 받침과 공 위 받침의 지그재그 적층 미세 차이는 단순화를 위해 의도적으로 무시함.
-function canFlowerAccept(flower: FlowerState, type: GamePiece['type']): boolean {
+// (렌더러의 FLOWER 게이지 "가득 참" 표시도 이 판정을 재사용: POLLEN / NECTAR 둘 다 불가 = 최대 조합, 명세서 3.7)
+export function canFlowerAccept(
+  flower: { readonly pieces: readonly (Pick<GamePiece, 'type'> | null)[] },
+  type: GamePiece['type'],
+): boolean {
   let nectar = type === 'NECTAR' ? 1 : 0;
   let pollen = type === 'POLLEN' ? 1 : 0;
   for (const p of flower.pieces) {

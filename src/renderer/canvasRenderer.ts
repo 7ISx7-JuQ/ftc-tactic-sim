@@ -14,7 +14,7 @@ import {
 } from '../core/collision';
 import type { AABB } from '../core/collision';
 import { hiveTipPollenThreshold } from '../core/types';
-import type { FlowerState, GamePiece } from '../core/types';
+import type { GamePiece } from '../core/types';
 
 // 1. 필드 스케일 상수 (명세서 2.1)
 export const FIELD_SIZE_INCH = FIELD_SIZE;
@@ -142,8 +142,6 @@ export const COLORS = {
   labelOnDark: '#ffffff',
   pollenFill: '#fde047',
   pollenStroke: '#a16207',
-  gaugeTube: 'rgba(142, 47, 111, 0.85)',
-  gaugeLip: '#8e2f6f',
   // 2v0에서 쓰이지 않는 상대 진영 전용 구조물 (채도 제거, 명세서 3.7)
   unusedFill: 'rgba(156, 163, 175, 0.22)',
   unusedCell: '#d1d5db',
@@ -153,7 +151,7 @@ export const COLORS = {
 // 5. 기본 도형 헬퍼
 const STROKE_WIDTH = 2;
 
-function fillStrokeRect(
+export function fillStrokeRect(
   ctx: CanvasRenderingContext2D,
   rect: Rect,
   fill: string,
@@ -255,19 +253,24 @@ export function drawLoadingZones(ctx: CanvasRenderingContext2D, withLabels = tru
 const HIVE_CELL_INSET = 0.8;   // 프레임 안쪽 셀 박스 여백 (inch)
 const NECTAR_RADIUS = PIECE_PHYSICS.NECTAR.radius; // 슬롯 크기 = NECTAR 직경 3.6"
 
+// 셀 박스 (진영 HIVE 칸에서 프레임 안쪽 여백을 뺀 영역, inch)
+export function hiveCellBox(alliance: Alliance, cell: HiveCell): Rect {
+  const outer = FIELD_LAYOUT.hiveCells[alliance][cell];
+  return {
+    x: outer.x + HIVE_CELL_INSET,
+    y: outer.y + HIVE_CELL_INSET,
+    width: outer.width - HIVE_CELL_INSET * 2,
+    height: outer.height - HIVE_CELL_INSET * 2,
+  };
+}
+
 function drawHiveCell(
   ctx: CanvasRenderingContext2D,
   alliance: Alliance,
   cell: HiveCell,
   view: HiveView,
 ): void {
-  const outer = FIELD_LAYOUT.hiveCells[alliance][cell];
-  const box: Rect = {
-    x: outer.x + HIVE_CELL_INSET,
-    y: outer.y + HIVE_CELL_INSET,
-    width: outer.width - HIVE_CELL_INSET * 2,
-    height: outer.height - HIVE_CELL_INSET * 2,
-  };
+  const box = hiveCellBox(alliance, cell);
   const isUp = view.upwardCell === cell;
   const nectar = isUp ? view.nectarInUpwardCell : 0;
   const pollen = isUp ? view.pollenInUpwardCell : 0;
@@ -361,16 +364,7 @@ export function drawHiveBase(ctx: CanvasRenderingContext2D, ally: Alliance): voi
     const isAlly = alliance === ally;
     const fill = isAlly ? (alliance === 'RED' ? COLORS.redCellDown : COLORS.blueCellDown) : COLORS.unusedCell;
     const stroke = isAlly ? (alliance === 'RED' ? COLORS.redStroke : COLORS.blueStroke) : COLORS.unusedStroke;
-    for (const cell of cells) {
-      const outer = FIELD_LAYOUT.hiveCells[alliance][cell];
-      const box: Rect = {
-        x: outer.x + HIVE_CELL_INSET,
-        y: outer.y + HIVE_CELL_INSET,
-        width: outer.width - HIVE_CELL_INSET * 2,
-        height: outer.height - HIVE_CELL_INSET * 2,
-      };
-      fillStrokeRect(ctx, box, fill, stroke);
-    }
+    for (const cell of cells) fillStrokeRect(ctx, hiveCellBox(alliance, cell), fill, stroke);
   }
   ctx.save();
   ctx.strokeStyle = COLORS.hiveFrameStroke;
@@ -382,26 +376,6 @@ export function drawHiveBase(ctx: CanvasRenderingContext2D, ally: Alliance): voi
   ctx.restore();
 }
 
-// FLOWER 슬롯 게이지: 탑다운 뷰에서는 수직 적재 높이를 표현할 수 없으므로 FLOWER 옆에 측면 단면 미니 게이지를 그림
-const FLOWER_GAUGE_SCALE = 0.5;        // 게이지 1인치 = 필드 0.5인치
-const FLOWER_GAUGE_TUBE_HEIGHT = 21.5; // 게이지 원통 표시 높이 (inch, FLOWER 원통 실제 높이, 용량 테이블 기준)
-// 하단 출구 턱 높이 = slot[0] POLLEN 직경. slot[0]이 비어도(null) 이 높이는 유지됨
-const FLOWER_EXIT_LIP_HEIGHT = PIECE_PHYSICS.POLLEN.radius * 2;
-
-// 슬롯 인덱스 기준 각 기물의 바닥 높이 (inch)
-// slot[0]은 항상 출구 턱 높이만큼 공간을 차지하므로, slot[0]이 null이면
-// slot[1]의 NECTAR는 지면이 아닌 턱 위에 걸려 떠 있는 높이로 계산됨
-function flowerSlotBaseHeights(pieces: readonly (GamePiece | null)[]): number[] {
-  const bases: number[] = [];
-  let z = 0;
-  pieces.forEach((piece, i) => {
-    bases.push(z);
-    if (i === 0) z += FLOWER_EXIT_LIP_HEIGHT;
-    else if (piece) z += PIECE_PHYSICS[piece.type].radius * 2;
-  });
-  return bases;
-}
-
 export function pieceColors(piece: Pick<GamePiece, 'type' | 'alliance'>): { fill: string; stroke: string } {
   if (piece.type === 'POLLEN') return { fill: COLORS.pollenFill, stroke: COLORS.pollenStroke };
   return piece.alliance === 'BLUE'
@@ -409,66 +383,9 @@ export function pieceColors(piece: Pick<GamePiece, 'type' | 'alliance'>): { fill
     : { fill: COLORS.redCellUp, stroke: COLORS.redStroke };
 }
 
-// floor: 게이지 원통 바닥 중심 (필드 inch 좌표)
-function drawFlowerGauge(ctx: CanvasRenderingContext2D, floor: Point, flower: FlowerState): void {
-  const s = FLOWER_GAUGE_SCALE;
-  const halfW = NECTAR_RADIUS * s + 0.3;
-  const toPx = (dx: number, z: number) => toCanvasPoint(floor.x + dx, floor.y - z * s);
-
-  // 원통 외곽 (좌/우 벽 + 바닥)
-  const topL = toPx(-halfW, FLOWER_GAUGE_TUBE_HEIGHT);
-  const botL = toPx(-halfW, 0);
-  const botR = toPx(halfW, 0);
-  const topR = toPx(halfW, FLOWER_GAUGE_TUBE_HEIGHT);
-  ctx.save();
-  ctx.strokeStyle = COLORS.gaugeTube;
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(topL.pxX, topL.pxY);
-  ctx.lineTo(botL.pxX, botL.pxY);
-  ctx.lineTo(botR.pxX, botR.pxY);
-  ctx.lineTo(topR.pxX, topR.pxY);
-  ctx.stroke();
-
-  // 하단 출구 턱: 이 선 아래(slot[0])는 득점 제외 볼륨
-  const lipL = toPx(-halfW, FLOWER_EXIT_LIP_HEIGHT);
-  const lipR = toPx(halfW, FLOWER_EXIT_LIP_HEIGHT);
-  ctx.strokeStyle = COLORS.gaugeLip;
-  ctx.setLineDash([2, 2]);
-  ctx.beginPath();
-  ctx.moveTo(lipL.pxX, lipL.pxY);
-  ctx.lineTo(lipR.pxX, lipR.pxY);
-  ctx.stroke();
-  ctx.restore();
-
-  const bases = flowerSlotBaseHeights(flower.pieces);
-  flower.pieces.forEach((piece, i) => {
-    if (piece === null) return; // NECTAR 블로킹으로 비어 있는 slot[0]
-    const r = PIECE_PHYSICS[piece.type].radius;
-    const { pxX, pxY } = toPx(0, bases[i] + r);
-    const { fill, stroke } = pieceColors(piece);
-    ctx.save();
-    ctx.globalAlpha = i === 0 ? 0.45 : 1; // slot[0]은 득점 제외이므로 흐리게
-    ctx.beginPath();
-    ctx.arc(pxX, pxY, inchToPx(r * s), 0, Math.PI * 2);
-    ctx.fillStyle = fill;
-    ctx.fill();
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = stroke;
-    ctx.stroke();
-    ctx.restore();
-  });
-}
-
+// FLOWER 원통 (FLOWER 내용물은 장면 렌더러의 필드 밖 게이지로 표시, 명세서 3.7)
 // FLOWER는 반지름 2인치(10px)라 라벨을 가장 가까운 벽의 반대편(필드 안쪽) 바깥에 배치
-// flowers가 주어지면 id가 일치하는 FLOWER 옆에 슬롯 게이지를 함께 그림
-export function drawFlowers(
-  ctx: CanvasRenderingContext2D,
-  flowers: readonly FlowerState[] = [],
-  withLabels = true,
-): void {
-  const gaugeHeight = FLOWER_GAUGE_TUBE_HEIGHT * FLOWER_GAUGE_SCALE;
-
+export function drawFlowers(ctx: CanvasRenderingContext2D, withLabels = true): void {
   for (const [i, flower] of FIELD_LAYOUT.flowers.entries()) {
     const { pxX, pxY } = toCanvasPoint(flower.x, flower.y);
     ctx.save();
@@ -486,39 +403,27 @@ export function drawFlowers(
     const distX = Math.min(flower.x, FIELD_SIZE_INCH - flower.x);
     const distY = Math.min(flower.y, FIELD_SIZE_INCH - flower.y);
     let labelAt: Point;
-    let gaugeFloor: Point;
     let align: CanvasTextAlign = 'center';
     if (distX <= distY) {
-      // 좌/우 벽에 붙은 FLOWER → 가로 방향으로 라벨, 게이지는 라벨 위쪽
+      // 좌/우 벽에 붙은 FLOWER → 가로 방향으로 라벨
       const fromLeft = flower.x < FIELD_CENTER;
       labelAt = { x: flower.x + (fromLeft ? offset : -offset), y: flower.y };
       align = fromLeft ? 'left' : 'right';
-      gaugeFloor = { x: flower.x + (fromLeft ? offset + 3 : -(offset + 3)), y: flower.y - 2 };
     } else {
-      // 위/아래 벽에 붙은 FLOWER → 세로 방향으로 라벨, 게이지는 라벨 오른쪽
+      // 위/아래 벽에 붙은 FLOWER → 세로 방향으로 라벨
       const fromTop = flower.y < FIELD_CENTER;
       labelAt = { x: flower.x, y: flower.y + (fromTop ? offset + 1 : -(offset + 1)) };
-      gaugeFloor = {
-        x: flower.x + flower.radius + 6,
-        y: fromTop ? flower.y + flower.radius + gaugeHeight : flower.y,
-      };
     }
     drawLabel(ctx, `FLOWER ${i + 1}`, labelAt, { size: 10, align, color: COLORS.flowerStroke });
-
-    const state = flowers.find((f) => f.id === flower.id);
-    if (state) drawFlowerGauge(ctx, gaugeFloor, state);
   }
 }
 
 // 7. 필드 전체 렌더 진입점
-export function renderField(
-  ctx: CanvasRenderingContext2D,
-  flowers: readonly FlowerState[] = [],
-): void {
+export function renderField(ctx: CanvasRenderingContext2D): void {
   ctx.clearRect(0, 0, CANVAS_SIZE_PX, CANVAS_SIZE_PX);
   drawFieldBackground(ctx);
   drawGardens(ctx);
   drawLoadingZones(ctx);
   drawHive(ctx);
-  drawFlowers(ctx, flowers);
+  drawFlowers(ctx);
 }

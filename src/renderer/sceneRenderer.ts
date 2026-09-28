@@ -1,12 +1,21 @@
-// 장면 렌더러 (명세서 3.7, 08-4): TimelineFrame 한 장 + 로봇 제원 + 보기 변환으로 캔버스를 그림
+// 장면 렌더러 (명세서 3.7, 08-4 / 08-5): TimelineFrame 한 장 + 로봇 제원 + 보기 변환으로 캔버스를 그림
 // 엔진을 호출 / 수정하지 않으며, 그림은 (프레임, 제원, 보기)만의 함수 (스크러빙 / 재생에서 같은 틱 = 같은 그림)
 // 좌표계: 필드 도형은 필드 px(inch × 5) 공간에서 그리고 보기 변환 행렬(회전 / 배율)로 옮긴다.
 //         글자 / 배지는 보기 회전을 상쇄해 화면 기준으로 똑바로 그린다.
 
-import { FIELD_SIZE, HIVE_CENTER_X, PIECE_PHYSICS, getBumperZoneOBB, getRobotOBB } from '../core/collision';
+import {
+  FIELD_SIZE,
+  FLOWER_IDS,
+  HIVE_CENTER_X,
+  PIECE_PHYSICS,
+  getBumperZoneOBB,
+  getRobotOBB,
+  hiveTipLipOrigin,
+} from '../core/collision';
 import type { OBB } from '../core/collision';
 import { getCarryCapacity } from '../core/simulationEngine';
-import type { DeepReadonly, GamePiece, RobotConfig, RobotState, TimelineFrame } from '../core/types';
+import { hiveTipPollenThreshold } from '../core/types';
+import type { DeepReadonly, GamePiece, HiveState, RobotConfig, RobotState, TimelineFrame } from '../core/types';
 import { badgeImage } from './badgeAssets';
 import {
   COLORS,
@@ -16,10 +25,21 @@ import {
   drawGardens,
   drawHiveBase,
   drawLoadingZones,
+  hiveCellBox,
   inchToPx,
   pieceColors,
 } from './canvasRenderer';
-import type { Alliance } from './canvasRenderer';
+import type { Alliance, HiveCell, Rect } from './canvasRenderer';
+import {
+  GAUGE_PIECE_RADIUS,
+  GAUGE_THICKNESS,
+  flowerGaugeLayout,
+  flowerGaugeSlots,
+  stockGaugeLayout,
+  stockSlotStates,
+  tipDropView,
+} from './gaugeLayout';
+import type { GaugeLayout } from './gaugeLayout';
 import {
   BADGE_FALLBACK_TEXT,
   BADGE_SIZE_INCH,
@@ -42,6 +62,7 @@ import {
   fieldPxMatrix,
   fieldToCanvas,
   labelCenter,
+  screenUpInField,
 } from './viewTransform';
 import type { Point2, ViewTransform } from './viewTransform';
 
@@ -67,12 +88,23 @@ const SCENE_COLORS = {
   carriedNext: '#111827',
   badgeBg: 'rgba(17, 24, 39, 0.85)',
   badgeText: '#ffffff',
+  gaugeBg: 'rgba(255, 255, 255, 0.92)',
+  gaugeSlot: 'rgba(17, 24, 39, 0.22)',
+  gaugeLip: '#8e2f6f',
+  jam: '#111827',
+  fullMark: 'rgba(17, 24, 39, 0.55)',
+  pendingStroke: '#111827',
+  pillBg: 'rgba(17, 24, 39, 0.78)',
+  pillText: '#ffffff',
+  tipping: '#f59e0b',
+  tipOutline: '#111827',
+  scored: '#f59e0b',
 };
 
 const MARGIN_PX = FIELD_MARGIN_INCH * PX_PER_INCH;
 
 // ------------------------------------------------------------
-// 1. 정적 레이어 (배경 / 타일 / 벽 / GARDEN / 로딩 존 / HIVE 바탕 / FLOWER 원통): 진영 × dpr별로 한 번 그려 캐시
+// 1. 정적 레이어 (배경 / 타일 / 벽 / GARDEN / 로딩 존 / HIVE 바탕 / FLOWER 원통 / 게이지 틀): 진영 × dpr별로 한 번 그려 캐시
 // ------------------------------------------------------------
 
 type LayerCanvas = HTMLCanvasElement | OffscreenCanvas;
@@ -84,7 +116,52 @@ function drawStaticField(ctx: CanvasRenderingContext2D, ally: Alliance): void {
   drawGardens(ctx, false);
   drawLoadingZones(ctx, false, ally);
   drawHiveBase(ctx, ally);
-  drawFlowers(ctx, [], false);
+  drawFlowers(ctx, false);
+  drawGaugeFrames(ctx, ally);
+}
+
+// 게이지 틀 (필드 밖): 둥근 직사각형 + 빈 칸 윤곽. FLOWER 게이지는 칸 0 / 1 사이 출구 턱 구분선 (칸 0 = 득점 제외)
+function gaugeFramePath(ctx: CanvasRenderingContext2D, g: GaugeLayout): void {
+  const { rect } = g;
+  ctx.beginPath();
+  ctx.roundRect(inchToPx(rect.minX), inchToPx(rect.minY), inchToPx(rect.maxX - rect.minX), inchToPx(rect.maxY - rect.minY), inchToPx(GAUGE_THICKNESS / 2));
+}
+
+function drawGaugeFrame(ctx: CanvasRenderingContext2D, g: GaugeLayout, fill: string, stroke: string, slots: boolean): void {
+  gaugeFramePath(ctx, g);
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = stroke;
+  ctx.stroke();
+  if (!slots) return;
+  for (const slot of g.slots) drawCircle(ctx, slot.x, slot.y, GAUGE_PIECE_RADIUS, 'transparent', SCENE_COLORS.gaugeSlot, 1);
+}
+
+function drawGaugeFrames(ctx: CanvasRenderingContext2D, ally: Alliance): void {
+  ctx.save();
+  FLOWER_IDS.forEach((_, i) => {
+    const g = flowerGaugeLayout(i);
+    drawGaugeFrame(ctx, g, SCENE_COLORS.gaugeBg, COLORS.flowerStroke, true);
+    // 출구 턱: 칸 0과 1 사이, 게이지 두께 방향
+    const mid = { x: (g.slots[0].x + g.slots[1].x) / 2, y: (g.slots[0].y + g.slots[1].y) / 2 };
+    const h = GAUGE_THICKNESS / 2;
+    ctx.beginPath();
+    ctx.moveTo(inchToPx(mid.x - g.outward.x * h), inchToPx(mid.y - g.outward.y * h));
+    ctx.lineTo(inchToPx(mid.x + g.outward.x * h), inchToPx(mid.y + g.outward.y * h));
+    ctx.setLineDash([2, 2]);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = SCENE_COLORS.gaugeLip;
+    ctx.stroke();
+    ctx.setLineDash([]);
+  });
+  // NECTAR 재고: 아군은 진영색 틀 + 빈 칸, 상대는 채도 제거 틀만 (2v0에서 쓰이지 않음)
+  for (const side of ['RED', 'BLUE'] as const) {
+    const used = side === ally;
+    const stroke = !used ? COLORS.unusedStroke : side === 'RED' ? COLORS.redStroke : COLORS.blueStroke;
+    drawGaugeFrame(ctx, stockGaugeLayout(side), used ? SCENE_COLORS.gaugeBg : COLORS.unusedFill, stroke, used);
+  }
+  ctx.restore();
 }
 
 function createLayerCanvas(width: number, height: number): LayerCanvas | null {
@@ -144,6 +221,135 @@ function drawFloorPieces(ctx: CanvasRenderingContext2D, pieces: readonly DeepRea
     const { fill, stroke } = pieceColors(piece);
     const inGarden = piece.state === 'IN_GARDEN';
     drawCircle(ctx, piece.x, piece.y, PIECE_PHYSICS[piece.type].radius, fill, inGarden ? SCENE_COLORS.gardenMark : stroke, inGarden ? 2.5 : 1.5);
+  }
+  ctx.restore();
+}
+
+// HIVE 아군 셀 상태 (필드 공간): 상향 셀 진영색 + 노란 강조 테두리, 전복 중이면 전복된 셀에 주황 점선 테두리
+// (셀 안 NECTAR / POLLEN 줄과 개수 글자는 화면 공간에서 똑바로 — drawHiveLabels)
+const oppositeCell = (cell: HiveCell): HiveCell => (cell === 'AUDIENCE_CELL' ? 'OPPOSITE_CELL' : 'AUDIENCE_CELL');
+
+function strokeBox(ctx: CanvasRenderingContext2D, box: Rect, color: string, width: number, dash: number[] = []): void {
+  ctx.setLineDash(dash);
+  ctx.lineWidth = width;
+  ctx.strokeStyle = color;
+  ctx.strokeRect(inchToPx(box.x) + width / 2, inchToPx(box.y) + width / 2, inchToPx(box.width) - width, inchToPx(box.height) - width);
+  ctx.setLineDash([]);
+}
+
+function drawHiveState(ctx: CanvasRenderingContext2D, hive: DeepReadonly<HiveState>, ally: Alliance): void {
+  ctx.save();
+  const up = hiveCellBox(ally, hive.upwardCell);
+  ctx.fillStyle = ally === 'RED' ? COLORS.redCellUp : COLORS.blueCellUp;
+  ctx.fillRect(inchToPx(up.x), inchToPx(up.y), inchToPx(up.width), inchToPx(up.height));
+  strokeBox(ctx, up, COLORS.upHighlight, 4);
+  if (hive.isTipping) strokeBox(ctx, hiveCellBox(ally, oppositeCell(hive.upwardCell)), SCENE_COLORS.tipping, 3, [8, 5]);
+  ctx.restore();
+}
+
+// FLOWER / 재고 게이지 내용
+function drawGaugeContents(ctx: CanvasRenderingContext2D, frame: DeepReadonly<TimelineFrame>, ally: Alliance): void {
+  ctx.save();
+  for (const flower of frame.field.flowers) {
+    const index = FLOWER_IDS.indexOf(flower.id as (typeof FLOWER_IDS)[number]);
+    if (index < 0) continue;
+    const g = flowerGaugeLayout(index);
+    flowerGaugeSlots(flower.pieces).forEach((slot, k) => {
+      const at = g.slots[k];
+      if (slot.kind === 'PIECE') {
+        const { fill, stroke } = pieceColors(slot.piece);
+        drawCircle(ctx, at.x, at.y, GAUGE_PIECE_RADIUS, fill, stroke, 1);
+      } else if (slot.kind === 'JAM') {
+        drawCircle(ctx, at.x, at.y, GAUGE_PIECE_RADIUS, SCENE_COLORS.jam, SCENE_COLORS.jam, 1);
+      } else if (slot.kind === 'FULL') {
+        const d = GAUGE_PIECE_RADIUS * 0.75;
+        ctx.beginPath();
+        ctx.moveTo(inchToPx(at.x - d), inchToPx(at.y - d));
+        ctx.lineTo(inchToPx(at.x + d), inchToPx(at.y + d));
+        ctx.moveTo(inchToPx(at.x + d), inchToPx(at.y - d));
+        ctx.lineTo(inchToPx(at.x - d), inchToPx(at.y + d));
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = SCENE_COLORS.fullMark;
+        ctx.stroke();
+      }
+    });
+  }
+  const stock = stockGaugeLayout(ally);
+  const nectar = pieceColors({ type: 'NECTAR', alliance: ally });
+  stockSlotStates(frame.field.pendingHumanNectar, frame.field.nectarStock).forEach((state, i) => {
+    const at = stock.slots[i];
+    if (state === 'STOCK') drawCircle(ctx, at.x, at.y, GAUGE_PIECE_RADIUS, nectar.fill, nectar.stroke, 1);
+    if (state === 'PENDING') {
+      // 투입 대기: 반투명 + 점선 테두리
+      ctx.globalAlpha = 0.45;
+      drawCircle(ctx, at.x, at.y, GAUGE_PIECE_RADIUS, nectar.fill, 'transparent', 0);
+      ctx.globalAlpha = 1;
+      ctx.setLineDash([3, 2]);
+      drawCircle(ctx, at.x, at.y, GAUGE_PIECE_RADIUS, 'transparent', SCENE_COLORS.pendingStroke, 1.5);
+      ctx.setLineDash([]);
+    }
+  });
+  ctx.restore();
+}
+
+// HIVE 시차 낙하 연출: 전복된 셀의 립 기준점 → 착지점 선형 보간, 불투명도 증가, 화면 12시부터 시계 방향 윤곽 호 (u = 1에서 완전한 원)
+function drawTipDrops(ctx: CanvasRenderingContext2D, frame: DeepReadonly<TimelineFrame>, ally: Alliance, view: ViewTransform): void {
+  const { hive } = frame.field;
+  if (!hive.isTipping || hive.pendingDrops.length === 0) return;
+  const lip = hiveTipLipOrigin(ally, oppositeCell(hive.upwardCell));
+  const up = screenUpInField(view);
+  const start = Math.atan2(up.y, up.x);
+  ctx.save();
+  for (const drop of hive.pendingDrops) {
+    const piece = frame.pieces.find((p) => p.id === drop.pieceId);
+    if (!piece) continue;
+    const v = tipDropView(lip, { x: drop.targetX, y: drop.targetY }, drop.settleTime, hive.tipProgressTimer);
+    const { fill } = pieceColors(piece);
+    const r = PIECE_PHYSICS[piece.type].radius;
+    ctx.globalAlpha = v.alpha;
+    drawCircle(ctx, v.x, v.y, r, fill, 'transparent', 0);
+    ctx.globalAlpha = 1;
+    ctx.beginPath();
+    ctx.arc(inchToPx(v.x), inchToPx(v.y), inchToPx(r), start, start + v.progress * Math.PI * 2);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = SCENE_COLORS.tipOutline;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// 경기 종료 강조 (필드 공간): 득점 인정 GARDEN 기물 테두리, 득점 FLOWER 게이지 테두리 (scoreBreakdown이 있는 종료 프레임만)
+function drawScoredFieldMarks(ctx: CanvasRenderingContext2D, frame: DeepReadonly<TimelineFrame>): void {
+  const breakdown = frame.scoreBreakdown;
+  if (!breakdown) return;
+  ctx.save();
+  for (const id of breakdown.gardenPieceIds) {
+    const piece = frame.pieces.find((p) => p.id === id);
+    if (piece) drawCircle(ctx, piece.x, piece.y, PIECE_PHYSICS[piece.type].radius + 0.8, 'transparent', SCENE_COLORS.scored, 3);
+  }
+  for (const f of breakdown.flowers) {
+    const index = FLOWER_IDS.indexOf(f.id as (typeof FLOWER_IDS)[number]);
+    if (!f.owned || index < 0) continue;
+    gaugeFramePath(ctx, flowerGaugeLayout(index));
+    ctx.lineWidth = 3.5;
+    ctx.strokeStyle = SCENE_COLORS.scored;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// 경기 종료 강조: 주차 인정 로봇 외곽 (몸체보다 1.5 in 크게)
+function drawParkedMarks(ctx: CanvasRenderingContext2D, frame: DeepReadonly<TimelineFrame>, scene: SceneInput): void {
+  const breakdown = frame.scoreBreakdown;
+  if (!breakdown) return;
+  ctx.save();
+  for (const id of breakdown.parkedRobots) {
+    const [robot, config] = id === 'robot1' ? [frame.r1, scene.r1Config] : [frame.r2, scene.r2Config];
+    const body = getRobotOBB(robot, config);
+    pathPolygon(ctx, obbCorners({ ...body, halfExtents: [body.halfExtents[0] + 1.5, body.halfExtents[1] + 1.5] }));
+    ctx.lineWidth = 3.5;
+    ctx.strokeStyle = SCENE_COLORS.scored;
+    ctx.stroke();
   }
   ctx.restore();
 }
@@ -281,6 +487,87 @@ function drawText(ctx: CanvasRenderingContext2D, text: string, at: Point2, size:
   ctx.fillText(text, at.x, at.y);
 }
 
+function drawPill(ctx: CanvasRenderingContext2D, text: string, at: Point2, size: number, bg: string, fg: string): void {
+  ctx.font = `bold ${size}px system-ui, sans-serif`;
+  const w = ctx.measureText(text).width + 8;
+  const h = size + 6;
+  ctx.beginPath();
+  ctx.roundRect(at.x - w / 2, at.y - h / 2, w, h, h / 2);
+  ctx.fillStyle = bg;
+  ctx.fill();
+  drawText(ctx, text, at, size, fg);
+}
+
+// 셀 박스의 화면 경계 상자 (중심, 폭, 높이 — 논리 px)
+function cellScreenBox(ally: Alliance, cell: HiveCell, view: ViewTransform): { cx: number; cy: number; w: number; h: number } {
+  const box = hiveCellBox(ally, cell);
+  const pts = [
+    fieldToCanvas(view, box.x, box.y),
+    fieldToCanvas(view, box.x + box.width, box.y),
+    fieldToCanvas(view, box.x, box.y + box.height),
+    fieldToCanvas(view, box.x + box.width, box.y + box.height),
+  ];
+  const xs = pts.map((p) => p.x);
+  const ys = pts.map((p) => p.y);
+  const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  return { cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, w: maxX - minX, h: maxY - minY };
+}
+
+// 화면 가로 줄로 기물 원 count개 (셀 폭에 맞춰 축소)
+function drawScreenRow(ctx: CanvasRenderingContext2D, cx: number, y: number, width: number, count: number, radius: number, fill: string, stroke: string): void {
+  if (count <= 0) return;
+  const gap = Math.min(radius * 2 + 3, (width - 6) / count);
+  const r = Math.min(radius, gap / 2 - 0.5);
+  for (let i = 0; i < count; i++) {
+    ctx.beginPath();
+    ctx.arc(cx + (i - (count - 1) / 2) * gap, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = stroke;
+    ctx.stroke();
+  }
+}
+
+// HIVE 셀 내용 (화면 공간, 똑바로): 상향 셀은 NECTAR 줄 / 개수 글자 "▲ N{NECTAR} P{POLLEN}/{임계}" / POLLEN 줄을 위에서 아래로,
+// 전복 중인 셀은 "TIPPING". 보기가 회전해도 줄과 글자가 겹치지 않음
+function drawHiveLabels(ctx: CanvasRenderingContext2D, hive: DeepReadonly<HiveState>, ally: Alliance, view: ViewTransform): void {
+  const k = view.scale * PX_PER_INCH;
+  const up = cellScreenBox(ally, hive.upwardCell, view);
+  const n = hive.nectarInUpwardCell;
+  const nectar = pieceColors({ type: 'NECTAR', alliance: ally });
+  drawScreenRow(ctx, up.cx, up.cy - up.h * 0.3, up.w, n, PIECE_PHYSICS.NECTAR.radius * k, nectar.fill, COLORS.labelOnDark);
+  drawScreenRow(ctx, up.cx, up.cy + up.h * 0.3, up.w, hive.pollenInUpwardCell, PIECE_PHYSICS.POLLEN.radius * k, COLORS.pollenFill, COLORS.pollenStroke);
+  drawPill(ctx, `▲ N${n} P${hive.pollenInUpwardCell}/${hiveTipPollenThreshold(n)}`, { x: up.cx, y: up.cy }, 11, SCENE_COLORS.pillBg, SCENE_COLORS.pillText);
+  if (hive.isTipping) {
+    const spilled = cellScreenBox(ally, oppositeCell(hive.upwardCell), view);
+    drawPill(ctx, 'TIPPING', { x: spilled.cx, y: spilled.cy }, 11, SCENE_COLORS.tipping, SCENE_COLORS.tipOutline);
+  }
+}
+
+// 경기 종료: 득점 FLOWER 점수 (똑바로): 필드 안쪽, "FLOWER n" 라벨 바로 바깥 (여백이 좁은 게이지 쪽에 두면 잘림)
+function drawScoredLabels(ctx: CanvasRenderingContext2D, frame: DeepReadonly<TimelineFrame>, ally: Alliance, view: ViewTransform): void {
+  const breakdown = frame.scoreBreakdown;
+  if (!breakdown) return;
+  const labels = fieldLabels(ally);
+  for (const f of breakdown.flowers) {
+    const index = FLOWER_IDS.indexOf(f.id as (typeof FLOWER_IDS)[number]);
+    const label = labels.find((l) => l.text === `FLOWER ${index + 1}`);
+    if (!f.owned || !label?.outward) continue;
+    ctx.font = `bold ${label.size}px system-ui, sans-serif`;
+    const lw = ctx.measureText(label.text).width;
+    const c = Math.cos(view.angle);
+    const sn = Math.sin(view.angle);
+    const nx = label.outward.x * c - label.outward.y * sn;
+    const ny = label.outward.x * sn + label.outward.y * c;
+    const labelExtent = Math.abs(nx) * lw + Math.abs(ny) * label.size; // 라벨 상자의 법선 방향 길이
+    const text = `+${f.points}`;
+    ctx.font = 'bold 11px system-ui, sans-serif';
+    const at = labelCenter(view, label.anchor, label.outward, ctx.measureText(text).width + 8, 17, LABEL_GAP_PX + labelExtent + 3);
+    drawPill(ctx, text, at, 11, SCENE_COLORS.scored, SCENE_COLORS.tipOutline);
+  }
+}
+
 function drawBadge(ctx: CanvasRenderingContext2D, robot: DeepReadonly<RobotState>, config: RobotConfig, view: ViewTransform): void {
   const badge = robotBadge(robot);
   if (!badge) return;
@@ -316,7 +603,8 @@ function drawBadge(ctx: CanvasRenderingContext2D, robot: DeepReadonly<RobotState
 
 /**
  * 장면 전체를 그림. ctx는 SCENE_WIDTH_PX × SCENE_HEIGHT_PX 논리 크기 × dpr 버퍼의 캔버스
- * 순서: 배경 / 좌우 패널 → 정적 레이어 → 구조물 라벨 → 바닥 기물 → 로봇 → 번호 / 배지 (HIVE 상태, 게이지, 비행 공은 이후 단계)
+ * 순서: 배경 / 좌우 패널 → 정적 레이어(게이지 틀 포함) → 구조물 라벨 → HIVE 셀 상태 / 게이지 내용 → 바닥 기물 → 종료 강조(GARDEN / FLOWER)
+ *       → 로봇 → 종료 강조(주차) → 팁 낙하 → HIVE 글자 / 종료 점수 / 번호 / 배지 (비행 공 / 표시 옵션은 08-6)
  */
 export function renderScene(ctx: CanvasRenderingContext2D, scene: SceneInput, dpr = 1): void {
   const { frame, view } = scene;
@@ -343,12 +631,19 @@ export function renderScene(ctx: CanvasRenderingContext2D, scene: SceneInput, dp
   drawFieldLabels(ctx, ally, view);
 
   ctx.setTransform(...fieldPxMatrix(view, dpr));
+  drawHiveState(ctx, frame.field.hive, ally);
+  drawGaugeContents(ctx, frame, ally);
   drawFloorPieces(ctx, frame.pieces);
+  drawScoredFieldMarks(ctx, frame);
   drawRobotBody(ctx, frame.r1, scene.r1Config, ally);
   drawRobotBody(ctx, frame.r2, scene.r2Config, ally);
+  drawParkedMarks(ctx, frame, scene);
+  drawTipDrops(ctx, frame, ally, view);
 
-  // 화면 공간: 로봇 번호 / 배지는 똑바로
+  // 화면 공간: HIVE 셀 글자 / 종료 점수 / 로봇 번호 / 배지는 똑바로
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawHiveLabels(ctx, frame.field.hive, ally, view);
+  drawScoredLabels(ctx, frame, ally, view);
   const robots: [DeepReadonly<RobotState>, RobotConfig, string][] = [
     [frame.r1, scene.r1Config, '1'],
     [frame.r2, scene.r2Config, '2'],

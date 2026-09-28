@@ -816,6 +816,12 @@ function isInDeadZone(x: number, y: number, radius: number, robotOBBs: readonly 
   return robotOBBs.some((obb) => testOBBvsCircle(obb, circle).colliding);
 }
 
+// HIVE 팁 시차 낙하 기준점 (Lip Origin, 명세서 2.6.1): 진영 중심선 x, 전복된 셀 쪽 프레임 가장자리 y
+// (엔진 낙하 계획과 렌더러 낙하 연출이 공유)
+export function hiveTipLipOrigin(alliance: 'RED' | 'BLUE', spilledCell: 'AUDIENCE_CELL' | 'OPPOSITE_CELL'): Vector2D {
+  return { x: HIVE_CENTER_X[alliance], y: spilledCell === 'AUDIENCE_CELL' ? HIVE_AABB.maxY : HIVE_AABB.minY };
+}
+
 // rng는 결정론적 재현을 위해 시드 기반 난수 생성기를 주입할 수 있음 (기본값 Math.random)
 export function generateTippedPiecePlan(
   alliance: 'RED' | 'BLUE',
@@ -824,9 +830,8 @@ export function generateTippedPiecePlan(
   robots: readonly RobotBody[],
   rng: () => number = Math.random,
 ): PendingDrop[] {
-  const lipX = HIVE_CENTER_X[alliance];
+  const { x: lipX, y: lipY } = hiveTipLipOrigin(alliance, upwardCell);
   const isAudience = upwardCell === 'AUDIENCE_CELL';
-  const lipY = isAudience ? HIVE_AABB.maxY : HIVE_AABB.minY;
   const spillDir = isAudience ? 1.0 : -1.0;
 
   const robotOBBs = robots.map(({ state, config }) => getRobotOBB(state, config));
