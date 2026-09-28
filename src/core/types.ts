@@ -152,13 +152,17 @@ export interface RobotState {
   vy: number;
   omega: number;
   heading: number;
-  actionState: 'IDLE' | 'INTAKING' | 'SHOOTING' | 'FLOWER_SETUP' | 'FLOWER_DROPPING';
+  // FLOWER_*: 리프트 FSM (명세서 2.6.3) — SETUP 올리는 중 / READY 올린 채 대기 / DROPPING 투입 중 / LOWERING 내리는 중
+  actionState: 'IDLE' | 'INTAKING' | 'SHOOTING' | 'FLOWER_SETUP' | 'FLOWER_READY' | 'FLOWER_DROPPING' | 'FLOWER_LOWERING';
   stateTimer: number;
   isBraking: boolean;       // Stationary Lock 액션 진입 후 완전 정지 대기 중인지 여부
   intakeContactTimer: number; // 유효 흡입 영역 내 기물 접촉 유지 시간 누적치 (초)
   intakeTargetPieceId: string | null; // 현재 접촉 흡입 중인 기물 식별자
   controlledPieces: GamePiece[]; // FIFO 적재함 (0번이 다음에 나감), 최대 길이 = 로봇 적재 한도
 }
+
+// 틱별 행동 요청 (입력 계층 → 엔진, 명세서 3.6). FLOWER_READY / FLOWER_LOWERING은 엔진 상태이며 요청 값이 아님
+export type ActionRequest = 'IDLE' | 'INTAKING' | 'SHOOTING' | 'FLOWER_SETUP' | 'FLOWER_DROPPING';
 
 // 슈팅 판정 인터페이스: 0.0 ~ 1.0 명중 확률 반환 (엔진 생성자 필수 인자)
 // 실제 경기는 탄도 LUT 기반 구현(createLUTShotResolver, Step 6)을 주입하고, 테스트는 고정 확률 함수를 주입

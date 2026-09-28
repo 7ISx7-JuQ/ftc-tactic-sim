@@ -35,7 +35,12 @@ const assert = (c: boolean, m: string) => {
 };
 const count = (e: SimulationEngine, s: string) => e.pieces.filter(p => p.state === s).length;
 const inp = (actionState: RobotDriveInput['actionState'], vx = 0, vy = 0, w = 0): RobotDriveInput => ({ targetVx: vx, targetVy: vy, targetOmega: w, actionState });
-const SHOOT = inp('SHOOTING'), INTAKE = inp('INTAKING'), DROP = inp('FLOWER_DROPPING');
+const SHOOT = inp('SHOOTING'), INTAKE = inp('INTAKING'), DROP = inp('FLOWER_DROPPING'), LIFT = inp('FLOWER_SETUP');
+// 리프트 FSM(명세서 2.6.3): A 토글 켬 + B 유지와 같은 입력 — 리프트가 올라가 있으면 투입, 아니면 올림 요청
+const isLifted = (s: string) => s === 'FLOWER_READY' || s === 'FLOWER_DROPPING';
+const liftDrop = (e: SimulationEngine) => (isLifted(e.r2.actionState) ? DROP : LIFT);
+// R2가 n틱 동안 올림 → 투입 (올림 25틱 + 투입 10틱 = 35틱에 첫 투입, 이후 10틱마다)
+const stepDrop = (e: SimulationEngine, n: number) => { for (let i = 0; i < n; i++) e.step(undefined, liftDrop(e)); };
 // 비행 중인 발사가 모두 도착할 때까지 입력 없이 진행 (발사 → 도착 분리, 명세서 2.6.2)
 const settle = (e: SimulationEngine) => { let guard = 0; while (e.field.pendingShots.length > 0 && guard++ < 500) e.step(); };
 // 발사 틱에 기록된 비행의 도착 틱 (그 틱에 발사가 없으면 -1)
@@ -104,12 +109,12 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       for (let i = 0; i < 60; i++) j.step(undefined, INTAKE);
       assert(j.field.flowers[0].pieces[0] === null && j.r2.controlledPieces.length === 2, 'nectar jam blocks deQ');
       const d = eng({ r2Spawn: pose(9, 107.9) });
-      for (let i = 0; i < 25 + 10 * 4; i++) d.step(undefined, DROP);
-      assert(d.field.flowers[0].pieces.length === 8 && d.r2.controlledPieces.length === 0 && d.r2.actionState === 'IDLE', 'FLOWER 4 + 4 drops = 8 POLLEN (≤ 9), all dropped');
+      stepDrop(d, 25 + 10 * 4);
+      assert(d.field.flowers[0].pieces.length === 8 && d.r2.controlledPieces.length === 0 && d.r2.actionState === 'FLOWER_READY', 'FLOWER 4 + 4 drops = 8 POLLEN (≤ 9), all dropped, lift stays up');
       const d9 = eng({ r2Spawn: pose(9, 107.9) });
       fillFlower1(d9, 8);
-      for (let i = 0; i < 45; i++) d9.step(undefined, DROP);
-      assert(d9.field.flowers[0].pieces.length === 9 && d9.r2.controlledPieces.length === 3 && d9.r2.actionState === 'IDLE', 'FLOWER 8 + 1 drop = 9 (table max), next drop refused -> IDLE');
+      stepDrop(d9, 45);
+      assert(d9.field.flowers[0].pieces.length === 9 && d9.r2.controlledPieces.length === 3 && d9.r2.actionState === 'FLOWER_READY', 'FLOWER 8 + 1 drop = 9 (table max), next drop refused -> READY');
     }
   }, TEST_TIMEOUT_MS);
 
@@ -289,7 +294,7 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       assert(deq(cfg('robot2', { intakeZones: createIntakeZonePreset('FRONT', { length: 18, width: 18 }) }), pose(96, 131.5, Math.PI / 2)) === 4, 'FRONT zone facing flower4 deQ');
       // FLOWER 투입은 방향 무관 (버전 1): FRONT 전용 로봇이 왼쪽 면으로 투입
       const d = eng({ r2Spawn: pose(9, 107.9) });
-      for (let i = 0; i < 45; i++) d.step(undefined, DROP);
+      stepDrop(d, 45);
       assert(d.field.flowers[0].pieces.length === 6, 'flower drop remains direction-independent (reach 1.0in, 2 drops by tick 45)');
     }
   }, TEST_TIMEOUT_MS);
@@ -329,10 +334,10 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       {
         const f = eng({ r2Loadout: ['NECTAR', 'POLLEN'], r2Spawn: pose(9, 107.9), hiveInitialPieces: { pollenCount: 0, nectarCount: 2 } });
         assert(f.r2.controlledPieces[0].type === 'NECTAR', 'loadout order preserved (index 0 = NECTAR)');
-        for (let i = 0; i < 35; i++) f.step(undefined, DROP);
+        stepDrop(f, 35);
         assert(f.field.flowers[0].pieces.length === 4 && f.r2.controlledPieces[0].type === 'NECTAR' && f.r2.controlledPieces.length === 2 && f.r2.actionState === 'IDLE'
           && f.timeline.every(fr => fr.r2.actionState === 'IDLE'),
-          'TELEOP: NECTAR at front -> drop request refused (never enters FLOWER_SETUP), loadout untouched');
+          'TELEOP: NECTAR at front -> lift request refused (never enters FLOWER_SETUP), loadout untouched');
         const g = eng({ r1Loadout: ['NECTAR', 'POLLEN', 'POLLEN'], hiveInitialPieces: { pollenCount: 0, nectarCount: 2 } });
         for (let i = 0; i < 15; i++) g.step(SHOOT);
         assert(g.r1.controlledPieces.map(p => p.type).join() === 'POLLEN,POLLEN' && g.field.pendingShots.map(s => s.pieceType).join() === 'NECTAR', 'FIFO shooting: NECTAR (index 0) fired first');
@@ -546,45 +551,56 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
 
   it('N. FLOWER 투입 요청 시점 거부', () => {
     {
-      const everLifted = (e: SimulationEngine, from = 0) => e.timeline.slice(from).some(fr => fr.r2.actionState === 'FLOWER_SETUP' || fr.r2.actionState === 'FLOWER_DROPPING');
+      const everLifted = (e: SimulationEngine, from = 0) => e.timeline.slice(from).some(fr => fr.r2.actionState !== 'IDLE' && fr.r2.actionState !== 'INTAKING');
       // ② 도달 거리 내 FLOWER 없음
       {
         const e = eng({ r2Spawn: pose(60, 120) });
-        for (let i = 0; i < 40; i++) e.step(undefined, DROP);
-        assert(!everLifted(e) && e.r2.controlledPieces.length === 4, 'no FLOWER in reach -> request refused, stays IDLE');
+        stepDrop(e, 40);
+        assert(!everLifted(e) && e.r2.controlledPieces.length === 4, 'no FLOWER in reach -> lift request refused, stays IDLE');
       }
-      // ③ 용량 초과: FLOWER1을 8개로 채운 뒤 1개 투입 → 9개(테이블 최대) → 추가 요청 거부
+      // ③ 용량 초과: FLOWER1을 8개로 채운 뒤 1개 투입 → 9개(테이블 최대) → 추가 투입 요청 무시, 리프트는 올린 채 대기
       {
         const e = eng({ r2Spawn: pose(9, 107.9) });
         fillFlower1(e, 8);
-        for (let i = 0; i < 35; i++) e.step(undefined, DROP);          // 35틱: 1개 투입 (8 → 9)
-        assert(e.field.flowers[0].pieces.length === 9 && e.r2.actionState === 'IDLE', 'first drop OK (8 -> 9), then no rearm because next POLLEN would exceed capacity');
-        for (let i = 0; i < 100; i++) e.step(undefined, DROP);
-        assert(!everLifted(e, 36) && e.r2.controlledPieces.length === 3, 'holding drop button at full FLOWER: no repeated lift cycles');
+        stepDrop(e, 35);                                                  // 35틱: 1개 투입 (8 → 9)
+        assert(e.field.flowers[0].pieces.length === 9 && e.r2.actionState === 'FLOWER_READY', 'first drop OK (8 -> 9), then no rearm because next POLLEN would exceed capacity');
+        stepDrop(e, 100);
+        assert(e.timeline.slice(36).every(fr => fr.r2.actionState === 'FLOWER_READY') && e.r2.controlledPieces.length === 3,
+          'holding drop button at full FLOWER: request ignored, lift waits (no repeated cycles)');
       }
       // 연속 투입: 가능할 때는 재장전 (FLOWER2가 비어 있으면 5개까지 연속 투입)
       {
         const e = eng({ flowerPiecesCount: [0, 4, 4, 4], r2Spawn: pose(9, 107.9) });
-        for (let i = 0; i < 25 + 10 * 4; i++) e.step(undefined, DROP);  // 준비 25틱 + 투입 10틱 × 4
+        stepDrop(e, 25 + 10 * 4);                                         // 올림 25틱 + 투입 10틱 × 4
         assert(e.field.flowers[0].pieces.length === 4 && e.r2.controlledPieces.length === 0, 'continuous drops while allowed (4 POLLEN into empty FLOWER)');
       }
       // ① NECTAR: TELEOP 거부, ENDGAME 수락
       {
         const e = eng({ r2Loadout: ['NECTAR', 'POLLEN'], r2Spawn: pose(9, 107.9), hiveInitialPieces: { pollenCount: 0, nectarCount: 2 } });
-        while (e.currentTick < 2990) e.step(undefined, DROP);
+        while (e.currentTick < 2990) e.step(undefined, liftDrop(e));
         assert(!everLifted(e), 'NECTAR at front refused for the whole TELEOP phase');
-        while (e.currentTick < 3040) e.step(undefined, DROP);
+        while (e.currentTick < 3040) e.step(undefined, liftDrop(e));
         const f = e.field.flowers[0];
-        assert(f.pieces.some(p => p?.type === 'NECTAR') && e.r2.controlledPieces.length <= 1, 'ENDGAME: NECTAR drop request accepted and dropped');
+        assert(f.pieces.some(p => p?.type === 'NECTAR') && e.r2.controlledPieces.length <= 1, 'ENDGAME: NECTAR lift / drop accepted and dropped');
       }
-      // 안전장치: 준비 중에 FLOWER가 가득 차면 완료 시점에 거부, 기물 그대로
+      // 투입 요청 시점 검사: 대기 중에 FLOWER가 가득 차면 투입 요청 무시, 기물 그대로
       {
         const e = eng({ r2Spawn: pose(9, 107.9) });
-        e.step(undefined, DROP);
-        assert(e.r2.actionState === 'FLOWER_SETUP', 'request accepted (FLOWER1 has room)');
-        fillFlower1(e, 9);                                                // 준비 중 다른 요인으로 9개(가득)가 됨
-        for (let i = 0; i < 40; i++) e.step(undefined, DROP);
-        assert(e.field.flowers[0].pieces.length === 9 && e.r2.controlledPieces.length === 4 && e.r2.actionState === 'IDLE', 'completion-time safety check rejects, loadout untouched');
+        e.step(undefined, LIFT);
+        assert(e.r2.actionState === 'FLOWER_SETUP', 'lift request accepted (FLOWER1 has room)');
+        fillFlower1(e, 9);                                                // 올리는 중 다른 요인으로 9개(가득)가 됨
+        stepDrop(e, 40);
+        assert(e.field.flowers[0].pieces.length === 9 && e.r2.controlledPieces.length === 4 && e.r2.actionState === 'FLOWER_READY'
+          && !e.timeline.some(fr => fr.r2.actionState === 'FLOWER_DROPPING'), 'READY: drop request refused when FLOWER became full, loadout untouched');
+      }
+      // 안전장치: 투입 중에 FLOWER가 가득 차면 완료 시점에 거부, 기물 그대로 두고 대기 복귀
+      {
+        const e = eng({ r2Spawn: pose(9, 107.9) });
+        while (e.r2.actionState !== 'FLOWER_DROPPING' && e.currentTick < 40) e.step(undefined, liftDrop(e));
+        assert(e.r2.actionState === 'FLOWER_DROPPING', 'drop accepted');
+        fillFlower1(e, 9);
+        for (let i = 0; i < 12; i++) e.step(undefined, LIFT);
+        assert(e.field.flowers[0].pieces.length === 9 && e.r2.controlledPieces.length === 4 && e.r2.actionState === 'FLOWER_READY', 'completion-time safety check rejects, loadout untouched, back to READY');
       }
     }
   }, TEST_TIMEOUT_MS);
@@ -605,7 +621,7 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
         else if (jam) f.pieces = [null, ...Array.from({ length: nectarInFlower }, nectar), ...Array.from({ length: e - 1 }, pollen)];
         else f.pieces = [pollen(), ...Array.from({ length: nectarInFlower }, nectar), ...Array.from({ length: e - 1 }, pollen)];
         const before = f.pieces.length;
-        for (let i = 0; i < 40; i++) en.step(undefined, DROP);
+        stepDrop(en, 40);
         assert(f.pieces[0]?.type !== 'NECTAR', 'slot[0] never NECTAR');
         return f.pieces.length - before;
       };
@@ -622,7 +638,7 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       {
         const en = eng({ r2Loadout: ['NECTAR'], r2Spawn: pose(9, 107.9), flowerPiecesCount: [0, 4, 4, 4], hiveInitialPieces: { pollenCount: 0, nectarCount: 2 } });
         while (en.currentTick < 3000) en.step();
-        for (let i = 0; i < 40; i++) en.step(undefined, DROP);
+        stepDrop(en, 40);
         const f = en.field.flowers[0];
         assert(f.pieces.length === 2 && f.pieces[0] === null && f.pieces[1]?.type === 'NECTAR', 'NECTAR into empty FLOWER -> [null, NECTAR] (slot[0] never NECTAR)');
       }
@@ -636,7 +652,7 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
         f.pieces = jammed ? [null, nectar] : [pollen(), nectar];
         for (let i = 0; i < pollenAbove; i++) f.pieces.push(pollen());
         const before = f.pieces.length;
-        for (let i = 0; i < 35; i++) e.step(undefined, DROP);
+        stepDrop(e, 35);
         return { added: f.pieces.length - before, e };
       };
       // 잼 [null, N, P×6] = {P6(+가상1)=7, N1} → +1 → 8 ≤ 8 수락 / [null, N, P×7] → 9 > 8 거부
@@ -843,6 +859,111 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       while (e.currentTick < 6000) e.step(SHOOT);
       const last = e.getFrame(6000)!;
       assert(last.field.pendingShots.length === 1 && last.field.pendingShots[0].arriveTick > 6000 && last.field.hive.tipCount === 0, 'flight still pending at the final tick -> not scored');
+    }
+  }, TEST_TIMEOUT_MS);
+
+  it('T. FLOWER 리프트 FSM (올림 / 대기 / 투입 / 내림)', () => {
+    // 기준: flowerSetupDelay 500 ms = 25틱, flowerDropDelay 200 ms = 10틱, R2는 FLOWER1 옆(도달 거리 안)에 정지
+    const near = () => eng({ r2Spawn: pose(9, 107.9) });
+    const states = (e: SimulationEngine) => e.timeline.map(fr => fr.r2.actionState);
+    const firstTick = (e: SimulationEngine, s: string, from = 0) => states(e).indexOf(s as never, from);
+    const flowerCount = (e: SimulationEngine, tick: number) => e.getFrame(tick)!.field.flowers[0].pieces.length;
+    const lowerDuration = (e: SimulationEngine, from: number) => {   // 내림 시작 틱 ~ IDLE 복귀 틱 (타이머 차감 횟수)
+      const start = firstTick(e, 'FLOWER_LOWERING', from);
+      return firstTick(e, 'IDLE', start) - start + 1;
+    };
+    const raiseToReady = (e: SimulationEngine) => { while (e.r2.actionState !== 'FLOWER_READY' && e.currentTick < 60) e.step(undefined, LIFT); };
+
+    // IDLE에서 투입 요청은 무효 (리프트가 올라가 있지 않음)
+    {
+      const e = near();
+      for (let i = 0; i < 40; i++) e.step(undefined, DROP);
+      assert(states(e).every(s => s === 'IDLE') && e.field.flowers[0].pieces.length === 4 && e.r2.controlledPieces.length === 4, 'IDLE + FLOWER_DROPPING request -> ignored (no lift, no drop)');
+    }
+    // 올림 요청 유지: 25틱 올린 뒤 대기, 투입 없이 계속 대기
+    {
+      const e = near();
+      for (let i = 0; i < 60; i++) e.step(undefined, LIFT);
+      assert(firstTick(e, 'FLOWER_SETUP') === 1 && firstTick(e, 'FLOWER_READY') === 25, `raise takes flowerSetupDelay (READY at tick 25, got ${firstTick(e, 'FLOWER_READY')})`);
+      assert(states(e).slice(25).every(s => s === 'FLOWER_READY') && e.field.flowers[0].pieces.length === 4 && e.r2.controlledPieces.length === 4, 'holding lift -> waits in READY, never drops by itself');
+    }
+    // 대기 중 투입 탭 1틱: 투입은 커밋되어 정확히 1개, 이후 대기 복귀
+    {
+      const e = near();
+      raiseToReady(e);
+      const t0 = e.currentTick;
+      e.step(undefined, DROP);
+      for (let i = 0; i < 20; i++) e.step(undefined, LIFT);
+      assert(e.field.flowers[0].pieces.length === 5 && e.r2.controlledPieces.length === 3 && e.r2.actionState === 'FLOWER_READY', 'READY + 1-tick drop tap -> exactly one drop, back to READY');
+      assert(flowerCount(e, t0 + 9) === 4 && flowerCount(e, t0 + 10) === 5, 'drop completes after flowerDropDelay (10 ticks)');
+    }
+    // 대기 중 내림: flowerSetupDelay(25틱) 동안 내린 뒤 IDLE
+    {
+      const e = near();
+      raiseToReady(e);
+      const t0 = e.currentTick;
+      for (let i = 0; i < 40; i++) e.step(undefined, inp('IDLE'));
+      assert(lowerDuration(e, t0) === 25 && e.r2.actionState === 'IDLE', `lower from READY takes flowerSetupDelay (25 ticks, got ${lowerDuration(e, t0)})`);
+    }
+    // 올리는 중 내림: 올린 시간(10틱)만큼만 내림
+    {
+      const e = near();
+      for (let i = 0; i < 10; i++) e.step(undefined, LIFT);
+      for (let i = 0; i < 30; i++) e.step(undefined, inp('IDLE'));
+      assert(firstTick(e, 'FLOWER_LOWERING') === 11 && lowerDuration(e, 0) === 10, `cancel while raising -> lower for the raised time (10 ticks, got ${lowerDuration(e, 0)})`);
+      assert(firstTick(e, 'FLOWER_READY') < 0 && e.r2.controlledPieces.length === 4, 'cancelled lift never reaches READY, nothing dropped');
+    }
+    // 제동 중(아직 올리지 않음) 내림: 즉시 IDLE
+    {
+      const e = near();
+      for (let i = 0; i < 3; i++) e.step(undefined, inp('IDLE', 0, -30));   // 천천히 FLOWER 쪽으로 이동 (도달 거리 유지)
+      e.step(undefined, LIFT);
+      const f4 = e.getFrame(4)!.r2;
+      assert(f4.actionState === 'FLOWER_SETUP' && f4.isBraking, 'lift accepted while moving -> braking, timer not started');
+      e.step(undefined, inp('IDLE'));
+      assert(e.r2.actionState === 'IDLE' && firstTick(e, 'FLOWER_LOWERING') < 0, 'cancel before any raise -> IDLE immediately (no lowering)');
+    }
+    // 투입 중 내림 요청은 무시: 투입 완료 → 대기 복귀 후에 내림
+    {
+      const e = near();
+      raiseToReady(e);
+      const t0 = e.currentTick;
+      e.step(undefined, DROP);
+      for (let i = 0; i < 40; i++) e.step(undefined, inp('IDLE'));
+      const dropTick = t0 + 10;
+      assert(flowerCount(e, dropTick) === 5 && e.getFrame(dropTick)!.r2.actionState === 'FLOWER_READY', 'lower request during DROPPING ignored: drop completes, back to READY');
+      assert(firstTick(e, 'FLOWER_LOWERING', t0) === dropTick + 1 && lowerDuration(e, t0) === 25 && e.r2.actionState === 'IDLE', 'then lowers from READY (25 ticks) to IDLE');
+    }
+    // 내림 중 올림 요청은 무시, IDLE 복귀 후 다시 올림 가능
+    {
+      const e = near();
+      raiseToReady(e);
+      const t0 = e.currentTick;
+      e.step(undefined, inp('IDLE'));
+      for (let i = 0; i < 30; i++) e.step(undefined, LIFT);
+      const idleTick = firstTick(e, 'IDLE', t0);
+      assert(lowerDuration(e, t0) === 25 && states(e).slice(t0 + 1, idleTick).every(s => s === 'FLOWER_LOWERING'), 'lift request during LOWERING ignored (lowering completes)');
+      assert(e.getFrame(idleTick + 1)!.r2.actionState === 'FLOWER_SETUP', 'after IDLE, lift request accepted again');
+    }
+    // 리프트 상태에서 슈팅 / 흡입 불가: 슈팅 요청은 내림 요청으로 해석, 내린 뒤 IDLE에서 발사
+    {
+      const e = near();
+      raiseToReady(e);
+      const t0 = e.currentTick;
+      for (let i = 0; i < 40; i++) e.step(undefined, SHOOT);
+      const idleTick = firstTick(e, 'IDLE', t0);
+      assert(firstTick(e, 'FLOWER_LOWERING', t0) === t0 + 1 && idleTick > t0 && firstTick(e, 'SHOOTING', t0) === idleTick + 1, 'SHOOT in READY -> lower first, shooting only after IDLE');
+      assert(e.timeline.slice(0, idleTick + 1).every(fr => fr.field.pendingShots.length === 0), 'no shot fired while lift is up');
+      const g = near();
+      raiseToReady(g);
+      for (let i = 0; i < 5; i++) g.step(undefined, INTAKE);
+      assert(g.r2.actionState === 'FLOWER_LOWERING', 'INTAKE in READY -> lowering (no intake while lifted)');
+    }
+    // 리프트 상태는 Stationary Lock: 주행 입력이 있어도 정지 유지
+    {
+      const e = near();
+      for (let i = 0; i < 40; i++) e.step(undefined, inp('FLOWER_SETUP', 40, 0, 2));
+      assert(e.r2.actionState === 'FLOWER_READY' && e.r2.x === 9 && e.r2.y === 107.9 && e.r2.heading === 0, 'drive input ignored while raising / waiting');
     }
   }, TEST_TIMEOUT_MS);
 });

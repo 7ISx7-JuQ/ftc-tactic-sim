@@ -35,6 +35,7 @@ import {
   isHiveTipReached,
 } from './types';
 import type {
+  ActionRequest,
   DeepReadonly,
   FieldState,
   FlowerState,
@@ -127,9 +128,11 @@ export interface RobotDriveInput {
   targetVx: number;     // 필드 좌표계 목표 속도 (inch/s)
   targetVy: number;
   targetOmega: number;  // 목표 각속도 (rad/s)
-  // 요청 행동. SHOOTING / FLOWER_* 는 진입 후 완료까지 커밋되며(Stationary Lock),
-  // 완료 시점에 같은 요청이 유지되고 있으면 다음 발사/투입을 연속 수행
-  actionState: RobotState['actionState'];
+  // 요청 행동. SHOOTING / FLOWER_DROPPING / FLOWER_LOWERING은 진입 후 완료까지 커밋되며(Stationary Lock),
+  // 완료 시점에 같은 요청이 유지되고 있으면 다음 발사/투입을 연속 수행.
+  // 리프트(FLOWER_SETUP → READY → DROPPING → LOWERING, 명세서 2.6.3): FLOWER_SETUP / FLOWER_DROPPING 요청은
+  // 리프트 유지, 그 외 요청은 리프트 상태에서 내림 요청으로 해석
+  actionState: ActionRequest;
 }
 
 // runFullMatch()용 틱별 입력 스케줄 (tick = 이번 step 직전의 currentTick)
@@ -274,12 +277,14 @@ function canFlowerAccept(flower: FlowerState, type: GamePiece['type']): boolean 
   return nectar <= FLOWER_MAX_NECTAR_CAPACITY && pollen <= (FLOWER_MAX_POLLEN_BY_NECTAR[nectar] ?? 0);
 }
 
+// Stationary Lock 상태: 주행 입력 차단 + 정지 후 타이머 차감 (IDLE / INTAKING 외 전부)
 function isLockAction(state: RobotState['actionState']): boolean {
-  return state === 'SHOOTING' || state === 'FLOWER_SETUP' || state === 'FLOWER_DROPPING';
+  return state !== 'IDLE' && state !== 'INTAKING';
 }
 
-function isFlowerAction(state: RobotState['actionState']): boolean {
-  return state === 'FLOWER_SETUP' || state === 'FLOWER_DROPPING';
+// 리프트 유지 요청: 리프트 상태에서 이 외의 요청은 내림 요청으로 해석
+function isLiftHoldRequest(request: ActionRequest): boolean {
+  return request === 'FLOWER_SETUP' || request === 'FLOWER_DROPPING';
 }
 
 // GARDEN 판정: 기물을 바닥(xy 평면)에 수직 정사영한 원이 구역 사각형과 겹치면 인정 (걸침 포함)
@@ -849,24 +854,53 @@ export class SimulationEngine {
   // Step 1: FSM 행동 요청 + 기구학 / Stationary Lock
   // ------------------------------------------------------------
 
-  // IDLE / INTAKING 중에만 새 행동 요청을 수락. 락 액션은 완료 시까지 커밋.
+  // IDLE / INTAKING에서는 새 행동 요청을 수락하고, 리프트 올림 / 대기 중에는 투입 / 내림 요청만 반영.
+  // 발사 / 투입 / 내림은 완료 시까지 커밋 (요청 무시).
   private applyActionRequest(robot: RobotState, input: RobotDriveInput, config: RobotConfig): RobotState {
-    if (isLockAction(robot.actionState)) return robot;
-
     const request = input.actionState;
-    const hasPieces = robot.controlledPieces.length > 0;
 
-    if (request === 'SHOOTING' && hasPieces) {
+    switch (robot.actionState) {
+      case 'SHOOTING':
+      case 'FLOWER_DROPPING':
+      case 'FLOWER_LOWERING':
+        return robot;
+
+      case 'FLOWER_SETUP': {
+        if (isLiftHoldRequest(request)) return robot;
+        // 올리는 중 내림: 지금까지 올린 시간만큼 내림 (올림 시간 = 내림 시간). 제동 중이라 아직 안 올렸으면 즉시 IDLE
+        const raised = Math.max(0, config.flowerSetupDelay) / 1000 - robot.stateTimer;
+        if (raised <= EPSILON) return this.toIdleState(robot);
+        return this.enterLock(robot, 'FLOWER_LOWERING', raised * 1000);
+      }
+
+      case 'FLOWER_READY':
+        // 투입은 리프트가 올라가 있고 지금 투입 가능할 때만 (불가능하면 요청 무시, 대기 유지)
+        if (request === 'FLOWER_DROPPING') {
+          return this.findDropTarget(robot, config) >= 0 ? this.enterLock(robot, 'FLOWER_DROPPING', config.flowerDropDelay) : robot;
+        }
+        if (request === 'FLOWER_SETUP') return robot;
+        return this.enterLock(robot, 'FLOWER_LOWERING', config.flowerSetupDelay);
+
+      default:
+        break;
+    }
+
+    if (request === 'SHOOTING' && robot.controlledPieces.length > 0) {
       return this.enterLock(robot, 'SHOOTING', config.shooterDelay);
     }
-    // FLOWER 투입은 지금 당장 투입 가능한 경우에만 수락 (불가능하면 리프트 준비 없이 요청 거부 → IDLE 유지)
-    if (isFlowerAction(request) && this.findDropTarget(robot, config) >= 0) {
+    // 리프트 올림은 지금 당장 투입 가능한 경우에만 수락 (불가능하면 요청 거부 → IDLE / INTAKING).
+    // FLOWER_DROPPING 요청은 리프트가 올라가 있지 않으므로 무효
+    if (request === 'FLOWER_SETUP' && this.findDropTarget(robot, config) >= 0) {
       return this.enterLock(robot, 'FLOWER_SETUP', config.flowerSetupDelay);
     }
 
     const next: RobotState['actionState'] = request === 'INTAKING' ? 'INTAKING' : 'IDLE';
     if (next === robot.actionState) return robot;
     return { ...robot, actionState: next, stateTimer: 0, isBraking: false, intakeContactTimer: 0, intakeTargetPieceId: null };
+  }
+
+  private toIdleState(robot: RobotState): RobotState {
+    return { ...robot, actionState: 'IDLE', stateTimer: 0, isBraking: false, intakeContactTimer: 0, intakeTargetPieceId: null };
   }
 
   private enterLock(robot: RobotState, state: RobotState['actionState'], delayMs: number): RobotState {
@@ -1073,18 +1107,22 @@ export class SimulationEngine {
         return;
       }
       case 'FLOWER_SETUP':
-        rearm('FLOWER_DROPPING', config.flowerDropDelay);
+        // 올림 완료 → 올린 채 대기 (투입은 대기 상태에서 FLOWER_DROPPING 요청으로만)
+        rearm('FLOWER_READY', 0);
         return;
       case 'FLOWER_DROPPING': {
         const dropped = this.dropIntoFlower(robot, config);
-        // 연속 투입도 다음 기물이 투입 가능할 때만 재장전
-        if (dropped && isFlowerAction(input.actionState) && this.findDropTarget(robot, config) >= 0) {
+        // 연속 투입은 투입 요청이 유지되고 다음 기물이 투입 가능할 때만, 그 외에는 리프트를 올린 채 대기로 복귀
+        if (dropped && input.actionState === 'FLOWER_DROPPING' && this.findDropTarget(robot, config) >= 0) {
           rearm('FLOWER_DROPPING', config.flowerDropDelay);
         } else {
-          toIdle();
+          rearm('FLOWER_READY', 0);
         }
         return;
       }
+      case 'FLOWER_LOWERING':
+        toIdle();
+        return;
       default:
         return;
     }

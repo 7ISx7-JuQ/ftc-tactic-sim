@@ -298,7 +298,7 @@
             - 산출 기준: 원통 내 지그재그 적층 + 최상단 기물이 일부라도 원통 내부에 걸치면 인정. 사용자 계산값이며 실측이 가능해지면 실측값으로 교체 예정.
             - **NECTAR 잼 상태 처리 (단순화):** `slot[0]`이 비고 `slot[1]`에 NECTAR가 걸린 잼 상태(하단 추출 후 잼, 또는 빈 원통에 NECTAR 투입)에서는 빈 `slot[0]`을 **POLLEN 1개로 계산**하여 같은 테이블을 적용한다. 출구 턱 높이가 POLLEN 직경(2.8 in)과 같아, 턱에 걸린 NECTAR는 `slot[0]` POLLEN 위에 놓인 경우와 같은 높이에서 적층이 시작되기 때문이다. 턱(링) 위 받침과 공 위 받침에 따른 지그재그 적층의 미세한 차이는 **단순화를 위해 의도적으로 무시**한다 (별도 잼 전용 테이블 없음). 이 가상 POLLEN은 용량 판정에만 쓰이며 득점(`slot[1..N]` 개수)에는 포함되지 않는다.
         - 투입은 로봇 적재함 맨 앞 기물(FIFO, `controlledPieces.shift()`)을 FLOWER 최상단 슬롯에 추가 (`pieces.push(piece)`). 투입 가능 여부 = ① 도달 거리 내 FLOWER, ② NECTAR는 ENDGAME에만, ③ FLOWER 용량 테이블 (엔진 `findDropTarget`).
-        - **리프트 FSM (07-1 확정, 07-2 구현 예정 — 이전 "요청 1회 → 준비 → 자동 투입" 흐름을 대체):** 리프트를 올리고(준비) → 올린 채 대기 → 투입 → 내리는 단계를 분리하여, 드라이버가 리프트를 올린 뒤 투입 시점을 고르고 실수로 올린 리프트를 다시 내릴 수 있게 한다.
+        - **리프트 FSM (07-1 확정, 07-2 구현 완료 — 이전 "요청 1회 → 준비 → 자동 투입" 흐름을 대체):** 리프트를 올리고(준비) → 올린 채 대기 → 투입 → 내리는 단계를 분리하여, 드라이버가 리프트를 올린 뒤 투입 시점을 고르고 실수로 올린 리프트를 다시 내릴 수 있게 한다.
             - **상태 (모두 Stationary Lock, 3.4항):** `FLOWER_SETUP`(올리는 중) → `FLOWER_READY`(올린 채 대기, 타이머 없음) ⇄ `FLOWER_DROPPING`(투입 중) → `FLOWER_LOWERING`(내리는 중) → `IDLE`.
             - **리프트 유지 요청** = 행동 요청이 `FLOWER_SETUP` 또는 `FLOWER_DROPPING`. 그 외 요청(`IDLE` / `INTAKING` / `SHOOTING`)은 리프트 상태에서 "내림" 요청으로 해석한다.
             - **`IDLE` / `INTAKING`에서:**
@@ -602,7 +602,7 @@ export interface RobotState {
 }
 
 // 틱별 행동 요청 (입력 계층 → 엔진, 3.6항). FLOWER_READY / FLOWER_LOWERING은 엔진 상태이며 요청 값이 아님
-// (엔진 입력 RobotDriveInput.actionState의 타입, 07-2에서 RobotState['actionState']를 대체)
+// (엔진 입력 RobotDriveInput.actionState의 타입, 07-2 적용)
 export type ActionRequest = 'IDLE' | 'INTAKING' | 'SHOOTING' | 'FLOWER_SETUP' | 'FLOWER_DROPPING';
 
 // 슈팅 판정 인터페이스 (엔진 생성자 필수 인자: 실제 경기는 LUT 기반, 테스트는 고정 확률)
@@ -731,6 +731,7 @@ export interface TimelineFrame {
 | 06-5 | LUT 명중 확률 판정 함수(`createLUTShotResolver`) + LUT 생성 실행 / 사용자 경험 명세 (아래 6.2.6) | `ballistics.ts`, `types.ts`, 두 테스트 파일 |
 | 06-6 | 발사 비행 처리 (발사 / 도착 분리, `IN_FLIGHT`, 비행 대기열, 명중 / HIVE 반사 / 바닥 착지) (아래 6.2.7) | `ballistics.ts`, `simulationEngine.ts`, `types.ts`, 두 테스트 파일 |
 | 07-1 | 입력 계층 / 실시간 루프 명세 구체화, FLOWER 리프트 FSM 명세 (아래 6.2.8) | 명세서 |
+| 07-2 | FLOWER 리프트 FSM 엔진 구현 (올림 / 대기 / 투입 / 내림, `ActionRequest`) (아래 6.2.9) | `simulationEngine.ts`, `types.ts`, `__tests__/simulationEngine.test.ts` |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
@@ -810,6 +811,12 @@ export interface TimelineFrame {
 - **실시간 루프:** 20 ms 누산기, 따라잡기 상한 5틱, 포커스 소실 / 탭 숨김 / 패드 분리 시 자동 일시정지(누산 시간 · 입력 초기화, 일시정지 틱에서 재개), 새로고침 등으로 사라진 경기는 폐기.
 - **측정:** 풀매치 타임라인 힙 약 46 MB, `runFullMatch()` 약 1.6초 (Node, 로봇 1대 주행 입력).
 
+### 6.2.9 Step 07-2 (FLOWER 리프트 FSM) 완료 항목
+
+- **타입:** `RobotState.actionState`에 `FLOWER_READY` / `FLOWER_LOWERING` 추가, 요청 타입 `ActionRequest` 신설 (`RobotDriveInput.actionState`). 리프트 상태는 `IDLE` / `INTAKING` 외 상태로서 기구학상 자동으로 Stationary Lock.
+- **엔진 (`applyActionRequest` / `processActionCompletion`):** `IDLE` / `INTAKING`에서 올림 요청만 수락(투입 가능할 때), 투입 요청 무효. 올리는 중 내림 = 올린 시간(제동 중이면 즉시 `IDLE`), 올림 완료 → `FLOWER_READY`. 대기 중 투입 요청(투입 가능할 때) → `FLOWER_DROPPING`, 내림 요청 → `FLOWER_LOWERING`(`flowerSetupDelay`). 투입 / 내림 / 발사는 커밋. 투입 완료 후 투입 요청 유지 + 다음 기물 가능 → 연속 투입, 그 외 대기 복귀. 내림 완료 → `IDLE`.
+- **테스트:** 기존 D / J / K / N / O를 올림 → 투입 흐름(헬퍼 `stepDrop`: A 켬 + B 유지와 같은 입력)으로 갱신 — 투입 후 리프트는 `FLOWER_READY` 유지, 가득 찬 FLOWER에 투입 요청 시 대기 유지, 투입 중 FLOWER가 가득 차면 완료 시 거부 후 대기 복귀. 엔진 T(리프트 FSM: `IDLE` 투입 무효, 올림 25틱 후 대기, 투입 탭 1개 커밋, 대기 중 내림 25틱, 올리는 중 내림 = 올린 시간, 제동 중 취소 즉시 `IDLE`, 투입 중 내림 무시, 내림 중 올림 무시, 리프트 상태 슈팅 / 흡입 불가, 정지 유지) 추가. 올림 완료 시 자동 투입, 부분 내림을 전체 시간으로, 투입 중 내림 수용, `IDLE` 투입 수락, 제동 중 즉시 `IDLE` 제거, 대기 중 주행 허용, 내림 중 올림 수용, 투입 후 `IDLE` 복귀 각각에서 실패함을 확인.
+
 ### 6.3 남은 Step (권장 순서)
 
 > 모든 Step은 완료 시 `npm test`(엔진 회귀 테스트)가 통과해야 하며, 새로 추가한 규칙에는 테스트 그룹을 추가한다.
@@ -819,9 +826,9 @@ export interface TimelineFrame {
     - ~~06-3: 몬테카를로 명중 판정, 기물 종류별 v0 탐색, 기준 셀 72 × 72 LUT 생성, 4-Cell 대칭 복사 (로봇당 8장, 합계 16장).~~ (완료, 6.2.4)
     - ~~06-5: `createLUTShotResolver(luts, r1Config, r2Config)`: 쌍선형 보간 조회(`sampleLUT`) + 조준 판정(FIXED 허용 오차 / TURRET 회전 범위) → 엔진 생성자에 주입 (엔진 수정 불필요).~~ (완료, 6.2.6)
     - ~~06-6: 2.6.2항의 발사 비행 처리 구현 (`IN_FLIGHT`, 비행 대기열, 도착 규칙, 착지 속도) + 엔진 회귀 테스트.~~ (완료, 6.2.7)
-- **Step 7 — 입력 계층 및 실시간 루프 (상세 규칙 3.6항, 리프트 FSM 2.6.3항):** 07-1(명세) 완료.
+- **Step 7 — 입력 계층 및 실시간 루프 (상세 규칙 3.6항, 리프트 FSM 2.6.3항):** 07-1(명세), 07-2(리프트 FSM) 완료.
     - ~~07-1: 입력 계층 / 실시간 루프 / 리프트 FSM 명세 구체화.~~ (완료, 6.2.8)
-    - 07-2: 엔진 리프트 FSM — `types.ts`(`actionState`에 `FLOWER_READY` / `FLOWER_LOWERING`, `ActionRequest`), `simulationEngine.ts`(요청 처리 / 완료 처리). 기존 FLOWER 테스트(D / N / O)를 두 단계 흐름(올림 → 투입)으로 갱신하고 리프트 FSM 테스트 그룹 추가 (`IDLE` 투입 무효, 대기 / 연속 투입 / 대기 복귀, 올리는 중 내림 = 올린 시간, 대기 중 내림 = `flowerSetupDelay`, 제동 중 취소 즉시 `IDLE`, 투입 / 내림 중 요청 무시, 투입 불가 시 대기 유지, 리프트 상태 슈팅 / 흡입 불가).
+    - ~~07-2: 엔진 리프트 FSM (`actionState` 확장, `ActionRequest`, 요청 / 완료 처리, FLOWER 테스트 갱신 + 테스트 그룹 T).~~ (완료, 6.2.9)
     - 07-3: `src/input/inputConfig.ts` + 순수 변환 — 장치 합성(R2 = 패드 1 + 키보드), 축 처리(데드존, 키보드 정규화, `FIELD` / `ROBOT`), 행동 요청 결정(리프트 의도 유도, 리프트 중 트리거 무시, 우선순위), 탭 래치 누적기, 8비트 부호화 / 복호화 + 단위 테스트.
     - 07-4: 입력 로그 + 로봇별 입력 출처(`LIVE` / `REPLAY` / `NONE`) + 녹화 덧입히기 — 되감은 틱 이후 `LIVE` 로그 폐기, 로그 기반 `inputProvider`. 테스트: 실시간 결과 = 로그 재생 결과(비트 동일), 2회차에서 R1 명령 재생 + R2 실시간, 분기 시 로그 절단.
     - 07-5: 실시간 루프 컨트롤러 — 20 ms 누산기, 따라잡기 상한 5틱, 일시정지 / 재개(누산 시간 · 입력 누적기 초기화, 일시정지 틱에서 재개), 경기 종료 자동 정지. 시계 / 스케줄러 주입으로 가짜 시간 테스트 (순간 끊김, 탭 숨김, 재개).
