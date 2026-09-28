@@ -732,6 +732,7 @@ export interface TimelineFrame {
 | 06-6 | 발사 비행 처리 (발사 / 도착 분리, `IN_FLIGHT`, 비행 대기열, 명중 / HIVE 반사 / 바닥 착지) (아래 6.2.7) | `ballistics.ts`, `simulationEngine.ts`, `types.ts`, 두 테스트 파일 |
 | 07-1 | 입력 계층 / 실시간 루프 명세 구체화, FLOWER 리프트 FSM 명세 (아래 6.2.8) | 명세서 |
 | 07-2 | FLOWER 리프트 FSM 엔진 구현 (올림 / 대기 / 투입 / 내림, `ActionRequest`) (아래 6.2.9) | `simulationEngine.ts`, `types.ts`, `__tests__/simulationEngine.test.ts` |
+| 07-3 | 입력 설정 + 순수 변환 (장치 읽기, 탭 래치, 장치 합성, 조작 모드, 행동 요청, 8비트 부호화) (아래 6.2.10) | `src/input/inputConfig.ts`, `src/input/controls.ts`, `src/input/__tests__/controls.test.ts` |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
@@ -817,6 +818,18 @@ export interface TimelineFrame {
 - **엔진 (`applyActionRequest` / `processActionCompletion`):** `IDLE` / `INTAKING`에서 올림 요청만 수락(투입 가능할 때), 투입 요청 무효. 올리는 중 내림 = 올린 시간(제동 중이면 즉시 `IDLE`), 올림 완료 → `FLOWER_READY`. 대기 중 투입 요청(투입 가능할 때) → `FLOWER_DROPPING`, 내림 요청 → `FLOWER_LOWERING`(`flowerSetupDelay`). 투입 / 내림 / 발사는 커밋. 투입 완료 후 투입 요청 유지 + 다음 기물 가능 → 연속 투입, 그 외 대기 복귀. 내림 완료 → `IDLE`.
 - **테스트:** 기존 D / J / K / N / O를 올림 → 투입 흐름(헬퍼 `stepDrop`: A 켬 + B 유지와 같은 입력)으로 갱신 — 투입 후 리프트는 `FLOWER_READY` 유지, 가득 찬 FLOWER에 투입 요청 시 대기 유지, 투입 중 FLOWER가 가득 차면 완료 시 거부 후 대기 복귀. 엔진 T(리프트 FSM: `IDLE` 투입 무효, 올림 25틱 후 대기, 투입 탭 1개 커밋, 대기 중 내림 25틱, 올리는 중 내림 = 올린 시간, 제동 중 취소 즉시 `IDLE`, 투입 중 내림 무시, 내림 중 올림 무시, 리프트 상태 슈팅 / 흡입 불가, 정지 유지) 추가. 올림 완료 시 자동 투입, 부분 내림을 전체 시간으로, 투입 중 내림 수용, `IDLE` 투입 수락, 제동 중 즉시 `IDLE` 제거, 대기 중 주행 허용, 내림 중 올림 수용, 투입 후 `IDLE` 복귀 각각에서 실패함을 확인.
 
+### 6.2.10 Step 07-3 (입력 설정 + 순수 변환) 완료 항목
+
+- **`src/input/inputConfig.ts`:** 게임패드 축 / 버튼 매핑(`GAMEPAD_AXES`, `GAMEPAD_BUTTONS`: 표준 배열 0부터, 트리거는 아날로그 임계값), 키보드 매핑(`KEYBOARD_BINDINGS`, `event.code`), `KEYBOARD_ENABLED`, 장치 배정(`DEVICE_ASSIGNMENT`), `TRIGGER_THRESHOLD`, `DEADZONE_LEFT` / `DEADZONE_RIGHT_X`, `DEFAULT_DRIVE_MODE`, `QUANT_MAX`. 루프 상수(20 ms, 따라잡기 상한 5틱)는 07-5에서 추가.
+- **`src/input/controls.ts` (DOM 비의존 순수 함수):**
+    - 장치 읽기: `readGamepad`(구조적 `GamepadSnapshot`, 원형 / 축 데드존 `applyRadialDeadzone` / `applyAxialDeadzone`, 비유한값 0), `readKeyboard`(눌린 코드 집합, 대각선 정규화) → 드라이버 기준 `ControlSample`.
+    - 탭 래치: 장치별 `ControlLatch`(`sample` / `consume` / `reset`) → `TickControls`(유지형 = 현재 OR 에지, 토글 = 에지, 여러 틱 소비 시 에지는 첫 틱만).
+    - 장치 배정 / 합성: `assignedDevices`, `mergeTickControls`(축 절댓값 큰 값, 버튼 / 토글 OR).
+    - 조작 모드: `driverToField`(FIELD RED / BLUE, ROBOT 헤딩 회전, 합성 후 단위원 제한).
+    - 행동 요청: `resolveActionRequest`(직전 엔진 상태에서 리프트 의도 유도, 리프트 중 RT / LT 무시, 투입 중 A 무효, 우선순위), `buildDriveCommand`.
+    - 8비트: `quantizeUnit`(부호 대칭 반올림), `encodeDriveCommand` → `[qx, qy, qω, action]`, `decodeDriveInput`(튜플 / `Int8Array` 오프셋, ±127 제한, 알 수 없는 행동 코드는 `IDLE`), `ACTION_CODES` 고정 순서.
+- **테스트 (`src/input/__tests__/controls.test.ts`, 그룹 A~I):** A 설정 기본값, B 게임패드(축 방향 / 데드존 / 트리거 임계값 / X·Y 미배정), C 키보드, D 짧은 탭 래치(유지형 3종 / 토글 / 캐치업 첫 틱 / 최신 축 / reset), E 장치 합성, F 조작 모드, G 행동 요청(상태 × 버튼 조합), H 8비트 부호화 / 복호화, I 엔진 연동(부호화 → 복호화 → `step`: RED / BLUE 전진, 리프트 전체 흐름, 리프트 중 RT / 스틱 무시, 투입 중 A 무효, 거부된 A가 FLOWER 옆에서 다시 발동하지 않음). Y축 반전 제거, 데드존 재조정 제거, 래치 에지 무시(흡입 / 투입) / 미초기화, 축 합산, BLUE 미반전, 로봇 기준 부호 반전, 흡입 우선, 리프트 중 RT 반영, 투입 중 A 내림, `IDLE`에서 B 유효, 비대칭 반올림, 복호화 제한 제거, 단위원 제한 제거 각각에서 실패함을 확인.
+
 ### 6.3 남은 Step (권장 순서)
 
 > 모든 Step은 완료 시 `npm test`(엔진 회귀 테스트)가 통과해야 하며, 새로 추가한 규칙에는 테스트 그룹을 추가한다.
@@ -826,10 +839,10 @@ export interface TimelineFrame {
     - ~~06-3: 몬테카를로 명중 판정, 기물 종류별 v0 탐색, 기준 셀 72 × 72 LUT 생성, 4-Cell 대칭 복사 (로봇당 8장, 합계 16장).~~ (완료, 6.2.4)
     - ~~06-5: `createLUTShotResolver(luts, r1Config, r2Config)`: 쌍선형 보간 조회(`sampleLUT`) + 조준 판정(FIXED 허용 오차 / TURRET 회전 범위) → 엔진 생성자에 주입 (엔진 수정 불필요).~~ (완료, 6.2.6)
     - ~~06-6: 2.6.2항의 발사 비행 처리 구현 (`IN_FLIGHT`, 비행 대기열, 도착 규칙, 착지 속도) + 엔진 회귀 테스트.~~ (완료, 6.2.7)
-- **Step 7 — 입력 계층 및 실시간 루프 (상세 규칙 3.6항, 리프트 FSM 2.6.3항):** 07-1(명세), 07-2(리프트 FSM) 완료.
+- **Step 7 — 입력 계층 및 실시간 루프 (상세 규칙 3.6항, 리프트 FSM 2.6.3항):** 07-1(명세), 07-2(리프트 FSM), 07-3(입력 변환) 완료.
     - ~~07-1: 입력 계층 / 실시간 루프 / 리프트 FSM 명세 구체화.~~ (완료, 6.2.8)
     - ~~07-2: 엔진 리프트 FSM (`actionState` 확장, `ActionRequest`, 요청 / 완료 처리, FLOWER 테스트 갱신 + 테스트 그룹 T).~~ (완료, 6.2.9)
-    - 07-3: `src/input/inputConfig.ts` + 순수 변환 — 장치 합성(R2 = 패드 1 + 키보드), 축 처리(데드존, 키보드 정규화, `FIELD` / `ROBOT`), 행동 요청 결정(리프트 의도 유도, 리프트 중 트리거 무시, 우선순위), 탭 래치 누적기, 8비트 부호화 / 복호화 + 단위 테스트.
+    - ~~07-3: `src/input/inputConfig.ts` + 순수 변환 (장치 읽기 / 탭 래치 / 장치 합성 / 조작 모드 / 행동 요청 / 8비트 부호화) + 단위 테스트.~~ (완료, 6.2.10)
     - 07-4: 입력 로그 + 로봇별 입력 출처(`LIVE` / `REPLAY` / `NONE`) + 녹화 덧입히기 — 되감은 틱 이후 `LIVE` 로그 폐기, 로그 기반 `inputProvider`. 테스트: 실시간 결과 = 로그 재생 결과(비트 동일), 2회차에서 R1 명령 재생 + R2 실시간, 분기 시 로그 절단.
     - 07-5: 실시간 루프 컨트롤러 — 20 ms 누산기, 따라잡기 상한 5틱, 일시정지 / 재개(누산 시간 · 입력 누적기 초기화, 일시정지 틱에서 재개), 경기 종료 자동 정지. 시계 / 스케줄러 주입으로 가짜 시간 테스트 (순간 끊김, 탭 숨김, 재개).
     - 07-6: 브라우저 어댑터 — Gamepad 폴링(슬롯 배정, 표준 매핑 확인), 키보드(`event.code`, `preventDefault`, 입력 폼 무시, 자동 반복 제외, `KEYBOARD_ENABLED`), `requestAnimationFrame` 스케줄러, `visibilitychange` / `blur` / `gamepaddisconnected` → 일시정지. 헤드리스 Chromium 점검(가짜 `navigator.getGamepads`, 키 이벤트). 화면 연결은 Step 8.
@@ -839,6 +852,7 @@ export interface TimelineFrame {
     - 시나리오 설정: 진영, 시작 자세 드래그/회전(배치 검증), 적재물 목록, FLOWER/GARDEN/HIVE 잔여 수, 오토 팁, 시드 — `validateScenario()` 결과가 비어 있지 않으면 확정 버튼 비활성화.
     - 로봇별 탄도 설정(`BallisticsConfig`) 및 스윗스팟 한 점 입력(144 × 144 격자(1 in) 클릭, 조준점을 향한 로봇 몸체 윤곽 / 검증 실패 사유 미리보기, 검증 규칙 2.6.2항), 스크러버/재생 컨트롤, 스코어보드/RP.
     - LUT 생성 실행 / 사용자 경험 (2.6.2항 "LUT 생성 실행 / 사용자 경험" 1~4): ① `ballistics.ts` 사전 준비(`generateReferenceLUTRows`, 시드 파생 공개, 분할 동일성 테스트) → ② Worker 풀 + 작업 대기열 + 조립 → ③ 로봇별 상태 머신 / 취소 / 시뮬레이션 시작 버튼 잠금 → ④ v0 선표시 / 진행 막대 / 남은 시간 / 점진 히트맵 → ⑤ IndexedDB 캐시(`BALLISTICS_MODEL_VERSION` 포함) 순서로 구현.
+    - 리프트 상태 표시 (2.6.3항): 투입이 끝나도 리프트는 올린 채(`FLOWER_READY`) 정지 고정되어, 드라이버가 A로 내리기 전까지 스틱 입력이 있어도 로봇이 움직이지 않는다. 드라이버가 "고장"으로 오해하지 않도록 로봇별 리프트 상태(올리는 중 / 올림 대기 / 투입 중 / 내리는 중)와 "A로 리프트를 내려야 이동 가능" 안내를 GUI에 분명히 표시할 것.
     - 입력 관련 (3.6항): 게임패드 연결 상태 표시(읽기 전용 — 슬롯별 패드 이름, 배정 로봇, 비표준 매핑 경고, "버튼을 한 번 눌러 연결" 안내, 매핑 편집 없음, 키보드는 표시 / 안내하지 않음), 로봇별 조작 모드(`FIELD` / `ROBOT`) 선택, 일시정지 / 재개 컨트롤, 로봇별 입력 출처 선택(녹화 덧입히기 흐름).
 - **Step 10 — 분기 타임라인 및 경기 저장/공유:** 분기 트리(부모 프레임 공유, 분기 이후 프레임만 생성), 저장 레시피(설정 + 시나리오 + 시드 + 양자화 입력 로그 + 탄도 설정 / LUT 시드 / 샘플 수 / `BALLISTICS_MODEL_VERSION` + 엔진 버전 + 상태 체크섬, LUT 자체는 저장하지 않고 캐시 또는 재생성). 레시피 약 50 KB 수준으로 파일/IndexedDB 저장 가능. 입력 로그 형식(로봇별 틱당 4 B, 8비트)은 3.6항, 저장 시 연속 중복 압축.
 
