@@ -1,5 +1,6 @@
-// 장면 렌더러 (명세서 3.7, 08-4 / 08-5): TimelineFrame 한 장 + 로봇 제원 + 보기 변환으로 캔버스를 그림
-// 엔진을 호출 / 수정하지 않으며, 그림은 (프레임, 제원, 보기)만의 함수 (스크러빙 / 재생에서 같은 틱 = 같은 그림)
+// 장면 렌더러 (명세서 3.7, 08-4 ~ 08-6): TimelineFrame 한 장 + 로봇 제원 + 보기 변환 + 표시 옵션으로 캔버스를 그림
+// 엔진을 호출 / 수정하지 않으며, 그림은 (프레임, 제원, 보기, 옵션)만의 함수 (스크러빙 / 재생에서 같은 틱 = 같은 그림)
+// (예외: 표시 옵션 hitProbability가 켜지면 장면의 판정 함수를 그리는 프레임마다 호출 — 엔진 상태와 무관)
 // 좌표계: 필드 도형은 필드 px(inch × 5) 공간에서 그리고 보기 변환 행렬(회전 / 배율)로 옮긴다.
 //         글자 / 배지는 보기 회전을 상쇄해 화면 기준으로 똑바로 그린다.
 
@@ -15,7 +16,10 @@ import {
 import type { OBB } from '../core/collision';
 import { getCarryCapacity } from '../core/simulationEngine';
 import { hiveTipPollenThreshold } from '../core/types';
-import type { DeepReadonly, GamePiece, HiveState, RobotConfig, RobotState, TimelineFrame } from '../core/types';
+import type { DeepReadonly, GamePiece, HiveState, RobotConfig, RobotState, ShotProbabilityResolver, TimelineFrame } from '../core/types';
+import { airborneDisplay, shotElapsed, shotPositionAt, shotTrail } from './flightView';
+import { DEFAULT_RENDER_OPTIONS, aimGuide, hitProbabilities, intakeProgress } from './renderOptions';
+import type { RenderOptions } from './renderOptions';
 import { badgeImage } from './badgeAssets';
 import {
   COLORS,
@@ -71,6 +75,8 @@ export interface SceneInput {
   r1Config: RobotConfig;
   r2Config: RobotConfig;
   view: ViewTransform;
+  options?: RenderOptions;                 // 미지정 = 모두 꺼짐
+  shotResolver?: ShotProbabilityResolver;  // 표시 옵션 hitProbability용 (엔진에 주입된 판정 함수)
 }
 
 const SCENE_COLORS = {
@@ -99,6 +105,16 @@ const SCENE_COLORS = {
   tipping: '#f59e0b',
   tipOutline: '#111827',
   scored: '#f59e0b',
+  shadow: 'rgba(17, 24, 39, 0.28)',
+  trail: 'rgba(17, 24, 39, 0.45)',
+  result: { HIT: '#16a34a', MISS_HIVE: '#f59e0b', MISS_FLOOR: '#6b7280' } as Record<'HIT' | 'MISS_HIVE' | 'MISS_FLOOR', string>,
+  aimLine: 'rgba(17, 24, 39, 0.7)',
+  aimSector: 'rgba(250, 204, 21, 0.25)',
+  aimSectorStroke: 'rgba(161, 98, 7, 0.6)',
+  intakeArc: '#15803d',
+  panelTitle: '#111827',
+  panelText: '#374151',
+  panelMuted: '#9ca3af',
 };
 
 const MARGIN_PX = FIELD_MARGIN_INCH * PX_PER_INCH;
@@ -354,6 +370,94 @@ function drawParkedMarks(ctx: CanvasRenderingContext2D, frame: DeepReadonly<Time
   ctx.restore();
 }
 
+// 비행 공 (명세서 3.7): 바닥 위치에 그림자, 공은 화면 위쪽으로 0.3·z in 띄우고 반지름 × (1 + z / 100)
+// 표시 옵션: flightTrail = 발사구부터 현재까지 점선, flightResult = 결과별 색 테두리 (기본은 도착 전까지 구분 없음)
+function drawFlights(ctx: CanvasRenderingContext2D, frame: DeepReadonly<TimelineFrame>, view: ViewTransform, options: RenderOptions): void {
+  const shots = frame.field.pendingShots;
+  if (shots.length === 0) return;
+  const up = screenUpInField(view);
+  const lifted = (p: { x: number; y: number; z: number }) => {
+    const { offset } = airborneDisplay(p.z);
+    return { x: p.x + up.x * offset, y: p.y + up.y * offset };
+  };
+  ctx.save();
+  for (const shot of shots) {
+    const piece = frame.pieces.find((p) => p.id === shot.pieceId);
+    if (!piece) continue;
+    const t = shotElapsed(shot, frame.tick);
+    const pos = shotPositionAt(shot, t);
+    const r = PIECE_PHYSICS[piece.type].radius;
+    if (options.flightTrail) {
+      pathPolyline(ctx, shotTrail(shot, t).map(lifted));
+      ctx.setLineDash([4, 3]);
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = SCENE_COLORS.trail;
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    drawCircle(ctx, pos.x, pos.y, r, SCENE_COLORS.shadow, 'transparent', 0);
+    const ball = lifted(pos);
+    const { fill, stroke } = pieceColors(piece);
+    const resultRing = options.flightResult ? SCENE_COLORS.result[shot.result] : null;
+    drawCircle(ctx, ball.x, ball.y, r * airborneDisplay(pos.z).scale, fill, resultRing ?? stroke, resultRing ? 3 : 1.5);
+  }
+  ctx.restore();
+}
+
+function pathPolyline(ctx: CanvasRenderingContext2D, pts: Point2[]): void {
+  ctx.beginPath();
+  pts.forEach((p, i) => (i === 0 ? ctx.moveTo(inchToPx(p.x), inchToPx(p.y)) : ctx.lineTo(inchToPx(p.x), inchToPx(p.y))));
+}
+
+// 표시 옵션 aimGuide: 조준 가능 부채꼴 + 발사 방향 선 (조준점 거리까지)
+const AIM_SECTOR_RADIUS = 24; // inch
+
+function drawAimGuides(ctx: CanvasRenderingContext2D, frame: DeepReadonly<TimelineFrame>, scene: SceneInput): void {
+  ctx.save();
+  const { allianceColor, hive } = frame.field;
+  for (const [robot, config] of [[frame.r1, scene.r1Config], [frame.r2, scene.r2Config]] as const) {
+    const g = aimGuide(robot, config, allianceColor, hive.upwardCell);
+    const cx = inchToPx(g.center.x);
+    const cy = inchToPx(g.center.y);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, inchToPx(AIM_SECTOR_RADIUS), g.sectorStart, g.sectorEnd);
+    ctx.closePath();
+    ctx.fillStyle = SCENE_COLORS.aimSector;
+    ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = SCENE_COLORS.aimSectorStroke;
+    ctx.stroke();
+    const reach = Math.hypot(g.aim.x - g.center.x, g.aim.y - g.center.y);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(inchToPx(g.center.x + Math.cos(g.launchHeading) * reach), inchToPx(g.center.y + Math.sin(g.launchHeading) * reach));
+    ctx.setLineDash([6, 4]);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = SCENE_COLORS.aimLine;
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  ctx.restore();
+}
+
+// 표시 옵션 intakeProgress: 흡입 대상 둘레에 진행 호 (화면 12시부터 시계 방향)
+function drawIntakeProgress(ctx: CanvasRenderingContext2D, frame: DeepReadonly<TimelineFrame>, scene: SceneInput, view: ViewTransform): void {
+  const up = screenUpInField(view);
+  const start = Math.atan2(up.y, up.x);
+  ctx.save();
+  for (const [robot, config] of [[frame.r1, scene.r1Config], [frame.r2, scene.r2Config]] as const) {
+    const p = intakeProgress(robot, config, frame);
+    if (!p || p.fraction <= 0) continue;
+    ctx.beginPath();
+    ctx.arc(inchToPx(p.x), inchToPx(p.y), inchToPx(p.radius), start, start + p.fraction * Math.PI * 2);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = SCENE_COLORS.intakeArc;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawRobotBody(
   ctx: CanvasRenderingContext2D,
   robot: DeepReadonly<RobotState>,
@@ -568,6 +672,25 @@ function drawScoredLabels(ctx: CanvasRenderingContext2D, frame: DeepReadonly<Tim
   }
 }
 
+// 표시 옵션 hitProbability: 좌우 패널 (왼쪽 R1, 오른쪽 R2)에 POLLEN / NECTAR 명중 확률, 적재함 0번 종류 강조
+function drawHitProbabilityPanels(ctx: CanvasRenderingContext2D, frame: DeepReadonly<TimelineFrame>, resolver: ShotProbabilityResolver | undefined): void {
+  const panels: ['robot1' | 'robot2', number][] = [['robot1', SIDE_PANEL_PX / 2], ['robot2', SCENE_WIDTH_PX - SIDE_PANEL_PX / 2]];
+  const probs = resolver ? hitProbabilities(frame, resolver) : null;
+  for (const [id, x] of panels) {
+    drawText(ctx, id === 'robot1' ? 'R1 명중 확률' : 'R2 명중 확률', { x, y: 40 }, 14, SCENE_COLORS.panelTitle);
+    if (!probs) {
+      drawText(ctx, '판정 함수 없음', { x, y: 66 }, 12, SCENE_COLORS.panelMuted);
+      continue;
+    }
+    const p = probs[id];
+    (['POLLEN', 'NECTAR'] as const).forEach((type, i) => {
+      const next = p.next === type;
+      drawText(ctx, `${next ? '▶ ' : ''}${type} ${Math.round(p[type] * 100)}%`, { x, y: 66 + i * 22 }, next ? 14 : 12, next ? SCENE_COLORS.panelTitle : SCENE_COLORS.panelText);
+    });
+    if (p.next === null) drawText(ctx, '적재 없음', { x, y: 110 }, 11, SCENE_COLORS.panelMuted);
+  }
+}
+
 function drawBadge(ctx: CanvasRenderingContext2D, robot: DeepReadonly<RobotState>, config: RobotConfig, view: ViewTransform): void {
   const badge = robotBadge(robot);
   if (!badge) return;
@@ -604,10 +727,12 @@ function drawBadge(ctx: CanvasRenderingContext2D, robot: DeepReadonly<RobotState
 /**
  * 장면 전체를 그림. ctx는 SCENE_WIDTH_PX × SCENE_HEIGHT_PX 논리 크기 × dpr 버퍼의 캔버스
  * 순서: 배경 / 좌우 패널 → 정적 레이어(게이지 틀 포함) → 구조물 라벨 → HIVE 셀 상태 / 게이지 내용 → 바닥 기물 → 종료 강조(GARDEN / FLOWER)
- *       → 로봇 → 종료 강조(주차) → 팁 낙하 → HIVE 글자 / 종료 점수 / 번호 / 배지 (비행 공 / 표시 옵션은 08-6)
+ *       → [조준선] → 로봇 → 종료 강조(주차) → [흡입 진행] → 팁 낙하 → 비행 공([잔상] / [결과 색])
+ *       → HIVE 글자 / 종료 점수 / 번호 / 배지 → [좌우 패널 명중 확률]   ([ ] = 표시 옵션)
  */
 export function renderScene(ctx: CanvasRenderingContext2D, scene: SceneInput, dpr = 1): void {
   const { frame, view } = scene;
+  const options = scene.options ?? DEFAULT_RENDER_OPTIONS;
   const ally = frame.field.allianceColor;
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -635,10 +760,13 @@ export function renderScene(ctx: CanvasRenderingContext2D, scene: SceneInput, dp
   drawGaugeContents(ctx, frame, ally);
   drawFloorPieces(ctx, frame.pieces);
   drawScoredFieldMarks(ctx, frame);
+  if (options.aimGuide) drawAimGuides(ctx, frame, scene);
   drawRobotBody(ctx, frame.r1, scene.r1Config, ally);
   drawRobotBody(ctx, frame.r2, scene.r2Config, ally);
   drawParkedMarks(ctx, frame, scene);
+  if (options.intakeProgress) drawIntakeProgress(ctx, frame, scene, view);
   drawTipDrops(ctx, frame, ally, view);
+  drawFlights(ctx, frame, view, options);
 
   // 화면 공간: HIVE 셀 글자 / 종료 점수 / 로봇 번호 / 배지는 똑바로
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -654,4 +782,7 @@ export function renderScene(ctx: CanvasRenderingContext2D, scene: SceneInput, dp
   }
   for (const [robot, config] of robots) drawBadge(ctx, robot, config, view);
   ctx.restore();
+
+  // 좌우 패널 (뷰포트 밖, 회전 없음): 표시 옵션이 꺼져 있으면 판정 함수를 호출하지 않음
+  if (options.hitProbability) drawHitProbabilityPanels(ctx, frame, scene.shotResolver);
 }
