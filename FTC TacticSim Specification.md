@@ -427,7 +427,7 @@
         - 근거: 재현성은 해상도와 무관(엔진이 쓴 값 = 로그 값)하고 해상도는 조작감만 좌우한다. 1단계 = maxSpeed 60 in/s 기준 0.47 in/s(정지 임계 0.5 in/s 미만), 회전 4 rad/s 기준 0.03 rad/s, 풀스틱 방향 분해능 약 0.45°. 일반 패드는 8비트 원본이 많고 16비트 패드도 1% 이하는 잡음 / 데드존(8%) 범위. 크기: 로봇 2대 × 6000틱 × 4 B = 48 KB (원본, 저장 시 연속 중복 압축은 Step 10). int16은 크기 2배에 체감 이득 없음.
         - 메모리: 로봇별 `Int8Array(6000 × 4)` = 24 KB 미리 할당. 참고로 풀매치 타임라인은 힙 약 46 MB(07-1 측정)로 입력 로그는 그 0.1% 수준 — 메모리 관리의 초점은 타임라인(Step 10 분기).
     - **입력 로그 / 로봇별 입력 출처 / 녹화 덧입히기:**
-        - 로그는 로봇별 채널 `{ data: Int8Array(6000 × 4), length }`. 인덱스 t = 틱 t → t + 1 스텝에 쓰인 입력 (`DriveInputProvider`의 tick 규약과 동일).
+        - 로그는 로봇별 채널 `{ data: Int8Array(6000 × 4), length }` (`src/input/inputLog.ts`의 `InputLogChannel`). 인덱스 t = 틱 t → t + 1 스텝에 쓰인 입력 (`DriveInputProvider`의 tick 규약과 동일). 틱 t에 쓰면 t 이후 기록은 폐기되고, 기록 끝보다 뒤에 쓰면 사이 틱은 중립(0, 0, 0, `IDLE`)으로 채운다 (예: 1회차 `NONE`이던 로봇을 중간 틱부터 `LIVE`로 기록).
         - 로봇별 입력 출처 `InputSource = 'LIVE' | 'REPLAY' | 'NONE'`:
             - `LIVE`: 장치 입력 → 축 처리 / 요청 결정 → 부호화 → 로그 t에 기록 → 복호화 → 엔진.
             - `REPLAY`: 로그 t 복호화 → 엔진. 기록 길이를 넘은 틱은 `NONE`과 같음.
@@ -435,7 +435,7 @@
         - **녹화 덧입히기:** 1회차 R1 `LIVE` / R2 `NONE`으로 R1 입력 기록 → 원하는 틱으로 되감기(`scrubTo`) → 2회차 R1 `REPLAY` / R2 `LIVE`로 한 경기장에서 두 로봇을 따로 조종한 결과를 만든다.
         - 되감은 틱 k에서 이어 진행하면 엔진은 k 이후 프레임을 폐기(기존 분기 규칙)하고, `LIVE` 로봇의 로그도 k 이후를 폐기한 뒤 이어서 기록한다. `REPLAY` 로봇의 로그는 유지.
         - `REPLAY`는 위치가 아니라 **조작 명령**을 재생한다. 2회차에 다른 로봇과 부딪히거나 기물을 먼저 가져가면 1회차와 궤적 / 결과가 달라질 수 있으며, 이는 결정론을 유지한 정상 동작이다. 리프트 요청도 기록된 요청을 그대로 보내고 수락 여부는 엔진이 다시 판정한다.
-        - 두 로봇이 모두 `REPLAY` / `NONE`이면 실시간 루프 없이 `inputProvider` + `runFullMatch()`로 즉시 재계산할 수 있다.
+        - 두 로봇이 모두 `REPLAY` / `NONE`이면 실시간 루프 없이 `inputProvider` + `runFullMatch()`로 즉시 재계산할 수 있다. 입력 허브 `MatchInputs`(로봇별 로그 / 출처 / 조작 모드)의 재생 공급 함수 `createReplayProvider()`는 만든 시점의 출처를 복사해 고정하고, `LIVE` 로봇도 기록된 로그를 읽기 전용으로 재생하며(방금 실시간으로 진행한 경기를 바로 재계산), `NONE`은 로그가 있어도 중립 입력이다. 실시간 진행은 `MatchInputs.step(engine, liveControls)`(틱 결정 → 기록 → 복호화 → `engine.step`).
         - 로그는 같은 로봇 설정 / 시나리오 / 시드 / 탄도 설정 / 엔진 버전을 전제로 한다 (저장 레시피, Step 10).
     - **실시간 루프 (`requestAnimationFrame` + 20 ms 고정 스텝 누산기):**
         - 프레임마다 누산 시간 += 경과 시간, 20 ms마다 1틱 소비 (입력 결정 → `engine.step`).
@@ -733,6 +733,7 @@ export interface TimelineFrame {
 | 07-1 | 입력 계층 / 실시간 루프 명세 구체화, FLOWER 리프트 FSM 명세 (아래 6.2.8) | 명세서 |
 | 07-2 | FLOWER 리프트 FSM 엔진 구현 (올림 / 대기 / 투입 / 내림, `ActionRequest`) (아래 6.2.9) | `simulationEngine.ts`, `types.ts`, `__tests__/simulationEngine.test.ts` |
 | 07-3 | 입력 설정 + 순수 변환 (장치 읽기, 탭 래치, 장치 합성, 조작 모드, 행동 요청, 8비트 부호화) (아래 6.2.10) | `src/input/inputConfig.ts`, `src/input/controls.ts`, `src/input/__tests__/controls.test.ts` |
+| 07-4 | 입력 로그 + 로봇별 입력 출처 + 녹화 덧입히기 + 로그 재생 공급 함수 (아래 6.2.11) | `src/input/inputLog.ts`, `src/input/__tests__/inputLog.test.ts` |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
@@ -830,6 +831,14 @@ export interface TimelineFrame {
     - 8비트: `quantizeUnit`(부호 대칭 반올림), `encodeDriveCommand` → `[qx, qy, qω, action]`, `decodeDriveInput`(튜플 / `Int8Array` 오프셋, ±127 제한, 알 수 없는 행동 코드는 `IDLE`), `ACTION_CODES` 고정 순서.
 - **테스트 (`src/input/__tests__/controls.test.ts`, 그룹 A~I):** A 설정 기본값, B 게임패드(축 방향 / 데드존 / 트리거 임계값 / X·Y 미배정), C 키보드, D 짧은 탭 래치(유지형 3종 / 토글 / 캐치업 첫 틱 / 최신 축 / reset), E 장치 합성, F 조작 모드, G 행동 요청(상태 × 버튼 조합), H 8비트 부호화 / 복호화, I 엔진 연동(부호화 → 복호화 → `step`: RED / BLUE 전진, 리프트 전체 흐름, 리프트 중 RT / 스틱 무시, 투입 중 A 무효, 거부된 A가 FLOWER 옆에서 다시 발동하지 않음). Y축 반전 제거, 데드존 재조정 제거, 래치 에지 무시(흡입 / 투입) / 미초기화, 축 합산, BLUE 미반전, 로봇 기준 부호 반전, 흡입 우선, 리프트 중 RT 반영, 투입 중 A 내림, `IDLE`에서 B 유효, 비대칭 반올림, 복호화 제한 제거, 단위원 제한 제거 각각에서 실패함을 확인.
 
+### 6.2.11 Step 07-4 (입력 로그 / 입력 출처 / 녹화 덧입히기) 완료 항목
+
+- **`src/input/inputLog.ts`:**
+    - `InputLogChannel`: `Int8Array(6000 × 4)` 미리 할당, `write(t, record)`(t 이후 폐기, 끝 뒤에 쓰면 사이 틱 중립 채움, 범위 밖 `RangeError`), `has` / `truncate` / `clear`, `length`.
+    - `MatchInputs`: 로봇별 `logs` / `sources`(기본 둘 다 `LIVE`) / `modes`(기본 `FIELD`). `resolve(engine, live)`: 엔진 현재 틱에서 `LIVE`는 직전 로봇 상태 · 엔진 진영 · 로봇별 모드로 명령을 만들어 기록 후 복호화, `REPLAY`는 로그 복호화(기록 범위 밖 중립), `NONE`은 중립. `step(engine, live)` = `resolve` + `engine.step`(경기 종료 후 기록 없음). `createReplayProvider()`: 출처 복사, `LIVE`도 읽기 전용 재생, 로그에 쓰지 않음.
+    - 되감기 분기는 별도 처리 없이 성립: 되감은 틱 k에서 `LIVE` 로봇이 기록하면 k 이후 로그가 폐기되고, 엔진은 k 이후 프레임을 폐기(기존 규칙), `REPLAY` 로봇 로그는 유지.
+- **테스트 (`src/input/__tests__/inputLog.test.ts`, 그룹 A~F):** A 로그 채널(기록 / 앞 틱 덮어쓰기 절단 / 빈 틱 중립 채움 / 범위 밖 거부), B 입력 출처(LIVE 기록 = 부호화 값, 로봇별 제원 복호화, NONE 미기록, REPLAY 절단된 옛 데이터 미재생, 로봇별 헤딩 · 모드, 엔진 진영, 로봇별 리프트 의도), C 풀매치 실시간 = 로그 재생(6000틱 전 프레임 동일, 발사 포함 / 명중 확률 0.6, R2 로봇 기준 모드, 재생 중 로그 불변), D 녹화 덧입히기(1회차 R1 기록 → 되감기 → 2회차 R1 재생 + R2 실시간: 간섭 없으면 R1 궤적 동일, R2가 경로에 들어오면 명령은 같고 궤적은 달라짐, R1 로그 불변, 덧입힌 결과 로그 재생 재현), E 되감기 분기(LIVE 로그 400틱 이후 교체 / REPLAY 로그 유지 / 분기 결과 재현), F 재생 공급 함수(출처 복사 고정, NONE은 로그 무시). 복호화 생략(원시 값 입력), 덮어쓰기 절단 제거, 빈 틱 채움 제거, 재생 중 기록, 출처 미복사(R1 / R2), NONE 로그 재생, 절단 데이터 재생, 다른 로봇 상태 사용, 진영 무시, 모드 공유(R1 / R2) 각각에서 실패함을 확인.
+
 ### 6.3 남은 Step (권장 순서)
 
 > 모든 Step은 완료 시 `npm test`(엔진 회귀 테스트)가 통과해야 하며, 새로 추가한 규칙에는 테스트 그룹을 추가한다.
@@ -839,11 +848,11 @@ export interface TimelineFrame {
     - ~~06-3: 몬테카를로 명중 판정, 기물 종류별 v0 탐색, 기준 셀 72 × 72 LUT 생성, 4-Cell 대칭 복사 (로봇당 8장, 합계 16장).~~ (완료, 6.2.4)
     - ~~06-5: `createLUTShotResolver(luts, r1Config, r2Config)`: 쌍선형 보간 조회(`sampleLUT`) + 조준 판정(FIXED 허용 오차 / TURRET 회전 범위) → 엔진 생성자에 주입 (엔진 수정 불필요).~~ (완료, 6.2.6)
     - ~~06-6: 2.6.2항의 발사 비행 처리 구현 (`IN_FLIGHT`, 비행 대기열, 도착 규칙, 착지 속도) + 엔진 회귀 테스트.~~ (완료, 6.2.7)
-- **Step 7 — 입력 계층 및 실시간 루프 (상세 규칙 3.6항, 리프트 FSM 2.6.3항):** 07-1(명세), 07-2(리프트 FSM), 07-3(입력 변환) 완료.
+- **Step 7 — 입력 계층 및 실시간 루프 (상세 규칙 3.6항, 리프트 FSM 2.6.3항):** 07-1(명세), 07-2(리프트 FSM), 07-3(입력 변환), 07-4(입력 로그 / 덧입히기) 완료.
     - ~~07-1: 입력 계층 / 실시간 루프 / 리프트 FSM 명세 구체화.~~ (완료, 6.2.8)
     - ~~07-2: 엔진 리프트 FSM (`actionState` 확장, `ActionRequest`, 요청 / 완료 처리, FLOWER 테스트 갱신 + 테스트 그룹 T).~~ (완료, 6.2.9)
     - ~~07-3: `src/input/inputConfig.ts` + 순수 변환 (장치 읽기 / 탭 래치 / 장치 합성 / 조작 모드 / 행동 요청 / 8비트 부호화) + 단위 테스트.~~ (완료, 6.2.10)
-    - 07-4: 입력 로그 + 로봇별 입력 출처(`LIVE` / `REPLAY` / `NONE`) + 녹화 덧입히기 — 되감은 틱 이후 `LIVE` 로그 폐기, 로그 기반 `inputProvider`. 테스트: 실시간 결과 = 로그 재생 결과(비트 동일), 2회차에서 R1 명령 재생 + R2 실시간, 분기 시 로그 절단.
+    - ~~07-4: 입력 로그 + 로봇별 입력 출처(`LIVE` / `REPLAY` / `NONE`) + 녹화 덧입히기 + 로그 기반 `inputProvider`.~~ (완료, 6.2.11)
     - 07-5: 실시간 루프 컨트롤러 — 20 ms 누산기, 따라잡기 상한 5틱, 일시정지 / 재개(누산 시간 · 입력 누적기 초기화, 일시정지 틱에서 재개), 경기 종료 자동 정지. 시계 / 스케줄러 주입으로 가짜 시간 테스트 (순간 끊김, 탭 숨김, 재개).
     - 07-6: 브라우저 어댑터 — Gamepad 폴링(슬롯 배정, 표준 매핑 확인), 키보드(`event.code`, `preventDefault`, 입력 폼 무시, 자동 반복 제외, `KEYBOARD_ENABLED`), `requestAnimationFrame` 스케줄러, `visibilitychange` / `blur` / `gamepaddisconnected` → 일시정지. 헤드리스 Chromium 점검(가짜 `navigator.getGamepads`, 키 이벤트). 화면 연결은 Step 8.
 - **Step 8 — 렌더러 엔진 연결:** `TimelineFrame` 기반 렌더링 (로봇 OBB/헤딩, 인테이크 구역 시각화, 기물, HIVE 셀 개수/팁, FLOWER 게이지(지그재그 적층 표시 보정 필요), 비행 공 보간(비행 대기열 출발점 → 도착점 선형 보간 + 높이 연출, 2.6.2항), 대기 중 휴먼 NECTAR 표시).
