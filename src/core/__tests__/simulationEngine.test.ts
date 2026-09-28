@@ -993,5 +993,55 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       assert(e.r2.actionState === 'FLOWER_READY' && e.r2.x === 9 && e.r2.y === 107.9 && e.r2.heading === 0, 'drive input ignored while raising / waiting');
     }
   }, TEST_TIMEOUT_MS);
+
+  it('U. 경기 종료 득점 내역 (scoreBreakdown, 08-3)', () => {
+    // 기본 경기 (입력 없음): RED는 R1이 로딩 존 스폰(주차), BLUE는 R2가 로딩 존 스폰 / 아군 GARDEN 4개, 팁 / FLOWER 없음
+    for (const alliance of ['RED', 'BLUE'] as const) {
+      const e = eng({ allianceColor: alliance });
+      e.runFullMatch();
+      const last = e.getFrame(6000)!;
+      const b = last.scoreBreakdown!;
+      const allyGarden = e.pieces.filter(p => p.state === 'IN_GARDEN' && testCircleVsAABB({ center: { x: p.x, y: p.y }, radius: PIECE_PHYSICS[p.type].radius }, GARDEN_AABB[alliance]).colliding).map(p => p.id);
+      assert(e.timeline.slice(0, 6000).every(f => f.scoreBreakdown === null), `${alliance}: no breakdown before the final tick`);
+      assert(b !== null && b.hive === 0 && b.flower === 0 && b.garden === 4 && b.park === 5 && last.totalScore === 9, `${alliance}: garden 4 + park 5 = 9`);
+      assert(b.parkedRobots.join() === (alliance === 'RED' ? 'robot1' : 'robot2') && b.gardenPieceIds.slice().sort().join() === allyGarden.sort().join(), `${alliance}: parked robot / counted garden pieces identified`);
+      assert(b.flowers.map(f => f.id).join() === e.field.flowers.map(f => f.id).join() && b.flowers.every(f => !f.owned && f.points === 0 && f.scoringPieces === 3), `${alliance}: 4 FLOWERs (POLLEN only, slot[1..] 3) not owned`);
+    }
+    // 전 항목: 팁 1회(20) + FLOWER 1개 소유(slot[1..] 2개 × 2 + 5 = 9) + GARDEN 4 + 주차 1대(5) = 38
+    const build = () => {
+      const aim = hiveCellAimPoint('RED', 'AUDIENCE_CELL');
+      const e = eng({
+        r1Spawn: pose(60.5, 130.5, bearingTo(60.5, 130.5, aim.x, aim.y)), r2Spawn: pose(9, 36), r1Loadout: ['POLLEN'],
+        hiveInitialPieces: { nectarCount: 2, pollenCount: 4 }, flowerPiecesCount: [0, 4, 4, 4],
+      });
+      // FLOWER 1 = [POLLEN, NECTAR, POLLEN] (바닥 산포 기물을 옮겨 담음 — slot[0] 제외 2개, 아군 NECTAR 포함)
+      const take = (type: 'POLLEN' | 'NECTAR') => { const p = e.pieces.find(q => q.type === type && q.state === 'ON_FIELD')!; p.state = 'IN_FLOWER'; return p; };
+      e.field.flowers[0].pieces = [take('POLLEN'), take('NECTAR'), take('POLLEN')];
+      // runFullMatch()는 reset()으로 위 배치를 지우므로 직접 진행: R1 1발 발사 후 입력 없음
+      while (e.currentTick < 6000) e.step(e.currentTick < 15 ? SHOOT : undefined);
+      return e;
+    };
+    const e = build();
+    const last = e.getFrame(6000)!;
+    const b = last.scoreBreakdown!;
+    assert(b.hive === 20 && last.field.hive.tipCount === 1, `one tip -> hive 20 (${b.hive})`);
+    assert(b.flowers[0].owned && b.flowers[0].scoringPieces === 2 && b.flowers[0].points === 9 && b.flower === 9 && b.flowers.slice(1).every(f => !f.owned && f.points === 0),
+      `FLOWER 1 owned: 2 × 2 + 5 = 9, others 0 (${b.flowers.map(f => f.points)})`);
+    assert(b.garden === 4 && b.park === 5 && b.parkedRobots.join() === 'robot2', `garden ${b.garden}, park ${b.park} (${b.parkedRobots})`);
+    assert(b.hive + b.flower + b.garden + b.park === last.totalScore && last.totalScore === 38, `items sum to totalScore (${last.totalScore})`);
+    assert(last.field.flowers[0].owner === 'RED' && last.field.flowers[1].owner === 'NONE', 'FLOWER owner set only for the scored FLOWER');
+    // 스크러빙: 종료 전으로 되감으면 내역 없음, 같은 입력으로 재시뮬레이션하면 종료 프레임 동일, 종료 프레임으로 되감으면 복원
+    {
+      const original = JSON.stringify(last);
+      e.scrubTo(5990);
+      assert(e.getFrame(5990)!.scoreBreakdown === null, 'scrubbed before the end -> no breakdown');
+      while (e.currentTick < 6000) e.step();
+      assert(JSON.stringify(e.getFrame(6000)) === original, 're-simulated final frame (breakdown included) identical');
+      e.scrubTo(6000);
+      assert(JSON.stringify(e.getFrame(6000)) === original, 'scrubbing to the final frame keeps its breakdown');
+    }
+    // 결정론: 같은 설정 / 입력의 다른 경기도 같은 내역
+    assert(JSON.stringify(build().getFrame(6000)!.scoreBreakdown) === JSON.stringify(b), 'deterministic breakdown');
+  }, TEST_TIMEOUT_MS);
 });
 

@@ -333,7 +333,7 @@
         - 경기 진행 중(Tick 0 ~ 5999) `TimelineFrame.totalScore`에는 공식 룰상 즉시 확정되는 **HIVE Tip 점수(회당 20점)**만 실시간 반영.
         - 미확정 요소(FLOWER 소유권/보너스, GARDEN 안치, PARK 주차)의 실시간 예측치를 타임라인 점수에 혼합하지 않음.
         - 경기 종료 틱(Tick 6000) 도달 시점에 HIVE 점수 + FLOWER 최종 점수 + GARDEN 점수 + PARK 점수를 일괄 합산하여 최종 점수를 확정 기록.
-        - **득점 내역 기록 (08-1 확정, 08-3 구현):** 종료 프레임에는 항목별 점수와 인정 근거(득점 FLOWER, 인정 GARDEN 기물 id, 주차 로봇)를 `TimelineFrame.scoreBreakdown`에 함께 기록하고, 그 외 프레임은 `null`이다. 항목 합 = `totalScore`. 렌더러의 경기 종료 강조(3.7항)와 Step 9 스코어보드가 이 기록만 읽으며 득점 규칙을 다시 계산하지 않는다 (규칙의 단일 출처 = 엔진).
+        - **득점 내역 기록 (08-1 확정, 08-3 구현 완료):** 종료 프레임에는 항목별 점수와 인정 근거(득점 FLOWER, 인정 GARDEN 기물 id, 주차 로봇)를 `TimelineFrame.scoreBreakdown`에 함께 기록하고, 그 외 프레임은 `null`이다. 항목 합 = `totalScore`. 렌더러의 경기 종료 강조(3.7항)와 Step 9 스코어보드가 이 기록만 읽으며 득점 규칙을 다시 계산하지 않는다 (규칙의 단일 출처 = 엔진).
 3. **충돌 엔진 역학 모델 (`src/core/collision.ts`):**
     - **로봇-환경 충돌:** 벽면 경계, HIVE AABB, 4개 FLOWER Circle에 대해 SAT 침투 보정(MTV). 벽을 파고드는 법선 속도는 0으로 차단하되, 접선 속도는 보존하여 미끄러짐 구현.
     - **로봇-로봇 충돌 (비탄성 슬라이딩):**
@@ -773,13 +773,14 @@ export interface RPState {
   pollinator2: boolean;
 }
 
-// 경기 종료(Tick 6000) 득점 내역 (08-1 확정, 08-3 구현). hive + flower + garden + park = totalScore
+// 경기 종료(Tick 6000) 득점 내역 (08-1 확정, 08-3 구현 완료). hive + flower + garden + park = totalScore
 export interface ScoreBreakdown {
   hive: number;   // 텔레옵 팁 × 20
   flower: number; // 득점 FLOWER의 (slot[1..N] 기물 수 × 2 + 하단 보너스 5) 합
   garden: number; // 아군 GARDEN 인정 기물 수 × 1
   park: number;   // 주차 인정 로봇 수 × 5
-  flowers: { id: string; scoringPieces: number; owned: boolean; points: number }[]; // FLOWER별 (FLOWER_IDS 순서)
+  // FLOWER별 (FLOWER_IDS 순서): scoringPieces = slot[1..N] 기물 수 (소유 여부와 무관), owned = 아군 NECTAR 존재, points = 그 FLOWER 점수
+  flowers: { id: string; scoringPieces: number; owned: boolean; points: number }[];
   gardenPieceIds: string[];               // 득점 인정 GARDEN 기물 id
   parkedRobots: ('robot1' | 'robot2')[];  // 주차 인정 로봇
 }
@@ -856,6 +857,7 @@ export interface TimelineFrame {
 | 07-6 | 브라우저 입력 어댑터 (게임패드 폴링, 키보드, rAF, 자동 일시정지 이벤트) + 헤드리스 Chromium 점검 (아래 6.2.13) — Step 7 완료 | `src/input/browserInput.ts`, `src/input/__tests__/browserInput.test.ts` |
 | 08-1 | 렌더러 / 화면 연결 명세 구체화 (보기 방향, 캔버스 레이아웃, 로봇 / 기물 / HIVE / FLOWER · 재고 게이지 / 비행 공 표시, 표시 옵션, 경기 종료 득점 내역, 개발 하네스) (아래 6.2.14) | 명세서 |
 | 08-2 | 발사 비행 개정(06-6): HIVE / 벽 충돌 후 반사 포물선 낙하, 충돌 후 구간 기록, 무효 명중 반사 (아래 6.2.15) | `ballistics.ts`, `simulationEngine.ts`, `types.ts`, 두 엔진 테스트 파일, 입력 테스트 제한 시간 |
+| 08-3 | 경기 종료 득점 내역 `scoreBreakdown` 기록 (항목별 점수 + 인정 근거) (아래 6.2.16) | `simulationEngine.ts`, `types.ts`, `__tests__/simulationEngine.test.ts` |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
@@ -999,6 +1001,12 @@ export interface TimelineFrame {
 - **테스트:** 탄도 O(명중 = 접촉 시각 · 구간 없음, HIVE 충돌 후 착지가 접촉보다 늦음, 바닥 착지 = 명목 끝, 벽 접촉 후 수직 낙하) 갱신, 탄도 P(구간 위치 공식, 옆면 반사 방향 / 크기, 산포 세기 · 각도, 스침 충돌 최소 이탈 속도, 윗면 한 번 튀고 이탈, 느린 공 3회 튐 → 굴러감 → 낙하, 정지 공 가장 가까운 면으로 굴러감, 벽 수평 정지 · 수직 속도 연속, 무효 명중 AUDIENCE / OPPOSITE 반사, 착지 안전장치, 모든 경우 구간 연속 · 바닥 착지 · HIVE 밖) 추가. 엔진 S(HIVE 충돌 후 낙하 중 `IN_FLIGHT` · 착지 틱 = 최종 착지 · 착지점, 무효 명중: 팁 중 도착 → `MISS_HIVE` · 착지 틱 연장 · 셀 앞 착지 · 미득점, 프레임 구간 목록 복제) 갱신. 벽 무시, 옆면 반사 제거, 최소 이탈 속도 제거, 윗면 튐 제거, 착지 속도 감쇠 제거, 무효 명중 즉시 착지, 구간 목록 미복제 각각에서 실패함을 확인.
 - **입력 테스트 제한 시간:** 풀매치를 도는 입력 테스트(입력 로그 C~F, 실시간 루프 E / G)에 엔진 테스트와 같은 120초 제한 시간을 지정 (기본 5초는 병렬 실행 부하에서 부족해 입력 로그 C가 6.3초로 시간 초과한 것을 08-2 검증 중 확인).
 
+### 6.2.16 Step 08-3 (경기 종료 득점 내역) 완료 항목
+
+- **`types.ts`:** `ScoreBreakdown {hive, flower, garden, park, flowers[{id, scoringPieces, owned, points}], gardenPieceIds, parkedRobots}`, `TimelineFrame.scoreBreakdown: ScoreBreakdown | null`.
+- **엔진:** `finalizeScore`가 기존 합산과 같은 판정으로 항목별 점수와 인정 근거(FLOWER별 slot[1..N] 수 / 소유 / 점수, 득점 GARDEN 기물 id, 주차 로봇 슬롯 id)를 함께 만든다 (규칙 변경 없음, 항목 합 = `totalScore`). 종료 전 틱은 `null`, `reset` 시 `null`, 프레임 기록 / 스크러빙 복원 시 복제.
+- **테스트:** 엔진 U(기본 경기 RED / BLUE: 종료 전 프레임 `null`, GARDEN 4 + 주차 5 = 9, 주차 로봇 · GARDEN 기물 id 식별, FLOWER 4개 미소유 / slot[1..] 3 / 전 항목 경기: 팁 20 + FLOWER 1개 소유 9 + GARDEN 4 + 주차 5 = 38, 항목 합 = `totalScore`, 득점 FLOWER만 owner 설정 / 종료 전으로 되감으면 내역 없음, 재시뮬레이션 종료 프레임 동일, 종료 프레임 되감기 유지 / 같은 설정 결정론). 하단 보너스 누락, slot[0] 포함, GARDEN 아군 필터 누락, 내역 미기록, 매 틱 내역 기록, 주차 로봇 id 오류 각각에서 실패함을 확인.
+
 ### 6.3 남은 Step (권장 순서)
 
 > 모든 Step은 완료 시 `npm test`(엔진 회귀 테스트)가 통과해야 하며, 새로 추가한 규칙에는 테스트 그룹을 추가한다.
@@ -1015,10 +1023,10 @@ export interface TimelineFrame {
     - ~~07-4: 입력 로그 + 로봇별 입력 출처(`LIVE` / `REPLAY` / `NONE`) + 녹화 덧입히기 + 로그 기반 `inputProvider`.~~ (완료, 6.2.11)
     - ~~07-5: 실시간 루프 컨트롤러 + 입력 수집기 — 20 ms 누산기, 따라잡기 상한 5틱, 일시정지 / 재개, 경기 종료 자동 정지, 가짜 시간 테스트.~~ (완료, 6.2.12)
     - ~~07-6: 브라우저 어댑터 (게임패드 폴링, 키보드, `requestAnimationFrame`, 자동 일시정지 이벤트) + 헤드리스 Chromium 점검.~~ (완료, 6.2.13). 화면 연결은 Step 8.
-- **Step 8 — 렌더러 엔진 연결 (상세 규칙 3.7항):** 08-1(명세), 08-2(발사 비행 개정) 완료.
+- **Step 8 — 렌더러 엔진 연결 (상세 규칙 3.7항):** 08-1(명세), 08-2(발사 비행 개정), 08-3(득점 내역) 완료.
     - ~~08-1: 렌더러 / 화면 연결 명세 구체화.~~ (완료, 6.2.14)
     - ~~08-2: 발사 비행 개정(06-6) — HIVE / 벽 충돌 후 반사 포물선 낙하 (명세 + `ballistics.ts` + 엔진 + 테스트).~~ (완료, 6.2.15)
-    - 08-3: 엔진 경기 종료 득점 내역 `scoreBreakdown` 기록 (`types.ts`, 엔진, 회귀 테스트 그룹 추가 — 항목 합 = `totalScore`, 인정 근거, 종료 전 프레임 `null`, 스크러빙 후 재기록).
+    - ~~08-3: 엔진 경기 종료 득점 내역 `scoreBreakdown` 기록 (`types.ts`, 엔진, 회귀 테스트 그룹 추가 — 항목 합 = `totalScore`, 인정 근거, 종료 전 프레임 `null`, 스크러빙 후 재기록).~~ (완료, 6.2.16)
     - 08-4: 캔버스 레이아웃 / 좌표 변환 / 보기 회전(애니메이션 배율 포함), 정적 레이어 캐시(상대 진영 채도 제거), 로봇(몸체 / 인테이크 구역 / 적재물 / 배지 — 글자 배지 대체), 바닥 기물.
     - 08-5: HIVE(아군 셀 상태, 시차 낙하 연출), FLOWER 게이지(필드 밖 9칸, 잼, 가득 참 X), NECTAR 재고 게이지, 경기 종료 강조.
     - 08-6: 비행 공(명목 구간 보간 + 높이 보정, 충돌 후 구간, 그림자 / 오프셋 / 크기), 표시 옵션 5종.

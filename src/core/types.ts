@@ -265,6 +265,19 @@ export type DeepReadonly<T> = T extends (infer U)[]
     ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
     : T;
 
+// 경기 종료(Tick 6000) 득점 내역 (명세서 3.2, 08-3). hive + flower + garden + park = totalScore
+// 렌더러 / 스코어보드는 이 기록만 읽고 득점 규칙을 다시 계산하지 않음 (규칙의 단일 출처 = 엔진)
+export interface ScoreBreakdown {
+  hive: number;   // 텔레옵 팁 × 20
+  flower: number; // 득점 FLOWER의 (slot[1..N] 기물 수 × 2 + 하단 보너스 5) 합
+  garden: number; // 아군 GARDEN 인정 기물 수 × 1
+  park: number;   // 주차 인정 로봇 수 × 5
+  // FLOWER별 (FLOWER_IDS 순서): scoringPieces = slot[1..N] 기물 수 (소유 여부와 무관), owned = 아군 NECTAR 존재, points = 그 FLOWER 점수
+  flowers: { id: string; scoringPieces: number; owned: boolean; points: number }[];
+  gardenPieceIds: string[];              // 득점 인정 GARDEN 기물 id
+  parkedRobots: ('robot1' | 'robot2')[]; // 주차 인정 로봇
+}
+
 // 6. 타임라인 프레임 스냅샷
 export interface TimelineFrame {
   tick: number;
@@ -275,6 +288,7 @@ export interface TimelineFrame {
   pieces: GamePiece[];
   totalScore: number;
   rpAchieved: RPState;
+  scoreBreakdown: ScoreBreakdown | null; // 종료 프레임(Tick 6000)만 기록, 그 외 null
 }
 
 // ==========================================

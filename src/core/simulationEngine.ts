@@ -48,6 +48,7 @@ import type {
   RobotState,
   RPState,
   ScenarioConfig,
+  ScoreBreakdown,
   ShotProbabilityResolver,
   TimelineFrame,
 } from './types';
@@ -366,6 +367,17 @@ interface SimSnapshot {
   pieces: GamePiece[];
 }
 
+// 득점 내역 복제 (프레임 기록 / 스크러빙 복원 시 엔진 작업본과 분리)
+function cloneScoreBreakdown(src: ScoreBreakdown | null): ScoreBreakdown | null {
+  if (!src) return null;
+  return {
+    ...src,
+    flowers: src.flowers.map((f) => ({ ...f })),
+    gardenPieceIds: [...src.gardenPieceIds],
+    parkedRobots: [...src.parkedRobots],
+  };
+}
+
 function cloneSnapshot(src: SimSnapshot, pieceIndex: ReadonlyMap<string, number>): SimSnapshot {
   const pieces = src.pieces.map((p) => ({ ...p }));
   const relink = (p: GamePiece): GamePiece => {
@@ -430,6 +442,7 @@ export class SimulationEngine {
   private pieceIndex = new Map<string, number>();
   private totalScore = 0;
   private rpAchieved: RPState = { swarm: false, pollinator1: false, pollinator2: false };
+  private scoreBreakdown: ScoreBreakdown | null = null; // 종료 틱에만 기록 (그 외 null)
 
   constructor(
     r1Config: RobotConfig,
@@ -471,6 +484,7 @@ export class SimulationEngine {
     this.currentTick = 0;
     this.totalScore = 0;
     this.rpAchieved = { swarm: false, pollinator1: false, pollinator2: false };
+    this.scoreBreakdown = null;
 
     this.r1 = createRobotState(resolveSpawnPose(sc?.r1Spawn, DEFAULT_SPAWN_POSES[alliance].robot1));
     this.r2 = createRobotState(resolveSpawnPose(sc?.r2Spawn, DEFAULT_SPAWN_POSES[alliance].robot2));
@@ -653,9 +667,13 @@ export class SimulationEngine {
     this.syncCarriedPieces();
     this.classifyGardenPieces();
 
-    // 점수: 진행 중에는 HIVE Tip만 실시간, 종료 틱에 전 항목 확정
-    if (this.currentTick >= MATCH_TICKS) this.finalizeScore();
-    else this.totalScore = this.field.hive.tipCount * HIVE_TIP_POINTS;
+    // 점수: 진행 중에는 HIVE Tip만 실시간 (득점 내역 없음), 종료 틱에 전 항목 확정 + 득점 내역
+    if (this.currentTick >= MATCH_TICKS) {
+      this.finalizeScore();
+    } else {
+      this.totalScore = this.field.hive.tipCount * HIVE_TIP_POINTS;
+      this.scoreBreakdown = null;
+    }
 
     return this.recordFrame();
   }
@@ -692,6 +710,7 @@ export class SimulationEngine {
     this.currentTick = frame.tick;
     this.totalScore = frame.totalScore;
     this.rpAchieved = { ...frame.rpAchieved };
+    this.scoreBreakdown = cloneScoreBreakdown(frame.scoreBreakdown);
     this.rngState = this.rngStates[target];
   }
 
@@ -1353,36 +1372,47 @@ export class SimulationEngine {
     }
   }
 
-  // Tick 6000: HIVE + FLOWER + GARDEN + PARK 일괄 합산 및 RP 판정
+  // Tick 6000: HIVE + FLOWER + GARDEN + PARK 일괄 합산 및 RP 판정, 항목별 득점 내역과 인정 근거 기록
   private finalizeScore(): void {
     const alliance = this.field.allianceColor;
     const hiveScore = this.field.hive.tipCount * HIVE_TIP_POINTS;
 
-    let flowerScore = 0;
-    for (const flower of this.field.flowers) {
+    const flowers = this.field.flowers.map((flower) => {
       const volume = flower.pieces.slice(1).filter((p): p is GamePiece => p !== null);
-      const hasAllyNectar = volume.some((p) => p.type === 'NECTAR' && p.alliance === alliance);
-      if (!hasAllyNectar) continue;
-      flowerScore += volume.length * FLOWER_POINTS_PER_PIECE + FLOWER_BOTTOM_BONUS;
-      flower.owner = alliance;
-      flower.bottomBonus = alliance;
-    }
+      const owned = volume.some((p) => p.type === 'NECTAR' && p.alliance === alliance);
+      if (owned) {
+        flower.owner = alliance;
+        flower.bottomBonus = alliance;
+      }
+      const points = owned ? volume.length * FLOWER_POINTS_PER_PIECE + FLOWER_BOTTOM_BONUS : 0;
+      return { id: flower.id, scoringPieces: volume.length, owned, points };
+    });
+    const flowerScore = flowers.reduce((sum, f) => sum + f.points, 0);
 
     const garden = GARDEN_AABB[alliance];
-    const gardenScore = this.pieces.filter(
-      (p) =>
-        p.state === 'IN_GARDEN' && p.vx === 0 && p.vy === 0 && pieceOverlapsAABB(p, garden),
-    ).length;
+    const gardenPieceIds = this.pieces
+      .filter((p) => p.state === 'IN_GARDEN' && p.vx === 0 && p.vy === 0 && pieceOverlapsAABB(p, garden))
+      .map((p) => p.id);
+    const gardenScore = gardenPieceIds.length;
 
     // PARK: 차체 일부라도 아군 LOADING ZONE과 겹친 채 정지한 로봇 (FTC 룰: 부분 진입 인정)
     const zone = LOADING_ZONE_AABB[alliance];
-    const parked = this.robotBodies().filter(
-      ({ state, config }) =>
-        isRobotStationary(state) && testOBBvsAABB(getRobotOBB(state, config), zone).colliding,
-    ).length;
+    const parkedRobots = this.robotBodies()
+      .filter(({ state, config }) => isRobotStationary(state) && testOBBvsAABB(getRobotOBB(state, config), zone).colliding)
+      .map(({ config }) => config.id);
+    const parked = parkedRobots.length;
     const parkScore = parked * PARK_POINTS;
 
     this.totalScore = hiveScore + flowerScore + gardenScore + parkScore;
+    this.scoreBreakdown = {
+      hive: hiveScore,
+      flower: flowerScore,
+      garden: gardenScore,
+      park: parkScore,
+      flowers,
+      gardenPieceIds,
+      parkedRobots,
+    };
     this.rpAchieved = {
       swarm: parked === 2,
       // POLLINATOR: 오토 + 텔레옵 팁 합산 (점수는 텔레옵 팁만)
@@ -1402,6 +1432,7 @@ export class SimulationEngine {
       ...snapshot,
       totalScore: this.totalScore,
       rpAchieved: { ...this.rpAchieved },
+      scoreBreakdown: cloneScoreBreakdown(this.scoreBreakdown),
     };
     this.frames[this.currentTick] = frame;
     this.rngStates[this.currentTick] = this.rngState;
