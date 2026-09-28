@@ -297,7 +297,18 @@
             - **`slot[0]` 불변식:** `slot[0]`에는 NECTAR가 올 수 없다 (초기 배치는 POLLEN만, 하단 추출 후 NECTAR는 `slot[1]`에 걸림, 빈 원통에 투입된 NECTAR는 `[null, NECTAR]`). 따라서 NECTAR가 있는 FLOWER의 `slot[0]`은 항상 POLLEN이거나 POLLEN으로 계산하는 빈칸(아래 잼 처리)이며 계산상 POLLEN ≥ 1이다. 기하 계산상의 {0, 7} 조합은 `slot[0]`이 NECTAR여야 하므로 도달 불가능하여 테이블에서 제외했다.
             - 산출 기준: 원통 내 지그재그 적층 + 최상단 기물이 일부라도 원통 내부에 걸치면 인정. 사용자 계산값이며 실측이 가능해지면 실측값으로 교체 예정.
             - **NECTAR 잼 상태 처리 (단순화):** `slot[0]`이 비고 `slot[1]`에 NECTAR가 걸린 잼 상태(하단 추출 후 잼, 또는 빈 원통에 NECTAR 투입)에서는 빈 `slot[0]`을 **POLLEN 1개로 계산**하여 같은 테이블을 적용한다. 출구 턱 높이가 POLLEN 직경(2.8 in)과 같아, 턱에 걸린 NECTAR는 `slot[0]` POLLEN 위에 놓인 경우와 같은 높이에서 적층이 시작되기 때문이다. 턱(링) 위 받침과 공 위 받침에 따른 지그재그 적층의 미세한 차이는 **단순화를 위해 의도적으로 무시**한다 (별도 잼 전용 테이블 없음). 이 가상 POLLEN은 용량 판정에만 쓰이며 득점(`slot[1..N]` 개수)에는 포함되지 않는다.
-        - 리프트 준비 완료 후 로봇 적재함 맨 앞 기물(FIFO, `controlledPieces.shift()`)을 FLOWER 최상단 슬롯에 추가 (`pieces.push(piece)`). 투입 가능 여부(① 도달 거리 내 FLOWER, ② NECTAR는 ENDGAME에만, ③ FLOWER 용량 테이블)는 **투입 요청 시점**에 검사하여 불가능하면 리프트 준비(`FLOWER_SETUP`)에 진입하지 않고 요청을 거부(IDLE 유지)한다. 연속 투입도 다음 기물이 투입 가능할 때만 이어간다. 준비 중 상황 변화에 대비해 투입 완료 시점에도 같은 조건을 재검사하며, 불가능하면 기물은 그대로 둔 채 상태만 복귀.
+        - 투입은 로봇 적재함 맨 앞 기물(FIFO, `controlledPieces.shift()`)을 FLOWER 최상단 슬롯에 추가 (`pieces.push(piece)`). 투입 가능 여부 = ① 도달 거리 내 FLOWER, ② NECTAR는 ENDGAME에만, ③ FLOWER 용량 테이블 (엔진 `findDropTarget`).
+        - **리프트 FSM (07-1 확정, 07-2 구현 예정 — 이전 "요청 1회 → 준비 → 자동 투입" 흐름을 대체):** 리프트를 올리고(준비) → 올린 채 대기 → 투입 → 내리는 단계를 분리하여, 드라이버가 리프트를 올린 뒤 투입 시점을 고르고 실수로 올린 리프트를 다시 내릴 수 있게 한다.
+            - **상태 (모두 Stationary Lock, 3.4항):** `FLOWER_SETUP`(올리는 중) → `FLOWER_READY`(올린 채 대기, 타이머 없음) ⇄ `FLOWER_DROPPING`(투입 중) → `FLOWER_LOWERING`(내리는 중) → `IDLE`.
+            - **리프트 유지 요청** = 행동 요청이 `FLOWER_SETUP` 또는 `FLOWER_DROPPING`. 그 외 요청(`IDLE` / `INTAKING` / `SHOOTING`)은 리프트 상태에서 "내림" 요청으로 해석한다.
+            - **`IDLE` / `INTAKING`에서:**
+                - `FLOWER_SETUP` 요청: 투입 가능(①②③)할 때만 수락 → `FLOWER_SETUP` 진입 (`stateTimer = flowerSetupDelay`, 제동 후 정지 시점부터 차감). 불가능하면 거부 (리프트를 올리지 않음, 기존 요청 거부 규칙과 동일하게 `IDLE` / `INTAKING`).
+                - `FLOWER_DROPPING` 요청: **무효** (리프트가 올라가 있지 않으면 투입 불가, 거부).
+            - **`FLOWER_SETUP`(올리는 중):** 유지 요청이면 계속 올리고, 타이머 완료 시 `FLOWER_READY`. 내림 요청이면 즉시 `FLOWER_LOWERING`으로 전환하며 내리는 시간 = **지금까지 올린 시간**(`flowerSetupDelay − 남은 stateTimer`, 올림 시간 = 내림 시간). 아직 제동 중이라 올린 시간이 0이면 곧바로 `IDLE`.
+            - **`FLOWER_READY`(대기):** `FLOWER_DROPPING` 요청 + 투입 가능 → `FLOWER_DROPPING` (`stateTimer = flowerDropDelay`). 투입 불가면 요청 무시하고 대기 유지. `FLOWER_SETUP` 요청이면 대기 유지. 내림 요청이면 `FLOWER_LOWERING` (`stateTimer = flowerSetupDelay`). 적재함이 비어도 자동으로 내리지 않는다 (내림 요청까지 대기).
+            - **`FLOWER_DROPPING`(투입 중):** 진행 중에는 모든 요청을 무시한다 (내림 요청 포함, 커밋). 완료 시 투입 조건을 재검사해 가능하면 투입, 불가능하면 기물을 그대로 둔다. 이어서 요청이 `FLOWER_DROPPING`이고 다음 기물이 투입 가능하면 연속 투입(`stateTimer = flowerDropDelay`), 그 외에는 `FLOWER_READY`로 복귀 (리프트는 올린 채 유지).
+            - **`FLOWER_LOWERING`(내리는 중):** 진행 중 모든 요청 무시 (커밋), 완료 시 `IDLE`.
+            - 리프트 상태에서는 HIVE 슈팅 / 흡입 요청이 받아들여지지 않는다 (리프트를 내린 뒤 `IDLE`에서 다시 요청). 입력 계층은 리프트 상태 동안 트리거 입력을 요청에 반영하지 않는다 (3.6항).
 4. **GARDEN & PARK (경기 종료 판정):**
     - 경기 진행 중에는 실시간 점수로 가산하지 않음.
     - 경기 종료 틱(Tick 6000, 남은 시간 0초) 시점에 필드 상태를 검사하여 일괄 가산:
@@ -354,7 +365,7 @@
 4. **틱당 물리 파이프라인 실행 순서:**
     - **Step 1: 로봇 기구학 갱신 (`kinematics.ts`) 및 FSM 주행 제어 이원화**
         - **`INTAKING` (주행 중 흡입 허용):** 외부 주행 입력(`vx, vy, omega`)을 차단하지 않고 정상 주행 적분. 주행하며 공을 빨아들이는 동작 허용.
-        - **`SHOOTING`, `FLOWER_SETUP`, `FLOWER_DROPPING` (Stationary Lock 감속 제동):**
+        - **`SHOOTING`, `FLOWER_SETUP`, `FLOWER_DROPPING` (Stationary Lock 감속 제동, 리프트 상태 `FLOWER_READY` / `FLOWER_LOWERING` 포함 — 2.6.3항):**
             - 즉각적인 위치 고정이 아닌, 목표 속도를 `(0, 0, 0)`으로 강제하여 Slew Rate Limiter 기반 감속 주행 유도.
             - 차체 실제 속도가 완전 정지 임계치(`speed < 0.5 in/s` 및 `|omega| < 0.05 rad/s`)에 도달하기 전까지는 감속 제동 상태(`isBraking = true`)로 대기하며 액션 타이머를 차감하지 않음.
             - 완전 정지 도달 시 비로소 `isBraking = false`로 전환하고 `stateTimer -= dt` 차감 시작.
@@ -365,6 +376,75 @@
     - Step 5: HIVE `tipProgressTimer += dt` 누적 및 `settleTime` 도달 공 순차 `ON_FIELD` 방출
     - Step 5-2: 발사 비행 도착 (`stepShotArrivals`): 도착 틱이 된 발사를 발사 순서대로 명중 적재 / 반사 방출 / 바닥 착지 (2.6.2항)
 5. **Slew Rate Limiter:** RoadRunner / Pedro Pathing 오도메트리 제원 기반 속도 선형 보간.
+6. **입력 계층 및 실시간 루프 (Step 7, 07-1 확정):** 엔진 바깥의 순수 TS 계층이 장치 입력을 틱별 `RobotDriveInput`으로 만들어 엔진에 넣는다. 엔진 입력 인터페이스(`step(r1Input, r2Input)`, `inputProvider`)는 그대로 쓴다.
+    - **모듈 구성 (`src/input/`):**
+        - `inputConfig.ts`: 키 매핑 / 데드존 / 임계값 / 장치 배정 / 루프 상수를 한곳에 모은 설정 파일 (`collision.ts` 실측 상수처럼 값만 바꿔 조정). 매핑 편집 GUI는 두지 않는다.
+        - 순수 변환(축 처리, 행동 요청 결정, 탭 래치, 양자화), 입력 로그 / 입력 출처, 실시간 루프 컨트롤러: DOM 비의존, 시계 / 스케줄러 / 원시 입력을 주입받아 Node(Vitest)에서 가짜 시간으로 테스트.
+        - 브라우저 어댑터(Gamepad 폴링, 키보드 이벤트, `requestAnimationFrame`, 포커스 / 가시성 이벤트): 원시 입력 수집과 콜백 연결만 하는 얇은 층.
+    - **키 매핑 (`inputConfig.ts` 기본값, W3C Gamepad 표준 배열 `mapping === 'standard'` 기준, 인덱스는 0부터):**
+
+      | 기능 | 게임패드 | 키보드 (`KeyboardEvent.code`) | 입력 방식 |
+      |---|---|---|---|
+      | 전후 평행이동 | 좌스틱 Y `axes[1]` (위 = −1이므로 부호 반전) | `KeyW` 전진 / `KeyS` 후진 | 아날로그 / ±1 |
+      | 좌우 평행이동 | 좌스틱 X `axes[0]` (오른쪽 = +) | `KeyD` 오른쪽 / `KeyA` 왼쪽 | 아날로그 / ±1 |
+      | 회전 | 우스틱 X `axes[2]` (오른쪽 = + = 시계 방향 = 헤딩 증가) | `ArrowRight` + / `ArrowLeft` − | 아날로그 / ±1 |
+      | (미사용) | 우스틱 Y `axes[3]` | — | — |
+      | `INTAKING` | LT `buttons[6]` (`value ≥ 0.5`) | `KeyM` | 누르는 동안 유지 |
+      | `SHOOTING` | RT `buttons[7]` (`value ≥ 0.5`) | `Comma` | 누르는 동안 유지 |
+      | 리프트 올림 / 내림 (`FLOWER_SETUP`) | A `buttons[0]` | `Period` | 누를 때마다 토글 |
+      | `FLOWER_DROPPING` | B `buttons[1]` | `Slash` | 누르는 동안 유지 |
+
+        - 키보드는 물리 키 위치(`event.code`)로 읽어 한/영 입력 상태·자판 배열과 무관하게 동작. 매핑된 키는 `preventDefault`(방향키 스크롤, Firefox `/` 빠른 찾기 방지), 입력 폼(`input` / `textarea` / `select` / `contenteditable`)에 포커스가 있으면 무시, 자동 반복(`event.repeat`)은 눌림 에지로 세지 않음.
+        - 트리거 임계값(`TRIGGER_THRESHOLD = 0.5`), 그 외 버튼은 `pressed`. 비표준 매핑 패드도 같은 인덱스를 적용 (연결 표시에서 경고, Step 9).
+    - **장치 → 로봇 배정 (`inputConfig.ts` 고정값):** 게임패드 슬롯 0 → R1, 게임패드 슬롯 1 → R2, 키보드 → R2.
+        - 게임패드 슬롯 = `navigator.getGamepads()` 배열 인덱스 (연결 순서, 브라우저 정책상 페이지에서 버튼을 한 번 눌러야 노출).
+        - 키보드는 개발자 디버그용 비공개 입력 (사용자 안내 없음, 사용자에게는 게임패드 조작만 안내). `KEYBOARD_ENABLED` 플래그로 정식 배포 시 비활성화 가능.
+        - 한 로봇에 장치가 여럿 배정되면(R2 = 패드 1 + 키보드) 합성: 축은 채널별로 절댓값이 큰 값, 유지형 버튼은 OR, 토글 눌림 에지는 OR.
+    - **축 처리 (틱마다, 최신 샘플 사용):**
+        - 좌스틱 원형 데드존 `DEADZONE_LEFT = 0.08`: 크기 m < 0.08이면 0, 아니면 크기를 (min(m, 1) − 0.08) / (1 − 0.08)로 재조정 (방향 유지, 크기 ≤ 1). 우스틱 X 축 데드존 `DEADZONE_RIGHT_X = 0.08` (같은 재조정).
+        - 키보드: 전진 f = W − S, 오른쪽 s = D − A, 동시 입력 시 크기 1로 정규화 (대각선 0.707), 회전 r = Right − Left. 느린 이동 키는 두지 않음.
+        - 드라이버 기준 전진 f(스틱 위 = +), 오른쪽 s → 필드 좌표 정규화 속도 (ux, uy):
+            - **필드 기준 `FIELD` (기본):** 드라이버는 아군 벽에서 필드 안쪽을 바라본다 — RED는 x = 0 벽에서 +x 방향, BLUE는 x = 144 벽에서 −x 방향. RED: ux = f, uy = s / BLUE: ux = −f, uy = −s (캔버스 y-down에서 +x를 보는 드라이버의 오른쪽이 +y).
+            - **로봇 기준 `ROBOT` (옵션):** 직전 프레임(현재 틱 상태)의 헤딩 h 기준. ux = f·cos h − s·sin h, uy = f·sin h + s·cos h (앞 = (cos h, sin h), 오른쪽 = (−sin h, cos h)).
+            - 조작 모드(`DriveMode = 'FIELD' | 'ROBOT'`)는 로봇별 드라이버 입력 설정 (로봇 제원 `RobotConfig` / 시나리오가 아님). 로그에는 변환이 끝난 필드 좌표 값을 기록하므로 모드는 리플레이에 영향 없음.
+        - 회전: 정규화 각속도 uω = r (두 모드 공통, + = 오른쪽 회전).
+    - **행동 요청 결정 (틱마다, 로봇별 `ActionRequest` 1개):** 직전 프레임의 로봇 `actionState`와 이번 틱 버튼(탭 래치 적용)으로 결정한다. 리프트 토글 값은 입력 계층에 따로 저장하지 않고 **매 틱 엔진 상태에서 유도**하므로, 엔진이 요청을 거부 / 무효 판정하면 토글도 자동으로 그 상태를 따른다 (어긋날 수 없음).
+        - 리프트 의도 기본값 = 직전 상태가 `FLOWER_SETUP` / `FLOWER_READY` / `FLOWER_DROPPING`이면 켜짐, 그 외 꺼짐.
+        - A 눌림 에지: 직전 상태가 `IDLE` / `INTAKING`이면 켜짐(올림 요청), `FLOWER_SETUP` / `FLOWER_READY`면 꺼짐(내림 요청), `SHOOTING` / `FLOWER_DROPPING` / `FLOWER_LOWERING`이면 무효 (투입 중 내림 불가).
+        - **직전 상태가 리프트 상태(`FLOWER_SETUP` / `FLOWER_READY` / `FLOWER_DROPPING`):** RT / LT는 반영하지 않음. 의도 켜짐 → B면 `FLOWER_DROPPING`, 아니면 `FLOWER_SETUP` / 의도 꺼짐 → `IDLE`(내림 요청).
+        - **그 외 상태:** 우선순위 **`SHOOTING`(RT) > `FLOWER_DROPPING`(B) > `FLOWER_SETUP`(A 켜짐) > `INTAKING`(LT) > `IDLE`**. 리프트가 올라가 있지 않으면 B는 무효이므로 실제 선택은 RT → A → LT 순. 같은 틱에 RT와 A가 함께 들어오면 `SHOOTING`이 선택되고 A는 버려진다.
+        - 우선순위 근거: 계속 쥐는 LT를 최하위로 두어 흡입 중에도 RT / A가 먹히게 하고(발사 후 LT를 쥐고 있으면 다시 흡입), 리프트 상태에서는 B가 A 토글보다 앞서야 투입이 가능. 엔진은 틱당 요청 1개만 받으므로 상위 요청이 거부되면 하위 요청도 그 틱에는 수행되지 않음 (예: 빈 적재함에서 LT + RT → RT를 쥐는 동안 흡입 정지).
+        - `ActionRequest = 'IDLE' | 'INTAKING' | 'SHOOTING' | 'FLOWER_SETUP' | 'FLOWER_DROPPING'` (`FLOWER_READY` / `FLOWER_LOWERING`은 엔진 상태이며 요청 값이 아님).
+    - **짧은 탭 래치:** 게임패드는 `requestAnimationFrame`마다 폴링하고 키보드는 이벤트로 받아 원시 입력 누적기에 모은다. 틱을 소비할 때:
+        - 유지형 버튼(LT / RT / B / m / , / /): 눌림 = 현재 눌림 OR 직전 틱 소비 이후 눌림 에지 1회 이상. 20 ms 안에 눌렀다 뗀 입력도 최소 1틱 요청으로 반영된다 (RT 탭 = 1발, B 탭 = 1개 투입 — 해당 동작은 진입 후 커밋되므로).
+        - 토글(A / .): 직전 틱 소비 이후 눌림 에지가 1회 이상이면 토글 1회.
+        - 한 프레임에서 여러 틱을 소비하면 누적된 에지는 첫 틱에만 적용하고 이후 틱은 현재 레벨을 쓴다. 축은 소비 시점의 최신 샘플.
+        - 게임패드는 폴링 간격(약 16.7 ms)보다 짧은 탭은 API 한계로 감지되지 않을 수 있음.
+    - **양자화 (입력 수신 시점, 8비트):**
+        - 로봇별 틱당 4바이트: `[qx, qy, qω]` int8 ∈ [−127, 127] + `[action]` (0 `IDLE`, 1 `INTAKING`, 2 `SHOOTING`, 3 `FLOWER_SETUP`, 4 `FLOWER_DROPPING`).
+        - q = sign(u) · floor(|u| · 127 + 0.5), [−127, 127]로 제한 (u = 위 축 처리 결과 ux / uy / uω, 부호 대칭 반올림).
+        - 엔진 입력 = 복호화 값: `targetVx = qx / 127 × maxSpeed`, `targetVy = qy / 127 × maxSpeed`, `targetOmega = qω / 127 × maxTurnRate`. **실시간 입력도 부호화 → 복호화를 거쳐 엔진에 들어가므로** 로그 재생 결과가 비트 단위로 같다.
+        - 근거: 재현성은 해상도와 무관(엔진이 쓴 값 = 로그 값)하고 해상도는 조작감만 좌우한다. 1단계 = maxSpeed 60 in/s 기준 0.47 in/s(정지 임계 0.5 in/s 미만), 회전 4 rad/s 기준 0.03 rad/s, 풀스틱 방향 분해능 약 0.45°. 일반 패드는 8비트 원본이 많고 16비트 패드도 1% 이하는 잡음 / 데드존(8%) 범위. 크기: 로봇 2대 × 6000틱 × 4 B = 48 KB (원본, 저장 시 연속 중복 압축은 Step 10). int16은 크기 2배에 체감 이득 없음.
+        - 메모리: 로봇별 `Int8Array(6000 × 4)` = 24 KB 미리 할당. 참고로 풀매치 타임라인은 힙 약 46 MB(07-1 측정)로 입력 로그는 그 0.1% 수준 — 메모리 관리의 초점은 타임라인(Step 10 분기).
+    - **입력 로그 / 로봇별 입력 출처 / 녹화 덧입히기:**
+        - 로그는 로봇별 채널 `{ data: Int8Array(6000 × 4), length }`. 인덱스 t = 틱 t → t + 1 스텝에 쓰인 입력 (`DriveInputProvider`의 tick 규약과 동일).
+        - 로봇별 입력 출처 `InputSource = 'LIVE' | 'REPLAY' | 'NONE'`:
+            - `LIVE`: 장치 입력 → 축 처리 / 요청 결정 → 부호화 → 로그 t에 기록 → 복호화 → 엔진.
+            - `REPLAY`: 로그 t 복호화 → 엔진. 기록 길이를 넘은 틱은 `NONE`과 같음.
+            - `NONE`: 0 입력 + `IDLE` (기록하지 않음).
+        - **녹화 덧입히기:** 1회차 R1 `LIVE` / R2 `NONE`으로 R1 입력 기록 → 원하는 틱으로 되감기(`scrubTo`) → 2회차 R1 `REPLAY` / R2 `LIVE`로 한 경기장에서 두 로봇을 따로 조종한 결과를 만든다.
+        - 되감은 틱 k에서 이어 진행하면 엔진은 k 이후 프레임을 폐기(기존 분기 규칙)하고, `LIVE` 로봇의 로그도 k 이후를 폐기한 뒤 이어서 기록한다. `REPLAY` 로봇의 로그는 유지.
+        - `REPLAY`는 위치가 아니라 **조작 명령**을 재생한다. 2회차에 다른 로봇과 부딪히거나 기물을 먼저 가져가면 1회차와 궤적 / 결과가 달라질 수 있으며, 이는 결정론을 유지한 정상 동작이다. 리프트 요청도 기록된 요청을 그대로 보내고 수락 여부는 엔진이 다시 판정한다.
+        - 두 로봇이 모두 `REPLAY` / `NONE`이면 실시간 루프 없이 `inputProvider` + `runFullMatch()`로 즉시 재계산할 수 있다.
+        - 로그는 같은 로봇 설정 / 시나리오 / 시드 / 탄도 설정 / 엔진 버전을 전제로 한다 (저장 레시피, Step 10).
+    - **실시간 루프 (`requestAnimationFrame` + 20 ms 고정 스텝 누산기):**
+        - 프레임마다 누산 시간 += 경과 시간, 20 ms마다 1틱 소비 (입력 결정 → `engine.step`).
+        - **따라잡기 상한 `MAX_CATCHUP_TICKS = 5`:** 한 프레임에 최대 5틱(100 ms)만 소비하고 남은 누산 시간은 버린다 (순간 끊김 시 게임 시간이 잠깐 느려질 뿐, 입력이 틱별로 기록되므로 결정론 유지).
+        - **자동 일시정지:** 탭 숨김(`visibilitychange` → hidden), 창 포커스 소실(`blur`), 경기 중 배정된 게임패드 연결 해제(`gamepaddisconnected`). 탭이 숨겨지면 브라우저가 `requestAnimationFrame` 호출을 멈추고 게임패드 / 키 입력도 전달되지 않으므로(키를 뗀 이벤트 유실 → 키가 눌린 채 남음), 그대로 두면 복귀 시 밀린 시간 동안 마지막 입력이 유지된 채 한꺼번에 시뮬레이션된다.
+        - 일시정지 시: 루프 정지, 누산 시간 0, 원시 입력 누적기(키 상태 / 탭 래치 에지) 초기화. 엔진은 마지막으로 완료한 틱에 멈춰 있다.
+        - 재개: 사용자의 명시적 조작으로만 재개(Step 7에서는 `resume()` API, 버튼 / 단축키 배치는 Step 9 GUI). 일시정지된 틱에서 그대로 이어가며 재개 첫 프레임은 경과 시간 0으로 시작.
+        - 경기 종료(6000틱) 시 루프 자동 정지.
+        - **새로고침 / 탭 닫힘 / 크래시 등 외부 개입으로 페이지 상태가 사라지면 그 경기는 폐기한다** (v1은 자동 저장 / 복구 없음, 6.4항).
 
 ## 4. 데이터 인터페이스 명세 (`types.ts`)
 
@@ -406,7 +486,7 @@ export interface RobotConfig {
   aimTolerance: number; // 고정형 허용 조준 오차 (rad, 헤딩 기준 ±, 기본 3° ≈ 0.0524)
 
   // FLOWER 득점 옵션
-  flowerSetupDelay: number; // 리프트 준비 시간 (ms)
+  flowerSetupDelay: number; // 리프트 올림 시간 = 내림 시간 (ms, 2.6.3항 리프트 FSM)
   flowerDropDelay: number; // 연속 투입 간격 (ms)
 }
 
@@ -512,13 +592,18 @@ export interface RobotState {
   vy: number;
   omega: number;
   heading: number;
-  actionState: 'IDLE' | 'INTAKING' | 'SHOOTING' | 'FLOWER_SETUP' | 'FLOWER_DROPPING';
+  // FLOWER_*: 리프트 FSM (2.6.3항) — SETUP 올리는 중 / READY 올린 채 대기 / DROPPING 투입 중 / LOWERING 내리는 중
+  actionState: 'IDLE' | 'INTAKING' | 'SHOOTING' | 'FLOWER_SETUP' | 'FLOWER_READY' | 'FLOWER_DROPPING' | 'FLOWER_LOWERING';
   stateTimer: number;
   isBraking: boolean; // Stationary Lock 액션 진입 후 완전 정지 대기 중인지 여부
   intakeContactTimer: number; // 유효 흡입 영역 내 기물 접촉 유지 시간 누적치 (초 단위)
   intakeTargetPieceId: string | null; // 현재 접촉 흡입 중인 기물 식별자
   controlledPieces: GamePiece[]; // FIFO 적재함 (0번이 다음에 나감), 최대 길이 = 로봇 적재 한도
 }
+
+// 틱별 행동 요청 (입력 계층 → 엔진, 3.6항). FLOWER_READY / FLOWER_LOWERING은 엔진 상태이며 요청 값이 아님
+// (엔진 입력 RobotDriveInput.actionState의 타입, 07-2에서 RobotState['actionState']를 대체)
+export type ActionRequest = 'IDLE' | 'INTAKING' | 'SHOOTING' | 'FLOWER_SETUP' | 'FLOWER_DROPPING';
 
 // 슈팅 판정 인터페이스 (엔진 생성자 필수 인자: 실제 경기는 LUT 기반, 테스트는 고정 확률)
 export type ShotProbabilityResolver = (
@@ -613,7 +698,7 @@ export interface TimelineFrame {
     - 공(`ON_FIELD`)의 타일 마찰 감속(`stepPieceDynamics`) 및 공-환경/로봇/공 충돌 완화 루프를 구현하라.
     - HIVE 30도 틸트 기반 시차 낙하 큐 생성 함수(`generateTippedPiecePlan`)를 구현하고, 아군 진영에 따른 `Lip_X` 분기 및 데드존 Re-roll 로직을 엄수하라.
 4. **의존성 분리:** `simulationEngine.ts`는 React Hook에 의존하지 않는 순수 TS 클래스로 작성하여 50Hz 루프(`dt = 0.02`)를 독자적으로 돌게 하라.
-5. **상태 전이(FSM) 타이머 및 주행 제어:** `actionState === 'INTAKING'`일 때는 주행 입력을 유지하여 Mobile Intake를 수행하고 공 접촉 타이머를 누적하도록 지시. `SHOOTING`, `FLOWER_SETUP`, `FLOWER_DROPPING`일 때는 감속 제동(`isBraking = true`) 후 정지 완료 시점에 `stateTimer`를 차감하도록 지시.
+5. **상태 전이(FSM) 타이머 및 주행 제어 (리프트 상태 `FLOWER_READY` / `FLOWER_LOWERING`도 Stationary Lock, 리프트 전이는 2.6.3항 리프트 FSM):** `actionState === 'INTAKING'`일 때는 주행 입력을 유지하여 Mobile Intake를 수행하고 공 접촉 타이머를 누적하도록 지시. `SHOOTING`, `FLOWER_SETUP`, `FLOWER_DROPPING`일 때는 감속 제동(`isBraking = true`) 후 정지 완료 시점에 `stateTimer`를 차감하도록 지시.
 6. **FLOWER 슬롯 구조 및 하단 추출/블로킹 구현:**
     - `flower.pieces[0]`을 지면 슬롯(`slot[0]`), `[1..N]`을 유효 스코어링 볼륨으로 취급하라.
     - 로봇 인테이크 구역(`intakeZones`)이 FLOWER 원통 정사영과 겹칠 때 `slot[0]`의 POLLEN만 추출(`shift`) 가능하며, 추출 쿨다운은 `max(intakeDelay, 0.12s)`를 적용하라.
@@ -645,6 +730,7 @@ export interface TimelineFrame {
 | 06-4 | HIVE 진입 면 / 림 아래 벽 정확 판정, 1 in 격자 · 샘플 수 상향 · 보간 조회, 격자별 독립 난수 · 도달 불가 격자 생략 (아래 6.2.5) | `ballistics.ts`, `types.ts`, `__tests__/ballistics.test.ts` |
 | 06-5 | LUT 명중 확률 판정 함수(`createLUTShotResolver`) + LUT 생성 실행 / 사용자 경험 명세 (아래 6.2.6) | `ballistics.ts`, `types.ts`, 두 테스트 파일 |
 | 06-6 | 발사 비행 처리 (발사 / 도착 분리, `IN_FLIGHT`, 비행 대기열, 명중 / HIVE 반사 / 바닥 착지) (아래 6.2.7) | `ballistics.ts`, `simulationEngine.ts`, `types.ts`, 두 테스트 파일 |
+| 07-1 | 입력 계층 / 실시간 루프 명세 구체화, FLOWER 리프트 FSM 명세 (아래 6.2.8) | 명세서 |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
@@ -716,6 +802,14 @@ export interface TimelineFrame {
 - **바닥 착지:** 사거리 지점, 착지 속도 = 발사 방향 v0·cosθ × `landingSpeedRetention`, 착지 전 벽에 닿으면 벽 앞 정지. 경기 종료까지 도착하지 못한 비행은 무득점.
 - **테스트:** 엔진 C / K / M / Q / R을 도착 기준으로 갱신(비행 대기 헬퍼 `settle`), 엔진 S(발사 대기열 / IN_FLIGHT / 도착 틱 공식 / 도착 틱 적재 / 프레임 기록 보호 / HIVE 충돌 반사 방향 / 바닥 착지 속도 / 난수 소비 고정 / 비행 중 스크러빙 재시뮬레이션 동일 / 종료 시 비행 무득점), 탄도 O(발사 방향 · 터렛 제한, 명중 비행 시간, v0 우선순위, 발사각 기본값, HIVE 충돌 / 바닥 착지 / 벽 정지, 탄도 변환). 도착 시 유효성 검사 제거, 명중 시 난수 미소비, 즉시 도착, 착지 감쇠 제거, 대기열 미복제, 벽 정지 제거, 반사 방향 반전 각각에서 실패함을 확인.
 
+### 6.2.8 Step 07-1 (입력 계층 명세 구체화) 완료 항목
+
+- **FLOWER 리프트 FSM (2.6.3항):** 올림(`FLOWER_SETUP`) → 대기(`FLOWER_READY`) ⇄ 투입(`FLOWER_DROPPING`) → 내림(`FLOWER_LOWERING`). `IDLE`에서 투입 요청 무효, 내림 시간 = 올린 시간(`flowerSetupDelay` 기준), 투입 중 내림 요청 무시, 리프트 상태에서 슈팅 / 흡입 불가. 새 타입 `ActionRequest`.
+- **입력 계층 (3.6항):** `inputConfig.ts` 키 매핑(표준 Gamepad 0부터: LT 6 흡입, RT 7 발사, A 0 리프트 토글, B 1 투입 / 키보드 WASD · ← → · m , . /), 장치 배정(패드 0 → R1, 패드 1 → R2, 키보드 → R2 비공개 디버그), 데드존, 필드 기준(기본) / 로봇 기준 조작, 우선순위 `SHOOTING > FLOWER_DROPPING > FLOWER_SETUP > INTAKING`, 리프트 토글의 엔진 상태 유도, 짧은 탭 래치.
+- **8비트 양자화 / 입력 로그:** 로봇별 틱당 4 B, 입력 수신 시점 부호화 → 복호화 후 엔진 입력, 로봇별 입력 출처(`LIVE` / `REPLAY` / `NONE`)와 녹화 덧입히기.
+- **실시간 루프:** 20 ms 누산기, 따라잡기 상한 5틱, 포커스 소실 / 탭 숨김 / 패드 분리 시 자동 일시정지(누산 시간 · 입력 초기화, 일시정지 틱에서 재개), 새로고침 등으로 사라진 경기는 폐기.
+- **측정:** 풀매치 타임라인 힙 약 46 MB, `runFullMatch()` 약 1.6초 (Node, 로봇 1대 주행 입력).
+
 ### 6.3 남은 Step (권장 순서)
 
 > 모든 Step은 완료 시 `npm test`(엔진 회귀 테스트)가 통과해야 하며, 새로 추가한 규칙에는 테스트 그룹을 추가한다.
@@ -725,17 +819,21 @@ export interface TimelineFrame {
     - ~~06-3: 몬테카를로 명중 판정, 기물 종류별 v0 탐색, 기준 셀 72 × 72 LUT 생성, 4-Cell 대칭 복사 (로봇당 8장, 합계 16장).~~ (완료, 6.2.4)
     - ~~06-5: `createLUTShotResolver(luts, r1Config, r2Config)`: 쌍선형 보간 조회(`sampleLUT`) + 조준 판정(FIXED 허용 오차 / TURRET 회전 범위) → 엔진 생성자에 주입 (엔진 수정 불필요).~~ (완료, 6.2.6)
     - ~~06-6: 2.6.2항의 발사 비행 처리 구현 (`IN_FLIGHT`, 비행 대기열, 도착 규칙, 착지 속도) + 엔진 회귀 테스트.~~ (완료, 6.2.7)
-- **Step 7 — 입력 계층 및 실시간 루프:**
-    - Gamepad API → `RobotDriveInput` 변환: 필드 기준 속도(`스틱 × maxSpeed`, `오른쪽 스틱 X × maxTurnRate`), 데드존, 드라이버 시점 회전, 버튼 → `actionState`(우선순위 고정, 짧은 탭 래치).
-    - **입력 양자화는 입력 수신 시점에 수행** (저장 시점 양자화는 재생 궤적을 어긋나게 함), 틱별 입력 로그 기록.
-    - `requestAnimationFrame` + 20 ms 고정 스텝 누산기(캐치업 상한) 실시간 루프, `inputProvider`로 입력 로그 리플레이.
+- **Step 7 — 입력 계층 및 실시간 루프 (상세 규칙 3.6항, 리프트 FSM 2.6.3항):** 07-1(명세) 완료.
+    - ~~07-1: 입력 계층 / 실시간 루프 / 리프트 FSM 명세 구체화.~~ (완료, 6.2.8)
+    - 07-2: 엔진 리프트 FSM — `types.ts`(`actionState`에 `FLOWER_READY` / `FLOWER_LOWERING`, `ActionRequest`), `simulationEngine.ts`(요청 처리 / 완료 처리). 기존 FLOWER 테스트(D / N / O)를 두 단계 흐름(올림 → 투입)으로 갱신하고 리프트 FSM 테스트 그룹 추가 (`IDLE` 투입 무효, 대기 / 연속 투입 / 대기 복귀, 올리는 중 내림 = 올린 시간, 대기 중 내림 = `flowerSetupDelay`, 제동 중 취소 즉시 `IDLE`, 투입 / 내림 중 요청 무시, 투입 불가 시 대기 유지, 리프트 상태 슈팅 / 흡입 불가).
+    - 07-3: `src/input/inputConfig.ts` + 순수 변환 — 장치 합성(R2 = 패드 1 + 키보드), 축 처리(데드존, 키보드 정규화, `FIELD` / `ROBOT`), 행동 요청 결정(리프트 의도 유도, 리프트 중 트리거 무시, 우선순위), 탭 래치 누적기, 8비트 부호화 / 복호화 + 단위 테스트.
+    - 07-4: 입력 로그 + 로봇별 입력 출처(`LIVE` / `REPLAY` / `NONE`) + 녹화 덧입히기 — 되감은 틱 이후 `LIVE` 로그 폐기, 로그 기반 `inputProvider`. 테스트: 실시간 결과 = 로그 재생 결과(비트 동일), 2회차에서 R1 명령 재생 + R2 실시간, 분기 시 로그 절단.
+    - 07-5: 실시간 루프 컨트롤러 — 20 ms 누산기, 따라잡기 상한 5틱, 일시정지 / 재개(누산 시간 · 입력 누적기 초기화, 일시정지 틱에서 재개), 경기 종료 자동 정지. 시계 / 스케줄러 주입으로 가짜 시간 테스트 (순간 끊김, 탭 숨김, 재개).
+    - 07-6: 브라우저 어댑터 — Gamepad 폴링(슬롯 배정, 표준 매핑 확인), 키보드(`event.code`, `preventDefault`, 입력 폼 무시, 자동 반복 제외, `KEYBOARD_ENABLED`), `requestAnimationFrame` 스케줄러, `visibilitychange` / `blur` / `gamepaddisconnected` → 일시정지. 헤드리스 Chromium 점검(가짜 `navigator.getGamepads`, 키 이벤트). 화면 연결은 Step 8.
 - **Step 8 — 렌더러 엔진 연결:** `TimelineFrame` 기반 렌더링 (로봇 OBB/헤딩, 인테이크 구역 시각화, 기물, HIVE 셀 개수/팁, FLOWER 게이지(지그재그 적층 표시 보정 필요), 비행 공 보간(비행 대기열 출발점 → 도착점 선형 보간 + 높이 연출, 2.6.2항), 대기 중 휴먼 NECTAR 표시).
 - **Step 9 — 웹 GUI (React):**
     - 로봇 설정 폼: 제원, `BumperZone` 편집기(면/offset/width/depth, FRONT/ANY 프리셋, 로봇 기준 앞이 위인 미리보기), `maxControlledPieces`.
     - 시나리오 설정: 진영, 시작 자세 드래그/회전(배치 검증), 적재물 목록, FLOWER/GARDEN/HIVE 잔여 수, 오토 팁, 시드 — `validateScenario()` 결과가 비어 있지 않으면 확정 버튼 비활성화.
     - 로봇별 탄도 설정(`BallisticsConfig`) 및 스윗스팟 한 점 입력(144 × 144 격자(1 in) 클릭, 조준점을 향한 로봇 몸체 윤곽 / 검증 실패 사유 미리보기, 검증 규칙 2.6.2항), 스크러버/재생 컨트롤, 스코어보드/RP.
     - LUT 생성 실행 / 사용자 경험 (2.6.2항 "LUT 생성 실행 / 사용자 경험" 1~4): ① `ballistics.ts` 사전 준비(`generateReferenceLUTRows`, 시드 파생 공개, 분할 동일성 테스트) → ② Worker 풀 + 작업 대기열 + 조립 → ③ 로봇별 상태 머신 / 취소 / 시뮬레이션 시작 버튼 잠금 → ④ v0 선표시 / 진행 막대 / 남은 시간 / 점진 히트맵 → ⑤ IndexedDB 캐시(`BALLISTICS_MODEL_VERSION` 포함) 순서로 구현.
-- **Step 10 — 분기 타임라인 및 경기 저장/공유:** 분기 트리(부모 프레임 공유, 분기 이후 프레임만 생성), 저장 레시피(설정 + 시나리오 + 시드 + 양자화 입력 로그 + 탄도 설정 / LUT 시드 / 샘플 수 / `BALLISTICS_MODEL_VERSION` + 엔진 버전 + 상태 체크섬, LUT 자체는 저장하지 않고 캐시 또는 재생성). 레시피 약 50 KB 수준으로 파일/IndexedDB 저장 가능.
+    - 입력 관련 (3.6항): 게임패드 연결 상태 표시(읽기 전용 — 슬롯별 패드 이름, 배정 로봇, 비표준 매핑 경고, "버튼을 한 번 눌러 연결" 안내, 매핑 편집 없음, 키보드는 표시 / 안내하지 않음), 로봇별 조작 모드(`FIELD` / `ROBOT`) 선택, 일시정지 / 재개 컨트롤, 로봇별 입력 출처 선택(녹화 덧입히기 흐름).
+- **Step 10 — 분기 타임라인 및 경기 저장/공유:** 분기 트리(부모 프레임 공유, 분기 이후 프레임만 생성), 저장 레시피(설정 + 시나리오 + 시드 + 양자화 입력 로그 + 탄도 설정 / LUT 시드 / 샘플 수 / `BALLISTICS_MODEL_VERSION` + 엔진 버전 + 상태 체크섬, LUT 자체는 저장하지 않고 캐시 또는 재생성). 레시피 약 50 KB 수준으로 파일/IndexedDB 저장 가능. 입력 로그 형식(로봇별 틱당 4 B, 8비트)은 3.6항, 저장 시 연속 중복 압축.
 
 ### 6.4 보류 / 후속 검토 항목
 
@@ -746,4 +844,7 @@ export interface TimelineFrame {
 - **바닥 잔여 공 직접 배치 GUI:** v1 이후 (현재는 무작위 산포).
 - **실측 보정:** FLOWER 용량 테이블, HIVE 팁 임계 테이블, 빗맞음 방출 파라미터, 착지 속도 유지 비율(`landingSpeedRetention`, 실측 방법 2.5항), 슈터 편차 파라미터(실측 명중률로 보정)는 실측 데이터 확보 시 교체.
 - **저정밀 LUT 미리보기 (불채택):** 샘플을 줄인 빠른 미리보기 LUT를 먼저 보여주고 정밀본으로 교체하는 방식은 채택하지 않음. 미리보기로 경기를 돌리면 저장 레시피 재현 시 결과가 달라져 결정론이 깨지고, 표시용으로만 제한해도 정밀본과 달라 보이는 혼란이 생김. 대신 정밀본을 행 단위로 점진 표시 (2.6.2항 진행 상황 표시).
+- **경기 자동 저장 / 복구:** v1은 새로고침 / 크래시 시 경기 폐기 (3.6항). 입력 로그를 주기적으로 저장해 두면 로그 재생으로 복구할 수 있으므로 필요 시 Step 10 이후 검토.
+- **키보드 입력:** 개발자 디버그용 비공개 입력 (3.6항). 정식 배포 시 `KEYBOARD_ENABLED = false`로 비활성화 검토.
+- **리프트 상태 주행:** v1은 리프트 상태 전체(올림 / 대기 / 투입 / 내림)를 Stationary Lock으로 둔다. 실제 로봇이 리프트를 올린 채 미세 이동이 가능하면 대기 상태의 저속 주행 허용을 검토.
 - **교차 브라우저 결정론:** `Math.sin/cos/hypot` 등 초월함수 결과가 JS 엔진마다 최하위 비트에서 다를 수 있어, 다른 브라우저 간 리플레이는 비트 단위 동일성이 보장되지 않음 (저장 레시피에 상태 체크섬 포함 권장).
