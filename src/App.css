@@ -6,3 +6,46 @@
   padding: 16px;
   box-sizing: border-box;
 }
+
+/* 개발 하네스 (08-7, 개발 서버 전용) */
+.dev-harness {
+  width: 100%;
+  max-width: 1200px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+}
+.dev-toolbar,
+.dev-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.dev-toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.dev-sep {
+  width: 1px;
+  height: 18px;
+  background: currentColor;
+  opacity: 0.3;
+}
+/* 논리 1200 × 800 캔버스를 폭에 맞춰 비율 유지 확대 / 축소 (내부 버퍼는 devicePixelRatio 반영) */
+.dev-canvas {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 2;
+  display: block;
+  border-radius: 6px;
+}
+.dev-status {
+  font-variant-numeric: tabular-nums;
+}
+.dev-hint {
+  font-size: 12px;
+  opacity: 0.7;
+}
