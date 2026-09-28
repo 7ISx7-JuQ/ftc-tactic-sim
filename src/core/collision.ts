@@ -312,7 +312,11 @@ export function testOBBvsFieldBounds(obb: OBB): CollisionResult {
 }
 
 // 로봇 OBB: axes[0] = 헤딩 방향(length), axes[1] = 좌우 방향(width)
-export function getRobotOBB(state: RobotState, config: RobotConfig): OBB {
+// (위치 / 헤딩 / 크기만 사용 — 렌더러가 읽기 전용 프레임의 로봇 상태로도 호출)
+export function getRobotOBB(
+  state: Pick<RobotState, 'x' | 'y' | 'heading'>,
+  config: Pick<RobotConfig, 'length' | 'width'>,
+): OBB {
   const heading = finiteOr0(state.heading);
   const cos = Math.cos(heading);
   const sin = Math.sin(heading);

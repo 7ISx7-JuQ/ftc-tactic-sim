@@ -121,7 +121,7 @@ export const INITIAL_HIVE_VIEW: Record<Alliance, HiveView> = {
 };
 
 // 4. 색상 팔레트
-const COLORS = {
+export const COLORS = {
   fieldBg: '#d9d9d9',
   tileLine: 'rgba(0, 0, 0, 0.12)',
   wall: '#222222',
@@ -144,6 +144,10 @@ const COLORS = {
   pollenStroke: '#a16207',
   gaugeTube: 'rgba(142, 47, 111, 0.85)',
   gaugeLip: '#8e2f6f',
+  // 2v0에서 쓰이지 않는 상대 진영 전용 구조물 (채도 제거, 명세서 3.7)
+  unusedFill: 'rgba(156, 163, 175, 0.22)',
+  unusedCell: '#d1d5db',
+  unusedStroke: '#9ca3af',
 };
 
 // 5. 기본 도형 헬퍼
@@ -224,10 +228,11 @@ export function drawFieldBackground(ctx: CanvasRenderingContext2D): void {
 }
 
 // GARDEN은 높이 2인치(10px)라 라벨을 필드 안쪽 방향 바깥에 배치
-export function drawGardens(ctx: CanvasRenderingContext2D): void {
+export function drawGardens(ctx: CanvasRenderingContext2D, withLabels = true): void {
   const { RED, BLUE } = FIELD_LAYOUT.gardens;
   fillStrokeRect(ctx, RED, COLORS.redFill, COLORS.redStroke);
   fillStrokeRect(ctx, BLUE, COLORS.blueFill, COLORS.blueStroke);
+  if (!withLabels) return;
 
   const rc = rectCenter(RED);
   const bc = rectCenter(BLUE);
@@ -236,10 +241,13 @@ export function drawGardens(ctx: CanvasRenderingContext2D): void {
 }
 
 // LOADING ZONE은 세로로 긴 구역(11 x 23)이라 라벨을 90° 회전해 내부에 배치
-export function drawLoadingZones(ctx: CanvasRenderingContext2D): void {
+// ally가 주어지면 상대 진영 로딩 존은 채도를 뺀 "사용 불가" 스타일 (2v0, 명세서 3.7)
+export function drawLoadingZones(ctx: CanvasRenderingContext2D, withLabels = true, ally?: Alliance): void {
   const { RED, BLUE } = FIELD_LAYOUT.loadingZones;
-  fillStrokeRect(ctx, RED, COLORS.redFill, COLORS.redStroke, true);
-  fillStrokeRect(ctx, BLUE, COLORS.blueFill, COLORS.blueStroke, true);
+  const unused = (side: Alliance) => ally !== undefined && side !== ally;
+  fillStrokeRect(ctx, RED, unused('RED') ? COLORS.unusedFill : COLORS.redFill, unused('RED') ? COLORS.unusedStroke : COLORS.redStroke, true);
+  fillStrokeRect(ctx, BLUE, unused('BLUE') ? COLORS.unusedFill : COLORS.blueFill, unused('BLUE') ? COLORS.unusedStroke : COLORS.blueStroke, true);
+  if (!withLabels) return;
   drawLabel(ctx, 'RED LOADING', rectCenter(RED), { size: 10, color: COLORS.redStroke, rotate: -Math.PI / 2 });
   drawLabel(ctx, 'BLUE LOADING', rectCenter(BLUE), { size: 10, color: COLORS.blueStroke, rotate: Math.PI / 2 });
 }
@@ -342,6 +350,38 @@ export function drawHive(
   drawLabel(ctx, 'BLUE HIVE', { x: HIVE_CENTER_X.BLUE, y: hive.y - 2.2 }, { size: 11, color: COLORS.blueStroke });
 }
 
+// HIVE 정적 바탕 (장면 렌더러 정적 레이어용, 라벨 / 상태 없음): 프레임 + 셀 박스
+// 아군 셀은 진영 기본색, 상대 셀은 채도를 뺀 "사용 불가" 스타일 (상향 방향 / 개수 표시 없음, 명세서 3.7)
+export function drawHiveBase(ctx: CanvasRenderingContext2D, ally: Alliance): void {
+  const hive = FIELD_LAYOUT.hive;
+  fillStrokeRect(ctx, hive, COLORS.hiveFrame, COLORS.hiveFrameStroke);
+  const alliances: Alliance[] = ['RED', 'BLUE'];
+  const cells: HiveCell[] = ['OPPOSITE_CELL', 'AUDIENCE_CELL'];
+  for (const alliance of alliances) {
+    const isAlly = alliance === ally;
+    const fill = isAlly ? (alliance === 'RED' ? COLORS.redCellDown : COLORS.blueCellDown) : COLORS.unusedCell;
+    const stroke = isAlly ? (alliance === 'RED' ? COLORS.redStroke : COLORS.blueStroke) : COLORS.unusedStroke;
+    for (const cell of cells) {
+      const outer = FIELD_LAYOUT.hiveCells[alliance][cell];
+      const box: Rect = {
+        x: outer.x + HIVE_CELL_INSET,
+        y: outer.y + HIVE_CELL_INSET,
+        width: outer.width - HIVE_CELL_INSET * 2,
+        height: outer.height - HIVE_CELL_INSET * 2,
+      };
+      fillStrokeRect(ctx, box, fill, stroke);
+    }
+  }
+  ctx.save();
+  ctx.strokeStyle = COLORS.hiveFrameStroke;
+  ctx.lineWidth = STROKE_WIDTH;
+  ctx.beginPath();
+  ctx.moveTo(inchToPx(hive.x), inchToPx(FIELD_CENTER));
+  ctx.lineTo(inchToPx(hive.x + hive.width), inchToPx(FIELD_CENTER));
+  ctx.stroke();
+  ctx.restore();
+}
+
 // FLOWER 슬롯 게이지: 탑다운 뷰에서는 수직 적재 높이를 표현할 수 없으므로 FLOWER 옆에 측면 단면 미니 게이지를 그림
 const FLOWER_GAUGE_SCALE = 0.5;        // 게이지 1인치 = 필드 0.5인치
 const FLOWER_GAUGE_TUBE_HEIGHT = 21.5; // 게이지 원통 표시 높이 (inch, FLOWER 원통 실제 높이, 용량 테이블 기준)
@@ -362,7 +402,7 @@ function flowerSlotBaseHeights(pieces: readonly (GamePiece | null)[]): number[] 
   return bases;
 }
 
-function pieceColors(piece: GamePiece): { fill: string; stroke: string } {
+export function pieceColors(piece: Pick<GamePiece, 'type' | 'alliance'>): { fill: string; stroke: string } {
   if (piece.type === 'POLLEN') return { fill: COLORS.pollenFill, stroke: COLORS.pollenStroke };
   return piece.alliance === 'BLUE'
     ? { fill: COLORS.blueCellUp, stroke: COLORS.blueStroke }
@@ -425,6 +465,7 @@ function drawFlowerGauge(ctx: CanvasRenderingContext2D, floor: Point, flower: Fl
 export function drawFlowers(
   ctx: CanvasRenderingContext2D,
   flowers: readonly FlowerState[] = [],
+  withLabels = true,
 ): void {
   const gaugeHeight = FLOWER_GAUGE_TUBE_HEIGHT * FLOWER_GAUGE_SCALE;
 
@@ -439,6 +480,7 @@ export function drawFlowers(
     ctx.lineWidth = STROKE_WIDTH;
     ctx.stroke();
     ctx.restore();
+    if (!withLabels) continue;
 
     const offset = flower.radius + 1;
     const distX = Math.min(flower.x, FIELD_SIZE_INCH - flower.x);
