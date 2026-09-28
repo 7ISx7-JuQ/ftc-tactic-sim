@@ -380,7 +380,7 @@
     - **모듈 구성 (`src/input/`):**
         - `inputConfig.ts`: 키 매핑 / 데드존 / 임계값 / 장치 배정 / 루프 상수를 한곳에 모은 설정 파일 (`collision.ts` 실측 상수처럼 값만 바꿔 조정). 매핑 편집 GUI는 두지 않는다.
         - 순수 변환(축 처리, 행동 요청 결정, 탭 래치, 양자화), 입력 로그 / 입력 출처, 실시간 루프 컨트롤러: DOM 비의존, 시계 / 스케줄러 / 원시 입력을 주입받아 Node(Vitest)에서 가짜 시간으로 테스트.
-        - 브라우저 어댑터(Gamepad 폴링, 키보드 이벤트, `requestAnimationFrame`, 포커스 / 가시성 이벤트): 원시 입력 수집과 콜백 연결만 하는 얇은 층.
+        - 브라우저 어댑터(Gamepad 폴링, 키보드 이벤트, `requestAnimationFrame`, 포커스 / 가시성 이벤트): 원시 입력 수집과 콜백 연결만 하는 얇은 층. 구현 `src/input/browserInput.ts`(07-6): `BrowserInputAdapter`(브라우저 환경 객체 주입 가능, `attach(onPause)` / `detach`, 루프의 `poll()`에서 배정 슬롯 게임패드 폴링 + 눌린 키 재샘플, `gamepadStatus()` 슬롯별 연결 / 표준 매핑 — Step 9 연결 표시용), `createAnimationFrameScheduler`, `createBrowserRealtimeLoop(engine, inputs, hooks)` → `{loop, adapter, dispose}`. 포커스 소실 / 탭 숨김 시 어댑터가 눌린 키 집합을 비운 뒤 일시정지를 요청한다 (키를 뗀 이벤트 유실 대비). 사용자 일시정지 / 재개에서는 키 집합을 유지해 누르고 있는 키가 다음 폴링에서 복원된다.
     - **키 매핑 (`inputConfig.ts` 기본값, W3C Gamepad 표준 배열 `mapping === 'standard'` 기준, 인덱스는 0부터):**
 
       | 기능 | 게임패드 | 키보드 (`KeyboardEvent.code`) | 입력 방식 |
@@ -738,6 +738,7 @@ export interface TimelineFrame {
 | 07-3 | 입력 설정 + 순수 변환 (장치 읽기, 탭 래치, 장치 합성, 조작 모드, 행동 요청, 8비트 부호화) (아래 6.2.10) | `src/input/inputConfig.ts`, `src/input/controls.ts`, `src/input/__tests__/controls.test.ts` |
 | 07-4 | 입력 로그 + 로봇별 입력 출처 + 녹화 덧입히기 + 로그 재생 공급 함수 (아래 6.2.11) | `src/input/inputLog.ts`, `src/input/__tests__/inputLog.test.ts` |
 | 07-5 | 실시간 루프 컨트롤러 + 입력 수집기 (20 ms 누산기, 따라잡기 5틱, 일시정지 / 재개, 종료) (아래 6.2.12) | `src/input/realtimeLoop.ts`, `src/input/liveControls.ts`, `src/input/inputConfig.ts`, `src/input/__tests__/realtimeLoop.test.ts` |
+| 07-6 | 브라우저 입력 어댑터 (게임패드 폴링, 키보드, rAF, 자동 일시정지 이벤트) + 헤드리스 Chromium 점검 (아래 6.2.13) — Step 7 완료 | `src/input/browserInput.ts`, `src/input/__tests__/browserInput.test.ts` |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
@@ -850,6 +851,12 @@ export interface TimelineFrame {
 - **`src/input/realtimeLoop.ts`:** `RealtimeLoop`(주입 스케줄러, 20 ms 누산기, 따라잡기 상한 후 밀린 시간 버림 / 1틱 미만 나머지 이월, 프레임마다 `poll` 후 틱 소비, 일시정지 시 요청 취소 · 누산 0 · 입력 초기화, 재개 첫 프레임 경과 0 · 입력 초기화, 6000틱 도달 시 `ENDED`).
 - **테스트 (`src/input/__tests__/realtimeLoop.test.ts`, 그룹 A~H, 가짜 스케줄러 / 가짜 시간):** A 상수, B 누산기(20 / 10 ms 프레임, 30 / 60 / 120 / 144 Hz에서 초당 50틱), C 따라잡기(70 ms → 3틱 + 나머지 이월, 110 ms → 5틱 + 나머지 유지, 250 ms 끊김 → 5틱 후 밀린 시간 버림), D 일시정지 / 재개(사유, 요청 취소, 정지 중 틱 없음, 30초 후 재개 첫 프레임 0틱, 상태 이벤트 순서, 잘못된 순서 호출 무시), E 경기 종료(남은 틱만 소비 후 `ENDED`, 이후 호출 무시, 끝난 경기 시작 시 즉시 `ENDED`), F 틱당 입력 1회 소비 / 프레임당 폴링 1회(소비 전), G 통합(키보드 → R2 주행, 따라잡기 프레임 중 탭은 첫 틱만 발사, 탭 숨김 중 뗀 키 유실 후 재개 시 저절로 달리지 않음, 일시정지 중 되감기 후 재개, 불규칙 프레임 간격 · 끊김 · 일시정지가 섞인 풀매치 실시간 결과 = 로그 재생 결과), H 입력 수집기(배정 / 합성 / 미배정 슬롯 / 연결 해제 / 초기화 / 키보드 비활성화).
 
+### 6.2.13 Step 07-6 (브라우저 입력 어댑터) 완료 항목
+
+- **`src/input/browserInput.ts`:** `BrowserInputAdapter`(`LiveControlSource` 구현) — 키보드: 매핑 키만 처리(`event.code`), `preventDefault`(방향키 / `/`), 입력 폼 대상 무시(`isEditableTarget`), 자동 반복은 새 눌림 아님, `KEYBOARD_ENABLED = false`면 가로채지도 않음. 게임패드: `poll()`에서 배정 슬롯만 `navigator.getGamepads()` 폴링(연결 해제 / API 없음 / 예외 → 중립). 자동 일시정지: `blur` / `visibilitychange`(hidden) → 눌린 키 비우고 `BLUR` / `HIDDEN`, 배정 슬롯 `gamepaddisconnected` → `GAMEPAD_DISCONNECTED`. `gamepadStatus()`, `detach()`. `createAnimationFrameScheduler`, `createBrowserRealtimeLoop`.
+- **테스트 (`src/input/__tests__/browserInput.test.ts`, 그룹 A~F, Node `EventTarget` 가짜 환경):** A 입력 폼 판정, B 키보드(차단 / 미매핑 키 통과 / 자동 반복 / 입력 폼 / 짧은 탭 / 비활성화), C 게임패드 폴링(슬롯 배정 / 연결 해제 / 미배정 슬롯 / API 예외 · 없음 / 연결 상태 · 비표준 매핑), D 자동 일시정지(포커스 소실 · 탭 숨김 시 키 제거, 보이게 될 때는 무시, 미배정 패드 분리 무시, `detach`), E 루프 연결(키보드 주행, 사용자 일시정지 / 재개 후 누르고 있는 키 유지, 포커스 소실 후 재개 시 정지, `dispose`), F rAF 스케줄러. 차단 제거, 입력 폼 가로채기, 키보드 플래그 무시, 포커스 소실 / 탭 숨김 시 키 유지, 보이게 될 때도 일시정지, 미배정 패드 분리 일시정지, 폴링 시 키 재샘플 누락, 연결 해제 플래그 무시, 예외 처리 제거, `detach` 누락, 일시정지 사유 오류, 표준 매핑 판정 누락 각각에서 실패함을 확인.
+- **헤드리스 Chromium 점검 (저장소 밖 일회성 스크립트, 실제 `KeyboardEvent` / `requestAnimationFrame` / 가짜 `navigator.getGamepads`, 12항목 통과):** 실시간 루프 초당 약 50틱(49), 실제 W 키로 R2 주행, 매핑 키 기본 동작 차단 / 미매핑 키 통과, `,` 짧은 탭 = 발사 1회, 입력 폼에 `,` 입력 시 가로채지 않음, 게임패드 슬롯 0 → R1 주행 · 연결 상태, 포커스 소실 → 일시정지 중 틱 정지 · 재개 후 눌린 키 제거, 탭 숨김 / 배정 패드 분리 → 일시정지, 상태 이벤트 순서, 브라우저 실시간 결과 = 로그 재생 결과.
+
 ### 6.3 남은 Step (권장 순서)
 
 > 모든 Step은 완료 시 `npm test`(엔진 회귀 테스트)가 통과해야 하며, 새로 추가한 규칙에는 테스트 그룹을 추가한다.
@@ -859,13 +866,13 @@ export interface TimelineFrame {
     - ~~06-3: 몬테카를로 명중 판정, 기물 종류별 v0 탐색, 기준 셀 72 × 72 LUT 생성, 4-Cell 대칭 복사 (로봇당 8장, 합계 16장).~~ (완료, 6.2.4)
     - ~~06-5: `createLUTShotResolver(luts, r1Config, r2Config)`: 쌍선형 보간 조회(`sampleLUT`) + 조준 판정(FIXED 허용 오차 / TURRET 회전 범위) → 엔진 생성자에 주입 (엔진 수정 불필요).~~ (완료, 6.2.6)
     - ~~06-6: 2.6.2항의 발사 비행 처리 구현 (`IN_FLIGHT`, 비행 대기열, 도착 규칙, 착지 속도) + 엔진 회귀 테스트.~~ (완료, 6.2.7)
-- **Step 7 — 입력 계층 및 실시간 루프 (상세 규칙 3.6항, 리프트 FSM 2.6.3항):** 07-1(명세), 07-2(리프트 FSM), 07-3(입력 변환), 07-4(입력 로그 / 덧입히기), 07-5(실시간 루프) 완료.
+- **Step 7 — 입력 계층 및 실시간 루프 (상세 규칙 3.6항, 리프트 FSM 2.6.3항):** 07-1(명세), 07-2(리프트 FSM), 07-3(입력 변환), 07-4(입력 로그 / 덧입히기), 07-5(실시간 루프), 07-6(브라우저 어댑터) 완료 — Step 7 완료.
     - ~~07-1: 입력 계층 / 실시간 루프 / 리프트 FSM 명세 구체화.~~ (완료, 6.2.8)
     - ~~07-2: 엔진 리프트 FSM (`actionState` 확장, `ActionRequest`, 요청 / 완료 처리, FLOWER 테스트 갱신 + 테스트 그룹 T).~~ (완료, 6.2.9)
     - ~~07-3: `src/input/inputConfig.ts` + 순수 변환 (장치 읽기 / 탭 래치 / 장치 합성 / 조작 모드 / 행동 요청 / 8비트 부호화) + 단위 테스트.~~ (완료, 6.2.10)
     - ~~07-4: 입력 로그 + 로봇별 입력 출처(`LIVE` / `REPLAY` / `NONE`) + 녹화 덧입히기 + 로그 기반 `inputProvider`.~~ (완료, 6.2.11)
     - ~~07-5: 실시간 루프 컨트롤러 + 입력 수집기 — 20 ms 누산기, 따라잡기 상한 5틱, 일시정지 / 재개, 경기 종료 자동 정지, 가짜 시간 테스트.~~ (완료, 6.2.12)
-    - 07-6: 브라우저 어댑터 — Gamepad 폴링(슬롯 배정, 표준 매핑 확인), 키보드(`event.code`, `preventDefault`, 입력 폼 무시, 자동 반복 제외, `KEYBOARD_ENABLED`), `requestAnimationFrame` 스케줄러, `visibilitychange` / `blur` / `gamepaddisconnected` → 일시정지. 헤드리스 Chromium 점검(가짜 `navigator.getGamepads`, 키 이벤트). 화면 연결은 Step 8.
+    - ~~07-6: 브라우저 어댑터 (게임패드 폴링, 키보드, `requestAnimationFrame`, 자동 일시정지 이벤트) + 헤드리스 Chromium 점검.~~ (완료, 6.2.13). 화면 연결은 Step 8.
 - **Step 8 — 렌더러 엔진 연결:** `TimelineFrame` 기반 렌더링 (로봇 OBB/헤딩, 인테이크 구역 시각화, 기물, HIVE 셀 개수/팁, FLOWER 게이지(지그재그 적층 표시 보정 필요), 비행 공 보간(비행 대기열 출발점 → 도착점 선형 보간 + 높이 연출, 2.6.2항), 대기 중 휴먼 NECTAR 표시).
 - **Step 9 — 웹 GUI (React):**
     - 로봇 설정 폼: 제원, `BumperZone` 편집기(면/offset/width/depth, FRONT/ANY 프리셋, 로봇 기준 앞이 위인 미리보기), `maxControlledPieces`.
@@ -887,5 +894,6 @@ export interface TimelineFrame {
 - **저정밀 LUT 미리보기 (불채택):** 샘플을 줄인 빠른 미리보기 LUT를 먼저 보여주고 정밀본으로 교체하는 방식은 채택하지 않음. 미리보기로 경기를 돌리면 저장 레시피 재현 시 결과가 달라져 결정론이 깨지고, 표시용으로만 제한해도 정밀본과 달라 보이는 혼란이 생김. 대신 정밀본을 행 단위로 점진 표시 (2.6.2항 진행 상황 표시).
 - **경기 자동 저장 / 복구:** v1은 새로고침 / 크래시 시 경기 폐기 (3.6항). 입력 로그를 주기적으로 저장해 두면 로그 재생으로 복구할 수 있으므로 필요 시 Step 10 이후 검토.
 - **키보드 입력:** 개발자 디버그용 비공개 입력 (3.6항). 정식 배포 시 `KEYBOARD_ENABLED = false`로 비활성화 검토.
+- **브라우저 자동 테스트:** 07-6의 헤드리스 Chromium 점검은 저장소 밖 일회성 스크립트(`playwright-core`, 작업 공간에만 설치)로 수행했다. 브라우저 동작 회귀 테스트를 저장소에 두려면 Playwright 또는 Vitest 브라우저 모드를 개발 의존성으로 추가해야 하므로, Step 8 / 9(화면 · GUI) 진행 시 함께 검토.
 - **리프트 상태 주행:** v1은 리프트 상태 전체(올림 / 대기 / 투입 / 내림)를 Stationary Lock으로 둔다. 실제 로봇이 리프트를 올린 채 미세 이동이 가능하면 대기 상태의 저속 주행 허용을 검토.
 - **교차 브라우저 결정론:** `Math.sin/cos/hypot` 등 초월함수 결과가 JS 엔진마다 최하위 비트에서 다를 수 있어, 다른 브라우저 간 리플레이는 비트 단위 동일성이 보장되지 않음 (저장 레시피에 상태 체크섬 포함 권장).
