@@ -68,3 +68,7 @@ export const DEFAULT_DRIVE_MODE: DriveMode = 'FIELD';
 
 // 8비트 양자화: 정규화 값 u ∈ [−1, 1] → 정수 q ∈ [−QUANT_MAX, QUANT_MAX]
 export const QUANT_MAX = 127;
+
+// 실시간 루프: 20 ms(엔진 DT 0.02초)마다 1틱, 한 프레임에 최대 5틱(100 ms)까지만 따라잡고 나머지 밀린 시간은 버림
+export const TICK_MS = 20;
+export const MAX_CATCHUP_TICKS = 5;

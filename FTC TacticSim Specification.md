@@ -439,10 +439,13 @@
         - 로그는 같은 로봇 설정 / 시나리오 / 시드 / 탄도 설정 / 엔진 버전을 전제로 한다 (저장 레시피, Step 10).
     - **실시간 루프 (`requestAnimationFrame` + 20 ms 고정 스텝 누산기):**
         - 프레임마다 누산 시간 += 경과 시간, 20 ms마다 1틱 소비 (입력 결정 → `engine.step`).
-        - **따라잡기 상한 `MAX_CATCHUP_TICKS = 5`:** 한 프레임에 최대 5틱(100 ms)만 소비하고 남은 누산 시간은 버린다 (순간 끊김 시 게임 시간이 잠깐 느려질 뿐, 입력이 틱별로 기록되므로 결정론 유지).
+        - **따라잡기 상한 `MAX_CATCHUP_TICKS = 5`:** 한 프레임에 최대 5틱(100 ms)만 소비하고, 그러고도 1틱 이상 밀려 있으면 밀린 누산 시간을 버린다 (1틱 미만 나머지는 다음 프레임으로 이월). 순간 끊김 시 게임 시간이 잠깐 느려질 뿐, 입력이 틱별로 기록되므로 결정론 유지.
+        - **구현 (`src/input/realtimeLoop.ts`, `src/input/liveControls.ts`, 07-5):** `RealtimeLoop(engine, inputs: MatchInputs, controls: LiveControlSource, scheduler: FrameScheduler, hooks)`. 프레임 스케줄러(`request` / `cancel`, 브라우저는 `requestAnimationFrame`)를 주입받아 가짜 시간으로 테스트한다. 상태 `READY` → `RUNNING` ⇄ `PAUSED` → `ENDED`, 일시정지 사유 `USER` / `HIDDEN` / `BLUR` / `GAMEPAD_DISCONNECTED`, 훅 `onFrame(소비 틱 수)`(렌더링 연결, Step 8) / `onStateChange`.
+            - 루프가 `requestAnimationFrame`을 단독으로 소유하고, 프레임 시작 시 입력 공급의 `poll()`(게임패드 폴링 / 키 상태 재샘플, 07-6 어댑터)을 1회 호출한 뒤 틱을 소비한다 (폴링과 틱 소비의 순서 보장).
+            - 입력 수집기 `LiveControlCollector`: 배정된 장치별 탭 래치(`sampleGamepad(slot, pad | null)` / `sampleKeyboard(codes)`), 틱마다 로봇별 합성(`consumeTick`), `reset`. 배정되지 않은 게임패드 슬롯은 무시, 연결 해제(`null`)는 중립.
         - **자동 일시정지:** 탭 숨김(`visibilitychange` → hidden), 창 포커스 소실(`blur`), 경기 중 배정된 게임패드 연결 해제(`gamepaddisconnected`). 탭이 숨겨지면 브라우저가 `requestAnimationFrame` 호출을 멈추고 게임패드 / 키 입력도 전달되지 않으므로(키를 뗀 이벤트 유실 → 키가 눌린 채 남음), 그대로 두면 복귀 시 밀린 시간 동안 마지막 입력이 유지된 채 한꺼번에 시뮬레이션된다.
         - 일시정지 시: 루프 정지, 누산 시간 0, 원시 입력 누적기(키 상태 / 탭 래치 에지) 초기화. 엔진은 마지막으로 완료한 틱에 멈춰 있다.
-        - 재개: 사용자의 명시적 조작으로만 재개(Step 7에서는 `resume()` API, 버튼 / 단축키 배치는 Step 9 GUI). 일시정지된 틱에서 그대로 이어가며 재개 첫 프레임은 경과 시간 0으로 시작.
+        - 재개: 사용자의 명시적 조작으로만 재개(Step 7에서는 `resume()` API, 버튼 / 단축키 배치는 Step 9 GUI). 일시정지된 틱(일시정지 중 되감았으면 되감은 틱)에서 그대로 이어가며 재개 첫 프레임은 경과 시간 0으로 시작. 시작 / 재개 시에도 입력 누적기를 비워 일시정지 중 누른 탭은 재개 후 발동하지 않으며, 누르고 있는 입력은 다음 프레임 폴링에서 다시 샘플되어 이어진다.
         - 경기 종료(6000틱) 시 루프 자동 정지.
         - **새로고침 / 탭 닫힘 / 크래시 등 외부 개입으로 페이지 상태가 사라지면 그 경기는 폐기한다** (v1은 자동 저장 / 복구 없음, 6.4항).
 
@@ -734,6 +737,7 @@ export interface TimelineFrame {
 | 07-2 | FLOWER 리프트 FSM 엔진 구현 (올림 / 대기 / 투입 / 내림, `ActionRequest`) (아래 6.2.9) | `simulationEngine.ts`, `types.ts`, `__tests__/simulationEngine.test.ts` |
 | 07-3 | 입력 설정 + 순수 변환 (장치 읽기, 탭 래치, 장치 합성, 조작 모드, 행동 요청, 8비트 부호화) (아래 6.2.10) | `src/input/inputConfig.ts`, `src/input/controls.ts`, `src/input/__tests__/controls.test.ts` |
 | 07-4 | 입력 로그 + 로봇별 입력 출처 + 녹화 덧입히기 + 로그 재생 공급 함수 (아래 6.2.11) | `src/input/inputLog.ts`, `src/input/__tests__/inputLog.test.ts` |
+| 07-5 | 실시간 루프 컨트롤러 + 입력 수집기 (20 ms 누산기, 따라잡기 5틱, 일시정지 / 재개, 종료) (아래 6.2.12) | `src/input/realtimeLoop.ts`, `src/input/liveControls.ts`, `src/input/inputConfig.ts`, `src/input/__tests__/realtimeLoop.test.ts` |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
@@ -839,6 +843,13 @@ export interface TimelineFrame {
     - 되감기 분기는 별도 처리 없이 성립: 되감은 틱 k에서 `LIVE` 로봇이 기록하면 k 이후 로그가 폐기되고, 엔진은 k 이후 프레임을 폐기(기존 규칙), `REPLAY` 로봇 로그는 유지.
 - **테스트 (`src/input/__tests__/inputLog.test.ts`, 그룹 A~F):** A 로그 채널(기록 / 앞 틱 덮어쓰기 절단 / 빈 틱 중립 채움 / 범위 밖 거부), B 입력 출처(LIVE 기록 = 부호화 값, 로봇별 제원 복호화, NONE 미기록, REPLAY 절단된 옛 데이터 미재생, 로봇별 헤딩 · 모드, 엔진 진영, 로봇별 리프트 의도), C 풀매치 실시간 = 로그 재생(6000틱 전 프레임 동일, 발사 포함 / 명중 확률 0.6, R2 로봇 기준 모드, 재생 중 로그 불변), D 녹화 덧입히기(1회차 R1 기록 → 되감기 → 2회차 R1 재생 + R2 실시간: 간섭 없으면 R1 궤적 동일, R2가 경로에 들어오면 명령은 같고 궤적은 달라짐, R1 로그 불변, 덧입힌 결과 로그 재생 재현), E 되감기 분기(LIVE 로그 400틱 이후 교체 / REPLAY 로그 유지 / 분기 결과 재현), F 재생 공급 함수(출처 복사 고정, NONE은 로그 무시). 복호화 생략(원시 값 입력), 덮어쓰기 절단 제거, 빈 틱 채움 제거, 재생 중 기록, 출처 미복사(R1 / R2), NONE 로그 재생, 절단 데이터 재생, 다른 로봇 상태 사용, 진영 무시, 모드 공유(R1 / R2) 각각에서 실패함을 확인.
 
+### 6.2.12 Step 07-5 (실시간 루프) 완료 항목
+
+- **`inputConfig.ts`:** 루프 상수 `TICK_MS = 20`(엔진 DT), `MAX_CATCHUP_TICKS = 5` 추가.
+- **`src/input/liveControls.ts`:** `LiveControlSource` 인터페이스(`poll?` / `consumeTick` / `reset`), `LiveControlCollector`(배정 장치별 탭 래치 → 로봇별 합성, 미배정 슬롯 무시, 연결 해제 중립, 키보드 비활성화 반영).
+- **`src/input/realtimeLoop.ts`:** `RealtimeLoop`(주입 스케줄러, 20 ms 누산기, 따라잡기 상한 후 밀린 시간 버림 / 1틱 미만 나머지 이월, 프레임마다 `poll` 후 틱 소비, 일시정지 시 요청 취소 · 누산 0 · 입력 초기화, 재개 첫 프레임 경과 0 · 입력 초기화, 6000틱 도달 시 `ENDED`).
+- **테스트 (`src/input/__tests__/realtimeLoop.test.ts`, 그룹 A~H, 가짜 스케줄러 / 가짜 시간):** A 상수, B 누산기(20 / 10 ms 프레임, 30 / 60 / 120 / 144 Hz에서 초당 50틱), C 따라잡기(70 ms → 3틱 + 나머지 이월, 110 ms → 5틱 + 나머지 유지, 250 ms 끊김 → 5틱 후 밀린 시간 버림), D 일시정지 / 재개(사유, 요청 취소, 정지 중 틱 없음, 30초 후 재개 첫 프레임 0틱, 상태 이벤트 순서, 잘못된 순서 호출 무시), E 경기 종료(남은 틱만 소비 후 `ENDED`, 이후 호출 무시, 끝난 경기 시작 시 즉시 `ENDED`), F 틱당 입력 1회 소비 / 프레임당 폴링 1회(소비 전), G 통합(키보드 → R2 주행, 따라잡기 프레임 중 탭은 첫 틱만 발사, 탭 숨김 중 뗀 키 유실 후 재개 시 저절로 달리지 않음, 일시정지 중 되감기 후 재개, 불규칙 프레임 간격 · 끊김 · 일시정지가 섞인 풀매치 실시간 결과 = 로그 재생 결과), H 입력 수집기(배정 / 합성 / 미배정 슬롯 / 연결 해제 / 초기화 / 키보드 비활성화).
+
 ### 6.3 남은 Step (권장 순서)
 
 > 모든 Step은 완료 시 `npm test`(엔진 회귀 테스트)가 통과해야 하며, 새로 추가한 규칙에는 테스트 그룹을 추가한다.
@@ -848,12 +859,12 @@ export interface TimelineFrame {
     - ~~06-3: 몬테카를로 명중 판정, 기물 종류별 v0 탐색, 기준 셀 72 × 72 LUT 생성, 4-Cell 대칭 복사 (로봇당 8장, 합계 16장).~~ (완료, 6.2.4)
     - ~~06-5: `createLUTShotResolver(luts, r1Config, r2Config)`: 쌍선형 보간 조회(`sampleLUT`) + 조준 판정(FIXED 허용 오차 / TURRET 회전 범위) → 엔진 생성자에 주입 (엔진 수정 불필요).~~ (완료, 6.2.6)
     - ~~06-6: 2.6.2항의 발사 비행 처리 구현 (`IN_FLIGHT`, 비행 대기열, 도착 규칙, 착지 속도) + 엔진 회귀 테스트.~~ (완료, 6.2.7)
-- **Step 7 — 입력 계층 및 실시간 루프 (상세 규칙 3.6항, 리프트 FSM 2.6.3항):** 07-1(명세), 07-2(리프트 FSM), 07-3(입력 변환), 07-4(입력 로그 / 덧입히기) 완료.
+- **Step 7 — 입력 계층 및 실시간 루프 (상세 규칙 3.6항, 리프트 FSM 2.6.3항):** 07-1(명세), 07-2(리프트 FSM), 07-3(입력 변환), 07-4(입력 로그 / 덧입히기), 07-5(실시간 루프) 완료.
     - ~~07-1: 입력 계층 / 실시간 루프 / 리프트 FSM 명세 구체화.~~ (완료, 6.2.8)
     - ~~07-2: 엔진 리프트 FSM (`actionState` 확장, `ActionRequest`, 요청 / 완료 처리, FLOWER 테스트 갱신 + 테스트 그룹 T).~~ (완료, 6.2.9)
     - ~~07-3: `src/input/inputConfig.ts` + 순수 변환 (장치 읽기 / 탭 래치 / 장치 합성 / 조작 모드 / 행동 요청 / 8비트 부호화) + 단위 테스트.~~ (완료, 6.2.10)
     - ~~07-4: 입력 로그 + 로봇별 입력 출처(`LIVE` / `REPLAY` / `NONE`) + 녹화 덧입히기 + 로그 기반 `inputProvider`.~~ (완료, 6.2.11)
-    - 07-5: 실시간 루프 컨트롤러 — 20 ms 누산기, 따라잡기 상한 5틱, 일시정지 / 재개(누산 시간 · 입력 누적기 초기화, 일시정지 틱에서 재개), 경기 종료 자동 정지. 시계 / 스케줄러 주입으로 가짜 시간 테스트 (순간 끊김, 탭 숨김, 재개).
+    - ~~07-5: 실시간 루프 컨트롤러 + 입력 수집기 — 20 ms 누산기, 따라잡기 상한 5틱, 일시정지 / 재개, 경기 종료 자동 정지, 가짜 시간 테스트.~~ (완료, 6.2.12)
     - 07-6: 브라우저 어댑터 — Gamepad 폴링(슬롯 배정, 표준 매핑 확인), 키보드(`event.code`, `preventDefault`, 입력 폼 무시, 자동 반복 제외, `KEYBOARD_ENABLED`), `requestAnimationFrame` 스케줄러, `visibilitychange` / `blur` / `gamepaddisconnected` → 일시정지. 헤드리스 Chromium 점검(가짜 `navigator.getGamepads`, 키 이벤트). 화면 연결은 Step 8.
 - **Step 8 — 렌더러 엔진 연결:** `TimelineFrame` 기반 렌더링 (로봇 OBB/헤딩, 인테이크 구역 시각화, 기물, HIVE 셀 개수/팁, FLOWER 게이지(지그재그 적층 표시 보정 필요), 비행 공 보간(비행 대기열 출발점 → 도착점 선형 보간 + 높이 연출, 2.6.2항), 대기 중 휴먼 NECTAR 표시).
 - **Step 9 — 웹 GUI (React):**
