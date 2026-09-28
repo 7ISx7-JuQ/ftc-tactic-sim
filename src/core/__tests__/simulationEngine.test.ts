@@ -804,18 +804,44 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
         const live = eng({ r1Spawn: front, r1Loadout: ['POLLEN'] });
         for (let i = 0; i < 15; i++) live.step(SHOOT);
         const frameShots = live.getFrame(15)!.field.pendingShots;
-        assert(frameShots !== live.field.pendingShots && frameShots[0] !== live.field.pendingShots[0], 'recorded flight queue is a copy of the live queue');
+        assert(frameShots !== live.field.pendingShots && frameShots[0] !== live.field.pendingShots[0] && frameShots[0].segments !== live.field.pendingShots[0].segments,
+          'recorded flight queue (and its segments) is a copy of the live queue');
       }
     }
-    // 빗맞음 + HIVE 충돌 (P = 0, 정면): 첫 접촉점에서 바깥으로 반사 방출
+    // 빗맞음 + HIVE 충돌 (P = 0, 정면): 첫 접촉점에서 바깥으로 반사, 바닥에 닿을 때까지 비행 유지 (08-2)
     {
       const e = eng({ r1Spawn: front, r1Loadout: ['POLLEN'] }, C1, C2, fixedP(0));
       for (let i = 0; i < 15; i++) e.step(SHOOT);
       const shot = e.field.pendingShots[0];
       assert(shot.result === 'MISS_HIVE' && near(shot.toY, HIVE_AABB.maxY + PIECE_PHYSICS.POLLEN.radius, 1e-6), `miss hits the HIVE front face (y ${shot.toY.toFixed(3)})`);
+      const contactTick = 15 + Math.round(shot.contactTime / DT);
+      const landTime = shot.segments[shot.segments.length - 1].t1;
+      assert(shot.segments.length > 0 && shot.segments[0].vy > 0 && shot.arriveTick === 15 + Math.round(landTime / DT) && shot.arriveTick > contactTick + 5,
+        `falls after the contact (contact tick ${contactTick}, landing tick ${shot.arriveTick})`);
       settle(e);
+      assert(e.getFrame(shot.arriveTick - 1)!.pieces.find(p => p.id === shot.pieceId)!.state === 'IN_FLIGHT', 'still in flight (falling) one tick before landing');
       const piece = e.getFrame(shot.arriveTick)!.pieces.find(p => p.id === shot.pieceId)!;
-      assert(piece.state === 'ON_FIELD' && piece.y > HIVE_AABB.maxY && piece.vy > 0, 'ejected outward from the HIVE face');
+      assert(piece.state === 'ON_FIELD' && near(piece.x, shot.landX, 1e-9) && near(piece.y, shot.landY, 1e-9) && piece.y > HIVE_AABB.maxY && piece.vy > 0, 'lands in front of the HIVE face, moving outward');
+    }
+    // 무효 명중: 명중으로 발사됐지만 도착 시점에 HIVE 전복 중 → 조준점에서 셀 앞면 바깥으로 반사 낙하 (08-2)
+    {
+      // 상향 셀 {NECTAR 3, POLLEN 2}: 첫 발 명중 도착으로 팁, 둘째 발(팁 전 발사)은 전복 중 도착
+      const e = eng({ r1Spawn: front, r1Loadout: ['POLLEN', 'POLLEN'], hiveInitialPieces: { nectarCount: 3, pollenCount: 2 } }, C1, C2, fixedP(1));
+      for (let i = 0; i < 30; i++) e.step(SHOOT);
+      const launched = e.field.pendingShots.find(sh => sh.launchTick === 30)!;
+      const hitArrive = launched.arriveTick;
+      assert(launched.result === 'HIT', 'second shot launched as a hit (before the tip)');
+      while (e.currentTick < hitArrive) e.step();
+      const voided = e.field.pendingShots.find(sh => sh.launchTick === 30)!;
+      assert(e.field.hive.tipCount === 1 && e.field.hive.isTipping, 'first shot tipped the HIVE, still tipping at the second arrival');
+      assert(voided.result === 'MISS_HIVE' && voided.segments.length > 0 && voided.arriveTick > hitArrive && voided.segments[0].t0 === voided.contactTime,
+        `voided hit falls from the aim point (aim tick ${hitArrive} -> landing tick ${voided.arriveTick})`);
+      assert(e.pieces.find(p => p.id === voided.pieceId)!.state === 'IN_FLIGHT' && e.getFrame(hitArrive)!.field.pendingShots.some(sh => sh.launchTick === 30 && sh.result === 'MISS_HIVE'),
+        'piece stays IN_FLIGHT; the aim-tick frame records the voided flight');
+      settle(e);
+      const piece = e.getFrame(voided.arriveTick)!.pieces.find(p => p.id === voided.pieceId)!;
+      assert(piece.state === 'ON_FIELD' && near(piece.y, voided.landY, 1e-9) && piece.y > HIVE_AABB.maxY + PIECE_PHYSICS.POLLEN.radius && e.field.hive.pollenInUpwardCell === 0,
+        'lands in front of the AUDIENCE cell, not scored');
     }
     // 빗맞음 + 바닥 착지 (HIVE 반대쪽을 향한 고정형): 사거리 지점에 착지, 수평 속도 × landingSpeedRetention
     {
@@ -827,7 +853,8 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       settle(e);
       const piece = e.getFrame(shot.arriveTick)!.pieces.find(p => p.id === shot.pieceId)!;
       // 착지 틱에 물리가 한 번 더 돌기 전 상태로 배치되므로 도착 프레임의 속도는 착지 속도
-      assert(piece.state === 'ON_FIELD' && near(piece.x, shot.toX, 1e-9) && near(piece.vx, shot.landingVx, 1e-9) && shot.landingVx > 0, 'lands on the floor with retained horizontal speed');
+      assert(piece.state === 'ON_FIELD' && near(piece.x, shot.toX, 1e-9) && shot.landX === shot.toX && shot.segments.length === 0 && near(piece.vx, shot.landingVx, 1e-9) && shot.landingVx > 0,
+        'lands on the floor with retained horizontal speed');
     }
     // 난수는 발사마다 3회: 첫 발의 명중 여부와 무관하게 둘째 발의 반사 난수가 같음
     {
@@ -838,7 +865,7 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
         return e.field.pendingShots.find(s => s.launchTick === 30)!;
       };
       const a = second(1), b = second(0);
-      assert(a.ejectSpeedRoll === b.ejectSpeedRoll && a.ejectAngleRoll === b.ejectAngleRoll, 'RNG consumption per shot is outcome independent');
+      assert(a.bounceRestitutionRoll === b.bounceRestitutionRoll && a.bounceAngleRoll === b.bounceAngleRoll, 'RNG consumption per shot is outcome independent');
     }
     // 스크러빙: 비행 중 틱으로 되감아 같은 입력으로 재시뮬레이션하면 동일
     {

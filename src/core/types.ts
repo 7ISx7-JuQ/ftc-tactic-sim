@@ -198,28 +198,48 @@ export interface HiveState {
 }
 
 // 5. 필드 통합 상태 및 RP
-// 발사 비행 대기열 (명세서 2.6.2): 결과와 도착 지점은 발사 시점에 확정, 도착 틱에 반영
+// 충돌 후 자유 비행 구간 (명세서 2.6.2, 08-2). 시각은 발사 후 경과 초, τ = t − t0
+// BALLISTIC: (x, y, z) + (vx, vy, vz)·τ, z에서 g·τ²/2 차감 / ROLL: HIVE 윗면 위 수평 등속 (z 일정, vz 무시)
+export interface FlightSegment {
+  kind: 'BALLISTIC' | 'ROLL';
+  t0: number;
+  t1: number;
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+}
+
+// 발사 비행 대기열 (명세서 2.6.2): 결과와 궤도는 발사 시점에 확정, 도착 틱에 반영
+// 명목 구간(발사구 → to) 뒤에 충돌 후 구간(segments)이 이어지고, 마지막 구간 끝이 착지점 (land)
 export interface PendingShot {
   pieceId: string;
   pieceType: 'POLLEN' | 'NECTAR';
   robotId: 'robot1' | 'robot2';
-  result: 'HIT' | 'MISS_HIVE' | 'MISS_FLOOR'; // 명중 / HIVE 직육면체 충돌 후 반사 방출 / 바닥 착지
+  // 명중 / HIVE 직육면체 충돌 후 반사 낙하 / 바닥 착지. 명중이 도착 시 무효가 되면 MISS_HIVE로 바뀜
+  result: 'HIT' | 'MISS_HIVE' | 'MISS_FLOOR';
   targetCell: 'AUDIENCE_CELL' | 'OPPOSITE_CELL'; // 발사 시점 상향 셀 (도착 시 바뀌었으면 명중 무효)
   launchTick: number;
-  arriveTick: number;       // 도착 틱 (≥ launchTick + 1)
+  arriveTick: number;       // HIT: 조준점 도착 틱 (유효성 판정) / 그 외: 최종 착지 틱. ≥ launchTick + 1
+  contactTime: number;      // 명목 구간 끝 (발사 후 초): 조준점 도착 / HIVE 첫 접촉 / 벽 접촉 / 바닥 착지
   fromX: number;            // 발사구 (inch)
   fromY: number;
   fromZ: number;
-  toX: number;              // 도착 지점: 명중 = 조준점, HIVE 충돌 = 첫 접촉점, 바닥 = 착지점
+  toX: number;              // 명목 구간 끝 지점: 명중 = 조준점, HIVE 충돌 = 첫 접촉점, 벽 = 벽 접촉점, 바닥 = 착지점
   toY: number;
   toZ: number;
   heading: number;          // 명목 궤적 수평 방향 (rad)
   v0: number;               // 명목 사출 속도 (inch/s) — 렌더러 높이 연출용
   pitch: number;            // 명목 발사각 (rad)
-  landingVx: number;        // 바닥 착지 직후 속도 (inch/s, MISS_FLOOR)
+  segments: FlightSegment[]; // 충돌 후 구간 (시간순, 빈 배열 = 명목 구간 끝이 착지점 또는 명중)
+  landX: number;            // 최종 착지점 (공 중심 바닥 투영)
+  landY: number;
+  landingVx: number;        // 착지 직후 속도 (inch/s, 수평 속도 × landingSpeedRetention, 벽 정지 시 0)
   landingVy: number;
-  ejectSpeedRoll: number;   // HIVE 반사 방출 난수 [0, 1) (발사 시점에 소비, 도착 시 사용)
-  ejectAngleRoll: number;
+  bounceRestitutionRoll: number; // 반사 세기 산포 난수 [0, 1) (발사 시점에 소비)
+  bounceAngleRoll: number;       // 반사 방향 산포 난수 [0, 1)
 }
 
 export interface FieldState {

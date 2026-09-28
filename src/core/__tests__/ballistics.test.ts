@@ -21,6 +21,14 @@ import {
   lutGridIndex,
   mirrorLUTSet,
   planShotFlight,
+  planFallToFloor,
+  planHiveBounce,
+  planVoidedHitBounce,
+  flightSegmentPoint,
+  HIVE_BOUNCE_ANGLE_SPREAD,
+  HIVE_BOUNCE_MIN_SPEED,
+  HIVE_BOUNCE_RESTITUTION_SPREAD,
+  HIVE_TOP_MAX_BOUNCES,
   RNG_DRAWS_PER_SAMPLE,
   sampleLUT,
   searchLaunchSpeed,
@@ -38,10 +46,10 @@ import {
   sweetSpotLaunchSpeed,
   timeAtDistance,
 } from '../ballistics';
-import type { Trajectory } from '../ballistics';
+import type { FlightState, PostContactFlight, Trajectory } from '../ballistics';
 import { normalizeAngle } from '../kinematics';
 import { FIELD_SIZE, GRAVITY, HIVE_AABB, HIVE_CELL_TILT, HIVE_CENTER_X, HIVE_HEIGHT, HIVE_RIM_Y, HIVE_RIM_Z, PIECE_PHYSICS, hiveCellAimPoint } from '../collision';
-import type { BallisticsConfig, HeatmapLUTSet, HiveCellKey, MatchHeatmapLUTs, RobotConfig, ShooterBallistics } from '../types';
+import type { BallisticsConfig, FlightSegment, HeatmapLUTSet, HiveCellKey, MatchHeatmapLUTs, RobotConfig, ShooterBallistics } from '../types';
 
 // 각 검증은 메시지와 함께 expect로 확인 (실패 시 어떤 조건이 깨졌는지 메시지로 표시)
 const assert = (c: boolean, m: string) => {
@@ -500,6 +508,7 @@ describe('발사 비행 계획 (06-6)', () => {
       const D = Math.hypot(aim.x - p.from.x, aim.y - p.from.y);
       assert(p.result === 'HIT' && near(p.to.x, aim.x, 1e-12) && near(p.to.y, aim.y, 1e-12) && near(p.to.z, aim.z, 1e-12), 'hit -> aim point');
       assert(near(p.flightTime, D / (p.v0 * Math.cos(p.pitch)), 1e-12) && p.pitch === DEFAULT_SHOOTER_BALLISTICS.shooterPitch, 'hit flight time');
+      assert(p.contactTime === p.flightTime && p.segments.length === 0 && p.landing.x === aim.x && p.landing.y === aim.y, 'hit: no post-contact segments, arrival = contact');
       assert(near(p.v0, solveAimLaunchSpeed(60.5, 130.5, aim, { ...DEFAULT_SHOOTER_BALLISTICS })!, 1e-9) && near(p.from.z, HIVE_RIM_Z - DEFAULT_SHOOTER_BALLISTICS.dz, 1e-12), 'auto shooter v0 = closed form to the aim point');
       const traj = { ...p.from, heading: p.heading, v0: p.v0, pitch: p.pitch };
       assert(near(heightAtDistance(traj, D), aim.z, 1e-9), 'nominal trajectory passes the aim point');
@@ -515,7 +524,8 @@ describe('발사 비행 계획 (06-6)', () => {
     {
       const p = plan(60.5, 130.5, onAim(60.5, 130.5), false);
       const box = intersectHiveBox({ ...p.from, heading: p.heading, v0: p.v0, pitch: p.pitch }, R_POLLEN)!;
-      assert(p.result === 'MISS_HIVE' && box !== null && near(p.to.x, box.x, 1e-12) && near(p.to.y, box.y, 1e-12) && near(p.flightTime, box.time, 1e-12), 'miss -> first HIVE box contact');
+      assert(p.result === 'MISS_HIVE' && box !== null && near(p.to.x, box.x, 1e-12) && near(p.to.y, box.y, 1e-12) && near(p.contactTime, box.time, 1e-12), 'miss -> first HIVE box contact');
+      assert(p.segments.length > 0 && p.flightTime > p.contactTime && near(p.flightTime, p.segments[p.segments.length - 1].t1, 1e-12), 'miss -> falls after the contact (arrival = final landing)');
     }
     // 빗맞음 + 바닥 착지: 사거리 지점, 수평 속도 × landingSpeedRetention (기물별)
     for (const type of ['POLLEN', 'NECTAR'] as const) {
@@ -524,12 +534,17 @@ describe('발사 비행 계획 (06-6)', () => {
       const R = landingDistance(traj, PIECE_PHYSICS[type].radius)!;
       const vh = p.v0 * Math.cos(p.pitch) * PIECE_PHYSICS[type].landingSpeedRetention;
       assert(p.result === 'MISS_FLOOR' && near(p.to.x, p.from.x + R, 1e-9) && near(p.to.z, PIECE_PHYSICS[type].radius, 1e-9) && near(p.landingVx, vh, 1e-9) && near(p.landingVy, 0, 1e-9), `${type} floor landing with retained speed`);
-      assert(near(p.flightTime, timeAtDistance(traj, R), 1e-12), `${type} landing time`);
+      assert(near(p.flightTime, timeAtDistance(traj, R), 1e-12) && p.contactTime === p.flightTime && p.segments.length === 0, `${type} landing time`);
+      assert(p.landing.x === p.to.x && p.landing.y === p.to.y, `${type} landing point = nominal end`);
     }
-    // 착지 전에 벽에 닿으면 벽 앞(반지름 여유)에서 정지
+    // 착지 전에 벽에 닿으면 벽 접촉점(반지름 여유)에서 수평 정지 후 수직 낙하 (08-2)
     {
       const p = plan(125, 72, 0, false);
-      assert(p.result === 'MISS_FLOOR' && near(p.to.x, FIELD_SIZE - R_POLLEN, 1e-9) && p.landingVx === 0 && p.landingVy === 0, 'blocked by the wall -> stops at the wall');
+      assert(p.result === 'MISS_FLOOR' && near(p.to.x, FIELD_SIZE - R_POLLEN, 1e-9) && p.to.z > R_POLLEN && p.landingVx === 0 && p.landingVy === 0, 'blocked by the wall -> stops at the wall (in the air)');
+      const drop = p.segments;
+      const end = flightSegmentPoint(drop[drop.length - 1], Infinity);
+      assert(drop.length === 1 && drop[0].vx === 0 && drop[0].vy === 0 && drop[0].t0 === p.contactTime && drop[0].x === p.to.x && drop[0].z === p.to.z, 'then drops straight down from the wall contact');
+      assert(near(end.z, R_POLLEN, 1e-9) && p.landing.x === p.to.x && near(p.flightTime, drop[0].t1, 1e-12), 'lands at the wall foot after the drop');
     }
     // 터렛: 로봇이 반대쪽을 봐도 조준 방위로 발사
     {
@@ -544,3 +559,120 @@ describe('발사 비행 계획 (06-6)', () => {
   });
 });
 
+describe('충돌 후 낙하 (08-2, 06-6 개정)', () => {
+  it('P. HIVE 옆면 / 윗면 반사, 벽 수평 정지, 무효 명중 반사', () => {
+    const E_POLLEN = PIECE_PHYSICS.POLLEN.restitution;
+    const box = { minX: HIVE_AABB.minX - R_POLLEN, maxX: HIVE_AABB.maxX + R_POLLEN, minY: HIVE_AABB.minY - R_POLLEN, maxY: HIVE_AABB.maxY + R_POLLEN };
+    const topZ = HIVE_HEIGHT + R_POLLEN;
+    const insideBox = (x: number, y: number) => x > box.minX && x < box.maxX && y > box.minY && y < box.maxY;
+    // 구간 연결 검사: 시작 상태에서 출발, 구간끼리 위치 / 시각이 이어지고, 마지막 끝이 바닥(z = 반지름) 착지점
+    const chain = (start: FlightState, f: PostContactFlight, label: string, r = R_POLLEN) => {
+      const segs = f.segments;
+      assert(segs.length > 0 && segs.every(s => s.t1 > s.t0), `${label}: non-empty segments with positive durations`);
+      assert(near(segs[0].t0, start.t, 1e-12) && near(segs[0].x, start.x, 1e-9) && near(segs[0].y, start.y, 1e-9) && near(segs[0].z, start.z, 1e-9), `${label}: starts at the contact state`);
+      for (let i = 0; i + 1 < segs.length; i++) {
+        const end = flightSegmentPoint(segs[i], segs[i].t1);
+        const next = segs[i + 1];
+        assert(near(segs[i].t1, next.t0, 1e-12) && near(end.x, next.x, 1e-9) && near(end.y, next.y, 1e-9) && near(end.z, next.z, 1e-9), `${label}: segment ${i} -> ${i + 1} continuous`);
+      }
+      const last = segs[segs.length - 1];
+      const end = flightSegmentPoint(last, last.t1);
+      assert(near(end.z, r, 1e-9) && near(end.x, f.landing.x, 1e-9) && near(end.y, f.landing.y, 1e-9) && near(last.t1, f.landingTime, 1e-12), `${label}: ends on the floor at the landing point`);
+      assert(!insideBox(f.landing.x, f.landing.y) && f.landing.x >= r && f.landing.x <= FIELD_SIZE - r && f.landing.y >= r && f.landing.y <= FIELD_SIZE - r, `${label}: lands in the field, outside the HIVE`);
+    };
+
+    // 구간 위치: BALLISTIC은 중력 포물선, ROLL은 높이 유지, 시각은 [t0, t1]로 제한
+    {
+      const seg: FlightSegment = { kind: 'BALLISTIC', t0: 1, t1: 2, x: 10, y: 20, z: 30, vx: 5, vy: -4, vz: 12 };
+      const p = flightSegmentPoint(seg, 1.5);
+      assert(near(p.x, 12.5) && near(p.y, 18) && near(p.z, 30 + 6 - GRAVITY * 0.125), 'ballistic point');
+      assert(near(flightSegmentPoint({ ...seg, kind: 'ROLL' }, 1.5).z, 30) && near(flightSegmentPoint(seg, 5).x, 15) && near(flightSegmentPoint(seg, 0).x, 10), 'roll keeps height, time clamped');
+    }
+
+    // 옆면 (중립 난수): 파고드는 법선 성분만 −e배, 접선 / 수직 속도 유지 → 바깥으로 튀어 바닥까지 낙하
+    {
+      const contact: FlightState = { t: 0.5, x: 72, y: box.maxY, z: 30, vx: 40, vy: -150, vz: -50 };
+      const f = planHiveBounce(contact, 'SIDE', 'POLLEN');
+      const s0 = f.segments[0];
+      assert(near(s0.vy, E_POLLEN * 150, 1e-9) && s0.vx === 40 && s0.vz === -50, `front face: vy -150 -> +${(E_POLLEN * 150).toFixed(1)}, tangential / vertical kept`);
+      chain(contact, f, 'side');
+      assert(f.landing.y > box.maxY && near(f.landingVy, s0.vy * PIECE_PHYSICS.POLLEN.landingSpeedRetention, 1e-9), 'lands in front of the face, horizontal speed × landingSpeedRetention');
+      // 옆면 x 쪽 (−x 면): 법선 (−1, 0)
+      const side = planHiveBounce({ t: 0, x: box.minX, y: 72, z: 20, vx: 100, vy: 10, vz: 0 }, 'SIDE', 'POLLEN');
+      assert(near(side.segments[0].vx, -E_POLLEN * 100, 1e-9) && side.segments[0].vy === 10 && side.landing.x < box.minX, 'left face reflects -x');
+    }
+    // 산포 난수: 반사 세기 × (1 ± 0.2), 방향 ± 15° 회전, 바깥 법선 성분 최소 속도 보장
+    {
+      const contact: FlightState = { t: 0, x: 72, y: box.maxY, z: 30, vx: 0, vy: -150, vz: 0 };
+      const weak = planHiveBounce(contact, 'SIDE', 'POLLEN', { restitution: 0, angle: 0.5 }).segments[0];
+      const strong = planHiveBounce(contact, 'SIDE', 'POLLEN', { restitution: 0.75, angle: 0.5 }).segments[0];
+      assert(near(weak.vy, E_POLLEN * (1 - HIVE_BOUNCE_RESTITUTION_SPREAD) * 150, 1e-9) && near(strong.vy, E_POLLEN * (1 + 0.5 * HIVE_BOUNCE_RESTITUTION_SPREAD) * 150, 1e-9), 'restitution roll scales the rebound');
+      const turned = planHiveBounce(contact, 'SIDE', 'POLLEN', { restitution: 0.5, angle: 0 }).segments[0];
+      assert(near(Math.atan2(turned.vy, turned.vx), Math.PI / 2 - HIVE_BOUNCE_ANGLE_SPREAD, 1e-9) && near(Math.hypot(turned.vx, turned.vy), E_POLLEN * 150, 1e-9), 'angle roll rotates the rebound by -15°');
+      const graze = planHiveBounce({ ...contact, vx: 150, vy: -1 }, 'SIDE', 'POLLEN').segments[0];
+      assert(near(graze.vy, HIVE_BOUNCE_MIN_SPEED, 1e-9) && near(graze.vx, 150, 1e-9), 'grazing hit: outward speed topped up to the minimum');
+      const grazeTurned = planHiveBounce({ ...contact, vx: 150, vy: -1 }, 'SIDE', 'POLLEN', { restitution: 0.5, angle: 0 }).segments[0];
+      assert(grazeTurned.vy >= HIVE_BOUNCE_MIN_SPEED - 1e-9, 'rotation toward the face still leaves the HIVE');
+    }
+    // 윗면: 빠른 공은 한 번 튀고 박스를 벗어나 그 포물선으로 낙하
+    {
+      // 가장자리 12.9 in 앞, 60 in/s: 첫 튐 체공(0.27 s) 안에 박스를 벗어남 (벽에는 닿지 않음)
+      const contact: FlightState = { t: 1, x: 72, y: 80, z: topZ, vx: 0, vy: 60, vz: -150 };
+      const f = planHiveBounce(contact, 'TOP', 'POLLEN');
+      assert(f.segments.length === 1 && near(f.segments[0].vz, E_POLLEN * 150, 1e-9) && f.segments[0].vy === 60, 'top: vertical speed reversed × e, horizontal kept, leaves the box in the air');
+      chain(contact, f, 'top fast');
+      assert(f.landing.y > box.maxY, 'lands beyond the far side');
+    }
+    // 윗면: 느린 공은 최대 횟수 튀고 윗면을 굴러 가장자리에서 낙하 (굴러감 속도 = max(수평 속도, 최소 속도))
+    {
+      const contact: FlightState = { t: 1, x: 72, y: 60, z: topZ, vx: 0, vy: 30, vz: -150 };
+      const f = planHiveBounce(contact, 'TOP', 'POLLEN');
+      const kinds = f.segments.map(s => s.kind).join();
+      assert(kinds === [...Array(HIVE_TOP_MAX_BOUNCES).fill('BALLISTIC'), 'ROLL', 'BALLISTIC'].join(), `slow top hit: ${HIVE_TOP_MAX_BOUNCES} bounces, roll, fall (${kinds})`);
+      for (let i = 0; i < HIVE_TOP_MAX_BOUNCES; i++) {
+        const s = f.segments[i];
+        assert(near(s.z, topZ, 1e-9) && near(flightSegmentPoint(s, s.t1).z, topZ, 1e-9) && insideBox(flightSegmentPoint(s, s.t1).x, flightSegmentPoint(s, s.t1).y), `bounce ${i + 1} starts and ends on the top`);
+      }
+      assert(near(f.segments[1].vz, E_POLLEN * f.segments[0].vz, 1e-9), 'each bounce loses speed by e');
+      const roll = f.segments[HIVE_TOP_MAX_BOUNCES];
+      assert(roll.vy === 30 && near(flightSegmentPoint(roll, roll.t1).y, box.maxY, 1e-9), 'roll along the velocity to the edge');
+      chain(contact, f, 'top slow');
+      // 수평 속도 0: 가장 가까운 면(−y) 쪽으로 최소 속도로 굴러감
+      const still = planHiveBounce({ ...contact, vy: 0 }, 'TOP', 'POLLEN');
+      const stillRoll = still.segments.find(s => s.kind === 'ROLL')!;
+      assert(stillRoll.vx === 0 && near(stillRoll.vy, -HIVE_BOUNCE_MIN_SPEED, 1e-12) && still.landing.y < box.minY, 'no horizontal speed -> rolls off the nearest face at the minimum speed');
+      chain({ ...contact, vy: 0 }, still, 'top still');
+    }
+    // 벽: 착지 전에 벽에 닿으면 수평 정지 후 수직 낙하 (착지 속도 0), 수직 속도는 이어짐
+    {
+      const start: FlightState = { t: 0, x: 140, y: 72, z: 40, vx: 100, vy: 0, vz: 0 };
+      const f = planFallToFloor(start, 'POLLEN');
+      const [a, b] = f.segments;
+      assert(f.segments.length === 2 && near(flightSegmentPoint(a, a.t1).x, FIELD_SIZE - R_POLLEN, 1e-9) && b.vx === 0 && b.vy === 0, 'stops horizontally at the wall');
+      assert(near(b.vz, a.vz - GRAVITY * (a.t1 - a.t0), 1e-9) && f.landingVx === 0 && f.landingVy === 0, 'vertical speed continues, no landing speed');
+      chain(start, f, 'wall');
+      const open = planFallToFloor({ ...start, x: 60 }, 'NECTAR');
+      assert(open.segments.length === 1 && near(open.landingVx, 100 * PIECE_PHYSICS.NECTAR.landingSpeedRetention, 1e-9), 'open floor: one parabola, speed retained');
+      chain({ ...start, x: 60 }, open, 'open', PIECE_PHYSICS.NECTAR.radius);
+    }
+    // 무효 명중: 조준점에서 셀 쪽 HIVE 앞면 바깥으로 반사 (AUDIENCE +y / OPPOSITE −y)
+    {
+      for (const cell of ['AUDIENCE_CELL', 'OPPOSITE_CELL'] as const) {
+        const aim = hiveCellAimPoint('RED', cell);
+        const fromY = cell === 'AUDIENCE_CELL' ? 130.5 : 144 - 130.5;
+        const hitPlan = planShotFlight({ robotX: 60.5, robotY: fromY, robotHeading: bearingTo(60.5, fromY, aim.x, aim.y), shooter: { turretType: 'FIXED', turretRange: [0, 0] }, ballistics: DEFAULT_SHOOTER_BALLISTICS, pieceType: 'POLLEN', alliance: 'RED', upwardCell: cell, hit: true });
+        const f = planVoidedHitBounce({ from: hitPlan.from, aim, v0: hitPlan.v0, pitch: hitPlan.pitch, contactTime: hitPlan.contactTime, targetCell: cell, pieceType: 'POLLEN' });
+        const out = cell === 'AUDIENCE_CELL' ? f.segments[0].vy : -f.segments[0].vy;
+        assert(out >= HIVE_BOUNCE_MIN_SPEED - 1e-9 && (cell === 'AUDIENCE_CELL' ? f.landing.y > box.maxY : f.landing.y < box.minY), `${cell}: bounces out of the cell front`);
+        const vzAtAim = hitPlan.v0 * Math.sin(hitPlan.pitch) - GRAVITY * hitPlan.contactTime;
+        chain({ t: hitPlan.contactTime, ...aim, vx: 0, vy: 0, vz: vzAtAim }, f, `voided ${cell}`);
+        assert(near(f.segments[0].vz, vzAtAim, 1e-9), 'vertical speed at the aim point kept');
+      }
+    }
+    // 착지 안전장치: 비정상 접촉(박스 안, 낮은 높이)도 HIVE 밖 필드 안에 착지
+    {
+      const f = planHiveBounce({ t: 0, x: 72, y: 90, z: 2, vx: 0, vy: -10, vz: 0 }, 'SIDE', 'POLLEN');
+      assert(!insideBox(f.landing.x, f.landing.y) && f.landing.y > box.maxY, 'degenerate contact inside the box -> landing pushed outside');
+    }
+  });
+});

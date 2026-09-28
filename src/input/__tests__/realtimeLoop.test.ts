@@ -12,6 +12,9 @@ import type { LiveControlSource } from '../liveControls';
 import { RealtimeLoop } from '../realtimeLoop';
 import type { FrameScheduler, LoopState, PauseReason } from '../realtimeLoop';
 
+// 풀매치를 도는 테스트의 제한 시간 (기본 5초는 병렬 실행 부하에서 부족, 엔진 테스트와 같은 값)
+const TEST_TIMEOUT_MS = 120_000;
+
 const assert = (c: boolean, m: string) => {
   expect(c, m).toBe(true);
 };
@@ -187,7 +190,7 @@ describe('실시간 루프 (명세서 3.6)', () => {
     const done = harness(e);
     done.loop.start();
     assert(done.loop.state === 'ENDED' && done.sched.waiting === 0, 'start on a finished match -> ENDED immediately');
-  });
+  }, TEST_TIMEOUT_MS);
 
   it('F. 틱마다 입력 1회 소비 / 프레임마다 폴링 1회 (소비 전)', () => {
     const c = new CountingControls();
@@ -280,7 +283,7 @@ describe('실시간 루프 (명세서 3.6)', () => {
       for (let t = 0; t <= MATCH_TICKS && diff < 0; t++) if (JSON.stringify(replay.getFrame(t)) !== JSON.stringify(h.e.getFrame(t))) diff = t;
       assert(diff < 0, `real-time loop result reproduces exactly from the logs (first diff ${diff})`);
     }
-  });
+  }, TEST_TIMEOUT_MS);
 
   it('H. 입력 수집기 (장치 배정 / 합성 / 해제 / 초기화)', () => {
     const c = new LiveControlCollector();

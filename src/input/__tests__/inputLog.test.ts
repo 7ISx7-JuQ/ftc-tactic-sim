@@ -7,6 +7,9 @@ import type { TickControls } from '../controls';
 import { InputLogChannel, LOG_RECORD_BYTES, MatchInputs } from '../inputLog';
 import type { RobotId } from '../inputConfig';
 
+// 풀매치를 도는 테스트의 제한 시간 (기본 5초는 병렬 실행 부하에서 부족, 엔진 테스트와 같은 값)
+const TEST_TIMEOUT_MS = 120_000;
+
 const assert = (c: boolean, m: string) => {
   expect(c, m).toBe(true);
 };
@@ -129,7 +132,7 @@ describe('입력 로그 / 입력 출처 / 녹화 덧입히기 (명세서 3.6)', 
     // 경기 종료 후 step: 기록 없이 마지막 프레임
     const last = m.step(live, both(MATCH_TICKS, 0, 0));
     assert(last.tick === MATCH_TICKS && m.logs.robot1.length === MATCH_TICKS, 'step after the final tick: no write, last frame');
-  });
+  }, TEST_TIMEOUT_MS);
 
   it('D. 녹화 덧입히기 (1회차 R1 기록 → 되감기 → 2회차 R1 재생 + R2 실시간)', () => {
     const TICKS = 150;
@@ -163,7 +166,7 @@ describe('입력 로그 / 입력 출처 / 녹화 덧입히기 (명세서 3.6)', 
     replay.inputProvider = m.createReplayProvider();
     replay.runFullMatch();
     assert(Array.from({ length: TICKS + 1 }, (_, t) => t).every(t => frameJSON(replay, t) === frameJSON(e, t)), 'overdubbed match reproduces from logs');
-  });
+  }, TEST_TIMEOUT_MS);
 
   it('E. 되감기 분기 (LIVE 로그 절단 / REPLAY 로그 유지)', () => {
     const e = eng();
@@ -190,7 +193,7 @@ describe('입력 로그 / 입력 출처 / 녹화 덧입히기 (명세서 3.6)', 
     let same = true;
     for (let t = 0; t <= 600 && same; t++) same = frameJSON(replay, t) === frameJSON(e, t);
     assert(same, 'branched match reproduces from logs (ticks 0..600)');
-  });
+  }, TEST_TIMEOUT_MS);
 
   it('F. 재생 공급 함수 (출처 고정 / NONE은 로그가 있어도 중립)', () => {
     const e = eng({ r1Spawn: pose(40, 20), r2Spawn: pose(40, 115) });
@@ -212,5 +215,5 @@ describe('입력 로그 / 입력 출처 / 녹화 덧입히기 (명세서 3.6)', 
     r2.inputProvider = live;
     r2.runFullMatch();
     assert(r2.getFrame(100)!.r1.x === e.getFrame(100)!.r1.x && r2.getFrame(100)!.r2.x === e.getFrame(100)!.r2.x, 'REPLAY provider reproduces the recorded drive');
-  });
+  }, TEST_TIMEOUT_MS);
 });
