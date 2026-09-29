@@ -20,7 +20,7 @@ describe('개발 하네스 설정 (명세서 3.7, 08-7 / 09-6c: 흐름 테스트
     const turret = createDevResolver({ ...robot1, turretType: 'TURRET', turretRange: [-Math.PI, Math.PI] }, robot2);
     assert(turret('robot1', 'POLLEN', 60, 130, onAim + 2, 'RED', 'AUDIENCE_CELL') === DEV_HIT_PROBABILITY, '360° turret aims anywhere -> 0.6');
     const e = createDevEngine('BLUE');
-    assert(e.field.allianceColor === 'BLUE' && e.r1Config.name === 'DEV R1' && e.currentTick === 0, 'engine: default scenario of the chosen alliance');
+    assert(e.field.allianceColor === 'BLUE' && e.r1Config.name === 'R1' && e.currentTick === 0, 'engine: default scenario of the chosen alliance');
     const s = createDevSetup('RED');
     assert(s.scenario.allianceColor === 'RED' && s.r1Config === robot1 && s.r2Config === robot2 && s.shotResolver('robot1', 'POLLEN', 60, 130, onAim, 'RED', 'AUDIENCE_CELL') === DEV_HIT_PROBABILITY, 'AppController setup: fixed configs + simple resolver + default scenario');
   });

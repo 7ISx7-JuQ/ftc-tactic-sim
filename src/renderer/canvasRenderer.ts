@@ -10,11 +10,10 @@ import {
   HIVE_AABB,
   HIVE_CENTER_X,
   LOADING_ZONE_AABB,
-  PIECE_PHYSICS,
 } from '../core/collision';
 import type { AABB } from '../core/collision';
-import { hiveTipPollenThreshold } from '../core/types';
 import type { GamePiece } from '../core/types';
+import { canvasFont } from './fonts';
 
 // 1. 필드 스케일 상수 (명세서 2.1)
 export const FIELD_SIZE_INCH = FIELD_SIZE;
@@ -106,18 +105,6 @@ export const FIELD_LAYOUT = {
     RED: aabbToRect(LOADING_ZONE_AABB.RED),
     BLUE: aabbToRect(LOADING_ZONE_AABB.BLUE),
   } as Record<Alliance, Rect>,
-};
-
-// HIVE 표시용 상태 (엔진 연동 전 기본값: 명세서 2.6.1 초기 UP 상태)
-export interface HiveView {
-  upwardCell: HiveCell;
-  nectarInUpwardCell: number;
-  pollenInUpwardCell: number;
-}
-
-export const INITIAL_HIVE_VIEW: Record<Alliance, HiveView> = {
-  RED: { upwardCell: 'AUDIENCE_CELL', nectarInUpwardCell: 0, pollenInUpwardCell: 0 },
-  BLUE: { upwardCell: 'OPPOSITE_CELL', nectarInUpwardCell: 0, pollenInUpwardCell: 0 },
 };
 
 // 4. 색상 팔레트
@@ -222,7 +209,7 @@ function drawLabel(
   ctx.translate(pxX, pxY);
   ctx.rotate(rotate);
   ctx.fillStyle = color;
-  ctx.font = `bold ${size}px system-ui, sans-serif`;
+  ctx.font = canvasFont(size);
   ctx.textAlign = align;
   ctx.textBaseline = 'middle';
   ctx.fillText(text, 0, 0);
@@ -293,7 +280,6 @@ export function drawLoadingZones(ctx: CanvasRenderingContext2D, withLabels = tru
 }
 
 const HIVE_CELL_INSET = 0.8;   // 프레임 안쪽 셀 박스 여백 (inch)
-const NECTAR_RADIUS = PIECE_PHYSICS.NECTAR.radius; // 슬롯 크기 = NECTAR 직경 3.6"
 
 // 셀 박스 (진영 HIVE 칸에서 프레임 안쪽 여백을 뺀 영역, inch)
 export function hiveCellBox(alliance: Alliance, cell: HiveCell): Rect {
@@ -304,95 +290,6 @@ export function hiveCellBox(alliance: Alliance, cell: HiveCell): Rect {
     width: outer.width - HIVE_CELL_INSET * 2,
     height: outer.height - HIVE_CELL_INSET * 2,
   };
-}
-
-function drawHiveCell(
-  ctx: CanvasRenderingContext2D,
-  alliance: Alliance,
-  cell: HiveCell,
-  view: HiveView,
-): void {
-  const box = hiveCellBox(alliance, cell);
-  const isUp = view.upwardCell === cell;
-  const nectar = isUp ? view.nectarInUpwardCell : 0;
-  const pollen = isUp ? view.pollenInUpwardCell : 0;
-  const isRed = alliance === 'RED';
-  const upFill = isRed ? COLORS.redCellUp : COLORS.blueCellUp;
-  const downFill = isRed ? COLORS.redCellDown : COLORS.blueCellDown;
-  const allianceStroke = isRed ? COLORS.redStroke : COLORS.blueStroke;
-  const textColor = isUp ? COLORS.labelOnDark : allianceStroke;
-
-  // 셀 박스: UP 셀은 진한 진영색 + 노란 하이라이트 테두리
-  const r = toCanvasRect(box);
-  ctx.save();
-  ctx.fillStyle = isUp ? upFill : downFill;
-  ctx.fillRect(r.x, r.y, r.width, r.height);
-  ctx.lineWidth = isUp ? 4 : STROKE_WIDTH;
-  ctx.strokeStyle = isUp ? COLORS.upHighlight : allianceStroke;
-  const inset = ctx.lineWidth / 2;
-  ctx.strokeRect(r.x + inset, r.y + inset, r.width - ctx.lineWidth, r.height - ctx.lineWidth);
-  ctx.restore();
-
-  const cx = box.x + box.width / 2;
-  const cellName = cell === 'OPPOSITE_CELL' ? 'OPPOSITE' : 'AUDIENCE';
-  drawLabel(ctx, isUp ? `▲ UP · ${cellName}` : cellName, { x: cx, y: box.y + 3 }, {
-    size: 9,
-    color: isUp ? COLORS.upHighlight : textColor,
-  });
-
-  // 셀 내부 기물: NECTAR 줄 / POLLEN 줄 (개수가 많으면 셀 폭에 맞춰 축소)
-  const drawRow = (count: number, radius: number, y: number, fill: string, stroke: string): void => {
-    if (count <= 0) return;
-    const gap = Math.min(radius * 2 + 0.6, (box.width - 1) / count);
-    const r = Math.min(radius, gap / 2 - 0.1);
-    for (let i = 0; i < count; i++) {
-      const { pxX, pxY } = toCanvasPoint(cx + (i - (count - 1) / 2) * gap, y);
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(pxX, pxY, inchToPx(r), 0, Math.PI * 2);
-      ctx.fillStyle = fill;
-      ctx.fill();
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = stroke;
-      ctx.stroke();
-      ctx.restore();
-    }
-  };
-  drawRow(nectar, NECTAR_RADIUS, box.y + box.height * 0.38, upFill, COLORS.labelOnDark);
-  drawRow(pollen, PIECE_PHYSICS.POLLEN.radius, box.y + box.height * 0.63, COLORS.pollenFill, COLORS.pollenStroke);
-
-  // 개수 + 현재 NECTAR 수 기준 팁까지 필요한 POLLEN 수 (임계 테이블)
-  const label = isUp ? `N${nectar} P${pollen}/${hiveTipPollenThreshold(nectar)}` : '-';
-  drawLabel(ctx, label, { x: cx, y: box.y + box.height - 3 }, { size: 11, color: textColor });
-}
-
-// HIVE: 49.46 x 38.95 프레임 안에 Red(C열) / Blue(D열) x OPPOSITE / AUDIENCE 2x2 셀
-export function drawHive(
-  ctx: CanvasRenderingContext2D,
-  view: Record<Alliance, HiveView> = INITIAL_HIVE_VIEW,
-): void {
-  const hive = FIELD_LAYOUT.hive;
-  fillStrokeRect(ctx, hive, COLORS.hiveFrame, COLORS.hiveFrameStroke);
-
-  const alliances: Alliance[] = ['RED', 'BLUE'];
-  const cells: HiveCell[] = ['OPPOSITE_CELL', 'AUDIENCE_CELL'];
-  for (const alliance of alliances) {
-    for (const cell of cells) drawHiveCell(ctx, alliance, cell, view[alliance]);
-  }
-
-  // Y=72 상하 분할선
-  ctx.save();
-  ctx.strokeStyle = COLORS.hiveFrameStroke;
-  ctx.lineWidth = STROKE_WIDTH;
-  ctx.beginPath();
-  ctx.moveTo(inchToPx(hive.x), inchToPx(FIELD_CENTER));
-  ctx.lineTo(inchToPx(hive.x + hive.width), inchToPx(FIELD_CENTER));
-  ctx.stroke();
-  ctx.restore();
-
-  // 진영 라벨 (프레임 위쪽 바깥)
-  drawLabel(ctx, 'RED HIVE', { x: HIVE_CENTER_X.RED, y: hive.y - 2.2 }, { size: 11, color: COLORS.redStroke });
-  drawLabel(ctx, 'BLUE HIVE', { x: HIVE_CENTER_X.BLUE, y: hive.y - 2.2 }, { size: 11, color: COLORS.blueStroke });
 }
 
 // HIVE 정적 바탕 (장면 렌더러 정적 레이어용, 라벨 / 상태 없음): 프레임 + 셀 박스
@@ -458,14 +355,4 @@ export function drawFlowers(ctx: CanvasRenderingContext2D, withLabels = true): v
     }
     drawLabel(ctx, `FLOWER ${i + 1}`, labelAt, { size: 10, align, color: COLORS.flowerStroke });
   }
-}
-
-// 7. 필드 전체 렌더 진입점
-export function renderField(ctx: CanvasRenderingContext2D): void {
-  ctx.clearRect(0, 0, CANVAS_SIZE_PX, CANVAS_SIZE_PX);
-  drawFieldBackground(ctx);
-  drawGardens(ctx);
-  drawLoadingZones(ctx);
-  drawHive(ctx);
-  drawFlowers(ctx);
 }

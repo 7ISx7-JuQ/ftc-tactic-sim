@@ -21,6 +21,7 @@ import { airborneDisplay, shotElapsed, shotPositionAt, shotTrail } from './fligh
 import { DEFAULT_RENDER_OPTIONS, aimGuide, intakeProgress } from './renderOptions';
 import type { RenderOptions } from './renderOptions';
 import { badgeImage } from './badgeAssets';
+import { canvasFont } from './fonts';
 import {
   ALLIANCE_COLORS,
   COLORS,
@@ -184,9 +185,13 @@ function createLayerCanvas(width: number, height: number): LayerCanvas | null {
   return null;
 }
 
+// 창 크기에 따라 배율(dpr)이 계속 바뀌므로 캐시가 쌓이지 않게 상한을 둔다 (09-6d)
+const STATIC_LAYER_CACHE_MAX = 4;
+
 function staticLayer(ally: Alliance, dpr: number): LayerCanvas | null {
   const key = `${ally}@${dpr}`;
   if (!staticLayers.has(key)) {
+    if (staticLayers.size >= STATIC_LAYER_CACHE_MAX) staticLayers.clear();
     const size = Math.round(VIEWPORT_PX * dpr);
     const layer = createLayerCanvas(size, size);
     const lctx = layer?.getContext('2d') as CanvasRenderingContext2D | null | undefined;
@@ -533,7 +538,7 @@ function drawRobotBody(
 // ------------------------------------------------------------
 
 function drawText(ctx: CanvasRenderingContext2D, text: string, at: Point2, size: number, color: string, outline?: string): void {
-  ctx.font = `bold ${size}px system-ui, sans-serif`;
+  ctx.font = canvasFont(size);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   if (outline) {
@@ -546,7 +551,7 @@ function drawText(ctx: CanvasRenderingContext2D, text: string, at: Point2, size:
 }
 
 function drawPill(ctx: CanvasRenderingContext2D, text: string, at: Point2, size: number, bg: string, fg: string): void {
-  ctx.font = `bold ${size}px system-ui, sans-serif`;
+  ctx.font = canvasFont(size);
   const w = ctx.measureText(text).width + 8;
   const h = size + 6;
   ctx.beginPath();
@@ -614,7 +619,7 @@ function drawBadge(ctx: CanvasRenderingContext2D, robot: DeepReadonly<RobotState
     ctx.drawImage(img, at.x - size / 2, at.y - size / 2, size, size);
   } else {
     const text = BADGE_FALLBACK_TEXT[badge.key];
-    ctx.font = `bold ${Math.max(8, Math.round(size / 3))}px system-ui, sans-serif`;
+    ctx.font = canvasFont(Math.max(8, Math.round(size / 3)));
     const w = Math.max(size, ctx.measureText(text).width + 8);
     const h = size * 0.6;
     const at = badgeCenter(robot, config, view, h);

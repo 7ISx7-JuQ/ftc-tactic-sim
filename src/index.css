@@ -1,16 +1,11 @@
+/* 전역 테마 (3.8항): 주변 UI는 어두운 계열 #15171C (필드 둘레 여백과 같은 색).
+   글꼴은 캔버스와 같은 src/renderer/fonts.ts FONT_FAMILY를 main.tsx가 루트에 넣는다 (아래는 그 전의 대체값) */
 :root {
-  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
-  color-scheme: light dark;
-  color: #1f2937;
-  background: #f3f4f6;
+  font-family: system-ui, sans-serif;
+  color-scheme: dark;
+  color: #e5e7eb;
+  background: #15171c;
   -webkit-font-smoothing: antialiased;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #e5e7eb;
-    background: #16171d;
-  }
 }
 
 body {

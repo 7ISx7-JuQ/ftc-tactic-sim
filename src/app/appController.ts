@@ -70,7 +70,7 @@ export interface AppControllerDeps {
 
 export class AppController {
   private readonly ctx: CanvasRenderingContext2D;
-  private readonly dpr: number;
+  private dpr: number;
   private readonly env: BrowserInputEnv | undefined;
   private readonly scheduler: FrameScheduler;
   private readonly now: () => number;
@@ -151,6 +151,21 @@ export class AppController {
     this.phase = 'ROTATING_OUT';
     this.animator.start(0, this.now());
     this.changed();
+  }
+
+  /**
+   * 캔버스 버퍼 배율 변경 (09-6d: 화면 크기에 맞춰 캔버스 CSS 크기가 바뀌면 버퍼 = CSS px × devicePixelRatio,
+   * 배율 = 버퍼 px / 논리 800 px). 다음 프레임에 다시 그림
+   */
+  setRenderScale(scale: number): void {
+    if (!(scale > 0) || scale === this.dpr) return;
+    this.dpr = scale;
+    this.requestRender();
+  }
+
+  /** 다시 그리기 요청 (예: 웹폰트 로드 완료 후 캔버스 글자 갱신). 여러 번 요청해도 다음 프레임에 한 번 */
+  redraw(): void {
+    this.requestRender();
   }
 
   dispose(): void {

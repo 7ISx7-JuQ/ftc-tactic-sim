@@ -35,6 +35,7 @@ const en = {
   'control.view': 'VIEW',
   'control.newMatch': 'NEW',
   'control.result': 'RESULT',
+  'control.timeline': 'Timeline',
   'view.driver': 'Driver view',
   'view.audience': 'Audience view',
 
@@ -51,6 +52,8 @@ const en = {
   'panel.hitProbability': 'Hit probability',
   'panel.noLoadout': 'Empty',
   'panel.noResolver': 'No shot model',
+  'panel.tipTarget': 'TIP count (auto + TELEOP) / next RP target',
+  'panel.tipAllDone': 'POLLINATOR 2 RP reached',
 
   // 경고 토스트 / 자동 일시정지 배너
   'toast.lowerLift': 'LOWER LIFT (A) TO MOVE',
@@ -72,6 +75,13 @@ const en = {
   'config.unappliedChanges': 'Unapplied changes',
   'config.lockedDuringMatch': 'Locked while a match exists',
   'config.startBlocked': 'Cannot start: {reason}',
+  // 접힌 config 아이콘 띠 (09-6d: 표시만)
+  'rail.robotReady': '{robot}: ready',
+  'rail.scenarioReady': 'SCENARIO: {color} ALLIANCE',
+  'rail.gamepads': 'Gamepads connected: {count}',
+  'rail.gamepadSlot': 'Slot {slot} → {robot}: {name}',
+  'rail.gamepadEmpty': 'not connected',
+  'rail.gamepadNonStandard': '{name} (non-standard mapping)',
 
   // LUT 생성 상태 (2.6.2 로봇별 상태 머신)
   'lut.IDLE': 'Not configured',
@@ -128,6 +138,7 @@ const ko: Record<MessageKey, string> = {
   'control.view': '시점',
   'control.newMatch': '새 경기',
   'control.result': '결과',
+  'control.timeline': '타임라인',
   'view.driver': '드라이버 시점',
   'view.audience': '관중석 시점',
 
@@ -142,6 +153,8 @@ const ko: Record<MessageKey, string> = {
   'panel.hitProbability': '명중 확률',
   'panel.noLoadout': '적재 없음',
   'panel.noResolver': '판정 함수 없음',
+  'panel.tipTarget': 'TIP 횟수(오토 + TELEOP) / 다음 RP 목표',
+  'panel.tipAllDone': 'POLLINATOR 2 RP 달성',
 
   'toast.lowerLift': 'A로 리프트를 내려야 이동 가능',
   'pause.USER': '일시정지',
@@ -161,6 +174,12 @@ const ko: Record<MessageKey, string> = {
   'config.unappliedChanges': '적용 안 된 수정',
   'config.lockedDuringMatch': '경기 중 잠금',
   'config.startBlocked': '시작 불가: {reason}',
+  'rail.robotReady': '{robot}: 준비 완료',
+  'rail.scenarioReady': '시나리오: {color} ALLIANCE',
+  'rail.gamepads': '연결된 게임패드: {count}',
+  'rail.gamepadSlot': '슬롯 {slot} → {robot}: {name}',
+  'rail.gamepadEmpty': '연결 없음',
+  'rail.gamepadNonStandard': '{name} (비표준 매핑)',
 
   'lut.IDLE': '설정 없음',
   'lut.QUEUED': '대기 중',

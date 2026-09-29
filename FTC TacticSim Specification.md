@@ -576,6 +576,7 @@
             - `intakeProgress`: 대상 둘레 + 0.6 in 반지름, 화면 12시부터 시계 방향 호, 진행률 [0, 1] 제한.
             - `hitProbability`: 왼쪽 패널 "R1 명중 확률" / 오른쪽 "R2 명중 확률", POLLEN / NECTAR 백분율, 적재함 0번 종류는 "▶"와 큰 글자, 적재 없음 표시, 판정 함수 미주입 시 "판정 함수 없음". 값은 엔진과 같이 [0, 1] 제한 / 비유한값 0.
             - (09-6b) 캔버스 좌우 패널이 삭제되어 이 글자는 좌측 HTML 득점 패널로 옮긴다 (09-6d). 그 사이 하네스에서는 표시하지 않는다.
+            - (09-6d) 좌측 패널 로봇 이름 아래에 `POLLEN` / `NECTAR` 정수 % (적재함 0번 종류 줄은 밝게, 다른 줄은 흐리게, 기물 색 점). 옵션이 꺼져 있으면 줄 자체가 없다.
             - `flightTrail`: 발사구부터 현재까지 공 표시 위치(높이 오프셋 포함)를 점선으로. `flightResult`: 공 테두리를 `HIT` 초록 / `MISS_HIVE` 주황 / `MISS_FLOOR` 회색으로.
             - 그리기 위치: 조준선은 로봇 아래, 흡입 진행은 로봇 위, 잔상 / 결과 색은 비행 공과 함께, 명중 확률은 뷰포트 밖 좌우 패널 (회전 없음).
     - **개발 하네스 (Step 8, 사용자 비공개):**
@@ -590,6 +591,7 @@
             - `DevHarness.tsx`: 버튼 / 라디오 / 체크박스 / 상태 글자(단계, 루프 상태와 일시정지 사유, 틱, 남은 시간, 점수, 게임패드 슬롯 연결)와 키보드 안내(개발용). 캔버스는 논리 1200 × 800을 CSS 폭 100% · 비율 3:2로 확대 / 축소, 버퍼는 `devicePixelRatio` 배.
             - `App.tsx`: `import.meta.env.DEV`일 때만 `lazy(import('./dev/DevHarness'))`. 정식 빌드 번들에 하네스 코드가 없음을 확인 (빌드 결과물 문자열 검사 + 미리보기에서 정적 필드만 표시).
             - 경기 보기를 관중석으로 두고 시작하면 회전 없이 700 ms 전환 시간 뒤 시작한다 (같은 흐름 유지).
+            - **(09-6d 변경)** 새 GUI(메인 화면)가 정식 빌드와 개발 서버 모두의 기본 화면이 되고, 하네스는 개발 서버에서 주소에 `?harness`가 있을 때만 뜬다 (정식 빌드는 `?harness`를 무시). 고정 설정 본체는 정식 코드 `src/app/defaultSetup.ts`(`DEFAULT_ROBOT_CONFIGS` — 이름 `R1` / `R2`, `createSimpleResolver`, `createDefaultSetup(진영)`)로 옮기고 `devSetup.ts`는 이를 다시 내보낸다. 정적 필드 화면(`FieldCanvas.tsx`, `renderField` / `drawHive` 등 720 × 720 옛 그리기 함수)은 삭제.
     - **테스트:** 순수 계산 함수는 Vitest — 보기 변환(RED / BLUE 회전 방향, 역변환 왕복, 애니메이션 배율), 비행 보간(s = 0 발사구, s = 1 도착점 일치, 보정항), 낙하 보간(립 → 착지, 불투명도 / 호 진행), FLOWER 게이지(4개 회전 대칭 좌표, 칸 위치, 가득 참 판정 — 테이블 7조합 + 잼), 재고 게이지 칸 배정, 적재물 배치. 그리기 결과는 각 단계 끝에 저장소 밖 1회성 헤드리스 Chromium 점검(07-6 방식)으로 확인하고, Playwright는 저장소에 넣지 않는다.
 
 8. **웹 GUI (Step 9, 09-1 확정):** 엔진 / 입력 계층 / 실시간 루프 / 렌더러 / LUT Worker를 한 화면으로 묶는 정식 사용자 화면. 세부 배치(폼 필드 배열, 컨트롤 모양, 색 척도 등)는 각 하위 Step 시작 시 확정하고, 여기서는 구조 / 흐름 / 규칙만 정한다.
@@ -609,7 +611,18 @@
             - 경기 설정 `MatchSetup { r1Config, r2Config, shotResolver, scenario, shooters? }`(진영 = `scenario.allianceColor`)을 주입받아 엔진을 만든다. `setSetup(setup)`은 경기 전(`SETUP`)에만 받아들여 새 0틱 엔진을 만들고(경기 중 false), 리셋은 현재 설정으로 0틱 새 엔진. 09-6d까지는 하네스 고정 설정, 09-8 이후 config 창의 적용된 설정이 들어온다.
             - 흐름 / 다시 그리기 / 상태 알림(진행 중 최대 약 10 Hz, 단계 · 루프 상태 변화는 즉시)은 08-7 하네스와 동일: `SETUP → ROTATING_IN(회전 중 루프 대기) → MATCH → 리셋 → ROTATING_OUT → SETUP`, 시작 / 일시정지 / 재개 / 리셋 / 보기 전환 / 표시 옵션. 분기 / 재생 / 결과 등 3.8항 전체 흐름은 09-7에서 확장한다. 입력 출처는 당분간 R1 / R2 모두 `LIVE` (기본 출처 규칙은 09-8).
             - 상태 `AppStatus`: 단계, 진영, 경기 보기, 보기 각도, 루프 상태 / 일시정지 사유, 틱, 남은 시간, 확정 점수, 텔레옵 / 오토 TIP 횟수, RP, 게임패드 슬롯 상태, 명중 확률(표시 옵션 `hitProbability`가 켜져 있을 때만 `hitProbabilities` — 상태를 만들 때마다 판정 함수 4회, 꺼져 있으면 `null`이고 호출 없음). 좌측 득점 패널(09-6d)이 이 값만 읽는다.
-        - **개발 하네스 대체:** Step 9 GUI가 정식 빌드와 개발 서버 모두의 화면이 된다. 하네스(`src/dev/`)는 Step 9 마지막 하위 Step에서 삭제.
+        - **개발 하네스 대체:** Step 9 GUI가 정식 빌드와 개발 서버 모두의 화면이 된다. 하네스(`src/dev/`)는 Step 9 마지막 하위 Step에서 삭제. **(09-6d)** 그 사이 하네스는 개발 서버 `?harness`로만 연다.
+        - **글꼴 (09-6d 확정):** `'Apple SD Gothic Neo', 'Pretendard Variable', Pretendard, system-ui, sans-serif` (`src/renderer/fonts.ts` `FONT_FAMILY` 한 곳에서 정의 — `main.tsx`가 HTML 루트에, `canvasFont(크기, 굵기)`가 캔버스 글자에 사용). macOS는 설치된 Apple SD 산돌고딕 Neo, 그 외는 Pretendard(OFL, npm `pretendard`, 사용 글자만 나눠 받는 dynamic subset 웹폰트). 굵기는 세미볼드 600 / 볼드 700 / 엑스트라볼드 800만 쓴다. 웹폰트가 늦게 도착하면 캔버스를 한 번 다시 그린다 (`document.fonts.ready` → `AppController.redraw()`).
+        - **아이콘 (09-6d 임시 확정):** `lucide-react`(ISC) 선 아이콘, `currentColor`. TIP 옆 HIVE 아이콘만 자체 제작(`HiveIcon.tsx`, 같은 24 × 24 / 선 굵기 2 규격). 사용자가 바꾸고 싶은 아이콘은 같은 규격(24 × 24 viewBox, `currentColor`) SVG로 제공하면 교체한다. 역할 대응: `START` Play / `PAUSE` Pause / `RESUME` Gamepad2 / `BRANCH` GitBranch / 1초 이동 Rewind · FastForward / 1틱 이동 ChevronLeft · ChevronRight / 재생 CirclePlay / `VIEW` SwitchCamera / `NEW` RotateCcw / `RESULT` Trophy / 로봇 Bot / 시나리오 Flag(진영색 채움) / 게임패드 Gamepad2 / 펼치기 PanelRightOpen / 준비 CircleCheck / 경고 TriangleAlert.
+        - **화면 뼈대 구현 (09-6d, `src/components/MainScreen.tsx` / `LeftPanel.tsx` / `ConfigRail.tsx` / `ScrubberBar.tsx` / `MainScreen.css`, 순수 규칙 `src/ui/mainScreenModel.ts`):**
+            - 배치: CSS 그리드 `좌측 패널 | 필드 | config 띠` + 아래 줄 전체 스크러버. 치수(기준 1366 × 650, 260u / 72u / 56u, 간격 12u)는 `LAYOUT_U` / `layoutCssVars()`가 루트 CSS 변수로 넘기고, CSS가 `--u = max(1px, min(100vw / 기준 폭, 100vh / 기준 높이))`로 곱한다. 1366 × 650 기준 필드 약 558 px, 3840 × 2160 약 1900 px.
+            - 필드: `fieldCanvasSize(영역 폭, 높이, dpr)` → CSS 크기 = 짧은 변 내림, 버퍼 = CSS × dpr 반올림, 렌더 배율 = 버퍼 / 800. `ResizeObserver` + 창 `resize`(dpr만 바뀐 경우)마다 `AppController.setRenderScale(배율)`, 버퍼가 바뀌었으면 `redraw()`. 컨트롤러 생성 시 첫 배율을 넘긴다.
+            - 테마: 배경 `#15171C`, 상자 `#1D2027` + 테두리 `#2C313B`, 보조 글자 `#9CA3AF`, 강조 / `ENDGAME` 타이머 주황 `#F59E0B`, 준비 초록 `#22C55E`. 진영 점수 상자 = 진영 기본색 바탕 + 15% 어두운 테두리 + 흰 글자 (`ALLIANCE_COLORS`와 같은 값).
+            - 좌측 패널: 타이머(`formatMatchTime`, 경기 전은 항상 기본색 / 경기 시작 후 남은 60초 이하 주황), 진영 점수(`AppStatus.score`), `TIP` = HIVE 아이콘 + `{오토 + 텔레옵} / {목표}`(`tipDisplay`: 4 → 7, 7 이상이면 초록 체크), 로봇 이름(`robotLabel`: 팀 번호가 있으면 `#번호`, 없으면 `R1` / `R2` — 팀 번호 입력은 09-9) + 명중 확률(표시 옵션 켜짐일 때).
+            - 스크러버 줄 (09-6d는 기존 동작만): 주 버튼(`mainButton`: 경기 전 `START` / 회전 중 비활성 / 진행 `PAUSE` / 일시정지 `RESUME` / 경기 종료 비활성), `VIEW`(드라이버 ↔ 관중석, 언제나), `NEW`(경기 전 제외, 확인창 없이 리셋 — 확인창은 09-7). 1초 / 1틱 이동, 타임라인 끌기, 재생, 배속(1× 선택 표시), `RESULT`는 자리만 두고 비활성. 타임라인 막대는 현재 틱 위치 + 기록 구간 + 10초 눈금 13개(`ENDGAME` 시작 눈금만 주황). 버튼은 누른 뒤 포커스를 풀어 Space / Enter가 버튼을 다시 누르지 않게 한다 (단축키는 09-7).
+            - 접힌 config 띠 (표시만): R1 / R2 로봇 + 초록 체크, 시나리오 진영색 깃발 + 체크(09-6d 고정 설정은 간이 판정 함수라 LUT가 없고 항상 적용 상태), 게임패드 연결 수 + 비표준 매핑 경고(`gamepadSummary`, 마우스 올리면 슬롯별 패드 이름 / 배정 로봇), 펼치기 버튼 비활성(09-8). 준비 신호 / 진행률 링 / 빨간 느낌표는 09-8 ~ 09-10.
+            - 경기 설정은 config 창 전까지 `createDefaultSetup('RED')`, 언어는 SETTINGS 탭(09-8) 전까지 주소 `?lang=ko`.
+            - 브라우저 탭 제목 `FTC TacticSim`.
     - **화면 구성:** 화면은 **메인 화면 하나**다. 경기 / 일시정지 / 복기가 모두 같은 화면이고, 설정은 우측 config 창, 경기 결과는 팝업이다. 별도 복기 창은 두지 않는다.
 
         ```
@@ -1143,6 +1156,7 @@ export interface TimelineFrame {
 | 09-6a | GUI 순수 기반: 문구 사전 `t()`(영어 / 한국어), 단위 변환 · 표시(길이 소수 2자리, 1e-6 in 입력 반올림), 입력 문자열 해석, 경기 타이머 표시 (아래 6.2.26) | `src/ui/i18n.ts`, `src/ui/units.ts`, `src/ui/__tests__/` |
 | 09-6b | 렌더러 전환: 캔버스 = 필드 뷰포트 800 × 800(좌우 패널 삭제, 장면 입력 `shotResolver` 제거), 혼합 테마, 진영 공식 색, `LOADING ZONE` 두 줄 라벨 (아래 6.2.27) | `viewTransform.ts`, `canvasRenderer.ts`, `sceneRenderer.ts`, `renderOptions.ts`, 하네스, `src/renderer/__tests__/` |
 | 09-6c | 앱 컨트롤러 `AppController`(경기 설정 주입, 하네스 흐름 일반화, 상태에 TIP / RP / 명중 확률), 하네스를 그 위로 이전 (아래 6.2.28) | `src/app/appController.ts`, `src/dev/devSetup.ts`, `DevHarness.tsx`, `src/app/__tests__/appController.test.ts` |
+| 09-6d | 화면 뼈대: 좌측 득점 패널 / 필드 / 접힌 config 띠(표시만) / 스크러버 줄(기존 동작만), 화면 비례 단위 `--u`, 글꼴(Apple SD Gothic Neo → Pretendard) / lucide 아이콘, 새 GUI 기본 화면 + 하네스 `?harness` (아래 6.2.29) | `src/components/`, `src/ui/mainScreenModel.ts`, `src/app/defaultSetup.ts`, `src/renderer/fonts.ts`, `App.tsx`, `main.tsx`, `src/ui/__tests__/mainScreenModel.test.ts` |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
@@ -1380,6 +1394,12 @@ export interface TimelineFrame {
 - **테스트:** `src/app/__tests__/appController.test.ts` B~D — B / C는 08-7 하네스 흐름 테스트를 옮긴 것(관중석 준비, 회전 중 루프 대기, 회전 후 드라이버 시점에서 시작, 초당 약 50틱, 키보드 R2 주행, 일시정지 중 옵션 2회 = 다시 그리기 1회, 일시정지 중 보기 전환, 재개, 포커스 소실 자동 일시정지, 리셋 반대 회전, BLUE +90°, 상태 알림 약 10 Hz, 관중석 경기), 진영 선택 대신 설정 교체(경기 중 거부)로 바꿈. D 신규(주입한 시나리오로 엔진 생성, 오토 / 텔레옵 TIP · 점수 · RP, 명중 확률 꺼짐 = null · 호출 0 / 켜짐 = 4회 · 주입한 판정 함수 값, 경기 전 설정 교체 = 새 0틱 엔진, 경기 중 거부, 리셋은 현재 설정 유지, `SETUP` 복귀 후 다시 교체 가능). 테스트 설정은 하네스와 독립(하네스 삭제 후에도 유지). `src/dev/__tests__/harness.test.ts`는 하네스 설정 검사(A + `createDevSetup`)만 남김. 경기 중 설정 교체 허용, 명중 확률 항상 계산, 시나리오 무시, 오토 TIP 필드 혼동, 회전 전 루프 시작 각각에서 실패함을 확인.
 - **헤드리스 Chromium 점검 (저장소 밖 1회성, 실제 개발 서버 + 하네스):** 준비 화면 → 진영 교체 → 시작 → 회전 후 `MATCH` / `RUNNING` → 키보드 W 주행 → 일시정지(틱 고정). 콘솔 오류 없음.
 
+### 6.2.29 Step 09-6d (화면 뼈대) 완료 항목
+
+- **구현:** 3.8항 "글꼴 / 아이콘 (09-6d)", "화면 뼈대 구현 (09-6d)", 3.7항 개발 하네스 "(09-6d 변경)" 참고. `AppController`에 `setRenderScale(배율)`(잘못된 값 / 같은 값 무시) / `redraw()` 추가, 정적 레이어 캐시 최대 4개(창 크기를 바꿀 때마다 배율별 캐시가 쌓이지 않도록 가득 차면 비움). 의존성 추가: `lucide-react`(ISC), `pretendard`(OFL). 09-6b에 실수로 커밋된 임시 점검 페이지 `shotcheck.html` 삭제.
+- **테스트 (`src/ui/__tests__/mainScreenModel.test.ts` A~D):** A CSS 변수 값, 기준 화면 필드 크기(≈ 558 px), 캔버스 크기(짧은 변 내림 / dpr 반올림 / 배율, 비정상 dpr · 0 크기), B `TIP` 표시(4 → 7 → 달성, 음수 제한), 로봇 이름(팀 번호 공백 = R1 / R2), 명중 확률 %, 타이머 `ENDGAME` 색(엔진 `ENDGAME_START_TICK` 경계, 경기 전 제외), C 주 버튼 6가지 상태, 타임라인 비율 / 눈금, 게임패드 요약, D 글꼴 순서 / `canvasFont`. 문구 사전에 `rail.*`, `panel.tipTarget` / `tipAllDone`, `control.timeline` 추가 (게임 용어 대문자 검사 통과). 하네스 테스트는 로봇 이름 `R1` 기대로 갱신.
+- **헤드리스 Chromium 점검 (저장소 밖 1회성):** 실제 개발 서버 1366 × 650 / 1366 × 768 / 3840 × 2160 경기 전 화면, 한국어, 시작 → 회전 → 키보드 주행 → 일시정지(`RESUME`) 화면, 가짜 상태(0:48 `ENDGAME` 주황, 60점, `TIP` 7 / 7 체크, 명중 확률, 비표준 게임패드 경고) RED / BLUE 한국어 / 4K, 기준보다 작은 창(1200 × 560 → 1366 × 650 스크롤), 아이콘 표. 점검 중 개발 모드 StrictMode 재마운트에서 새 컨트롤러가 이미 맞춰진 캔버스를 만나 배율 1로 그리는 문제를 발견해 생성 시 배율 전달 + 매번 배율 전달로 수정 후 재확인. 개발 서버 `?harness` = 하네스, 정식 빌드 미리보기 `?harness` = 메인 화면. 콘솔 오류는 임시 페이지의 파비콘 404뿐.
+
 ### 6.3 남은 Step (권장 순서)
 
 > 모든 Step은 완료 시 `npm test`(엔진 회귀 테스트)가 통과해야 하며, 새로 추가한 규칙에는 테스트 그룹을 추가한다.
@@ -1404,7 +1424,7 @@ export interface TimelineFrame {
     - ~~08-5: HIVE(아군 셀 상태, 시차 낙하 연출), FLOWER 게이지(필드 밖 9칸, 잼, 가득 참 X), NECTAR 재고 게이지(게이지 틀은 정적 레이어에 추가), 경기 종료 강조.~~ (완료, 6.2.18)
     - ~~08-6: 비행 공(명목 구간 보간 + 높이 보정, 충돌 후 구간, 그림자 / 오프셋 / 크기), 표시 옵션 5종.~~ (완료, 6.2.19)
     - ~~08-7: 개발 하네스(정식 엔진 / 입력 / 루프 + 간이 판정 함수, 시작 회전 후 루프 시작, 옵션 체크박스) + 헤드리스 Chromium 점검.~~ (완료, 6.2.20)
-- **Step 9 — 웹 GUI (React, 상세 규칙 3.8항):** 09-1(명세), 09-2(탄도 사전 준비), 09-3(LUT Worker 풀), 09-4(LUT 캐시), 09-5(배치 검증), 09-6a(GUI 순수 기반), 09-6b(렌더러 전환), 09-6c(앱 컨트롤러) 완료.
+- **Step 9 — 웹 GUI (React, 상세 규칙 3.8항):** 09-1(명세), 09-2(탄도 사전 준비), 09-3(LUT Worker 풀), 09-4(LUT 캐시), 09-5(배치 검증), 09-6a(GUI 순수 기반), 09-6b(렌더러 전환), 09-6c(앱 컨트롤러), 09-6d(화면 뼈대) 완료.
     - ~~09-1: 웹 GUI 명세 구체화.~~ (완료, 6.2.21)
     - ~~09-2: `ballistics.ts` 사전 준비 — `generateReferenceLUTRows`, `robotLUTSeeds`, `BALLISTICS_MODEL_VERSION`, 스윗스팟 진영 기준 변환 함수 + 분할 / 작업 계획 동일성 테스트.~~ (완료, 6.2.22)
     - ~~09-3: LUT Worker 풀(`src/workers/lutWorker.ts`) + 작업 대기열 + 조립 + 로봇별 상태 머신 / 취소 (React 비의존, 가짜 Worker 테스트).~~ (완료, 6.2.23)
@@ -1414,8 +1434,8 @@ export interface TimelineFrame {
         - ~~09-6a: 순수 기반 — 문구 사전 / 언어, 단위 변환 · 표시, 입력 문자열 해석, 경기 타이머 표시.~~ (완료, 6.2.26)
         - ~~09-6b: 렌더러 전환 — 캔버스를 필드 뷰포트(800 × 800)만 남기고 좌우 정보 패널 삭제, 진영 공식 색, 캔버스 글자 정리, 하네스를 새 캔버스 크기에 맞춤 (스크린샷 확인).~~ (완료, 6.2.27)
         - ~~09-6c: 앱 컨트롤러 — 하네스 컨트롤러를 React 비의존 `AppController`로 확장 (엔진 / 입력 / 루프 / 렌더링 예약 / 10 Hz 상태 알림, 기능은 하네스 수준: 시작 · 일시정지 · 재개 · 리셋).~~ (완료, 6.2.28)
-        - 09-6d: 화면 뼈대 — 좌측 득점 패널 / 필드 / 접힌 config 아이콘 띠(표시만) / 스크러버 줄(기존 동작만), 화면 비례 단위 `--u`, 명중 확률 좌측 패널 (스크린샷 확인).
-    - 09-7: 경기 흐름 — 시작 / 일시정지 / 재개 / 분기(확인창) / 재생 / 배속 / 틱 · 1초 이동 / 새 경기, 상태별 키 공유, 경고 토스트 / 자동 일시정지 배너, `ENDGAME` 타이머 색. 시작 전 행동 상태 배지 이미지 자산(`src/assets/badges/`)을 사용자에게 요청.
+        - ~~09-6d: 화면 뼈대 — 좌측 득점 패널 / 필드 / 접힌 config 아이콘 띠(표시만) / 스크러버 줄(기존 동작만), 화면 비례 단위 `--u`, 명중 확률 좌측 패널 (스크린샷 확인).~~ (완료, 6.2.29)
+    - 09-7: 경기 흐름 — 시작 / 일시정지 / 재개 / 분기(확인창) / 재생 / 배속 / 틱 · 1초 이동 / 새 경기, 상태별 키 공유, 경고 토스트 / 자동 일시정지 배너 (`ENDGAME` 타이머 색은 09-6d에서 완료). 시작 전 행동 상태 배지 이미지 자산(`src/assets/badges/`)을 사용자에게 요청.
     - 09-8: config 창 — 아이콘 띠(준비 신호 / 진행률 링 / 깃발 / 게임패드) + 탭 틀 + 초안 / 적용 / 되돌리기 + SETTINGS 탭(게임패드 상태, 입력 출처, 조작 모드, 키보드 토글, 표시 옵션, 언어, 단위, 기본 보기) + 설정 자동 보관.
     - 09-9: 로봇 탭 — 제원 폼, `BumperZone` 편집기, 슈터 / 리프트, 팀 번호, 상대 탭 복사, 탭 되돌리기.
     - 09-10: 스윗스팟 / 히트맵 편집 모드 + LUT 진행 표시(v0 선표시 / 진행 막대 / 남은 시간 / 점진 히트맵) + 기본 프리셋 자동 생성.

@@ -1,0 +1,392 @@
+/* 메인 화면 (명세서 3.8 화면 구성, 09-6d)
+   화면 비례 단위 --u = min(창 폭 / 1366, 창 높이 / 650), 1 px 미만으로는 줄이지 않고 스크롤.
+   기준 크기 / 좌측 패널 260u / 접힌 config 띠 72u / 스크러버 줄 56u / 간격 12u는 mainScreenModel.layoutCssVars()가 루트 style로 넘긴다.
+   필드 = 나머지 영역의 정사각형 (MainScreen.tsx가 캔버스 크기 결정). */
+
+.main-screen {
+  --u: max(1px, min(calc(100vw / var(--design-w)), calc(100vh / var(--design-h))));
+  --panel-bg: #1d2027;
+  --panel-border: #2c313b;
+  --text-muted: #9ca3af;
+  --accent: #f59e0b; /* ENDGAME 타이머 / 강조 주황 (렌더러 종료 강조와 같은 계열) */
+  --ok: #22c55e;
+  --warn: #f59e0b;
+  --gap: calc(var(--u) * var(--gap-u));
+
+  box-sizing: border-box;
+  width: 100vw;
+  height: 100vh;
+  min-width: calc(var(--u) * var(--design-w));
+  min-height: calc(var(--u) * var(--design-h));
+  padding: var(--gap);
+  display: grid;
+  grid-template-columns: calc(var(--u) * var(--left-panel)) minmax(0, 1fr) calc(var(--u) * var(--rail));
+  grid-template-rows: minmax(0, 1fr) calc(var(--u) * var(--scrubber));
+  grid-template-areas:
+    'left field rail'
+    'scrub scrub scrub';
+  gap: var(--gap);
+  font-size: calc(var(--u) * 14);
+  user-select: none;
+}
+
+.main-screen *,
+.main-screen *::before,
+.main-screen *::after {
+  box-sizing: border-box;
+}
+
+.main-screen svg.lucide {
+  width: calc(var(--u) * 22);
+  height: calc(var(--u) * 22);
+  flex: none;
+}
+
+/* ---------------- 좌측 득점 패널 ---------------- */
+.left-panel {
+  grid-area: left;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  min-height: 0;
+}
+
+.panel-box {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: calc(var(--u) * 10);
+  padding: calc(var(--u) * 12) calc(var(--u) * 16);
+}
+
+.panel-caption {
+  font-size: calc(var(--u) * 12);
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+
+.timer-value {
+  font-size: calc(var(--u) * 60);
+  font-weight: 800;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.timer-value.is-endgame {
+  color: var(--accent);
+}
+
+.score-box {
+  color: #ffffff;
+  border-width: calc(var(--u) * 2);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: calc(var(--u) * 8);
+}
+.score-alliance {
+  font-size: calc(var(--u) * 20);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+.score-value {
+  font-size: calc(var(--u) * 64);
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.tip-box {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 10);
+}
+.tip-icon {
+  width: calc(var(--u) * 30);
+  height: calc(var(--u) * 30);
+  flex: none;
+  color: var(--text-muted);
+}
+.tip-label {
+  font-size: calc(var(--u) * 18);
+  font-weight: 800;
+}
+.tip-count {
+  margin-left: auto;
+  font-size: calc(var(--u) * 32);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.tip-target {
+  font-size: calc(var(--u) * 20);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.main-screen svg.lucide.tip-done {
+  color: var(--ok);
+  width: calc(var(--u) * 26);
+  height: calc(var(--u) * 26);
+  stroke-width: 3;
+}
+
+.robots-box {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 14);
+  min-height: 0;
+  overflow: auto;
+}
+.robot-name {
+  font-size: calc(var(--u) * 20);
+  font-weight: 800;
+}
+.hit-rows {
+  margin-top: calc(var(--u) * 6);
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 4);
+}
+.hit-row {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 8);
+  font-size: calc(var(--u) * 14);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.hit-row.is-next {
+  color: inherit;
+}
+.hit-dot {
+  width: calc(var(--u) * 10);
+  height: calc(var(--u) * 10);
+  border-radius: 50%;
+  flex: none;
+}
+.hit-dot.is-pollen {
+  background: #fde047;
+}
+.hit-value {
+  margin-left: auto;
+  font-size: calc(var(--u) * 18);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------- 필드 ---------------- */
+.field-area {
+  grid-area: field;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.field-canvas {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: block;
+  border-radius: calc(var(--u) * 6);
+}
+
+/* ---------------- 접힌 config 아이콘 띠 ---------------- */
+.config-rail {
+  grid-area: rail;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--u) * 14);
+  padding: calc(var(--u) * 12) 0;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: calc(var(--u) * 10);
+  min-height: 0;
+}
+.rail-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--u) * 3);
+  cursor: default;
+}
+.rail-icon {
+  position: relative;
+  display: inline-flex;
+}
+.main-screen .rail-icon > svg.lucide:first-child {
+  width: calc(var(--u) * 30);
+  height: calc(var(--u) * 30);
+}
+.main-screen svg.lucide.rail-mark {
+  position: absolute;
+  right: calc(var(--u) * -7);
+  bottom: calc(var(--u) * -4);
+  width: calc(var(--u) * 15);
+  height: calc(var(--u) * 15);
+  background: var(--panel-bg);
+  border-radius: 50%;
+  stroke-width: 2.5;
+}
+.rail-mark.is-ok {
+  color: var(--ok);
+}
+.rail-mark.is-warn {
+  color: var(--warn);
+}
+.rail-label {
+  font-size: calc(var(--u) * 11);
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.rail-spacer {
+  flex: 1;
+}
+
+/* ---------------- 스크러버 줄 ---------------- */
+.scrubber-bar {
+  grid-area: scrub;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 10);
+  padding: 0 calc(var(--u) * 10);
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: calc(var(--u) * 10);
+}
+
+.main-screen button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.main-screen button:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+.main-screen button:focus-visible {
+  outline: calc(var(--u) * 2) solid var(--accent);
+  outline-offset: calc(var(--u) * 2);
+}
+
+.main-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--u) * 8);
+  min-width: calc(var(--u) * 140);
+  height: calc(var(--u) * 40);
+  padding: 0 calc(var(--u) * 16);
+  border-radius: calc(var(--u) * 8);
+  font-size: calc(var(--u) * 16);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+.main-screen .main-button {
+  background: #e5e7eb;
+  color: #15171c;
+}
+.main-screen .main-button.is-start {
+  background: var(--ok);
+  color: #0b1a10;
+}
+.main-screen .main-button svg.lucide {
+  fill: currentColor;
+}
+.main-screen .main-button.is-resume svg.lucide {
+  fill: none;
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(var(--u) * 36);
+  height: calc(var(--u) * 36);
+  border-radius: calc(var(--u) * 8);
+}
+.main-screen .icon-button:not(:disabled):hover,
+.main-screen .text-button:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.scrub-group {
+  display: flex;
+  gap: calc(var(--u) * 2);
+}
+
+.timeline {
+  flex: 1;
+  min-width: calc(var(--u) * 120);
+  height: calc(var(--u) * 36);
+  display: flex;
+  align-items: center;
+}
+.timeline-track {
+  position: relative;
+  width: 100%;
+  height: calc(var(--u) * 8);
+  border-radius: calc(var(--u) * 4);
+  background: #2f3440;
+}
+.timeline-recorded {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: #6b7280;
+}
+.timeline-mark {
+  position: absolute;
+  top: calc(var(--u) * -4);
+  width: 1px;
+  height: calc(var(--u) * 16);
+  background: rgba(255, 255, 255, 0.18);
+  transform: translateX(-50%);
+}
+.timeline-mark.is-major {
+  width: calc(var(--u) * 2);
+  background: var(--accent);
+}
+.timeline-thumb {
+  position: absolute;
+  top: 50%;
+  width: calc(var(--u) * 16);
+  height: calc(var(--u) * 16);
+  border-radius: 50%;
+  background: #e5e7eb;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 calc(var(--u) * 3) var(--panel-bg);
+}
+
+.speed-group {
+  display: flex;
+  border: 1px solid var(--panel-border);
+  border-radius: calc(var(--u) * 8);
+  overflow: hidden;
+}
+.speed-button {
+  min-width: calc(var(--u) * 42);
+  height: calc(var(--u) * 32);
+  font-size: calc(var(--u) * 13);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.main-screen .speed-button.is-selected {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 6);
+  height: calc(var(--u) * 36);
+  padding: 0 calc(var(--u) * 10);
+  border-radius: calc(var(--u) * 8);
+  font-size: calc(var(--u) * 14);
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
