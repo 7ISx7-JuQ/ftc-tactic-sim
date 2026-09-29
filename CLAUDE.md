@@ -19,5 +19,5 @@
 - 타입 체크: `npx tsc -b`
   - (주의) 루트 `tsconfig.json`은 `files: []` + `references` 구조라 `npx tsc --noEmit`을 루트에서 실행하면 검사 대상이 없어 항상 통과함. 반드시 `tsc -b`(또는 `npx tsc --noEmit -p tsconfig.app.json`)로 검사할 것.
 - 빌드: `npm run build`
-- 테스트: `npm test` (Vitest, `src/core/__tests__/`의 엔진 통합 회귀 테스트 + 탄도 계산 / 몬테카를로 LUT 단위 테스트, `src/input/__tests__/`의 입력 계층 테스트, `src/renderer/__tests__/`의 렌더러 순수 계산 테스트, `src/dev/__tests__/`의 개발 하네스 흐름 테스트, `src/workers/__tests__/`의 LUT 생성 관리자 / 캐시 테스트(가짜 Worker, 메모리 저장소), 약 50~80초)
+- 테스트: `npm test` (Vitest, `src/core/__tests__/`의 엔진 통합 회귀 테스트 + 탄도 계산 / 몬테카를로 LUT 단위 테스트, `src/input/__tests__/`의 입력 계층 테스트, `src/renderer/__tests__/`의 렌더러 순수 계산 테스트, `src/dev/__tests__/`의 개발 하네스 흐름 테스트, `src/workers/__tests__/`의 LUT 생성 관리자 / 캐시 테스트(가짜 Worker, 메모리 저장소), `src/ui/__tests__/`의 문구 사전 / 단위 변환 테스트, 약 50~80초)
   - 엔진 규칙을 바꾸면 관련 테스트도 함께 갱신하고, 새 규칙에는 테스트 그룹을 추가할 것.
