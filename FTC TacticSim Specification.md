@@ -239,6 +239,12 @@
             - **조회 흐름:** 확정 시 캐시 먼저 조회 → 적중하면 즉시 `READY` (Worker 미사용) → 없으면 생성 후 저장.
             - **저장 레시피(Step 10)와의 관계:** 레시피에는 LUT 대신 탄도 설정 + 시드 + 샘플 수 + `BALLISTICS_MODEL_VERSION`을 저장. 불러올 때 캐시가 있으면 즉시, 없으면 위 생성 흐름을 탐. 레시피의 모델 버전이 현재와 다르면 "재생성한 확률표로 결과가 달라질 수 있음"을 경고.
             - **실패 허용:** IndexedDB를 쓸 수 없으면(사생활 보호 모드, 용량 초과 등) 캐시 없이 매번 생성하며 기능은 동일.
+            - **구현 (09-4, `src/workers/lutCache.ts`):**
+                - 관리자용 인터페이스 `LUTCache { get(requestKey), put(requestKey, entry) }` (요청 키 원문 = `lutRequestKey`, 내부에서 `lutCacheKey` = SHA-256 16진 64자). 캐시 내용 `LUTCacheEntry` = 기물별 v0 / 스윗스팟 명중률 / 기준 셀 LUT.
+                - 순수 규칙: `entryToRecord`(버퍼 복사, 모델 버전 / 시각 기록), `recordToEntry`(모델 버전 불일치 · 버퍼 길이 ≠ 82,944 B · v0 비유한값 · 명중률 누락 → 미스), `recordsToEvict`(다른 모델 버전 전부 + 현재 버전 최근 사용 순 20개 초과분, 동률은 키 순).
+                - `StoreLUTCache(store)`: 레코드 저장소(`LUTRecordStore { get, put, list, delete }`) 위의 캐시. 적중 시 `lastUsedAt`만 갱신, 같은 키 재저장은 `createdAt` 유지, 저장 후 정리. `openIndexedDBRecordStore()`: DB `ftc-tactic-sim` / 저장소 `lutCache`(keyPath `key`), IndexedDB가 없거나 열기 실패면 `null`.
+                - `createBrowserLUTCache()`: 앱 시작 시 동기로 만들어 관리자에 주입, 첫 사용 때 연다. IndexedDB 또는 `crypto.subtle`(비보안 연결 등)이 없으면 조회는 항상 미스, 저장은 무시.
+                - **관리자 연동 (`LUTManagerOptions.cache`):** 요청 → `QUEUED`에서 캐시 조회 → 적중: Worker 작업 없이 기준 LUT 복원 + 4셀 대칭 복사 → `READY`(`fromCache = true`), 미스 / 조회 실패(비동기 · 동기 예외): v0 탐색부터 생성 → `READY` 직후 저장(저장 실패 무시). 적중 결과는 다시 저장하지 않는다. 조회가 끝났을 때 그 사이 재요청 / 취소 / 정리로 실행이 바뀌었으면 결과를 버린다 (옛 요청의 미스가 작업을 보내지 않음). 캐시를 주입하지 않으면 09-3과 같이 즉시 생성.
     - **런타임 판정 (`createLUTShotResolver(luts, r1Config, r2Config)`, 06-5 구현 완료):** 엔진 생성자에 주입하는 `ShotProbabilityResolver` (엔진 수정 없음). 엔진은 발사 완료 틱에 `(robotId, pieceType, robot.x, robot.y, robot.heading, alliance, upwardCell)`로 호출하고, 반환 확률과 시드 난수 1회로 명중을 정한다.
         - **입력:** `luts: MatchHeatmapLUTs` (로봇 슬롯별 `RobotHeatmapLUTs`), `r1Config` / `r2Config`의 `turretType` / `turretRange` / `aimTolerance`. 슈터 설정은 생성 시점에 복사해 고정한다 (이후 원본 객체 변경이 경기 중 판정에 새지 않음 → 결정론).
         - **$P_{\text{spatial}}$:** `luts[robotId][pieceType][hiveCellKey(alliance, upwardCell)]`를 로봇 중심 좌표에서 **쌍선형 보간**(`sampleLUT`)으로 조회. 둘러싼 격자 중심 4개 값을 거리 비례로 섞고, 필드 가장자리 격자 중심 바깥은 가장자리 값. 셀 키 = `${alliance}_${AUDIENCE | OPPOSITE}`. 팁으로 상향 셀이 바뀌면 다음 발사부터 새 셀의 LUT와 조준점을 쓴다.
@@ -1101,6 +1107,7 @@ export interface TimelineFrame {
 | 09-1 | 웹 GUI 명세 구체화 (메인 화면 / config 창 / 앱 상태 흐름 / 재생 · 재개 · 분기 / 단위 / 스윗스팟 진영 기준 / 배치 검증 / 결과 팝업 / 하위 Step 분할) (아래 6.2.21) | 명세서 |
 | 09-2 | `ballistics.ts` LUT 병렬 생성 사전 준비: 행 범위 LUT, 시드 파생 공개, 모델 버전, 스윗스팟 진영 기준 변환 (아래 6.2.22) | `ballistics.ts`, `__tests__/ballistics.test.ts` |
 | 09-3 | LUT Worker 풀 + 작업 대기열(v0 탐색 우선) + 조립 + 로봇별 상태 머신 / 취소 / 재요청 무시 / 오류 처리 (아래 6.2.23) | `src/workers/lutProtocol.ts`, `lutWorker.ts`, `createLUTWorker.ts`, `lutManager.ts`, `src/workers/__tests__/lutManager.test.ts` |
+| 09-4 | IndexedDB LUT 캐시 (SHA-256 키, 기준 셀 LUT 저장 / 4셀 복원, 최근 사용 20개 + 다른 모델 버전 삭제, 실패 허용) + 관리자 연동 (아래 6.2.24) | `src/workers/lutCache.ts`, `lutManager.ts`, `src/workers/__tests__/lutCache.test.ts`, `fakeWorker.ts` |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
@@ -1304,7 +1311,13 @@ export interface TimelineFrame {
 
 - **구현:** 2.6.2항 "LUT 생성 실행 / 사용자 경험" 1의 "구현 (09-3)" 참고 (`handleLUTJob`, `lutWorker.ts`, `createBrowserLUTWorker`, `LUTManager`, `defaultLUTPoolSize`, `lutRequestKey`).
 - **테스트 (`src/workers/__tests__/lutManager.test.ts` A~E, 가짜 Worker가 실제 처리기를 구조화 복제 경계로 호출, 처리 순서를 테스트가 조종):** A 처리기(탐색 결과 = `searchLaunchSpeed`, 행마다 진행 144 / 288 / 432, 행 결과 = `generateReferenceLUTRows`, transferable, v0 없는 행 작업 오류, 닫힌 해 없음), B 결정론(풀 1 / 3 / 8 / 2, 행 묶음 4 / 7 / 144, 완료 순서 역순 → 로봇 2대 결과 === `generateRobotLUTs`, 진행 완료, `matchLUTs`), C 상태 전이(`QUEUED > SEARCHING > GENERATING > READY`, 탐색 직후 v0 선표시, 부분 조립 행 = 최종 LUT 행, 두 번째 로봇 탐색이 대기 중 행 작업보다 먼저, 진행 단조 증가 · 행 단위 진행), D 재요청(같은 입력 무시, 로봇 크기 변경 재생성, 생성 중 설정 변경 → `CANCELLED > QUEUED` · 새 세대 · 이전 작업 결과 무시, `cancel` 유지 / `READY`에는 무시, 검증 실패 → `IDLE` + 사유), E 오류(`error` 메시지 / `onerror` / 행 길이 불일치 → `ERROR`, 다른 로봇 계속, 재요청 복구, 잃은 작업의 늦은 응답 무시), 풀 크기 공식, `dispose`, 요청 키 정규화. v0 탐색 우선 없음, 세대 확인 없음, 대기열 정리 없음, 재요청 무시 없음, 실행 중 진행 미집계, 오류 시 작업 유지, 기물 LUT 뒤바뀜, `CANCELLED` 알림 없음, 행 길이 검사 없음 각각에서 실패함을 확인.
-- **헤드리스 Chromium 점검 (저장소 밖 1회성):** 임시 페이지에서 실제 Worker 3개로 로봇 2대 생성 → 개발 서버 / 정식 빌드(미리보기) 모두 `generateRobotLUTs`와 비트 단위 동일, 콘솔 오류는 리소스 404 1건뿐(임시 페이지에 파비콘이 없어 생긴 것으로 추정). 기본 정밀도 전체 약 9.3초 (4코어).
+- **헤드리스 Chromium 점검 (저장소 밖 1회성):** 임시 페이지에서 실제 Worker 3개로 로봇 2대 생성 → 개발 서버 / 정식 빌드(미리보기) 모두 `generateRobotLUTs`와 비트 단위 동일, 콘솔 오류는 리소스 404 1건뿐(임시 페이지에 파비콘이 없어 생긴 것 — 09-4 점검에서 파비콘을 넣자 사라짐). 기본 정밀도 전체 약 9.3초 (4코어).
+
+### 6.2.24 Step 09-4 (IndexedDB LUT 캐시) 완료 항목
+
+- **구현:** 2.6.2항 "LUT 생성 실행 / 사용자 경험" 4의 "구현 (09-4)" 참고. 새 의존성 없음 (IndexedDB 연결부는 브라우저 점검, 규칙은 메모리 저장소로 Node 테스트).
+- **테스트 (`src/workers/__tests__/lutCache.test.ts` A~E, 가짜 Worker는 `fakeWorker.ts`로 관리자 테스트와 공용):** A 캐시 키(SHA-256 표준 테스트 벡터, 정규화 요청 키 64자), 레코드 변환(버퍼 복사, 원본 변경 무영향, v0 null 허용), 깨진 레코드 5종 → 미스, B 정리 규칙(다른 버전 + 최근 사용 20개 초과분, 20개면 없음, 동률 키 순), C 저장소 캐시(해시 키 저장, 적중 시 사용 시각만 갱신, 재저장 시 생성 시각 유지, 21개 추가 저장 중 사용한 레코드 생존 · 가장 오래된 것 삭제 · 20개 유지, 깨진 레코드 미스 · 미갱신, IndexedDB 없음 → 항상 미스), D 관리자 연동(미스: 조회 중 `QUEUED` · 작업 없음 → 생성 → 저장 내용 = 생성 결과, 새 관리자 적중: Worker 작업 0 · `QUEUED > READY` · 결과 === `generateRobotLUTs` · 4셀 대칭 복원 · 재저장 없음), E 조회 도중 설정 변경(옛 요청 미스 무시 · 최신 요청 결과), 조회 도중 취소 / 정리, 조회 실패(비동기 / 동기 예외) → 생성, 저장 실패 → `READY`. 사용 시각 미갱신, 다른 버전 유지, 최신 것 삭제, 버전 미검사, 버퍼 미복사, 생성 시각 초기화, 적중 재저장, 옛 조회 결과 적용, 조회 실패 무대응, 적중 후 생성, 동기 예외 미처리 각각에서 실패함을 확인.
+- **헤드리스 Chromium 점검 (저장소 밖 1회성, 실제 IndexedDB / `crypto.subtle` / Worker):** 1회차(DB 삭제 후) 생성 → 레코드 2개 저장, 새 페이지 2회차 → Worker 작업 0개 · 48 ms에 두 로봇 `READY`(캐시) · 결과 생성본과 비트 단위 동일, 22개 추가 저장 → 20개 유지 · 다른 모델 버전 삭제 · 레코드 기준 LUT 82,944 B. 콘솔 오류 없음.
 
 ### 6.3 남은 Step (권장 순서)
 
@@ -1330,11 +1343,11 @@ export interface TimelineFrame {
     - ~~08-5: HIVE(아군 셀 상태, 시차 낙하 연출), FLOWER 게이지(필드 밖 9칸, 잼, 가득 참 X), NECTAR 재고 게이지(게이지 틀은 정적 레이어에 추가), 경기 종료 강조.~~ (완료, 6.2.18)
     - ~~08-6: 비행 공(명목 구간 보간 + 높이 보정, 충돌 후 구간, 그림자 / 오프셋 / 크기), 표시 옵션 5종.~~ (완료, 6.2.19)
     - ~~08-7: 개발 하네스(정식 엔진 / 입력 / 루프 + 간이 판정 함수, 시작 회전 후 루프 시작, 옵션 체크박스) + 헤드리스 Chromium 점검.~~ (완료, 6.2.20)
-- **Step 9 — 웹 GUI (React, 상세 규칙 3.8항):** 09-1(명세), 09-2(탄도 사전 준비), 09-3(LUT Worker 풀) 완료.
+- **Step 9 — 웹 GUI (React, 상세 규칙 3.8항):** 09-1(명세), 09-2(탄도 사전 준비), 09-3(LUT Worker 풀), 09-4(LUT 캐시) 완료.
     - ~~09-1: 웹 GUI 명세 구체화.~~ (완료, 6.2.21)
     - ~~09-2: `ballistics.ts` 사전 준비 — `generateReferenceLUTRows`, `robotLUTSeeds`, `BALLISTICS_MODEL_VERSION`, 스윗스팟 진영 기준 변환 함수 + 분할 / 작업 계획 동일성 테스트.~~ (완료, 6.2.22)
     - ~~09-3: LUT Worker 풀(`src/workers/lutWorker.ts`) + 작업 대기열 + 조립 + 로봇별 상태 머신 / 취소 (React 비의존, 가짜 Worker 테스트).~~ (완료, 6.2.23)
-    - 09-4: IndexedDB LUT 캐시 (캐시 키 / LRU 20개 / 실패 허용).
+    - ~~09-4: IndexedDB LUT 캐시 (캐시 키 / LRU 20개 / 실패 허용).~~ (완료, 6.2.24)
     - 09-5: `validateRobotPlacement()` + `reset()` 사전 보정 + 엔진 회귀 테스트 그룹.
     - 09-6: GUI 기반 — 앱 컨트롤러(하네스 컨트롤러 확장), 문구 사전 / 언어 토글, 단위 변환, 진영 공식 색, 화면 뼈대(좌측 패널 / 필드 / 접힌 config / 스크러버 줄), 캔버스 필드 뷰포트 전용 전환(좌우 패널 삭제, 명중 확률 좌측 패널 이동).
     - 09-7: 경기 흐름 — 시작 / 일시정지 / 재개 / 분기(확인창) / 재생 / 배속 / 틱 · 1초 이동 / 새 경기, 상태별 키 공유, 경고 토스트 / 자동 일시정지 배너, `ENDGAME` 타이머 색. 시작 전 행동 상태 배지 이미지 자산(`src/assets/badges/`)을 사용자에게 요청.

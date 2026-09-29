@@ -5,7 +5,8 @@
 //     행 작업은 들어온 순서대로. 같은 (로봇, 기물)의 행 작업은 그 v0 탐색이 끝나야 대기열에 들어간다.
 //   - 결정론: 행 분할 / 순서 / Worker 수와 무관하게 결과 = generateRobotLUTs (09-2 격자별 독립 난수 구간).
 //   - 취소: 로봇별 세대 번호를 올리고 대기열의 이전 세대 작업을 제거. 실행 중인 작업은 끝까지 돌게 두고 결과를 무시한다.
-// Worker 생성 함수를 주입받아 Node에서 가짜 Worker로 테스트한다 (브라우저는 createLUTWorker.ts).
+//   - 캐시 (09-4): 요청 시 캐시를 먼저 조회 → 적중하면 Worker 없이 즉시 READY, 미스 / 실패면 생성 후 저장.
+// Worker 생성 함수 / 캐시를 주입받아 Node에서 가짜로 테스트한다 (브라우저는 createLUTWorker.ts, lutCache.ts).
 
 import {
   BALLISTICS_MODEL_VERSION,
@@ -24,6 +25,7 @@ import {
 } from '../core/ballistics';
 import type { BallisticsIssue, RobotBallisticsResult } from '../core/ballistics';
 import type { BallisticsConfig, MatchHeatmapLUTs } from '../core/types';
+import type { LUTCache, LUTCacheEntry } from './lutCache';
 import type { LUTJobMessage, LUTPieceType, LUTRobotId, LUTRobotSize, LUTWorkerMessage } from './lutProtocol';
 
 export const DEFAULT_LUT_ROWS_PER_JOB = 4;
@@ -60,6 +62,7 @@ export interface RobotLUTStatus {
   reference: Record<LUTPieceType, Float32Array>;    // 조립 중인 기준 셀(RED_AUDIENCE) LUT
   rowsDone: Record<LUTPieceType, Uint8Array>;       // 행별 완료 여부 (1 = 계산 끝남)
   result: RobotBallisticsResult | null;             // READY일 때만
+  fromCache: boolean;                               // 캐시에서 불러온 결과인지
 }
 
 export interface LUTManagerOptions {
@@ -69,6 +72,7 @@ export interface LUTManagerOptions {
   searchSamples?: number;  // v0 후보당 샘플 수 (기본 20000)
   seed?: number;           // 기준 시드 (기본 DEFAULT_BALLISTICS_SEED)
   rowsPerJob?: number;     // 행 묶음 크기 (기본 4행 = 576격자)
+  cache?: LUTCache | null; // LUT 캐시 (없으면 매번 생성)
   onChange?: (robotId: LUTRobotId) => void; // 상태 / 진행 변화마다 (GUI가 rAF로 모아서 갱신)
 }
 
@@ -130,6 +134,7 @@ interface RobotRun {
   cellsCompleted: number;
   jobProgress: Map<number, number>;   // 실행 중인 행 작업별 진행 격자 수
   result: RobotBallisticsResult | null;
+  fromCache: boolean;
 }
 
 const perPiece = <T>(make: () => T): Record<LUTPieceType, T> => ({ POLLEN: make(), NECTAR: make() });
@@ -152,6 +157,7 @@ function emptyRun(generation: number): RobotRun {
     cellsCompleted: 0,
     jobProgress: new Map(),
     result: null,
+    fromCache: false,
   };
 }
 
@@ -164,6 +170,7 @@ export class LUTManager {
   private readonly seed: number;
   private readonly rowsPerJob: number;
   private readonly onChange: (robotId: LUTRobotId) => void;
+  private readonly cache: LUTCache | null;
   private readonly runs: Record<LUTRobotId, RobotRun> = { robot1: emptyRun(0), robot2: emptyRun(0) };
   private searchQueue: Job[] = [];
   private rowQueue: Job[] = [];
@@ -176,6 +183,7 @@ export class LUTManager {
     this.seed = options.seed ?? DEFAULT_BALLISTICS_SEED;
     this.rowsPerJob = Math.max(1, Math.floor(options.rowsPerJob ?? DEFAULT_LUT_ROWS_PER_JOB));
     this.onChange = options.onChange ?? (() => {});
+    this.cache = options.cache ?? null;
     const poolSize = Math.max(1, Math.floor(options.poolSize ?? defaultLUTPoolSize()));
     // 풀은 관리자 수명 동안 재사용 (Worker 강제 종료 / 재생성 없음)
     this.slots = Array.from({ length: poolSize }, () => {
@@ -215,12 +223,9 @@ export class LUTManager {
     next.key = key;
     next.config = { ...req.config, sweetSpot: snapSweetSpot(req.config.sweetSpot) };
     next.robotSize = { length: req.robotSize.length, width: req.robotSize.width };
-    const seeds = robotLUTSeeds(this.seed);
-    for (const pieceType of PIECE_TYPES) {
-      this.searchQueue.push(this.makeJob('search', robotId, next, pieceType, this.searchSamples, seeds[pieceType].search));
-    }
     this.onChange(robotId);
-    this.dispatch();
+    if (this.cache) this.lookupCache(robotId, next, this.cache);
+    else this.enqueueSearches(robotId, next);
   }
 
   /** 진행 중인 생성을 멈춘다 (CANCELLED). 진행 중이 아니면 아무것도 하지 않음 */
@@ -247,6 +252,7 @@ export class LUTManager {
       reference: run.reference,
       rowsDone: run.rowsDone,
       result: run.result,
+      fromCache: run.fromCache,
     };
   }
 
@@ -279,6 +285,44 @@ export class LUTManager {
     this.searchQueue = this.searchQueue.filter(job => job.robotId !== robotId);
     this.rowQueue = this.rowQueue.filter(job => job.robotId !== robotId);
     return run;
+  }
+
+  private enqueueSearches(robotId: LUTRobotId, run: RobotRun): void {
+    const seeds = robotLUTSeeds(this.seed);
+    for (const pieceType of PIECE_TYPES) {
+      this.searchQueue.push(this.makeJob('search', robotId, run, pieceType, this.searchSamples, seeds[pieceType].search));
+    }
+    this.dispatch();
+  }
+
+  // 캐시 조회 (비동기, 상태는 QUEUED 유지). 조회가 끝났을 때 그 사이 재요청 / 취소 / 정리로 실행이 바뀌었으면 결과를 버린다.
+  private lookupCache(robotId: LUTRobotId, run: RobotRun, cache: LUTCache): void {
+    const settle = (entry: LUTCacheEntry | null) => {
+      if (this.disposed || this.runs[robotId] !== run || run.state !== 'QUEUED') return;
+      if (entry) this.applyCached(robotId, run, entry);
+      else this.enqueueSearches(robotId, run);
+    };
+    let pending: Promise<LUTCacheEntry | null>;
+    try {
+      pending = cache.get(run.key!);
+    } catch {
+      pending = Promise.resolve(null);
+    }
+    pending.then(settle, () => settle(null));
+  }
+
+  private applyCached(robotId: LUTRobotId, run: RobotRun, entry: LUTCacheEntry): void {
+    for (const type of PIECE_TYPES) {
+      run.searched[type] = true;
+      run.v0[type] = entry.v0[type];
+      run.hitRate[type] = entry.sweetSpotHitRate[type];
+      run.reference[type] = entry.reference[type];
+      run.rowsDone[type].fill(1);
+      run.rowsRemaining[type] = 0;
+    }
+    run.cellsCompleted = PIECE_TYPES.length * CELLS_PER_PIECE;
+    run.fromCache = true;
+    this.completeIfDone(robotId);
   }
 
   private makeJob(kind: Job['kind'], robotId: LUTRobotId, run: RobotRun, pieceType: LUTPieceType, samples: number, seed: number): Job {
@@ -406,5 +450,14 @@ export class LUTManager {
     };
     run.state = 'READY';
     this.onChange(robotId);
+    if (this.cache && !run.fromCache && run.key) {
+      // 저장 실패는 무시 (다음에 다시 생성하면 됨)
+      const entry: LUTCacheEntry = { v0: { ...run.v0 }, sweetSpotHitRate: { ...run.hitRate }, reference: run.reference };
+      try {
+        this.cache.put(run.key, entry).catch(() => {});
+      } catch {
+        // 동기 예외도 무시
+      }
+    }
   }
 }
