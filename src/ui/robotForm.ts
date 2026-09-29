@@ -6,10 +6,10 @@
 //   최대 각가속도 0.1 ~ 300 rad/s², 최대 적재 수 정수 1 ~ 4, 딜레이 · 준비 시간 · 투입 간격 정수 0 ~ 5000 ms,
 //   허용 조준 오차 0.1 ~ 45°, 터렛 한계 −180 ~ 180° (왼쪽 ≠ 오른쪽), 팀 번호 숫자 0 ~ 5자리, 팀명 24자까지.
 // - 09-9b 확정: 발사구 지상고 1 ~ 50 in, 발사각 5 ~ 85°, 발사구 오프셋 −18 ~ 18 in, 속도 편차 0 ~ 20 %, 방위 · 피치 편차 0 ~ 10°,
-//   흡입 구역 offset ± 변 길이 / 2, width 0.5 ~ 36 in, depth 0.25 ~ 12 in, 구역 0 ~ 8개.
+//   흡입 구역 offset ± 변 길이 / 2, width 3.6 ~ 36 in(가장 큰 기물 NECTAR 직경부터, 09-9c), depth 0.25 ~ 12 in, 구역 0 ~ 8개.
 
 import { DEFAULT_HEADING_NOISE_RAD, DEFAULT_PITCH_NOISE_RAD, DEFAULT_SHOOTER_BALLISTICS, DEFAULT_V0_NOISE_PERCENT } from '../core/ballistics';
-import { HIVE_RIM_Z } from '../core/collision';
+import { HIVE_RIM_Z, PIECE_PHYSICS } from '../core/collision';
 import type { BumperSide, BumperZone, RobotConfig } from '../core/types';
 import type { RobotId } from '../input/inputConfig';
 import { DISPLAY_DECIMALS, formatNumber, fromDisplay, parseNumberInput, toDisplay, unitLabel } from './units';
@@ -103,6 +103,8 @@ export const NUMBER_FIELDS: Readonly<Record<NumberFieldKey, NumberFieldSpec>> = 
 export const MAX_INTAKE_ZONES = 8;
 export const BUMPER_SIDES: readonly BumperSide[] = ['FRONT', 'BACK', 'LEFT', 'RIGHT'];
 export type ZoneField = 'offset' | 'width' | 'depth';
+/** 구역 폭 최소 = 가장 큰 기물(NECTAR) 직경 3.6 in: 기물보다 좁은 입구는 물리적으로 흡입 불가 (09-9c) */
+export const MIN_ZONE_WIDTH = 2 * Math.max(PIECE_PHYSICS.POLLEN.radius, PIECE_PHYSICS.NECTAR.radius);
 export const ZONE_FIELDS: readonly ZoneField[] = ['offset', 'width', 'depth'];
 
 /** 구역이 붙은 변의 길이: 앞 / 뒤 = 가로(width), 좌 / 우 = 세로(length) */
@@ -111,7 +113,7 @@ export function zoneSideLength(side: BumperSide, config: Pick<RobotConfig, 'widt
 }
 
 export function zoneFieldSpec(field: ZoneField, side: BumperSide, config: Pick<RobotConfig, 'width' | 'length'>): NumberFieldSpec {
-  if (field === 'width') return { kind: 'length', min: 0.5, max: 36 };
+  if (field === 'width') return { kind: 'length', min: MIN_ZONE_WIDTH, max: 36 };
   if (field === 'depth') return { kind: 'length', min: 0.25, max: 12 };
   const half = zoneSideLength(side, config) / 2;
   return { kind: 'length', min: -half, max: half };
@@ -122,7 +124,7 @@ export const zoneFieldKey = (index: number, field: ZoneField) => `zone.${index}.
 
 /** 새 구역 (구역 추가): FRONT, offset 0, 변 길이 × 1 in */
 export function newIntakeZone(config: Pick<RobotConfig, 'width' | 'length'>): BumperZone {
-  return { side: 'FRONT', offset: 0, width: Math.min(36, Math.max(0.5, config.width)), depth: 1 };
+  return { side: 'FRONT', offset: 0, width: Math.min(36, Math.max(MIN_ZONE_WIDTH, config.width)), depth: 1 };
 }
 
 // 범위 경계 비교 여유 (° ↔ rad 변환 부동소수점 오차: 45°를 입력하면 정확히 max와 같지 않을 수 있음)

@@ -119,7 +119,9 @@ describe('로봇 제원 폼 (09-9a)', () => {
     const body = { width: 18, length: 14 };
     expect(zoneFieldSpec('offset', 'FRONT', body)).toMatchObject({ min: -9, max: 9 });
     expect(zoneFieldSpec('offset', 'LEFT', body)).toMatchObject({ min: -7, max: 7 });
-    expect(zoneFieldSpec('width', 'BACK', body)).toMatchObject({ min: 0.5, max: 36 });
+    expect(zoneFieldSpec('width', 'BACK', body)).toMatchObject({ min: 3.6, max: 36 }); // NECTAR 직경 (09-9c)
+    expect(robotProfileIssues(writeZone(r1, 0, { width: 3.6 }))).toEqual([]);
+    expect(robotProfileIssues(writeZone(r1, 0, { width: 3.5 })).map(i => i.code)).toEqual(['FIELD_zone.0.width']); // POLLEN(2.8)은 들어가도 NECTAR는 불가
     expect(zoneFieldSpec('depth', 'RIGHT', body)).toMatchObject({ min: 0.25, max: 12 });
     expect(newIntakeZone(body)).toEqual({ side: 'FRONT', offset: 0, width: 18, depth: 1 });
     const shifted = writeZone(r1, 0, { offset: 10 }); // 가로 18 in → ±9 밖
