@@ -120,7 +120,7 @@ describe('config 창 초안 / 적용 (09-8a)', () => {
 
   it('G. (09-9a) COPY TO: 원본 초안 → 상대 탭 초안 (팀 번호 / 팀명 유지, 상대 탭 틀린 글자 지움), 원본이 틀리면 불가', () => {
     let s = initialDrafts(defaults);
-    s = editDraft(s, 'robot1', { teamNumber: '19049', teamName: 'Bees', config: { ...defaults.robot1.config, width: 14 } });
+    s = editDraft(s, 'robot1', { teamNumber: '19049', teamName: 'Bees', config: { ...defaults.robot1.config, width: 14 }, ballistics: defaults.robot1.ballistics });
     s = editDraft(s, 'robot2', { ...defaults.robot2, teamNumber: '24909' });
     s = setFieldText(s, 'robot2', 'maxSpeed', 'fast');
     const copied = copyRobotTab(s, 'robot1');

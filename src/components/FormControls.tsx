@@ -5,7 +5,7 @@ import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { t } from '../ui/i18n';
 import type { Language } from '../ui/i18n';
-import { checkText, fieldUnit, formatBound, formatField, parseNumberField } from '../ui/robotForm';
+import { checkNumber, checkText, displayRange, fieldUnit, formatField, parseNumberField } from '../ui/robotForm';
 import type { FieldError, NumberFieldSpec, TextFieldKey } from '../ui/robotForm';
 import type { LengthUnit } from '../ui/units';
 
@@ -66,7 +66,8 @@ function fieldErrorText(lang: Language, error: FieldError, spec?: NumberFieldSpe
     case 'RANGE': {
       const u = spec ? fieldUnit(spec, unit) : '';
       const suffix = !u ? '' : u === '°' || u === '%' ? u : ` ${u}`;
-      return t(lang, 'form.range', { min: spec ? formatBound(spec, error.min, unit) : error.min, max: spec ? formatBound(spec, error.max, unit) : error.max, unit: suffix });
+      const [min, max] = spec ? displayRange(spec, unit) : [String(error.min), String(error.max)];
+      return t(lang, 'form.range', { min, max, unit: suffix });
     }
   }
 }
@@ -88,7 +89,7 @@ function FieldShell({ label, error, children, id }: { label: string; error: stri
 }
 
 /** 숫자 칸 */
-export function NumberField({ id, label, spec, value, invalidText, unit, lang, disabled, onValue, onInvalid }: {
+export function NumberField({ id, label, spec, value, invalidText, unit, lang, disabled, checkValue, onValue, onInvalid }: {
   id: string;
   label: string;
   spec: NumberFieldSpec;
@@ -97,13 +98,15 @@ export function NumberField({ id, label, spec, value, invalidText, unit, lang, d
   unit: LengthUnit;
   lang: Language;
   disabled?: boolean;
+  checkValue?: boolean;          // 저장된 값 자체도 범위 검사 (범위가 다른 칸에 따라 바뀌는 흡입 구역 offset 등)
   onValue: (value: number) => void;
   onInvalid: (text: string) => void;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   const shown = editing ?? invalidText ?? formatField(spec, value, unit);
   const parsed = invalidText !== undefined ? parseNumberField(spec, invalidText, unit) : null;
-  const error = parsed && !parsed.ok ? fieldErrorText(lang, parsed.error, spec, unit) : null;
+  const valueError = invalidText === undefined && checkValue ? checkNumber(spec, value) : null;
+  const error = parsed && !parsed.ok ? fieldErrorText(lang, parsed.error, spec, unit) : valueError ? fieldErrorText(lang, valueError, spec, unit) : null;
   const u = fieldUnit(spec, unit);
   return (
     <FieldShell label={label} error={error} id={id}>

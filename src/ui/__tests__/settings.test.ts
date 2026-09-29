@@ -50,7 +50,7 @@ describe('SETTINGS / 자동 보관 (09-8b)', () => {
   it('B. 저장 → 복원 왕복 (설정 + 적용한 로봇 / 시나리오), 입력 출처는 보관하지 않음', () => {
     const applied = {
       ...defaults,
-      robot1: { teamNumber: '19049', teamName: 'Bumblebees', config: { ...defaults.robot1.config, maxSpeed: 72 } },
+      robot1: { teamNumber: '19049', teamName: 'Bumblebees', config: { ...defaults.robot1.config, maxSpeed: 72 }, ballistics: { ...defaults.robot1.ballistics, shooterPitch: 1 } },
       scenario: { allianceColor: 'BLUE' as const, flowerPiecesCount: [4, 3, 2, 1] as [number, number, number, number] },
     };
     const text = serializeStoredConfig({ settings: custom, applied });
@@ -95,7 +95,7 @@ describe('SETTINGS / 자동 보관 (09-8b)', () => {
     // 없는 항목 채우기: 팀명이 없던 저장값 → 기본값(빈 팀명)으로 채우고 나머지 유지, 슬롯 id 강제
     const noName = { robot1: { teamNumber: '19049', config: { ...defaults.robot1.config, maxSpeed: 80, id: 'robot2' } }, robot2: defaults.robot2, scenario: defaults.scenario };
     const filled = parseStoredConfig(wrap(noName), defaults).applied;
-    expect(filled?.robot1).toEqual({ teamNumber: '19049', teamName: '', config: { ...defaults.robot1.config, maxSpeed: 80 } });
+    expect(filled?.robot1).toEqual({ teamNumber: '19049', teamName: '', config: { ...defaults.robot1.config, maxSpeed: 80 }, ballistics: defaults.robot1.ballistics }); // 09-9a 저장값(탄도 없음)도 유지
     // 09-8b 형식 (RobotConfig를 프로필 없이 저장) → 기본 프로필
     expect(parseStoredConfig(wrap({ robot1: defaults.robot1.config, robot2: defaults.robot2.config, scenario: defaults.scenario }), defaults).applied).toEqual(defaults);
     // 모양 맞추기

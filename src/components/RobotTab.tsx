@@ -1,16 +1,31 @@
 // 로봇 제원 탭 R1 / R2 (명세서 3.8 로봇 제원 탭, 09-9a): 팀 / 하드웨어 / 인테이크 / 슈터 / FLOWER 리프트 + COPY TO.
 // 값은 초안(config 창 초안 / 적용 규칙)에만 들어가고 APPLY로 확정한다. 경기가 있는 동안 모든 칸 읽기 전용.
-// 인테이크 구역 편집기와 슈터 탄도(발사구 지상고 / 발사각 / 오프셋 / 편차)는 09-9b, 스윗스팟 / LUT는 09-10.
-import { Copy } from 'lucide-react';
+// 09-9b: 맨 위 로봇 미리보기, 흡입 구역 편집기(구역별 면 / 위치 / 폭 / 깊이, 추가 · 삭제, 프리셋 FRONT / ANY),
+// 슈터 탄도(발사구 지상고 / 발사각 / 오프셋 + 고급 설정의 편차 3종). 스윗스팟 / LUT는 09-10.
+import { Copy, Plus, Trash2 } from 'lucide-react';
+import { createIntakeZonePreset } from '../core/collision';
+import type { BumperSide } from '../core/types';
 import type { RobotId } from '../input/inputConfig';
 import { t } from '../ui/i18n';
 import type { Language, MessageKey } from '../ui/i18n';
-import { NUMBER_FIELDS, TURRET_PRESETS, readNumber, writeNumber } from '../ui/robotForm';
-import type { NumberFieldKey, RobotFieldKey, RobotProfile } from '../ui/robotForm';
-import { formatQuantity } from '../ui/units';
+import {
+  BUMPER_SIDES,
+  MAX_INTAKE_ZONES,
+  NUMBER_FIELDS,
+  TURRET_PRESETS,
+  ZONE_FIELDS,
+  newIntakeZone,
+  readNumber,
+  writeNumber,
+  writeZone,
+  zoneFieldKey,
+  zoneFieldSpec,
+} from '../ui/robotForm';
+import type { NumberFieldKey, RobotProfile } from '../ui/robotForm';
 import type { LengthUnit } from '../ui/units';
 import { robotLabel } from '../ui/mainScreenModel';
 import { NumberField, Section, Segmented, TextField, Toggle } from './FormControls';
+import RobotPreview from './RobotPreview';
 
 export interface RobotTabProps {
   robotId: RobotId;
@@ -20,8 +35,8 @@ export interface RobotTabProps {
   lang: Language;
   locked: boolean;
   canCopy: boolean;
-  /** 초안 편집: 새 프로필(없으면 값은 그대로) + 칸 키가 있으면 그 칸의 틀린 글자(null = 지움) */
-  onEdit: (profile: RobotProfile | null, key: RobotFieldKey | null, invalidText: string | null) => void;
+  /** 초안 편집: 새 프로필(없으면 값은 그대로) + 칸 키가 있으면 그 칸의 틀린 글자(null = 지움) + 함께 지울 칸 글자 */
+  onEdit: (profile: RobotProfile | null, key: string | null, invalidText: string | null, clearKeys?: readonly string[]) => void;
   onCopy: () => void;
 }
 
@@ -40,6 +55,12 @@ const LABELS: Readonly<Record<NumberFieldKey, MessageKey>> = {
   turretRight: 'robot.turretRight',
   flowerSetupDelay: 'robot.flowerSetupDelay',
   flowerDropDelay: 'robot.flowerDropDelay',
+  launchHeight: 'robot.launchHeight',
+  shooterPitch: 'robot.shooterPitch',
+  shooterOffset: 'robot.shooterOffset',
+  v0NoisePercent: 'robot.v0NoisePercent',
+  headingNoiseRad: 'robot.headingNoiseRad',
+  pitchNoiseRad: 'robot.pitchNoiseRad',
 };
 
 export default function RobotTab({ robotId, profile, fieldText, unit, lang, locked, canCopy, onEdit, onCopy }: RobotTabProps) {
@@ -63,9 +84,13 @@ export default function RobotTab({ robotId, profile, fieldText, unit, lang, lock
   // 칸 글자와 무관한 편집 (토글 / 형식 전환)
   const setConfig = (patch: Partial<RobotProfile['config']>) => onEdit({ ...profile, config: { ...config, ...patch } }, null, null);
   const turretSame = config.turretType === 'TURRET' && config.turretRange[0] === config.turretRange[1] && !fieldText.turretLeft && !fieldText.turretRight;
+  // 구역 목록 구조가 바뀌면(추가 / 삭제 / 프리셋) 번호가 밀리므로 구역 칸의 틀린 글자는 모두 지움
+  const zoneTextKeys = Object.keys(fieldText).filter(k => k.startsWith('zone.'));
+  const setZones = (intakeZones: RobotProfile['config']['intakeZones']) => onEdit({ ...profile, config: { ...config, intakeZones } }, null, null, zoneTextKeys);
 
   return (
     <div className="settings-tab robot-tab">
+      <RobotPreview config={config} shooterOffset={profile.ballistics.shooterOffset} lang={lang} />
       <Section title={t(lang, 'robot.section.team')}>
         <div className="form-grid">
           <TextField
@@ -102,13 +127,60 @@ export default function RobotTab({ robotId, profile, fieldText, unit, lang, lock
       <Section title={t(lang, 'robot.section.intake')}>
         <div className="form-grid">{num('intakeDelay')}</div>
         <Toggle checked={config.canIntakeNectar} disabled={locked} label={t(lang, 'robot.canIntakeNectar')} onChange={v => setConfig({ canIntakeNectar: v })} />
-        <div className="form-readonly">
+        <div className="zone-list">
           <span className="form-label">{t(lang, 'robot.intakeZones')}</span>
-          {config.intakeZones.length === 0 ? (
-            <span className="form-warn">{t(lang, 'robot.noIntakeZones')}</span>
-          ) : (
-            <span>{config.intakeZones.map(z => `${z.side} ${formatQuantity('length', z.width, unit)} × ${formatQuantity('length', z.depth, unit)}`).join(' · ')}</span>
-          )}
+          {config.intakeZones.length === 0 && <span className="form-warn">{t(lang, 'robot.noIntakeZones')}</span>}
+          {config.intakeZones.map((zone, i) => (
+            <div className="zone-row" key={i}>
+              <div className="zone-head">
+                <span className="zone-title">{t(lang, 'robot.zone.title', { n: i + 1 })}</span>
+                <Segmented<BumperSide>
+                  ariaLabel={t(lang, 'robot.zone.title', { n: i + 1 })}
+                  value={zone.side}
+                  options={BUMPER_SIDES}
+                  label={v => t(lang, `robot.side.${v}`)}
+                  disabled={() => locked}
+                  onChange={v => onEdit(writeZone(profile, i, { side: v }), zoneFieldKey(i, 'offset'), null)}
+                />
+                <button type="button" className="icon-button zone-remove" disabled={locked} title={t(lang, 'robot.zone.remove', { n: i + 1 })} aria-label={t(lang, 'robot.zone.remove', { n: i + 1 })} onClick={() => setZones(config.intakeZones.filter((_, j) => j !== i))}>
+                  <Trash2 />
+                </button>
+              </div>
+              <div className="form-grid zone-fields">
+                {ZONE_FIELDS.map(field => (
+                  <NumberField
+                    key={field}
+                    id={`${robotId}-zone-${i}-${field}`}
+                    label={t(lang, `robot.zone.${field}`)}
+                    spec={zoneFieldSpec(field, zone.side, config)}
+                    value={zone[field]}
+                    invalidText={fieldText[zoneFieldKey(i, field)]}
+                    unit={unit}
+                    lang={lang}
+                    disabled={locked}
+                    checkValue
+                    onValue={v => onEdit(writeZone(profile, i, { [field]: v }), zoneFieldKey(i, field), null)}
+                    onInvalid={text => onEdit(null, zoneFieldKey(i, field), text)}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+          <div className="settings-row">
+            <button type="button" className="config-button" disabled={locked || config.intakeZones.length >= MAX_INTAKE_ZONES} onClick={() => setZones([...config.intakeZones, newIntakeZone(config)])}>
+              <Plus />
+              {t(lang, 'robot.zone.add')}
+            </button>
+            <div className="preset-buttons">
+              <span className="settings-note">{t(lang, 'robot.zone.presets')}</span>
+              {(['FRONT', 'ANY'] as const).map(p => (
+                <button key={p} type="button" className="config-button" disabled={locked} onClick={() => setZones(createIntakeZonePreset(p, config))}>
+                  {p}
+                </button>
+              ))}
+            </div>
+          </div>
+          <p className="settings-note">{t(lang, 'robot.zone.hint')}</p>
         </div>
       </Section>
 
@@ -160,7 +232,21 @@ export default function RobotTab({ robotId, profile, fieldText, unit, lang, lock
             {turretSame && <span className="form-error">{t(lang, 'form.turretWidth')}</span>}
           </>
         )}
-        <div className="form-grid">{num('shooterDelay')}</div>
+        <div className="form-grid">
+          {num('launchHeight')}
+          {num('shooterPitch')}
+          {num('shooterOffset')}
+          {num('shooterDelay')}
+        </div>
+        <details className="advanced">
+          <summary>{t(lang, 'robot.advanced')}</summary>
+          <p className="settings-note">{t(lang, 'robot.advancedHint')}</p>
+          <div className="form-grid">
+            {num('v0NoisePercent')}
+            {num('headingNoiseRad')}
+            {num('pitchNoiseRad')}
+          </div>
+        </details>
       </Section>
 
       <Section title={t(lang, 'robot.section.lift')}>

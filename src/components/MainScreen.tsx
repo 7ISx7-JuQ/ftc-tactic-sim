@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { AppController } from '../app/appController';
 import type { AppStatus, LiftToast } from '../app/appController';
-import { DEFAULT_DRAFT_VALUES, buildMatchSetup } from '../app/defaultSetup';
+import { DEFAULT_DRAFT_VALUES, setupFromDrafts } from '../app/defaultSetup';
 import { DT, MATCH_TICKS } from '../core/simulationEngine';
 import { t } from '../ui/i18n';
 import { DEFAULT_SETTINGS, browserSettingsStorage, loadStoredConfig, saveStoredConfig } from '../ui/settings';
@@ -30,7 +30,7 @@ import {
   resetTabDraft,
   tabStatus,
 } from '../ui/configDraft';
-import type { ConfigDrafts, ConfigTab, DraftTab, DraftValues, TabStatus } from '../ui/configDraft';
+import type { ConfigDrafts, ConfigTab, DraftTab, TabStatus } from '../ui/configDraft';
 import ConfigPanel from './ConfigPanel';
 import ConfigRail from './ConfigRail';
 import ConfirmDialog from './ConfirmDialog';
@@ -43,13 +43,13 @@ import ResultPopup from './ResultPopup';
 import ScrubberBar from './ScrubberBar';
 import SettingsTab from './SettingsTab';
 import RobotTab from './RobotTab';
-import type { RobotFieldKey, RobotProfile } from '../ui/robotForm';
+import type { RobotProfile } from '../ui/robotForm';
 import type { ScrubberActions } from './ScrubberBar';
 import './MainScreen.css';
 
 const LAYOUT_STYLE = layoutCssVars(false) as CSSProperties;
 const LAYOUT_STYLE_OPEN = layoutCssVars(true) as CSSProperties;
-const setupOf = (v: DraftValues) => buildMatchSetup(v.robot1.config, v.robot2.config, v.scenario);
+const setupOf = setupFromDrafts;
 const TOAST_VISIBLE_MS = 1500; // 경고 토스트 표시 시간 (그 뒤 흐려지며 사라짐)
 const TOAST_FADE_MS = 300;
 // 설정 자동 보관 (09-8b): 앱 시작 시 한 번 읽음 (SETTINGS + 마지막으로 적용한 로봇 / 시나리오)
@@ -180,11 +180,12 @@ export default function MainScreen() {
     setDrafts(resetTabDraft(drafts, configTab, DEFAULT_DRAFT_VALUES));
   };
   // ---------------- 로봇 탭 (09-9a): 초안 편집 / 틀린 입력 글자 / COPY TO ----------------
-  const editRobot = (tab: 'robot1' | 'robot2') => (profile: RobotProfile | null, key: RobotFieldKey | null, invalidText: string | null) => {
+  const editRobot = (tab: 'robot1' | 'robot2') => (profile: RobotProfile | null, key: string | null, invalidText: string | null, clearKeys: readonly string[] = []) => {
     if (locked) return;
     setConfigNotice(null); // 고치기 시작하면 START 막힘 / 복사 안내는 지움
     setDrafts(d => {
       let next = profile ? editDraft(d, tab, profile) : d;
+      for (const k of clearKeys) next = setFieldText(next, tab, k, null);
       if (key) next = setFieldText(next, tab, key, invalidText);
       return next;
     });

@@ -4,7 +4,8 @@
 import { bearingTo, isAimWithinShooterRange } from '../core/ballistics';
 import { createIntakeZonePreset, hiveCellAimPoint } from '../core/collision';
 import { angleDifference } from '../core/kinematics';
-import type { RobotConfig, ScenarioConfig, ShotProbabilityResolver } from '../core/types';
+import type { RobotConfig, ScenarioConfig, ShooterBallistics, ShotProbabilityResolver } from '../core/types';
+import { DEFAULT_PROFILE_BALLISTICS } from '../ui/robotForm';
 import type { MatchSetup } from './appController';
 import type { DraftValues } from '../ui/configDraft';
 
@@ -53,14 +54,31 @@ export function createDefaultSetup(alliance: 'RED' | 'BLUE'): MatchSetup {
   return buildMatchSetup(robot1, robot2, { allianceColor: alliance });
 }
 
-/** config 창에서 적용된 로봇 제원 / 시나리오로 경기 설정 (09-8a: 판정 함수는 간이 판정, LUT 판정은 09-10) */
-export function buildMatchSetup(r1Config: RobotConfig, r2Config: RobotConfig, scenario: ScenarioConfig): MatchSetup {
-  return { r1Config, r2Config, shotResolver: createSimpleResolver(r1Config, r2Config), scenario };
+/**
+ * config 창에서 적용된 로봇 제원 / 시나리오 / 슈터 탄도로 경기 설정 (09-8a: 판정 함수는 간이 판정, LUT 판정은 09-10).
+ * 09-9b: 탄도(발사구 높이 dz / 발사각 / 오프셋)를 엔진 비행 처리에 넘긴다. 사출 속도 v0는 LUT 전까지 엔진 기본 계산
+ */
+export function buildMatchSetup(
+  r1Config: RobotConfig,
+  r2Config: RobotConfig,
+  scenario: ScenarioConfig,
+  ballistics?: Record<'robot1' | 'robot2', Pick<ShooterBallistics, 'dz' | 'shooterPitch' | 'shooterOffset'>>,
+): MatchSetup {
+  const shooters = ballistics && {
+    robot1: { dz: ballistics.robot1.dz, shooterPitch: ballistics.robot1.shooterPitch, shooterOffset: ballistics.robot1.shooterOffset },
+    robot2: { dz: ballistics.robot2.dz, shooterPitch: ballistics.robot2.shooterPitch, shooterOffset: ballistics.robot2.shooterOffset },
+  };
+  return { r1Config, r2Config, shotResolver: createSimpleResolver(r1Config, r2Config), scenario, ...(shooters ? { shooters } : {}) };
 }
 
-/** config 창 탭 기본값 (RESET TAB / 첫 실행): 팀 번호 / 팀명 없음 + 고정 제원 + RED 기본 시나리오. 기본 탄도 / 스윗스팟은 09-9b / 09-10 */
+/** 적용 값(프로필 + 시나리오) → 경기 설정 */
+export function setupFromDrafts(values: DraftValues): MatchSetup {
+  return buildMatchSetup(values.robot1.config, values.robot2.config, values.scenario, { robot1: values.robot1.ballistics, robot2: values.robot2.ballistics });
+}
+
+/** config 창 탭 기본값 (RESET TAB / 첫 실행): 팀 번호 / 팀명 없음 + 고정 제원 + RED 기본 시나리오 + 기본 탄도(09-9b). 스윗스팟은 09-10 */
 export const DEFAULT_DRAFT_VALUES: Readonly<DraftValues> = {
-  robot1: { teamNumber: '', teamName: '', config: DEFAULT_ROBOT_CONFIGS.robot1 },
-  robot2: { teamNumber: '', teamName: '', config: DEFAULT_ROBOT_CONFIGS.robot2 },
+  robot1: { teamNumber: '', teamName: '', config: DEFAULT_ROBOT_CONFIGS.robot1, ballistics: DEFAULT_PROFILE_BALLISTICS },
+  robot2: { teamNumber: '', teamName: '', config: DEFAULT_ROBOT_CONFIGS.robot2, ballistics: DEFAULT_PROFILE_BALLISTICS },
   scenario: { allianceColor: 'RED' },
 };

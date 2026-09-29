@@ -1,8 +1,17 @@
 // 로봇 제원 탭 폼 규칙 (명세서 3.8 로봇 제원 탭, 09-9a)
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_DRAFT_VALUES } from '../../app/defaultSetup';
+import { getBumperZoneOBB } from '../../core/collision';
+import type { BumperSide } from '../../core/types';
 import {
+  MAX_INTAKE_ZONES,
   NUMBER_FIELDS,
+  displayRange,
+  newIntakeZone,
+  previewAimSector,
+  previewZoneRect,
+  writeZone,
+  zoneFieldSpec,
   TURRET_PRESETS,
   checkText,
   copyRobotProfile,
@@ -74,12 +83,72 @@ describe('로봇 제원 폼 (09-9a)', () => {
   });
 
   it('F. COPY TO: 팀 번호 / 팀명 / 슬롯 id / 이름은 대상 유지, 나머지 복사 (깊은 복사)', () => {
-    const source = { teamNumber: '19049', teamName: 'Bees', config: { ...r1.config, width: 14, maxSpeed: 80 } };
+    const source = { teamNumber: '19049', teamName: 'Bees', config: { ...r1.config, width: 14, maxSpeed: 80 }, ballistics: { ...r1.ballistics, dz: 30 } };
     const target = { ...DEFAULT_DRAFT_VALUES.robot2, teamNumber: '24909', teamName: 'Hornets' };
     const copied = copyRobotProfile(source, target, 'robot2');
     expect(copied.teamNumber === '24909' && copied.teamName === 'Hornets').toBe(true);
     expect(copied.config).toEqual({ ...source.config, id: 'robot2', name: 'R2' });
+    expect(copied.ballistics).toEqual(source.ballistics); // (09-9b) 탄도도 복사
     copied.config.intakeZones[0].width = 1;
     expect(source.config.intakeZones[0].width).toBe(18);
+  });
+
+  it('G. (09-9b) 슈터 탄도 칸: 발사구 지상고 ↔ dz, 발사각 / 오프셋 / 편차 범위, 오류 범위 표시는 화면 값 순서', () => {
+    expect(r1.ballistics).toMatchObject({ dz: 53.5 - 14, shooterPitch: Math.PI / 3, shooterOffset: 0, v0NoisePercent: 0.02 });
+    expect(parse('launchHeight', '14')).toEqual({ ok: true, value: 39.5 });
+    expect(parse('launchHeight', '50.8', 'cm')).toEqual({ ok: true, value: 53.5 - 20 });
+    expect(parse('launchHeight', '0.5')).toMatchObject({ ok: false, error: { code: 'RANGE' } });
+    expect(parse('launchHeight', '50.5')).toMatchObject({ ok: false, error: { code: 'RANGE' } });
+    expect(displayRange(NUMBER_FIELDS.launchHeight, 'in')).toEqual(['1.00', '50.00']); // dz 범위를 뒤집어 h로 표시
+    expect(formatField(NUMBER_FIELDS.launchHeight, 39.5, 'in')).toBe('14.00');
+    expect(parse('shooterPitch', '60')).toEqual({ ok: true, value: Math.PI / 3 });
+    expect(parse('shooterPitch', '4')).toMatchObject({ ok: false });
+    expect(parse('shooterPitch', '86')).toMatchObject({ ok: false });
+    expect(parse('shooterOffset', '-18')).toEqual({ ok: true, value: -18 });
+    expect(parse('shooterOffset', '19')).toMatchObject({ ok: false });
+    expect(parse('v0NoisePercent', '2')).toEqual({ ok: true, value: 0.02 });
+    expect(parse('v0NoisePercent', '25')).toMatchObject({ ok: false });
+    expect(parse('headingNoiseRad', '0')).toEqual({ ok: true, value: 0 });
+    expect(parse('pitchNoiseRad', '10.5')).toMatchObject({ ok: false });
+    const moved = writeNumber(r1, 'launchHeight', 30);
+    expect(readNumber(moved, 'launchHeight') === 30 && moved.config === r1.config && r1.ballistics.dz === 39.5).toBe(true);
+    expect(robotProfileIssues({ ...r1, ballistics: { ...r1.ballistics, shooterPitch: 1.6 } }).map(i => i.code)).toEqual(['FIELD_shooterPitch']);
+  });
+
+  it('H. (09-9b) 흡입 구역 칸: offset 범위 = ± 변 길이 / 2 (면 / 로봇 크기), 폭 / 깊이, 개수 0 ~ 8', () => {
+    const body = { width: 18, length: 14 };
+    expect(zoneFieldSpec('offset', 'FRONT', body)).toMatchObject({ min: -9, max: 9 });
+    expect(zoneFieldSpec('offset', 'LEFT', body)).toMatchObject({ min: -7, max: 7 });
+    expect(zoneFieldSpec('width', 'BACK', body)).toMatchObject({ min: 0.5, max: 36 });
+    expect(zoneFieldSpec('depth', 'RIGHT', body)).toMatchObject({ min: 0.25, max: 12 });
+    expect(newIntakeZone(body)).toEqual({ side: 'FRONT', offset: 0, width: 18, depth: 1 });
+    const shifted = writeZone(r1, 0, { offset: 10 }); // 가로 18 in → ±9 밖
+    expect(robotProfileIssues(shifted).map(i => i.code)).toEqual(['FIELD_zone.0.offset']);
+    expect(r1.config.intakeZones[0].offset).toBe(0);
+    const side = writeZone(r1, 0, { side: 'LEFT', offset: 8.5 }); // 세로 18 in → ±9 안
+    expect(robotProfileIssues(side)).toEqual([]);
+    const zonesOf = (n: number) => ({ ...r1, config: { ...r1.config, intakeZones: Array.from({ length: n }, () => newIntakeZone(r1.config)) } });
+    expect(robotProfileIssues(zonesOf(MAX_INTAKE_ZONES))).toEqual([]);
+    expect(robotProfileIssues(zonesOf(MAX_INTAKE_ZONES + 1)).map(i => i.code)).toEqual(['ZONE_COUNT']);
+    expect(robotProfileIssues({ ...r1, config: { ...r1.config, intakeZones: [] } })).toEqual([]); // 0개 허용 (흡입 불가 경고)
+    expect(robotProfileIssues(writeZone(r1, 0, { side: 'TOP' as BumperSide })).map(i => i.code)).toEqual(['FIELD_zone.0.offset']);
+    expect(robotProfileIssues(writeZone(r1, 0, { depth: 0.1 })).map(i => i.code)).toEqual(['FIELD_zone.0.depth']);
+  });
+
+  it('I. (09-9b) 미리보기 기하 = 엔진 getBumperZoneOBB (헤딩 0: 앞 = +x, 오른쪽 = +y), 조준 부채꼴', () => {
+    const config = { width: 14, length: 18 };
+    const body = { center: { x: 0, y: 0 }, axes: [{ x: 1, y: 0 }, { x: 0, y: 1 }] as [{ x: number; y: number }, { x: number; y: number }], halfExtents: [9, 7] as [number, number] };
+    for (const side of ['FRONT', 'BACK', 'LEFT', 'RIGHT'] as const) {
+      for (const offset of [0, 3, -5, 20, -20]) { // ±20: 변 밖 → 엔진처럼 양끝으로 제한
+        const zone = { side, offset, width: 4, depth: 2 };
+        const rect = previewZoneRect(zone, config)!;
+        const obb = getBumperZoneOBB(body, zone)!;
+        expect([rect.fwd, rect.right, rect.fwdSize / 2, rect.rightSize / 2]).toEqual([obb.center.x, obb.center.y, obb.halfExtents[0], obb.halfExtents[1]]);
+      }
+    }
+    expect(previewZoneRect({ side: 'FRONT', offset: 0, width: 0, depth: 1 }, config)).toBeNull();
+    expect(previewAimSector({ turretType: 'FIXED', turretRange: [0, 0], aimTolerance: 0.1 })).toEqual({ start: -0.1, end: 0.1 });
+    expect(previewAimSector({ turretType: 'TURRET', turretRange: [-1, 1], aimTolerance: 0.1 })).toEqual({ start: -1, end: 1 });
+    expect(previewAimSector({ turretType: 'TURRET', turretRange: [2.5, -2.5], aimTolerance: 0.1 })).toEqual({ start: 2.5, end: -2.5 + 2 * Math.PI }); // 후방
   });
 });
