@@ -1,6 +1,7 @@
 // 메인 화면 표시 규칙 (명세서 3.8 화면 구성, 09-6d): React 컴포넌트가 쓰는 순수 계산. DOM / React 비의존
 import type { AppStatus } from '../app/appController';
 import type { GamepadSlotStatus } from '../input/browserInput';
+import { formatMatchTime } from './units';
 
 // ------------------------------------------------------------
 // 화면 비례 단위 (명세서 3.8 기본 원칙): --u = min(창 폭 / 1366, 창 높이 / 650), 1u = 기준 화면에서 1 px.
@@ -73,17 +74,28 @@ export function timerIsEndgame(status: Pick<AppStatus, 'phase' | 'remainingSec'>
 }
 
 // ------------------------------------------------------------
-// 스크러버 줄 주 버튼 (09-6d: 기존 동작만 — 시작 / 일시정지 / 재개. 분기 / 재생 / 결과는 09-7)
+// 스크러버 줄 주 버튼 (명세서 3.8 스크러버 줄, 09-7a): 상태에 따라 하나
+//   경기 전 START / 회전 중 START 비활성 / 진행 중 PAUSE / 보는 틱 < 머리 BRANCH / 보는 틱 = 머리 + 미종료 RESUME
+//   재생 중에도 보는 틱 기준으로 RESUME / BRANCH (누르면 재생을 멈추고 그 동작). 종료 강조 / 결과 팝업 중과 종료 틱에서는 비활성
 // ------------------------------------------------------------
 
-export type MainButton = { kind: 'START' | 'PAUSE' | 'RESUME'; enabled: boolean };
+export type MainButton = { kind: 'START' | 'PAUSE' | 'RESUME' | 'BRANCH'; enabled: boolean };
 
-export function mainButton(status: Pick<AppStatus, 'phase' | 'loopState'>): MainButton {
+export function mainButton(
+  status: Pick<AppStatus, 'phase' | 'loopState' | 'canResume' | 'canBranch' | 'tick' | 'headTick' | 'matchEnded'>,
+): MainButton {
   if (status.phase === 'SETUP') return { kind: 'START', enabled: true };
   if (status.phase !== 'MATCH') return { kind: 'START', enabled: false }; // 회전 애니메이션 중
   if (status.loopState === 'RUNNING') return { kind: 'PAUSE', enabled: true };
-  if (status.loopState === 'PAUSED') return { kind: 'RESUME', enabled: true };
-  return { kind: 'PAUSE', enabled: false }; // 경기 종료 (결과 / 복기는 09-7)
+  if (status.canBranch) return { kind: 'BRANCH', enabled: true };
+  if (status.canResume) return { kind: 'RESUME', enabled: true };
+  // 비활성: 되감은 틱이지만 종료 강조 / 결과 팝업 중 → BRANCH, 종료된 경기의 마지막 틱 → BRANCH(되감아야 가능), 그 외 RESUME
+  return { kind: status.tick < status.headTick || status.matchEnded ? 'BRANCH' : 'RESUME', enabled: false };
+}
+
+/** 분기 확인창 문구 값: 보는 틱의 경기 시계, 삭제될 기록 길이 (초, 소수 1자리) */
+export function branchConfirmParams(viewTick: number, headTick: number, matchTicks: number, dt: number): { time: string; seconds: string } {
+  return { time: formatMatchTime(Math.max(0, (matchTicks - viewTick) * dt)), seconds: (Math.max(0, headTick - viewTick) * dt).toFixed(1) };
 }
 
 // ------------------------------------------------------------

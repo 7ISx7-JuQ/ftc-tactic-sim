@@ -190,6 +190,13 @@ describe('실시간 루프 (명세서 3.6)', () => {
     const done = harness(e);
     done.loop.start();
     assert(done.loop.state === 'ENDED' && done.sched.waiting === 0, 'start on a finished match -> ENDED immediately');
+    // (09-7) 종료 후 분기: 엔진을 종료 전 틱으로 되감으면 ENDED에서도 재개 → 다시 끝까지
+    e.scrubTo(MATCH_TICKS - 3);
+    h.loop.resume();
+    assert(h.loop.state === 'RUNNING' && h.events[h.events.length - 1][0] === 'RUNNING', 'ended loop resumes after the engine was rewound (branch after the end)');
+    h.frame(0);
+    h.frame(100);
+    assert(h.loop.state === 'ENDED' && e.currentTick === MATCH_TICKS && e.timeline.length === MATCH_TICKS + 1, 'branched run reaches the end again');
   }, TEST_TIMEOUT_MS);
 
   it('F. 틱마다 입력 1회 소비 / 프레임마다 폴링 1회 (소비 전)', () => {

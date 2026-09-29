@@ -390,3 +390,151 @@
   font-weight: 800;
   letter-spacing: 0.03em;
 }
+.main-screen .main-button.is-branch {
+  background: var(--accent);
+  color: #1a1204;
+}
+.main-screen .main-button.is-branch svg.lucide {
+  fill: none;
+}
+
+/* ---------------- 결과 팝업 (09-7a 기본형: 점수 집계표, 세부 디자인은 09-12) ---------------- */
+.result-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: rgba(10, 11, 14, 0.55);
+  backdrop-filter: blur(calc(var(--u) * 6));
+}
+.result-popup {
+  width: calc(var(--u) * 420);
+  padding: calc(var(--u) * 24);
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 16);
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: calc(var(--u) * 14);
+  box-shadow: 0 calc(var(--u) * 20) calc(var(--u) * 60) rgba(0, 0, 0, 0.5);
+}
+.result-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--u) * 6);
+  text-align: center;
+}
+.result-app {
+  font-size: calc(var(--u) * 12);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.result-title {
+  font-size: calc(var(--u) * 20);
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+.result-alliance {
+  padding: calc(var(--u) * 3) calc(var(--u) * 12);
+  border-radius: 999px;
+  color: #ffffff;
+  font-size: calc(var(--u) * 12);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+.result-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-bottom: calc(var(--u) * 10);
+  border-bottom: 1px solid var(--panel-border);
+}
+.result-total-label {
+  font-size: calc(var(--u) * 14);
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.result-total-value {
+  font-size: calc(var(--u) * 56);
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.result-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: calc(var(--u) * 16);
+}
+.result-table th {
+  text-align: left;
+  font-weight: 700;
+  padding: calc(var(--u) * 6) 0;
+}
+.result-table td {
+  text-align: right;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.result-table tr + tr th,
+.result-table tr + tr td {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.result-rp-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: calc(var(--u) * 13);
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-bottom: calc(var(--u) * 8);
+}
+.result-rp-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: calc(var(--u) * 8);
+}
+.result-rp-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--u) * 4);
+  min-height: calc(var(--u) * 40);
+  padding: 0 calc(var(--u) * 6);
+  border: 1px solid var(--panel-border);
+  border-radius: calc(var(--u) * 8);
+  font-size: calc(var(--u) * 11);
+  font-weight: 800;
+  color: var(--text-muted);
+  text-align: center;
+}
+.result-rp-card.is-achieved {
+  color: #ffffff;
+  border-color: var(--ok);
+  background: rgba(34, 197, 94, 0.15);
+}
+.main-screen .result-rp-card svg.lucide {
+  width: calc(var(--u) * 14);
+  height: calc(var(--u) * 14);
+  color: var(--ok);
+  stroke-width: 3;
+}
+.result-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: calc(var(--u) * 10);
+}
+.main-screen .result-button {
+  height: calc(var(--u) * 38);
+  padding: 0 calc(var(--u) * 18);
+  border-radius: calc(var(--u) * 8);
+  border: 1px solid var(--panel-border);
+  font-size: calc(var(--u) * 14);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+.main-screen .result-button.is-primary {
+  background: #e5e7eb;
+  color: #15171c;
+  border-color: #e5e7eb;
+}

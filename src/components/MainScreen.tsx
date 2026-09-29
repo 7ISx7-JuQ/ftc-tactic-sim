@@ -7,10 +7,12 @@ import type { CSSProperties } from 'react';
 import { AppController } from '../app/appController';
 import type { AppStatus } from '../app/appController';
 import { createDefaultSetup } from '../app/defaultSetup';
-import { toLanguage } from '../ui/i18n';
-import { fieldCanvasSize, layoutCssVars } from '../ui/mainScreenModel';
+import { DT, MATCH_TICKS } from '../core/simulationEngine';
+import { t, toLanguage } from '../ui/i18n';
+import { branchConfirmParams, fieldCanvasSize, layoutCssVars } from '../ui/mainScreenModel';
 import ConfigRail from './ConfigRail';
 import LeftPanel from './LeftPanel';
+import ResultPopup from './ResultPopup';
 import ScrubberBar from './ScrubberBar';
 import type { ScrubberActions } from './ScrubberBar';
 import './MainScreen.css';
@@ -68,22 +70,62 @@ export default function MainScreen() {
   }, []);
 
   const c = () => controllerRef.current;
+
+  // 확인창 (09-7a: 브라우저 기본 confirm 임시 사용 — 09-7b에서 필드 위 모달로 교체). 떠 있는 동안 단축키 끔
+  const ask = (message: string): boolean => {
+    const controller = c();
+    controller?.setShortcutsEnabled(false);
+    try {
+      return window.confirm(message);
+    } finally {
+      controller?.setShortcutsEnabled(true);
+    }
+  };
+
+  // 분기: 재생 중이면 멈춘 뒤 그 틱 기준으로 확인 (명세서 3.8 분기 확인창)
+  const branch = () => {
+    const controller = c();
+    if (!controller) return;
+    controller.stopPlayback();
+    const s = controller.status();
+    if (!s.canBranch) return;
+    if (ask(t(lang, 'confirm.branch', branchConfirmParams(s.tick, s.headTick, MATCH_TICKS, DT)))) controller.branch();
+  };
+
+  // NEW: 진행 중이면 먼저 일시정지하고 확인, 취소하면 일시정지 상태로 남음 (09-7 확정)
+  const newMatch = () => {
+    const controller = c();
+    if (!controller) return;
+    controller.pause();
+    controller.stopPlayback();
+    if (ask(t(lang, 'confirm.newMatch'))) controller.reset();
+  };
+
   const actions: ScrubberActions = {
     start: () => c()?.start(),
     pause: () => c()?.pause(),
     resume: () => c()?.resume(),
+    branch,
+    stepView: delta => c()?.stepView(delta),
+    togglePlayback: () => c()?.togglePlayback(),
+    setSpeed: speed => c()?.setPlaybackSpeed(speed),
     toggleView: () => c()?.setMatchView(status?.matchView === 'AUDIENCE' ? 'DRIVER' : 'AUDIENCE'),
-    newMatch: () => c()?.reset(), // 확인창은 09-7
+    newMatch,
+    openResult: () => c()?.openResult(),
   };
 
   return (
     <div className="main-screen" lang={lang} style={LAYOUT_STYLE}>
       {status && <LeftPanel status={status} lang={lang} />}
-      <div className="field-area" ref={areaRef}>
+      {/* 종료 강조 5초 중 필드를 누르면 건너뛰기 */}
+      <div className="field-area" ref={areaRef} onClick={() => c()?.skipHighlight()}>
         <canvas ref={canvasRef} className="field-canvas" />
       </div>
       {status && <ConfigRail status={status} lang={lang} />}
       {status && <ScrubberBar status={status} lang={lang} actions={actions} />}
+      {status?.endStage === 'RESULT' && status.result && (
+        <ResultPopup result={status.result} alliance={status.alliance} lang={lang} onReview={() => c()?.closeResult()} onRestart={newMatch} />
+      )}
     </div>
   );
 }

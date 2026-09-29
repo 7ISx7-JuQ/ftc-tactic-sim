@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { DT, ENDGAME_START_TICK, MATCH_TICKS } from '../../core/simulationEngine';
 import { FONT_FAMILY, canvasFont } from '../../renderer/fonts';
 import {
+  branchConfirmParams,
   DESIGN_HEIGHT_PX,
   DESIGN_WIDTH_PX,
   LAYOUT_U,
@@ -88,13 +89,25 @@ describe('B. 좌측 패널', () => {
 });
 
 describe('C. 스크러버 줄 / config 띠', () => {
-  it('주 버튼: 경기 전 START / 회전 중 비활성 / 진행 PAUSE / 일시정지 RESUME / 종료 비활성', () => {
-    expect(mainButton({ phase: 'SETUP', loopState: 'READY' })).toEqual({ kind: 'START', enabled: true });
-    expect(mainButton({ phase: 'ROTATING_IN', loopState: 'READY' })).toEqual({ kind: 'START', enabled: false });
-    expect(mainButton({ phase: 'ROTATING_OUT', loopState: 'READY' })).toEqual({ kind: 'START', enabled: false });
-    expect(mainButton({ phase: 'MATCH', loopState: 'RUNNING' })).toEqual({ kind: 'PAUSE', enabled: true });
-    expect(mainButton({ phase: 'MATCH', loopState: 'PAUSED' })).toEqual({ kind: 'RESUME', enabled: true });
-    expect(mainButton({ phase: 'MATCH', loopState: 'ENDED' })).toEqual({ kind: 'PAUSE', enabled: false });
+  it('주 버튼 (09-7a): START / 회전 중 비활성 / PAUSE / BRANCH(보는 틱 < 머리) / RESUME(보는 틱 = 머리, 미종료) / 비활성', () => {
+    const base = { tick: 0, headTick: 0, matchEnded: false, canResume: false, canBranch: false };
+    expect(mainButton({ ...base, phase: 'SETUP', loopState: 'READY' })).toEqual({ kind: 'START', enabled: true });
+    expect(mainButton({ ...base, phase: 'ROTATING_IN', loopState: 'READY' })).toEqual({ kind: 'START', enabled: false });
+    expect(mainButton({ ...base, phase: 'ROTATING_OUT', loopState: 'READY' })).toEqual({ kind: 'START', enabled: false });
+    expect(mainButton({ ...base, phase: 'MATCH', loopState: 'RUNNING', tick: 900, headTick: 900 })).toEqual({ kind: 'PAUSE', enabled: true });
+    expect(mainButton({ ...base, phase: 'MATCH', loopState: 'PAUSED', tick: 900, headTick: 900, canResume: true })).toEqual({ kind: 'RESUME', enabled: true });
+    expect(mainButton({ ...base, phase: 'MATCH', loopState: 'PAUSED', tick: 400, headTick: 900, canBranch: true })).toEqual({ kind: 'BRANCH', enabled: true });
+    // 종료 후 복기: 되감으면 BRANCH, 마지막 틱에서는 BRANCH 비활성 (RESUME 없음), 종료 강조 / 결과 팝업 중(가능 플래그 꺼짐) 비활성
+    expect(mainButton({ ...base, phase: 'MATCH', loopState: 'ENDED', tick: 3000, headTick: MATCH_TICKS, matchEnded: true, canBranch: true })).toEqual({ kind: 'BRANCH', enabled: true });
+    expect(mainButton({ ...base, phase: 'MATCH', loopState: 'ENDED', tick: MATCH_TICKS, headTick: MATCH_TICKS, matchEnded: true })).toEqual({ kind: 'BRANCH', enabled: false });
+    expect(mainButton({ ...base, phase: 'MATCH', loopState: 'ENDED', tick: 3000, headTick: MATCH_TICKS, matchEnded: true })).toEqual({ kind: 'BRANCH', enabled: false });
+    expect(mainButton({ ...base, phase: 'MATCH', loopState: 'PAUSED', tick: 900, headTick: 900 })).toEqual({ kind: 'RESUME', enabled: false });
+  });
+
+  it('분기 확인창 문구 값: 보는 틱의 경기 시계, 삭제될 기록 초 (소수 1자리)', () => {
+    expect(branchConfirmParams(1500, 2000, MATCH_TICKS, DT)).toEqual({ time: '1:30', seconds: '10.0' });
+    expect(branchConfirmParams(5700, 6000, MATCH_TICKS, DT)).toEqual({ time: '0:06.0', seconds: '6.0' });
+    expect(branchConfirmParams(1499, 1500, MATCH_TICKS, DT)).toEqual({ time: '1:31', seconds: '0.0' });
   });
 
   it('타임라인: 위치 비율 제한, 10초 눈금 13개, ENDGAME 시작 눈금만 major', () => {

@@ -1,9 +1,11 @@
-// 스크러버 줄 (명세서 3.8 화면 구성, 09-6d: 기존 동작만). 주 버튼(START / PAUSE / RESUME) / VIEW / NEW만 동작하고,
-// 틱 · 1초 이동 / 타임라인 끌기 / 재생 / 배속 / RESULT / BRANCH는 자리만 두고 비활성 (09-7).
+// 스크러버 줄 (명세서 3.8 화면 구성, 09-7a): 주 버튼(START / PAUSE / RESUME / BRANCH), 1초 · 1틱 이동(길게 누르면 반복),
+// 재생 / 배속, VIEW, NEW, RESULT. 타임라인 막대는 표시만 (보는 틱 + 기록 구간, 끌어서 이동은 09-7b).
+import { useEffect, useRef } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
-import { ChevronLeft, ChevronRight, CirclePlay, FastForward, Gamepad2, Pause, Play, Rewind, RotateCcw, SwitchCamera, Trophy } from 'lucide-react';
-import type { AppStatus } from '../app/appController';
-import { DT, MATCH_TICKS } from '../core/simulationEngine';
+import { ChevronLeft, ChevronRight, CirclePause, CirclePlay, FastForward, Gamepad2, GitBranch, Pause, Play, Rewind, RotateCcw, SwitchCamera, Trophy } from 'lucide-react';
+import { PLAYBACK_SPEEDS, TICKS_PER_SECOND } from '../app/appController';
+import type { AppStatus, PlaybackSpeed } from '../app/appController';
+import { MATCH_TICKS } from '../core/simulationEngine';
 import { t } from '../ui/i18n';
 import type { Language, MessageKey } from '../ui/i18n';
 import { mainButton, timelineFraction, timelineMarks } from '../ui/mainScreenModel';
@@ -12,14 +14,20 @@ export interface ScrubberActions {
   start: () => void;
   pause: () => void;
   resume: () => void;
+  branch: () => void;          // 확인창은 호출하는 쪽(MainScreen)
+  stepView: (deltaTicks: number) => void;
+  togglePlayback: () => void;
+  setSpeed: (speed: PlaybackSpeed) => void;
   toggleView: () => void;
-  newMatch: () => void;
+  newMatch: () => void;        // 확인창은 호출하는 쪽
+  openResult: () => void;
 }
 
-const SPEEDS = [0.25, 0.5, 1, 2] as const;
-const MARKS = timelineMarks(MATCH_TICKS, Math.round(1 / DT));
+const MARKS = timelineMarks(MATCH_TICKS, TICKS_PER_SECOND);
+const REPEAT_DELAY_MS = 400;
+const REPEAT_INTERVAL_MS = 66;
 
-// 버튼을 누른 뒤 포커스를 남기지 않음 (Space / Enter가 마지막으로 누른 버튼을 다시 누르지 않도록, 단축키는 09-7)
+// 버튼을 누른 뒤 포커스를 남기지 않음 (Space / Enter가 마지막으로 누른 버튼을 다시 누르지 않도록, Space는 단축키)
 const blurAfter = (action: () => void) => (e: MouseEvent<HTMLButtonElement>) => {
   e.currentTarget.blur();
   action();
@@ -33,16 +41,63 @@ function IconButton({ label, icon, onClick, disabled, className = '' }: { label:
   );
 }
 
+/** 누르는 즉시 1회, 0.4초 이상 누르고 있으면 반복 (틱 / 1초 이동) */
+function RepeatButton({ label, icon, onStep, disabled }: { label: string; icon: ReactNode; onStep: () => void; disabled: boolean }) {
+  const timers = useRef<{ delay: number | null; interval: number | null }>({ delay: null, interval: null });
+  const stepRef = useRef(onStep);
+  useEffect(() => {
+    stepRef.current = onStep;
+  });
+  const stop = () => {
+    if (timers.current.delay !== null) window.clearTimeout(timers.current.delay);
+    if (timers.current.interval !== null) window.clearInterval(timers.current.interval);
+    timers.current = { delay: null, interval: null };
+  };
+  useEffect(() => stop, []);
+  useEffect(() => {
+    if (disabled) stop();
+  }, [disabled]);
+  return (
+    <button
+      type="button"
+      className="icon-button"
+      title={label}
+      aria-label={label}
+      disabled={disabled}
+      onPointerDown={e => {
+        if (e.button !== 0) return;
+        e.preventDefault(); // 포커스를 가져가지 않음
+        stop();
+        stepRef.current();
+        timers.current.delay = window.setTimeout(() => {
+          timers.current.interval = window.setInterval(() => stepRef.current(), REPEAT_INTERVAL_MS);
+        }, REPEAT_DELAY_MS);
+      }}
+      onPointerUp={stop}
+      onPointerLeave={stop}
+      onPointerCancel={stop}
+      onKeyDown={e => {
+        if (e.key === 'Enter') stepRef.current(); // 키보드 접근 (Space는 전역 단축키)
+      }}
+    >
+      {icon}
+    </button>
+  );
+}
+
 export default function ScrubberBar({ status, lang, actions }: { status: AppStatus; lang: Language; actions: ScrubberActions }) {
   const main = mainButton(status);
   const mainSpec: Record<typeof main.kind, { key: MessageKey; icon: ReactNode; action: () => void }> = {
     START: { key: 'control.start', icon: <Play />, action: actions.start },
     PAUSE: { key: 'control.pause', icon: <Pause />, action: actions.pause },
     RESUME: { key: 'control.resume', icon: <Gamepad2 />, action: actions.resume },
+    BRANCH: { key: 'control.branch', icon: <GitBranch />, action: actions.branch },
   };
   const spec = mainSpec[main.kind];
-  const fraction = timelineFraction(status.tick, MATCH_TICKS);
+  const viewFraction = timelineFraction(status.tick, MATCH_TICKS);
+  const headFraction = status.phase === 'MATCH' ? timelineFraction(status.headTick, MATCH_TICKS) : 0;
   const viewKey: MessageKey = status.matchView === 'DRIVER' ? 'view.driver' : 'view.audience';
+  const scrubDisabled = !status.canScrub;
 
   return (
     <footer className="scrubber-bar">
@@ -52,29 +107,40 @@ export default function ScrubberBar({ status, lang, actions }: { status: AppStat
       </button>
 
       <div className="scrub-group">
-        <IconButton label={t(lang, 'control.stepBackSecond')} icon={<Rewind />} />
-        <IconButton label={t(lang, 'control.stepBackTick')} icon={<ChevronLeft />} />
+        <RepeatButton label={t(lang, 'control.stepBackSecond')} icon={<Rewind />} disabled={scrubDisabled} onStep={() => actions.stepView(-TICKS_PER_SECOND)} />
+        <RepeatButton label={t(lang, 'control.stepBackTick')} icon={<ChevronLeft />} disabled={scrubDisabled} onStep={() => actions.stepView(-1)} />
       </div>
 
       <div className="timeline" role="slider" aria-label={t(lang, 'control.timeline')} aria-valuemin={0} aria-valuemax={MATCH_TICKS} aria-valuenow={status.tick} aria-disabled="true">
         <div className="timeline-track">
-          <div className="timeline-recorded" style={{ width: `${fraction * 100}%` }} />
+          <div className="timeline-recorded" style={{ width: `${headFraction * 100}%` }} />
           {MARKS.map(m => (
             <span key={m.fraction} className={`timeline-mark${m.major ? ' is-major' : ''}`} style={{ left: `${m.fraction * 100}%` }} />
           ))}
-          <span className="timeline-thumb" style={{ left: `${fraction * 100}%` }} />
+          <span className="timeline-thumb" style={{ left: `${viewFraction * 100}%` }} />
         </div>
       </div>
 
       <div className="scrub-group">
-        <IconButton label={t(lang, 'control.stepForwardTick')} icon={<ChevronRight />} />
-        <IconButton label={t(lang, 'control.stepForwardSecond')} icon={<FastForward />} />
+        <RepeatButton label={t(lang, 'control.stepForwardTick')} icon={<ChevronRight />} disabled={scrubDisabled} onStep={() => actions.stepView(1)} />
+        <RepeatButton label={t(lang, 'control.stepForwardSecond')} icon={<FastForward />} disabled={scrubDisabled} onStep={() => actions.stepView(TICKS_PER_SECOND)} />
       </div>
 
-      <IconButton label={t(lang, 'control.play')} icon={<CirclePlay />} />
+      <IconButton
+        label={t(lang, status.playing ? 'control.stopPlayback' : 'control.play')}
+        icon={status.playing ? <CirclePause /> : <CirclePlay />}
+        disabled={scrubDisabled}
+        onClick={actions.togglePlayback}
+      />
       <div className="speed-group" role="group" aria-label={t(lang, 'control.speed')} title={t(lang, 'control.speed')}>
-        {SPEEDS.map(s => (
-          <button type="button" key={s} className={`speed-button${s === 1 ? ' is-selected' : ''}`} disabled>
+        {PLAYBACK_SPEEDS.map(s => (
+          <button
+            type="button"
+            key={s}
+            className={`speed-button${s === status.playbackSpeed ? ' is-selected' : ''}`}
+            aria-pressed={s === status.playbackSpeed}
+            onClick={blurAfter(() => actions.setSpeed(s))}
+          >
             {s}×
           </button>
         ))}
@@ -84,11 +150,11 @@ export default function ScrubberBar({ status, lang, actions }: { status: AppStat
         <SwitchCamera />
         <span>{t(lang, 'control.view')}</span>
       </button>
-      <button type="button" className="text-button" disabled={status.phase === 'SETUP'} onClick={blurAfter(actions.newMatch)}>
+      <button type="button" className="text-button" disabled={status.phase === 'SETUP' || status.phase === 'ROTATING_OUT'} onClick={blurAfter(actions.newMatch)}>
         <RotateCcw />
         <span>{t(lang, 'control.newMatch')}</span>
       </button>
-      <button type="button" className="text-button" disabled>
+      <button type="button" className="text-button" disabled={status.endStage !== 'REVIEW'} onClick={blurAfter(actions.openResult)}>
         <Trophy />
         <span>{t(lang, 'control.result')}</span>
       </button>

@@ -79,8 +79,10 @@ export class RealtimeLoop {
   }
 
   // 재개: 사용자의 명시적 조작으로만. 일시정지된 틱(또는 그사이 되감은 틱)에서 이어가며 첫 프레임은 경과 시간 0
+  // (09-7) 경기 종료(ENDED) 후에도 엔진을 종료 전 틱으로 되감았으면(분기) 그 틱부터 재개한다
   resume(): void {
-    if (this.loopState !== 'PAUSED') return;
+    const branchedAfterEnd = this.loopState === 'ENDED' && this.engine.currentTick < MATCH_TICKS;
+    if (this.loopState !== 'PAUSED' && !branchedAfterEnd) return;
     this.run();
   }
 

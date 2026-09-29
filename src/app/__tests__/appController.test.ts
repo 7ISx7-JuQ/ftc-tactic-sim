@@ -6,7 +6,8 @@ import { KEYBOARD_BINDINGS } from '../../input/inputConfig';
 import type { FrameScheduler } from '../../input/realtimeLoop';
 import { DEFAULT_RENDER_OPTIONS } from '../../renderer/renderOptions';
 import { VIEW_ANIMATION_MS, viewAngle } from '../../renderer/viewTransform';
-import { AppController } from '../appController';
+import { MATCH_TICKS } from '../../core/simulationEngine';
+import { AppController, END_HIGHLIGHT_MS } from '../appController';
 import type { AppStatus, MatchSetup } from '../appController';
 
 // 각 검증은 메시지와 함께 expect로 확인 (실패 시 어떤 조건이 깨졌는지 메시지로 표시)
@@ -23,7 +24,14 @@ const fakeEnv = () => {
   const env: BrowserInputEnv = { window: win, document: doc, navigator: { getGamepads: () => pads } };
   return { env, win };
 };
-const key = (type: 'keydown' | 'keyup', code: string) => Object.assign(new Event(type, { cancelable: true }), { code, repeat: false });
+const key = (type: 'keydown' | 'keyup', code: string, shiftKey = false) => Object.assign(new Event(type, { cancelable: true }), { code, repeat: false, shiftKey });
+// 단축키 1회 누름 (keydown + keyup)
+const press = (win: EventTarget, code: string, shiftKey = false) => {
+  const down = key('keydown', code, shiftKey);
+  win.dispatchEvent(down);
+  win.dispatchEvent(key('keyup', code, shiftKey));
+  return down.defaultPrevented;
+};
 
 // 가짜 프레임 스케줄러 + 시계: frame(ms)가 시계를 옮기고 대기 중인 콜백을 모두 호출
 class FakeFrames implements FrameScheduler {
@@ -194,6 +202,143 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     assert(h.status().tick === 0 && h.currentFrame().r1.x === 120 && h.status().alliance === 'BLUE', 'reset keeps the current setup');
     frames.advance(VIEW_ANIMATION_MS + 50);
     assert(h.status().phase === 'SETUP' && h.setSetup(makeSetup('RED')), 'back in SETUP: setup replaceable again');
+    h.dispose();
+  });
+
+  it('E. 보는 틱 / 재생 / 재개 · 분기 / 단축키 (09-7a)', () => {
+    const { h, frames, win } = setup();
+    assert(press(win, 'Space') && h.status().phase === 'SETUP', 'Space before the match: default prevented, nothing else (START only by the button)');
+    h.start();
+    frames.advance(VIEW_ANIMATION_MS + 50);
+    // R2를 1초 몰고(W) 1초 정지 → 기록 약 100틱
+    win.dispatchEvent(key('keydown', KEYBOARD_BINDINGS.forward));
+    frames.advance(1000, 20);
+    win.dispatchEvent(key('keyup', KEYBOARD_BINDINGS.forward));
+    frames.advance(1000, 20);
+    assert(press(win, 'Space') && h.status().loopState === 'PAUSED' && h.status().pauseReason === 'USER', 'Space while running -> pause (default prevented)');
+    const head = h.status().headTick;
+    const drivenX = h.currentFrame().r2.x;
+    let s = h.status();
+    assert(s.tick === head && s.canResume && !s.canBranch && s.canScrub && !s.matchEnded, 'paused at the head: RESUME possible, no BRANCH');
+
+    // 틱 이동: ← 1틱, Shift + ← 50틱, → 가 머리를 넘지 않음. 엔진 기록 / 현재 틱은 그대로
+    assert(press(win, 'ArrowLeft') && h.status().tick === head - 1, '← : back 1 tick');
+    press(win, 'ArrowLeft', true);
+    assert(h.status().tick === head - 51 && h.currentFrame().tick === head - 51, 'Shift + ← : back 1 s (50 ticks), the drawn frame follows the view tick');
+    s = h.status();
+    assert(!s.canResume && s.canBranch && s.headTick === head, 'rewound: RESUME not possible, BRANCH possible, head unchanged');
+    h.resume();
+    assert(h.status().loopState === 'PAUSED' && h.status().tick === head - 51, 'resume ignored away from the head');
+    h.stepView(10_000);
+    assert(h.status().tick === head, 'stepping forward clamps to the head');
+    h.setViewTick(-5);
+    assert(h.status().tick === 0, 'view tick clamps to 0');
+
+    // 재생: Space = 재생(분기하지 않음), 1× 약 50틱/초, 2×, 머리에서 자동 정지 → RESUME 가능
+    assert(press(win, 'Space') && h.status().playing && h.status().loopState === 'PAUSED', 'Space away from the head -> playback (never a branch)');
+    frames.advance(500, 20);
+    const at1x = h.status().tick;
+    assert(at1x >= 22 && at1x <= 26, `1x playback ≈ 25 ticks in 0.5 s (${at1x})`);
+    h.setPlaybackSpeed(2);
+    frames.advance(500, 20);
+    const at2x = h.status().tick - at1x;
+    assert(at2x >= 47 && at2x <= 52 && h.status().playbackSpeed === 2, `2x playback ≈ 50 ticks in 0.5 s (${at2x})`);
+    assert(press(win, 'Space') && !h.status().playing, 'Space during playback -> stop');
+    const stoppedAt = h.status().tick;
+    frames.advance(300, 20);
+    assert(h.status().tick === stoppedAt, 'stopped playback holds the view tick');
+    h.play();
+    frames.advance(3000, 20);
+    s = h.status();
+    assert(!s.playing && s.tick === head && s.canResume && s.headTick === head, 'playback stops at the last recorded tick -> RESUME possible, record unchanged');
+    h.play();
+    assert(h.status().playing && h.status().tick === 0, 'play at the head restarts from tick 0');
+    h.stepView(1);
+    assert(!h.status().playing && h.status().tick === 1, 'stepping stops playback');
+
+    // 분기: 되감은 틱(주행 전)부터 다시 진행 → 이후 기록 폐기, 새 입력(정지)으로 다른 결과
+    h.setViewTick(20);
+    const branchX = h.currentFrame().r2.x;
+    h.branch();
+    s = h.status();
+    assert(s.loopState === 'RUNNING' && !s.playing && s.endStage === 'NONE', 'branch -> running from the view tick');
+    frames.advance(2000, 20);
+    h.pause();
+    s = h.status();
+    const branchedX = h.currentFrame().r2.x;
+    assert(s.headTick === s.tick && s.headTick > 60 && branchedX < drivenX - 20 && branchedX >= branchX, `branched run replaced the record (R2 stopped driving at tick 20: ${branchedX.toFixed(1)} vs driven ${drivenX.toFixed(1)})`);
+    h.setViewTick(10_000);
+    assert(h.status().tick === s.headTick, 'old frames after the branch point are gone (head = new head)');
+
+    // 단축키 끔 (확인창 / 팝업): Space 무시
+    h.setShortcutsEnabled(false);
+    assert(!press(win, 'Space') && h.status().loopState === 'PAUSED', 'shortcuts disabled -> Space ignored');
+    h.setShortcutsEnabled(true);
+    press(win, 'Space');
+    assert(h.status().loopState === 'RUNNING', 'Space at the head -> resume');
+    // 진행 중 ←는 R2 회전(입력 어댑터)이고 보는 틱 이동이 아님
+    const tickBefore = h.status().tick;
+    win.dispatchEvent(key('keydown', 'ArrowLeft'));
+    frames.advance(200, 20);
+    win.dispatchEvent(key('keyup', 'ArrowLeft'));
+    assert(h.status().tick > tickBefore && h.status().loopState === 'RUNNING', '← while running drives (no scrubbing)');
+    h.dispose();
+    assert(frames.waiting === 0, 'dispose: no pending frames');
+  });
+
+  it('F. 경기 종료 → 종료 강조 5초 → 결과 → 복기 / 다시 열기 / 종료 후 분기 / NEW', () => {
+    const { h, frames, win } = setup();
+    h.start();
+    frames.advance(VIEW_ANIMATION_MS + 50);
+    // 100 ms 프레임 = 5틱 (따라잡기 상한) → 6000틱에서 멈출 때까지
+    for (let i = 0; i < 1300 && h.status().loopState !== 'ENDED'; i++) frames.advance(100, 100);
+    let s = h.status();
+    assert(s.loopState === 'ENDED' && s.matchEnded && s.headTick === MATCH_TICKS && s.tick === MATCH_TICKS, 'match reached tick 6000');
+    assert(s.endStage === 'HIGHLIGHT' && !s.canScrub && !s.canResume && !s.canBranch && !!s.result, 'end highlight: controls locked, result ready');
+    const r = s.result!;
+    const b = r.breakdown;
+    assert(r.total === b.hive + b.flower + b.garden + b.park && r.total === s.score, 'result total = breakdown sum = final score');
+
+    // 5초 대기 후 결과 팝업 (Space로 건너뛰기는 아래 분기 뒤에서 확인)
+    frames.advance(END_HIGHLIGHT_MS - 200, 20);
+    assert(h.status().endStage === 'HIGHLIGHT', 'still highlighting before 5 s');
+    frames.advance(400, 20);
+    assert(h.status().endStage === 'RESULT', 'result popup after 5 s');
+    press(win, 'Space');
+    press(win, 'ArrowLeft');
+    assert(h.status().endStage === 'RESULT' && h.status().tick === MATCH_TICKS && !h.status().playing, 'result popup: Space / arrows ignored');
+
+    // 복기: RESUME 없음, 마지막 틱에서 Space = 처음부터 재생, RESULT로 다시 열기
+    h.closeResult();
+    s = h.status();
+    assert(s.endStage === 'REVIEW' && s.canScrub && !s.canResume && !s.canBranch, 'review: no RESUME, no BRANCH at the end tick');
+    press(win, 'Space');
+    assert(h.status().playing && h.status().tick === 0, 'Space at the end tick -> playback from the start');
+    frames.advance(200, 20);
+    h.openResult();
+    assert(h.status().endStage === 'RESULT' && !h.status().playing, 'RESULT reopens the popup (playback stopped)');
+    h.closeResult();
+
+    // 종료 후 분기: 종료 전 틱으로 되감으면 BRANCH → 다시 끝까지 → 다시 종료 강조 (Space로 건너뛰기)
+    h.setViewTick(MATCH_TICKS - 100);
+    assert(h.status().canBranch, 'rewound after the end: BRANCH possible');
+    h.branch();
+    assert(h.status().loopState === 'RUNNING' && h.status().endStage === 'NONE' && !h.status().matchEnded, 'branch after the end -> running again');
+    frames.advance(2500, 20);
+    assert(h.status().loopState === 'ENDED' && h.status().endStage === 'HIGHLIGHT', 'branched run ended -> highlight again');
+    h.skipHighlight();
+    assert(h.status().endStage === 'RESULT', 'click (skipHighlight) skips the 5 s wait');
+    h.closeResult();
+    h.setViewTick(MATCH_TICKS - 100);
+    h.branch();
+    frames.advance(2500, 20);
+    assert(press(win, 'Space') && h.status().endStage === 'RESULT', 'Space skips the 5 s wait');
+
+    // NEW: 새 0틱 경기, 종료 단계 초기화
+    h.closeResult();
+    h.reset();
+    s = h.status();
+    assert(s.phase === 'ROTATING_OUT' && s.tick === 0 && s.headTick === 0 && s.endStage === 'NONE' && !s.playing && s.result === null, 'NEW -> fresh match, end stage cleared');
     h.dispose();
   });
 });
