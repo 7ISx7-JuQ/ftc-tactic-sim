@@ -242,6 +242,16 @@ const en = {
   'lut.retry': 'RETRY',
   'lut.pendingApply': 'APPLY to rebuild the hit map with these changes',
 
+  // 필드 편집 모드 (09-10b)
+  'robot.showHeatmap': 'SHOW HIT MAP',
+  'robot.hideHeatmap': 'HIDE HIT MAP',
+  'robot.heatmapHint': 'Shows the applied hit map on the field',
+  'edit.heatmap.title': 'HIT MAP · {robot}',
+  'edit.heatmap.hint': 'Hit rate with the robot center on each square, aiming at the {key} aim point',
+  'edit.legend': 'Hit rate',
+  'edit.done': 'DONE',
+  'edit.escClose': 'Esc to close',
+
   // 시나리오 검증 (validateScenario, 2.4)
   'issue.FLOWER_COUNT': 'POLLEN per FLOWER must be an integer from 0 to 4',
   'issue.GARDEN_COUNT': 'POLLEN per GARDEN must be an integer from 0 to 8',
@@ -482,6 +492,16 @@ const ko: Record<MessageKey, string> = {
   'lut.pieceSearching': '{piece}: 발사 속도 탐색 중…',
   'lut.retry': '다시 시도',
   'lut.pendingApply': '적용하면 이 설정으로 명중 확률표를 새로 만듦',
+
+  // 필드 편집 모드 (09-10b)
+  'robot.showHeatmap': '필드에서 확률표 보기',
+  'robot.hideHeatmap': '확률표 닫기',
+  'robot.heatmapHint': '적용한 명중 확률표를 필드에 표시',
+  'edit.heatmap.title': '명중 확률표 · {robot}',
+  'edit.heatmap.hint': '각 칸에 로봇 중심을 두고 {key} 조준점을 정면 조준할 때의 명중률',
+  'edit.legend': '명중률',
+  'edit.done': '완료',
+  'edit.escClose': 'Esc로 닫기',
 
   'issue.FLOWER_COUNT': 'FLOWER별 POLLEN 수는 0 ~ 4 정수',
   'issue.GARDEN_COUNT': 'GARDEN별 POLLEN 수는 0 ~ 8 정수',

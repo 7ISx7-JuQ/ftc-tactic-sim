@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createIntakeZonePreset } from '../../core/collision';
 import type { RobotConfig, ScenarioConfig, ShotProbabilityResolver } from '../../core/types';
 import type { BrowserInputEnv, GamepadLike } from '../../input/browserInput';
@@ -9,6 +9,11 @@ import { VIEW_ANIMATION_MS, viewAngle } from '../../renderer/viewTransform';
 import { MATCH_TICKS } from '../../core/simulationEngine';
 import { AppController, END_HIGHLIGHT_MS, LIFT_TOAST_COOLDOWN_MS } from '../appController';
 import type { AppStatus, LiftToast, MatchSetup } from '../appController';
+import type { EditScene } from '../../renderer/editSceneRenderer';
+
+// 편집 모드 장면 그리기 기록 (09-10b): 실제 그리기 대신 받은 장면만 모음
+const editRenders = vi.hoisted(() => [] as unknown[]);
+vi.mock('../../renderer/editSceneRenderer', () => ({ renderEditScene: (_ctx: unknown, scene: unknown) => editRenders.push(scene) }));
 
 // 각 검증은 메시지와 함께 expect로 확인 (실패 시 어떤 조건이 깨졌는지 메시지로 표시)
 const assert = (c: boolean, m: string) => {
@@ -468,6 +473,52 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     frames.advance(VIEW_ANIMATION_MS + 50);
     input = h.status().input;
     assert(h.status().phase === 'SETUP' && h.status().matchView === 'AUDIENCE' && input.choices.robot2 === 'AUTO', 'NEW: view back to the default, choices back to the pre-match choices');
+    h.dispose();
+  });
+
+  it('I. 필드 편집 모드 장면 (09-10b): 경기 전에만 경기 장면 대신, 바뀔 때마다 다시 그림, START에서 해제', () => {
+    const { h, frames, counter } = setup();
+    frames.advance(16);
+    editRenders.length = 0;
+    const scene = (): EditScene => ({ mode: 'HEATMAP', alliance: 'RED', reference: null, rowsDone: null, sweetSpot: { x: 59.5, y: 131.5 } });
+    const a = scene();
+    h.setEditScene(a);
+    const before = counter.renders;
+    frames.advance(16);
+    assert(editRenders.length === 1 && editRenders[0] === a && counter.renders === before, 'SETUP: edit scene drawn instead of the match scene');
+    h.setEditScene(a);
+    frames.advance(16);
+    assert(editRenders.length === 1, 'same scene object: no redraw');
+    const b = scene();
+    h.setEditScene(b);
+    frames.advance(16);
+    assert(editRenders.length === 2 && editRenders[1] === b, 'new scene (e.g. hit map progress): redraw');
+    h.setEditScene(null);
+    frames.advance(16);
+    assert(editRenders.length === 2 && counter.renders === before + 1, 'null: back to the match scene');
+    // 편집 중 START → 편집 해제 후 회전 / 경기 장면, 경기 중에는 편집 장면을 받지 않음
+    const backToSetup = () => {
+      h.reset();
+      frames.advance(VIEW_ANIMATION_MS + 50);
+      h.redraw();
+      frames.advance(16);
+    };
+    h.setEditScene(scene());
+    frames.advance(16);
+    const edits = editRenders.length;
+    h.start();
+    frames.advance(VIEW_ANIMATION_MS + 50);
+    assert(editRenders.length === edits && h.status().phase === 'MATCH', 'START cancels the edit scene');
+    backToSetup();
+    assert(h.status().phase === 'SETUP' && editRenders.length === edits, 'NEW: back in SETUP without the edit scene from before START');
+    h.start();
+    frames.advance(VIEW_ANIMATION_MS + 50);
+    h.pause();
+    h.setEditScene(scene());
+    frames.advance(16);
+    assert(editRenders.length === edits, 'ignored during the match');
+    backToSetup();
+    assert(h.status().phase === 'SETUP' && editRenders.length === edits, 'a scene set during the match is not kept for SETUP');
     h.dispose();
   });
 });

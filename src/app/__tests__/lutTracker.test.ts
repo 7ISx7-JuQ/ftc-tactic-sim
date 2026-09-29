@@ -132,4 +132,26 @@ describe('LUT 생성 연결 (09-10a)', () => {
     expect(updates()).toBe(before);
     expect(workers.every(w => w.terminated)).toBe(true);
   });
+
+  it('E. 히트맵 버퍼 (09-10b): 조립 중 기준 LUT가 행 단위로 채워지고, 따라가는 로봇도 같은 버퍼, 재생성 시 새 버퍼', () => {
+    const { tracker, workers, drain } = setup(1);
+    tracker.request(DEFAULT_DRAFT_VALUES);
+    workers[0].step();
+    workers[0].step(); // v0 탐색 2개 → 행 작업 시작
+    const early = tracker.heatmap('robot1', 'POLLEN');
+    expect(early.rowsDone.reduce((n, v) => n + v, 0)).toBe(0);
+    workers[0].step(); // POLLEN 행 0 ~ 3
+    expect(Array.from(early.rowsDone.slice(0, 5))).toEqual([1, 1, 1, 1, 0]);
+    expect(tracker.heatmap('robot2', 'POLLEN').reference).toBe(early.reference); // R2는 R1을 따라감
+    expect(tracker.heatmap('robot1', 'NECTAR').rowsDone.reduce((n, v) => n + v, 0)).toBe(0);
+    drain();
+    const done = tracker.heatmap('robot1', 'POLLEN');
+    expect(done.rowsDone.every(v => v === 1)).toBe(true);
+    expect(done.reference).toEqual(direct.luts.POLLEN.RED_AUDIENCE);
+    // 다른 설정으로 다시 요청 → 새 세대 버퍼 (그릴 때마다 다시 받아야 함)
+    tracker.request({ robot1: { ...DEFAULT_DRAFT_VALUES.robot1, config: { ...DEFAULT_DRAFT_VALUES.robot1.config, length: 16 } }, robot2: DEFAULT_DRAFT_VALUES.robot2 });
+    const fresh = tracker.heatmap('robot1', 'POLLEN');
+    expect(fresh.reference).not.toBe(done.reference);
+    expect(fresh.rowsDone.reduce((n, v) => n + v, 0)).toBe(0);
+  });
 });

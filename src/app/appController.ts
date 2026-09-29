@@ -34,6 +34,8 @@ import type { FrameScheduler, LoopState, PauseReason, RealtimeLoop } from '../in
 import { DEFAULT_RENDER_OPTIONS, hitProbabilities } from '../renderer/renderOptions';
 import type { RenderOptions, RobotHitProbability } from '../renderer/renderOptions';
 import { renderScene } from '../renderer/sceneRenderer';
+import { renderEditScene } from '../renderer/editSceneRenderer';
+import type { EditScene } from '../renderer/editSceneRenderer';
 import { ViewAnimator, viewAngle } from '../renderer/viewTransform';
 import type { ViewMode } from '../renderer/viewTransform';
 
@@ -184,6 +186,7 @@ export class AppController {
 
   private renderHandle: number | null = null;
   private lastStatusAt = -Infinity;
+  private editScene: EditScene | null = null; // 필드 편집 모드 장면 (경기 전 SETUP에서만 그림, 09-10b)
 
   constructor(deps: AppControllerDeps) {
     this.ctx = deps.ctx;
@@ -271,6 +274,7 @@ export class AppController {
     }
     this.applyInputChoices();
     this.phase = 'ROTATING_IN';
+    this.editScene = null; // 편집 중 START = 편집 취소 후 시작 (명세서 3.8)
     this.animator.start(viewAngle(this.matchView, this.alliance), this.now());
     this.changed();
   }
@@ -395,6 +399,17 @@ export class AppController {
   setRenderScale(scale: number): void {
     if (!(scale > 0) || scale === this.dpr) return;
     this.dpr = scale;
+    this.requestRender();
+  }
+
+  /**
+   * 필드 편집 모드 장면 (명세서 3.8 필드 편집 모드, 09-10b): 경기 전(SETUP)에만 경기 장면 대신 그린다. null = 경기 장면으로.
+   * 편집 데이터(명중 확률표 진행 등)가 바뀔 때마다 새 장면으로 다시 부른다. START(회전 시작)에서 자동으로 해제
+   */
+  setEditScene(scene: EditScene | null): void {
+    if (scene && this.phase !== 'SETUP') return;
+    if (scene === this.editScene) return;
+    this.editScene = scene;
     this.requestRender();
   }
 
@@ -679,8 +694,12 @@ export class AppController {
 
   private renderNow(): void {
     const view = this.animator.sample(this.now());
-    const frame = this.currentFrame();
-    renderScene(this.ctx, { frame, r1Config: this.setup.r1Config, r2Config: this.setup.r2Config, view, options: this.options }, this.dpr);
+    if (this.editScene && this.phase === 'SETUP') {
+      renderEditScene(this.ctx, this.editScene, view, this.dpr);
+    } else {
+      const frame = this.currentFrame();
+      renderScene(this.ctx, { frame, r1Config: this.setup.r1Config, r2Config: this.setup.r2Config, view, options: this.options }, this.dpr);
+    }
 
     if (!view.done || this.playing || this.endStage === 'HIGHLIGHT') {
       this.requestRender(); // 보기 애니메이션 / 재생 / 종료 강조 대기 중 (루프가 돌면 onFrame이 이어서 그림)

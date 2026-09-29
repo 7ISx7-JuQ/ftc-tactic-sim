@@ -8,6 +8,7 @@ import type { RobotBallisticsResult } from '../core/ballistics';
 import type { RobotId } from '../input/inputConfig';
 import { LUTManager } from '../workers/lutManager';
 import type { LUTManagerOptions, LUTGenState } from '../workers/lutManager';
+import type { LUTPieceType } from '../workers/lutProtocol';
 import type { DraftValues } from '../ui/configDraft';
 import { lutView, nextTiming } from '../ui/lutView';
 import type { LutTiming, RobotLutView } from '../ui/lutView';
@@ -66,6 +67,15 @@ export class LUTTracker {
 
   view(robotId: RobotId): RobotLutView {
     return lutView(this.manager.getStatus(robotId), this.timing[robotId], this.now());
+  }
+
+  /**
+   * 히트맵 편집 모드용 기준 셀 LUT (09-10b): 조립 중 버퍼 그대로 (읽기 전용) + 행별 완료 표시. 따라가는 로봇은 앞선 로봇 것.
+   * 생성이 다시 시작되면 버퍼가 바뀌므로 그릴 때마다 다시 받는다
+   */
+  heatmap(robotId: RobotId, piece: LUTPieceType): { reference: Float32Array; rowsDone: Uint8Array } {
+    const status = this.manager.getStatus(robotId);
+    return { reference: status.reference[piece], rowsDone: status.rowsDone[piece] };
   }
 
   /** 두 로봇 모두 READY면 결과 (경기 판정 함수 / 사출 속도), 아니면 null */

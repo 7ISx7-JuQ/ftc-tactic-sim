@@ -4,6 +4,7 @@
 // 09-8b: SETTINGS 탭(즉시 적용) + localStorage 자동 보관, 언어는 SETTINGS 값.
 // 09-10a: 명중 확률표(LUT) 생성 연결 — 앱 시작(자동 보관 / 기본 프리셋)과 로봇 탭 APPLY에서 요청, 두 로봇이 준비되면 경기 판정 = LUT,
 // 준비될 때까지 START를 막는다 (Worker 풀 / 캐시는 LUTTracker가 소유, React는 약 10 Hz 요약만 받음).
+// 09-10b: 필드 편집 모드(히트맵) — 로봇 탭 SHOW HIT MAP으로 열고, 그 탭을 떠나거나 창을 닫거나 START하면 끝남. 장면은 컨트롤러가 그림.
 
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
@@ -44,6 +45,7 @@ import ConfigRail from './ConfigRail';
 import ConfirmDialog from './ConfirmDialog';
 import type { ConfirmRequest } from './ConfirmDialog';
 import EndOverlay from './EndOverlay';
+import FieldEditBanner from './FieldEditBanner';
 import FieldNotices from './FieldNotices';
 import type { ToastItem } from './FieldNotices';
 import LeftPanel from './LeftPanel';
@@ -52,6 +54,8 @@ import ScrubberBar from './ScrubberBar';
 import SettingsTab from './SettingsTab';
 import RobotTab from './RobotTab';
 import type { RobotProfile } from '../ui/robotForm';
+import { fieldEditStays, heatmapEditScene, toggleHeatmapEdit } from '../ui/fieldEdit';
+import type { FieldEdit } from '../ui/fieldEdit';
 import type { ScrubberActions } from './ScrubberBar';
 import './MainScreen.css';
 
@@ -88,6 +92,8 @@ export default function MainScreen() {
   const appliedRef = useRef(drafts.applied);
   const lutResultsRef = useRef<MatchLUTResults | null>(null);
   const [lutViews, setLutViews] = useState<Record<RobotId, RobotLutView> | null>(null);
+  // 필드 편집 모드 (09-10b)
+  const [fieldEdit, setFieldEdit] = useState<FieldEdit | null>(null);
 
   useEffect(() => {
     const area = areaRef.current;
@@ -126,6 +132,7 @@ export default function MainScreen() {
     const onStatus = (s: AppStatus) => {
       setStatus(s);
       if (!configCanOpen(s)) setConfigOpen(false);
+      if (s.phase !== 'SETUP') setFieldEdit(null);
     };
     const s0 = initialSettings.current;
     const controller = new AppController({
@@ -189,6 +196,9 @@ export default function MainScreen() {
   const luts = lutViews ?? { robot1: PENDING_LUT_VIEW, robot2: PENDING_LUT_VIEW };
   const canOpen = status ? configCanOpen(status) : false;
   const locked = status ? draftTabsLocked(status.phase) : false;
+  // 편집 모드는 연 로봇 탭이 보이는 경기 전 동안만: 탭 이동 / 창 닫기 / START에서 끝내고, 그 밖의 경우도 조건이 깨지면 보이지 않음
+  const activeEdit = fieldEdit && status && fieldEditStays(fieldEdit, { phase: status.phase, configOpen, tab: configTab }) ? fieldEdit : null;
+  const editAlliance = drafts.draft.scenario.allianceColor;
   const openConfig = (tab?: ConfigTab) => {
     if (!canOpen) return;
     if (tab) setConfigTab(tab);
@@ -197,6 +207,7 @@ export default function MainScreen() {
   };
   const closeConfig = () => {
     setConfigOpen(false);
+    setFieldEdit(null);
     setConfigNotice(null);
   };
   // APPLY: 경기 전에만 (경기가 있는 동안 잠금). 적용 값이 바뀌면 새 0틱 경기 설정 + LUT 요청 (입력이 같으면 그대로 READY)
@@ -279,11 +290,38 @@ export default function MainScreen() {
     document.documentElement.lang = lang;
   }, [lang]);
 
+  // ---------------- 필드 편집 모드 (09-10b) ----------------
+  // 편집 장면: 적용한 설정의 명중 확률표 (생성 중이면 약 10 Hz 진행 알림마다 조립 중 버퍼를 다시 읽음)
+  useEffect(() => {
+    const controller = controllerRef.current;
+    if (!controller) return;
+    if (!activeEdit) {
+      controller.setEditScene(null);
+      return;
+    }
+    const heatmap = trackerRef.current?.heatmap(activeEdit.robot, activeEdit.piece) ?? null;
+    controller.setEditScene(heatmapEditScene(editAlliance, drafts.applied[activeEdit.robot], heatmap));
+  }, [activeEdit, editAlliance, drafts.applied, lutViews]);
+  // 편집 중 Esc = 편집 모드 닫기 (config 창은 그대로, 확인창이 떠 있으면 확인창이 먼저)
+  useEffect(() => {
+    if (!activeEdit || confirm) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      e.preventDefault();
+      setFieldEdit(null);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [activeEdit, confirm]);
+
   // 펼친 동안 Esc = 닫기 (확인창이 떠 있으면 확인창이 먼저 받음)
   useEffect(() => {
     if (!configOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !e.defaultPrevented) setConfigOpen(false);
+      if (e.key === 'Escape' && !e.defaultPrevented) {
+        setConfigOpen(false);
+        setFieldEdit(null);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -291,6 +329,7 @@ export default function MainScreen() {
 
   // START: 적용 안 된 수정 / 검증 실패 / 명중 확률표 미준비가 있으면 시작하지 않고 첫 문제 탭(R1 → R2 → SCENARIO)으로 펼침
   const start = () => {
+    setFieldEdit(null); // 편집 중 START = 편집 취소 후 시작 절차 (명세서 3.8)
     const blocking = startBlocker(drafts, { robot1: luts.robot1.phase, robot2: luts.robot2.phase });
     if (blocking) {
       setConfigTab(blocking.tab);
@@ -364,6 +403,17 @@ export default function MainScreen() {
       <div className="field-area" ref={areaRef} onClick={() => c()?.skipHighlight()}>
         <canvas ref={canvasRef} className="field-canvas" />
         <FieldNotices autoPauseReason={status?.autoPauseReason ?? null} toasts={toasts} lang={lang} />
+        {activeEdit && (
+          <FieldEditBanner
+            edit={activeEdit}
+            alliance={editAlliance}
+            lut={luts[activeEdit.robot]}
+            pendingApply={lutInputsChanged(drafts.draft[activeEdit.robot], drafts.applied[activeEdit.robot])}
+            lang={lang}
+            onPiece={piece => setFieldEdit({ ...activeEdit, piece })}
+            onDone={() => setFieldEdit(null)}
+          />
+        )}
         {status?.endStage === 'HIGHLIGHT' && <EndOverlay key={status.endSeq} lang={lang} />}
       </div>
       {status &&
@@ -378,6 +428,7 @@ export default function MainScreen() {
             canReset={configTab !== 'settings' && canResetTab(drafts, configTab, DEFAULT_DRAFT_VALUES)}
             onTab={tab => {
               setConfigTab(tab);
+              if (tab !== fieldEdit?.robot) setFieldEdit(null);
               setConfigNotice(null);
             }}
             onClose={closeConfig}
@@ -407,6 +458,8 @@ export default function MainScreen() {
                   lut={luts[configTab]}
                   lutPending={lutInputsChanged(drafts.draft[configTab], drafts.applied[configTab])}
                   onRetry={() => trackerRef.current?.retry(configTab)}
+                  heatmapOn={activeEdit?.mode === 'HEATMAP' && activeEdit.robot === configTab}
+                  onHeatmap={() => setFieldEdit(current => toggleHeatmapEdit(current, configTab))}
                   onEdit={editRobot(configTab)}
                   onCopy={() => copyRobot(configTab)}
                 />

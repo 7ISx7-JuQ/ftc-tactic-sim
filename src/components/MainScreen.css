@@ -1572,3 +1572,91 @@
 .lut-piece .form-warn {
   font-size: calc(var(--u) * 11);
 }
+
+/* ---------------- 필드 편집 모드 안내 띠 (09-10b) ----------------
+   필드 위쪽 중앙. 모드 이름 + 기물 종류 + DONE / 범례 / 안내 + Esc. 클릭은 띠 안에서만 받음 (필드 클릭 통과 없음) */
+.field-edit-banner {
+  position: absolute;
+  top: calc(var(--u) * 12);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 6);
+  max-width: calc(100% - var(--u) * 24);
+  padding: calc(var(--u) * 10) calc(var(--u) * 14);
+  border-radius: calc(var(--u) * 10);
+  border: 1px solid var(--panel-border);
+  background: rgba(21, 23, 28, 0.92);
+  box-shadow: 0 calc(var(--u) * 6) calc(var(--u) * 20) rgba(0, 0, 0, 0.35);
+  animation: toast-in 150ms ease-out;
+}
+.field-edit-head {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 10);
+}
+.main-screen .field-edit-head > svg.lucide {
+  width: calc(var(--u) * 18);
+  height: calc(var(--u) * 18);
+  color: var(--accent);
+  flex: none;
+}
+.field-edit-title {
+  font-size: calc(var(--u) * 15);
+  font-weight: 800;
+  white-space: nowrap;
+  margin-right: auto;
+}
+.field-edit-head .config-button {
+  height: calc(var(--u) * 28);
+}
+.field-edit-legend {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 6);
+  font-size: calc(var(--u) * 11);
+  font-weight: 700;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.legend-bar {
+  width: calc(var(--u) * 120);
+  height: calc(var(--u) * 10);
+  border-radius: calc(var(--u) * 3);
+  border: 1px solid var(--panel-border);
+}
+.legend-end {
+  font-variant-numeric: tabular-nums;
+}
+.field-edit-basis {
+  margin-left: auto;
+  padding-left: calc(var(--u) * 10);
+}
+.field-edit-hint {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: calc(var(--u) * 10);
+  row-gap: calc(var(--u) * 2);
+  font-size: calc(var(--u) * 11);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.field-edit-state {
+  color: var(--warn);
+  font-weight: 700;
+}
+.field-edit-esc {
+  margin-left: auto;
+  opacity: 0.8;
+}
+/* 로봇 탭 SHOW / HIDE HIT MAP: 열려 있는 동안 강조 */
+.main-screen .config-button.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.field-edit-banner.is-bottom {
+  top: auto;
+  bottom: calc(var(--u) * 12);
+}

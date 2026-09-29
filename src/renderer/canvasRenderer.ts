@@ -225,7 +225,13 @@ export function drawFieldBackground(ctx: CanvasRenderingContext2D): void {
   ctx.save();
   ctx.fillStyle = COLORS.fieldBg;
   ctx.fillRect(0, 0, CANVAS_SIZE_PX, CANVAS_SIZE_PX);
+  ctx.restore();
+  drawFieldLines(ctx);
+}
 
+// 타일 그리드 + 외곽 벽 (바닥 위에 덧그림 — 편집 모드는 히트맵 위에 그림, 09-10b)
+export function drawFieldLines(ctx: CanvasRenderingContext2D): void {
+  ctx.save();
   // 24인치 타일 그리드
   ctx.strokeStyle = COLORS.tileLine;
   ctx.lineWidth = 1;
