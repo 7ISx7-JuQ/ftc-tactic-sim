@@ -1,6 +1,7 @@
-// config 창 공통 입력 컨트롤 (09-8b SETTINGS / 09-9a 로봇 탭): 구역 제목, 버튼 묶음, 토글, 숫자 칸, 글자 칸.
+// config 창 공통 입력 컨트롤 (09-8b SETTINGS / 09-9a 로봇 탭 / 09-11a 시나리오 탭): 구역 제목, 버튼 묶음, 토글, 숫자 칸, 글자 칸, 개수 조절기.
 // 숫자 칸 (명세서 3.8 입력 규칙): 단위 표시, 칠 때마다 검사 — 올바르면 그 칸 값만 엔진 단위로 바꿔 onValue, 틀리면 글자를 onInvalid로 보관
 // (빨간 테두리 + 빨간 설명, 구글 폼 방식). 초점이 있는 동안은 친 글자를 그대로 보여 주고, 초점을 잃으면 표시 형식으로.
+import { Minus, Plus } from 'lucide-react';
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { t } from '../ui/i18n';
@@ -34,6 +35,35 @@ export function Segmented<T extends string>({ value, options, label, disabled, o
           {label(v)}
         </button>
       ))}
+    </div>
+  );
+}
+
+/** 개수 조절기 (시나리오 탭 09-11a): − 값 + 버튼, 범위 끝에서 버튼 비활성. invalid = 다른 칸과 함께 검증에 걸림 (빨간 테두리) */
+export function Stepper({ label, value, min, max, onChange, disabled, invalid, lang }: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
+  disabled?: boolean;
+  invalid?: boolean;
+  lang: Language;
+}) {
+  return (
+    <div className={`stepper-field${invalid ? ' has-error' : ''}`}>
+      <span className="form-label">{label}</span>
+      <span className="stepper" role="group" aria-label={label}>
+        <button type="button" className="stepper-button" aria-label={t(lang, 'form.decrease')} disabled={disabled || value <= min} onClick={() => onChange(Math.max(min, value - 1))}>
+          <Minus />
+        </button>
+        <span className="stepper-value" aria-live="polite" aria-invalid={invalid}>
+          {value}
+        </span>
+        <button type="button" className="stepper-button" aria-label={t(lang, 'form.increase')} disabled={disabled || value >= max} onClick={() => onChange(Math.min(max, value + 1))}>
+          <Plus />
+        </button>
+      </span>
     </div>
   );
 }

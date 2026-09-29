@@ -5,6 +5,7 @@
 // 09-10a: 명중 확률표(LUT) 생성 연결 — 앱 시작(자동 보관 / 기본 프리셋)과 로봇 탭 APPLY에서 요청, 두 로봇이 준비되면 경기 판정 = LUT,
 // 준비될 때까지 START를 막는다 (Worker 풀 / 캐시는 LUTTracker가 소유, React는 약 10 Hz 요약만 받음).
 // 09-10b: 필드 편집 모드(히트맵) — 로봇 탭 SHOW HIT MAP으로 열고, 그 탭을 떠나거나 창을 닫거나 START하면 끝남. 장면은 컨트롤러가 그림.
+// 09-11a: 시나리오 탭(초안 / APPLY) + 시드 REROLL(바로 적용 + 자동 보관).
 // 09-10c: 스윗스팟 모드(SET ON FIELD) — 필드 클릭 = 초안 스윗스팟, DONE · APPLY = 그 로봇 탭 적용, CANCEL / Esc / START = 들어오기 전 값으로.
 
 import { useEffect, useRef, useState } from 'react';
@@ -54,7 +55,10 @@ import ResultPopup from './ResultPopup';
 import ScrubberBar from './ScrubberBar';
 import SettingsTab from './SettingsTab';
 import RobotTab from './RobotTab';
+import ScenarioTab from './ScenarioTab';
 import { readSweetSpot } from '../ui/robotForm';
+import { newSeed, readScenario, rerollSeed, scenarioFormIssues } from '../ui/scenarioForm';
+import type { ScenarioConfig } from '../core/types';
 import type { RobotProfile } from '../ui/robotForm';
 import {
   cancelSweetSpotEdit,
@@ -270,6 +274,28 @@ export default function MainScreen() {
       void ask(t(lang, 'confirm.copyOverwrite', { target: robotLabel(to), source: robotLabel(from) }), t(lang, 'robot.copyTo', { robot: robotLabel(to) })).then(ok => {
         if (ok) doCopy();
       });
+  };
+
+  // ---------------- 시나리오 탭 (09-11a): 초안 편집 / 틀린 입력 글자 / 시드 REROLL ----------------
+  const editScenario = (scenario: ScenarioConfig | null, key: string | null, invalidText: string | null, clearKeys: readonly string[] = []) => {
+    if (locked) return;
+    setConfigNotice(null);
+    setDrafts(d => {
+      let next = scenario ? editDraft(d, 'scenario', scenario) : d;
+      for (const k of clearKeys) next = setFieldText(next, 'scenario', k, null);
+      if (key) next = setFieldText(next, 'scenario', key, invalidText);
+      return next;
+    });
+  };
+  // REROLL (09-11 확정): APPLY 없이 적용 값 / 초안의 시드만 바꿔 경기 전 설정을 바로 교체하고 저장 (NEW는 시드 유지)
+  const rerollScenarioSeed = () => {
+    if (locked) return;
+    const current = readScenario(drafts.applied.scenario, drafts.applied.robot1.config, drafts.applied.robot2.config).seed;
+    const next = rerollSeed(drafts, newSeed(current));
+    setDrafts(next);
+    appliedRef.current = next.applied;
+    c()?.setSetup(setupOf(next.applied, lutResultsRef.current));
+    saveStoredConfig(settingsStorage, { settings, applied: next.applied });
   };
 
   // ---------------- SETTINGS (즉시 적용 + 자동 보관) ----------------
@@ -586,6 +612,19 @@ export default function MainScreen() {
                   }}
                   onEdit={editRobot(configTab)}
                   onCopy={() => copyRobot(configTab)}
+                />
+              ) : configTab === 'scenario' ? (
+                <ScenarioTab
+                  scenario={drafts.draft.scenario}
+                  robots={{ robot1: drafts.draft.robot1, robot2: drafts.draft.robot2 }}
+                  seed={readScenario(drafts.applied.scenario, drafts.applied.robot1.config, drafts.applied.robot2.config).seed}
+                  fieldText={drafts.fieldText.scenario}
+                  issues={scenarioFormIssues(drafts.draft)}
+                  unit={settings.lengthUnit}
+                  lang={lang}
+                  locked={locked}
+                  onEdit={editScenario}
+                  onReroll={rerollScenarioSeed}
                 />
               ) : null
             }

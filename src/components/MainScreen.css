@@ -1709,3 +1709,190 @@
 .field-edit-legend .segmented-button {
   height: calc(var(--u) * 24);
 }
+
+/* ---------------- 시나리오 탭 (09-11a) ---------------- */
+.scenario-tab {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 18);
+}
+.scenario-badge {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 8);
+  padding: calc(var(--u) * 8) calc(var(--u) * 12);
+  border-radius: calc(var(--u) * 8);
+  font-size: calc(var(--u) * 13);
+  font-weight: 800;
+}
+.scenario-badge.is-valid {
+  color: var(--ok);
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.45);
+}
+.scenario-badge.is-invalid {
+  color: var(--error);
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.5);
+}
+.main-screen .scenario-badge svg.lucide {
+  width: calc(var(--u) * 17);
+  height: calc(var(--u) * 17);
+}
+.scenario-issues {
+  margin: calc(var(--u) * -10) 0 0;
+  padding-left: calc(var(--u) * 18);
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 3);
+}
+.scenario-group {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 10);
+}
+
+/* 개수 조절기 */
+.stepper-field {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 4);
+  min-width: 0;
+}
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  height: calc(var(--u) * 32);
+  border: 1px solid var(--panel-border);
+  border-radius: calc(var(--u) * 7);
+  background: rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+}
+.stepper-field.has-error .stepper {
+  border-color: var(--error);
+  background: rgba(239, 68, 68, 0.08);
+}
+.main-screen .stepper-button {
+  width: calc(var(--u) * 32);
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+.main-screen .stepper-button:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+}
+.main-screen .stepper-button:disabled {
+  opacity: 0.35;
+}
+.main-screen .stepper-button svg.lucide {
+  width: calc(var(--u) * 14);
+  height: calc(var(--u) * 14);
+}
+.stepper-value {
+  min-width: calc(var(--u) * 34);
+  text-align: center;
+  font-size: calc(var(--u) * 14);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 로봇 적재물: 칸 = 기물 색 원 (클릭 순환), 1번 칸이 먼저 나감 */
+.loadout-row {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 12);
+  padding: calc(var(--u) * 6) calc(var(--u) * 8);
+  border: 1px solid transparent;
+  border-radius: calc(var(--u) * 8);
+}
+.loadout-row.has-error {
+  border-color: var(--error);
+  background: rgba(239, 68, 68, 0.08);
+}
+.loadout-robot {
+  font-size: calc(var(--u) * 13);
+  font-weight: 800;
+  min-width: calc(var(--u) * 24);
+}
+.loadout-slots {
+  display: flex;
+  gap: calc(var(--u) * 8);
+}
+.main-screen .loadout-slot {
+  position: relative;
+  width: calc(var(--u) * 30);
+  height: calc(var(--u) * 30);
+  border-radius: 50%;
+  border: calc(var(--u) * 2) solid transparent;
+}
+.main-screen .loadout-slot.is-pollen {
+  background: #fde047;
+  border-color: #a16207;
+}
+.main-screen .loadout-slot.is-nectar.is-red {
+  background: #df001b;
+  border-color: #bd0017;
+}
+.main-screen .loadout-slot.is-nectar.is-blue {
+  background: #0f53a7;
+  border-color: #0d478e;
+}
+.main-screen .loadout-slot.is-empty {
+  border: calc(var(--u) * 2) dashed #5b6270;
+}
+.main-screen .loadout-slot.is-over {
+  outline: calc(var(--u) * 2) solid var(--error);
+  outline-offset: calc(var(--u) * 2);
+}
+.main-screen .loadout-slot:not(:disabled):hover {
+  filter: brightness(1.12);
+}
+.loadout-index {
+  position: absolute;
+  right: calc(var(--u) * -6);
+  bottom: calc(var(--u) * -6);
+  font-size: calc(var(--u) * 10);
+  font-weight: 800;
+  color: var(--text-muted);
+}
+
+/* 시작 자세 */
+.spawn-card {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 8);
+  padding: calc(var(--u) * 8) calc(var(--u) * 10);
+  border: 1px solid var(--panel-border);
+  border-radius: calc(var(--u) * 8);
+}
+.spawn-card.has-error {
+  border-color: var(--error);
+  background: rgba(239, 68, 68, 0.06);
+}
+.spawn-head {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 8);
+}
+.spawn-head .config-button {
+  margin-left: auto;
+  height: calc(var(--u) * 28);
+}
+.spawn-tag {
+  font-size: calc(var(--u) * 11);
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.form-grid.spawn-fields {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.seed-value {
+  font-size: calc(var(--u) * 16);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.03em;
+}

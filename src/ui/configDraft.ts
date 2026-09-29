@@ -83,7 +83,7 @@ export function applyTab(state: ConfigDrafts, tab: DraftTab): ConfigDrafts {
 
 /** RESET TAB: 그 탭 초안을 기본값으로, 틀린 입력 글자도 지움 (적용은 APPLY로) */
 export function resetTabDraft(state: ConfigDrafts, tab: DraftTab, defaults: DraftValues): ConfigDrafts {
-  const next = editDraft(state, tab, defaults[tab]);
+  const next = editDraft(state, tab, resetValue(state, tab, defaults));
   return { ...next, fieldText: { ...next.fieldText, [tab]: {} } };
 }
 
@@ -134,7 +134,14 @@ export function firstBlockingTab(state: ConfigDrafts): DraftTab | null {
 
 /** RESET TAB 가능: 초안이 기본값과 다르거나 틀린 입력 글자가 있을 때 */
 export function canResetTab(state: ConfigDrafts, tab: DraftTab, defaults: DraftValues): boolean {
-  return hasFieldErrors(state, tab) || !deepEqual(state.draft[tab], defaults[tab]);
+  return hasFieldErrors(state, tab) || !deepEqual(state.draft[tab], resetValue(state, tab, defaults));
+}
+
+/** RESET TAB으로 돌아갈 값: 기본값. 단 시나리오 시드는 REROLL로만 바뀌므로(09-11 확정) 지금 시드를 유지 */
+function resetValue<T extends DraftTab>(state: ConfigDrafts, tab: T, defaults: DraftValues): DraftValues[T] {
+  const seed = state.draft.scenario.rngSeed;
+  if (tab !== 'scenario' || seed === undefined) return defaults[tab];
+  return { ...defaults.scenario, rngSeed: seed } as DraftValues[T];
 }
 
 // ------------------------------------------------------------

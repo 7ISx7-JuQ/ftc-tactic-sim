@@ -77,9 +77,9 @@ export const INITIAL_HUMAN_NECTAR_STOCK = 5;         // 경기 시작 시 휴먼
 export const NECTAR_IN_PLAY = TOTAL_NECTAR - INITIAL_HUMAN_NECTAR_STOCK; // 필드에 풀린 NECTAR (HIVE/로봇/바닥)
 export const FLOWER_MAX_START_PIECES = 4;            // 텔레옵 시작 시 FLOWER당 최대 POLLEN (오토 중 투입 불가)
 export const GARDEN_MAX_PIECES = 8;                  // GARDEN 물리적 수용 한도 (23in / POLLEN 직경 2.8in)
-const DEFAULT_FLOWER_PIECES = 4;
-const DEFAULT_GARDEN_PIECES = 4;
-const DEFAULT_HIVE_NECTAR = 3;
+export const DEFAULT_FLOWER_PIECES = 4;
+export const DEFAULT_GARDEN_PIECES = 4;
+export const DEFAULT_HIVE_NECTAR = 3;
 
 // FLOWER 상단 투입 도달 거리: 로봇 OBB 외곽 ↔ FLOWER 원통 최단 거리 (inch)
 // (하단 추출은 인테이크 구역 겹침으로 판정하므로 이 값을 쓰지 않음)

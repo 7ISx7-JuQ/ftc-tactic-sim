@@ -19,7 +19,7 @@ export interface ConfigPanelProps {
   onClose: () => void;
   onApply: () => void;
   onResetTab: () => void;
-  content: ReactNode | null;     // 현재 탭 내용 (SETTINGS 09-8b, 로봇 09-9a). 없으면 "이후 업데이트" 안내 (시나리오 09-11)
+  content: ReactNode | null;     // 현재 탭 내용 (SETTINGS 09-8b, 로봇 09-9a, 시나리오 09-11a). 없으면 "이후 업데이트" 안내
 }
 
 export default function ConfigPanel(props: ConfigPanelProps) {
