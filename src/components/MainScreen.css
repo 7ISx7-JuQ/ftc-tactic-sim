@@ -1660,3 +1660,52 @@
   top: auto;
   bottom: calc(var(--u) * 12);
 }
+
+/* ---------------- 스윗스팟 모드 (09-10c): 필드 십자 커서 / 칸 위 말풍선 / 띠의 초안 좌표 ---------------- */
+.field-area.is-picking .field-canvas {
+  cursor: crosshair;
+}
+.field-edit-spot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: calc(var(--u) * 10);
+  row-gap: calc(var(--u) * 2);
+  font-size: calc(var(--u) * 12);
+}
+.field-edit-coord {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.sweet-hover {
+  position: absolute;
+  z-index: 7; /* 안내 띠(6) 가까운 칸에서도 가리지 않게 */
+  transform: translate(-50%, calc(-100% - var(--u) * 14));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--u) * 2);
+  padding: calc(var(--u) * 5) calc(var(--u) * 9);
+  border-radius: calc(var(--u) * 7);
+  border: 1px solid #15803d;
+  background: rgba(21, 23, 28, 0.9);
+  font-size: calc(var(--u) * 11);
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.sweet-hover.is-invalid {
+  border-color: var(--error);
+}
+.sweet-hover-coord {
+  font-variant-numeric: tabular-nums;
+}
+.sweet-hover-issue {
+  color: #fca5a5;
+}
+.field-edit-legend .segmented {
+  margin-right: calc(var(--u) * 4);
+}
+.field-edit-legend .segmented-button {
+  height: calc(var(--u) * 24);
+}

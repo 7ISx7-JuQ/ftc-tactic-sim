@@ -658,8 +658,8 @@ export interface BallisticsIssue {
 
 type RobotSize = Pick<RobotConfig, 'length' | 'width'>;
 
-// 조준점을 정면으로 바라보는 로봇 몸체 OBB (axes[0] = 로봇 앞쪽)
-function aimingRobotOBB(x: number, y: number, target: { x: number; y: number }, size: RobotSize): OBB {
+// 조준점을 정면으로 바라보는 로봇 몸체 OBB (axes[0] = 로봇 앞쪽). 스윗스팟 검증과 GUI 스윗스팟 편집 모드 윤곽(09-10c)이 같이 씀
+export function aimingRobotOBB(x: number, y: number, target: { x: number; y: number }, size: RobotSize): OBB {
   const heading = bearingTo(x, y, target.x, target.y);
   const cos = Math.cos(heading);
   const sin = Math.sin(heading);

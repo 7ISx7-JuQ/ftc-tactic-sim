@@ -3,8 +3,8 @@
 // 09-9b: 맨 위 로봇 미리보기, 흡입 구역 편집기(구역별 면 / 위치 / 폭 / 깊이, 추가 · 삭제, 프리셋 FRONT / ANY),
 // 슈터 탄도(발사구 지상고 / 발사각 / 오프셋 + 고급 설정의 편차 3종).
 // 09-10a: 스윗스팟 X / Y(시나리오 진영 기준, 기준 CELL 표시) + 검증 사유 + 명중 확률표 상태(적용한 설정 기준).
-// 09-10b: SHOW HIT MAP(필드 히트맵 편집 모드 열기 / 닫기). 필드에서 스윗스팟 찍기는 09-10c.
-import { Copy, Map as MapIcon, Plus, Trash2 } from 'lucide-react';
+// 09-10b: SHOW HIT MAP(필드 히트맵 편집 모드 열기 / 닫기). 09-10c: SET ON FIELD(필드에서 스윗스팟 찍기 모드 열기).
+import { Copy, Crosshair, Map as MapIcon, Plus, Trash2 } from 'lucide-react';
 import { sweetSpotBasisCell } from '../core/ballistics';
 import { createIntakeZonePreset } from '../core/collision';
 import type { BumperSide } from '../core/types';
@@ -52,6 +52,8 @@ export interface RobotTabProps {
   onRetry: () => void;
   heatmapOn: boolean;                               // 이 로봇의 히트맵 편집 모드가 열려 있음 (09-10b)
   onHeatmap: () => void;                            // SHOW / HIDE HIT MAP
+  spotEditOn: boolean;                              // 이 로봇의 스윗스팟 편집 모드가 열려 있음 (09-10c)
+  onSetOnField: () => void;                         // SET ON FIELD (닫기는 필드 안내 띠의 DONE · APPLY / CANCEL)
   /** 초안 편집: 새 프로필(없으면 값은 그대로) + 칸 키가 있으면 그 칸의 틀린 글자(null = 지움) + 함께 지울 칸 글자 */
   onEdit: (profile: RobotProfile | null, key: string | null, invalidText: string | null, clearKeys?: readonly string[]) => void;
   onCopy: () => void;
@@ -80,7 +82,7 @@ const LABELS: Readonly<Record<NumberFieldKey, MessageKey>> = {
   pitchNoiseRad: 'robot.pitchNoiseRad',
 };
 
-export default function RobotTab({ robotId, profile, fieldText, unit, lang, locked, canCopy, alliance, lut, lutPending, onRetry, heatmapOn, onHeatmap, onEdit, onCopy }: RobotTabProps) {
+export default function RobotTab({ robotId, profile, fieldText, unit, lang, locked, canCopy, alliance, lut, lutPending, onRetry, heatmapOn, onHeatmap, spotEditOn, onSetOnField, onEdit, onCopy }: RobotTabProps) {
   const other: RobotId = robotId === 'robot1' ? 'robot2' : 'robot1';
   const { config } = profile;
   const num = (key: NumberFieldKey) => (
@@ -287,6 +289,13 @@ export default function RobotTab({ robotId, profile, fieldText, unit, lang, lock
               onInvalid={text => onEdit(null, sweetSpotFieldKey(axis), text)}
             />
           ))}
+        </div>
+        <div className="settings-row">
+          <span className="settings-note">{t(lang, 'edit.sweetSpot.hint', { key: sweetSpotBasisCell(alliance) })}</span>
+          <button type="button" className={`config-button${spotEditOn ? ' is-active' : ''}`} aria-pressed={spotEditOn} disabled={locked || spotEditOn} onClick={onSetOnField}>
+            <Crosshair />
+            {t(lang, spotEditOn ? 'robot.settingOnField' : 'robot.setOnField')}
+          </button>
         </div>
         {spotIssues.map(issue => (
           <span key={issue.code} className="form-error">

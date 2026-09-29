@@ -5,9 +5,10 @@
 // 09-10a: 명중 확률표(LUT) 생성 연결 — 앱 시작(자동 보관 / 기본 프리셋)과 로봇 탭 APPLY에서 요청, 두 로봇이 준비되면 경기 판정 = LUT,
 // 준비될 때까지 START를 막는다 (Worker 풀 / 캐시는 LUTTracker가 소유, React는 약 10 Hz 요약만 받음).
 // 09-10b: 필드 편집 모드(히트맵) — 로봇 탭 SHOW HIT MAP으로 열고, 그 탭을 떠나거나 창을 닫거나 START하면 끝남. 장면은 컨트롤러가 그림.
+// 09-10c: 스윗스팟 모드(SET ON FIELD) — 필드 클릭 = 초안 스윗스팟, DONE · APPLY = 그 로봇 탭 적용, CANCEL / Esc / START = 들어오기 전 값으로.
 
 import { useEffect, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { AppController } from '../app/appController';
 import type { AppStatus, LiftToast } from '../app/appController';
 import { DEFAULT_DRAFT_VALUES, setupFromDrafts } from '../app/defaultSetup';
@@ -45,7 +46,7 @@ import ConfigRail from './ConfigRail';
 import ConfirmDialog from './ConfirmDialog';
 import type { ConfirmRequest } from './ConfirmDialog';
 import EndOverlay from './EndOverlay';
-import FieldEditBanner from './FieldEditBanner';
+import FieldEditBanner, { SweetSpotHoverTip } from './FieldEditBanner';
 import FieldNotices from './FieldNotices';
 import type { ToastItem } from './FieldNotices';
 import LeftPanel from './LeftPanel';
@@ -53,9 +54,23 @@ import ResultPopup from './ResultPopup';
 import ScrubberBar from './ScrubberBar';
 import SettingsTab from './SettingsTab';
 import RobotTab from './RobotTab';
+import { readSweetSpot } from '../ui/robotForm';
 import type { RobotProfile } from '../ui/robotForm';
-import { fieldEditStays, heatmapEditScene, toggleHeatmapEdit } from '../ui/fieldEdit';
+import {
+  cancelSweetSpotEdit,
+  clickSweetSpot,
+  fieldEditStays,
+  fieldGridCell,
+  heatmapEditScene,
+  openSweetSpotEdit,
+  sweetSpotCandidateIssues,
+  sweetSpotDoneAction,
+  sweetSpotEditScene,
+  sweetSpotIssueCodes,
+  toggleHeatmapEdit,
+} from '../ui/fieldEdit';
 import type { FieldEdit } from '../ui/fieldEdit';
+import { SCENE_WIDTH_PX, canvasToField, cssToCanvas, fieldToCanvas, fitScale } from '../renderer/viewTransform';
 import type { ScrubberActions } from './ScrubberBar';
 import './MainScreen.css';
 
@@ -94,6 +109,10 @@ export default function MainScreen() {
   const [lutViews, setLutViews] = useState<Record<RobotId, RobotLutView> | null>(null);
   // 필드 편집 모드 (09-10b)
   const [fieldEdit, setFieldEdit] = useState<FieldEdit | null>(null);
+  // 스윗스팟 모드: 마우스를 올린 격자 중심(필드 좌표) + 안내 말풍선 위치(필드 영역 CSS px) — 칸이 바뀔 때만 갱신
+  const [spotHover, setSpotHover] = useState<{ cell: { x: number; y: number }; left: number; top: number } | null>(null);
+  // 클릭은 마지막 포인터 이동의 칸을 쓴다 (상태는 다음 렌더에야 바뀌므로 이동 직후 클릭에도 맞도록 즉시 갱신되는 ref)
+  const spotHoverRef = useRef<typeof spotHover>(null);
 
   useEffect(() => {
     const area = areaRef.current;
@@ -299,16 +318,26 @@ export default function MainScreen() {
       controller.setEditScene(null);
       return;
     }
-    const heatmap = trackerRef.current?.heatmap(activeEdit.robot, activeEdit.piece) ?? null;
-    controller.setEditScene(heatmapEditScene(editAlliance, drafts.applied[activeEdit.robot], heatmap));
-  }, [activeEdit, editAlliance, drafts.applied, lutViews]);
-  // 편집 중 Esc = 편집 모드 닫기 (config 창은 그대로, 확인창이 떠 있으면 확인창이 먼저)
+    const robot = activeEdit.robot;
+    const heatmap = trackerRef.current?.heatmap(robot, activeEdit.piece) ?? null;
+    controller.setEditScene(
+      activeEdit.mode === 'HEATMAP'
+        ? heatmapEditScene(editAlliance, drafts.applied[robot], heatmap)
+        : sweetSpotEditScene(editAlliance, drafts.draft[robot], drafts.applied[robot], heatmap, spotHover?.cell ?? null),
+    );
+  }, [activeEdit, editAlliance, drafts.applied, drafts.draft, lutViews, spotHover]);
+  // 편집 중 Esc = 편집 모드 닫기 / 스윗스팟 모드는 취소 (config 창은 그대로, 확인창이 떠 있으면 확인창이 먼저)
   useEffect(() => {
     if (!activeEdit || confirm) return;
+    const edit = activeEdit;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
       e.preventDefault();
+      // CANCEL과 같음: 스윗스팟 모드면 들어오기 전 값으로
+      if (edit.mode === 'SWEET_SPOT') setDrafts(d => cancelSweetSpotEdit(d, edit));
       setFieldEdit(null);
+      spotHoverRef.current = null;
+      setSpotHover(null);
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
@@ -327,10 +356,73 @@ export default function MainScreen() {
     return () => window.removeEventListener('keydown', onKey);
   }, [configOpen]);
 
+  // ---------------- 스윗스팟 모드 (09-10c) ----------------
+  // CANCEL / Esc: 스윗스팟 모드면 들어오기 전 값으로 되돌리고 닫음 (히트맵 모드는 닫기만)
+  const cancelEdit = () => {
+    const edit = fieldEdit;
+    if (edit?.mode === 'SWEET_SPOT') setDrafts(d => cancelSweetSpotEdit(d, edit));
+    setFieldEdit(null);
+    spotHoverRef.current = null;
+    setSpotHover(null);
+  };
+  // DONE: 스윗스팟 모드면 그 로봇 탭 APPLY까지 (09-10c 확정). 적용할 수 없으면(틀린 칸) 초안에만 남기고 안내
+  const doneEdit = () => {
+    const edit = activeEdit;
+    setFieldEdit(null);
+    spotHoverRef.current = null;
+    setSpotHover(null);
+    if (edit?.mode !== 'SWEET_SPOT') return;
+    const action = sweetSpotDoneAction(drafts, edit.robot);
+    if (action === 'APPLY') applyCurrentTab();
+    else if (action === 'KEEP_DRAFT') setConfigNotice(t(lang, 'edit.sweetSpot.notApplied'));
+  };
+  // 필드 CSS 좌표 → 격자 중심 (관중석 시점 역변환) + 말풍선 위치. 필드 밖이면 null
+  const spotAt = (clientX: number, clientY: number) => {
+    const canvas = canvasRef.current;
+    const area = areaRef.current;
+    if (!canvas || !area || !status) return null;
+    const rect = canvas.getBoundingClientRect();
+    const view = { angle: status.viewAngle, scale: fitScale(status.viewAngle) };
+    const p = cssToCanvas(clientX - rect.left, clientY - rect.top, rect.width, rect.height);
+    const cell = fieldGridCell(canvasToField(view, p.x, p.y));
+    if (!cell) return null;
+    const at = fieldToCanvas(view, cell.x, cell.y);
+    const areaRect = area.getBoundingClientRect();
+    const k = rect.width / SCENE_WIDTH_PX;
+    return { cell, left: rect.left - areaRect.left + at.x * k, top: rect.top - areaRect.top + at.y * k };
+  };
+  const spotEdit = activeEdit?.mode === 'SWEET_SPOT' ? activeEdit : null;
+  const onFieldPointerMove = (e: ReactPointerEvent) => {
+    if (!spotEdit) return;
+    const overBanner = e.target instanceof Element && e.target.closest('.field-edit-banner');
+    const next = overBanner ? null : spotAt(e.clientX, e.clientY);
+    const prev = spotHoverRef.current;
+    if (next?.cell.x === prev?.cell.x && next?.cell.y === prev?.cell.y) return;
+    spotHoverRef.current = next;
+    setSpotHover(next);
+  };
+  const onFieldClick = (e: ReactMouseEvent) => {
+    if (!spotEdit) {
+      c()?.skipHighlight(); // 종료 강조 5초 중 필드를 누르면 건너뛰기
+      return;
+    }
+    // 강조된 칸 그대로 찍음 (클릭 좌표는 정수로 반올림되어 칸 경계에서 포인터 이동 좌표와 다른 칸이 될 수 있음)
+    const hit = spotHoverRef.current ?? spotAt(e.clientX, e.clientY);
+    if (!hit) return;
+    setConfigNotice(null);
+    setDrafts(d => clickSweetSpot(d, spotEdit.robot, editAlliance, hit.cell));
+  };
+
   // START: 적용 안 된 수정 / 검증 실패 / 명중 확률표 미준비가 있으면 시작하지 않고 첫 문제 탭(R1 → R2 → SCENARIO)으로 펼침
   const start = () => {
-    setFieldEdit(null); // 편집 중 START = 편집 취소 후 시작 절차 (명세서 3.8)
-    const blocking = startBlocker(drafts, { robot1: luts.robot1.phase, robot2: luts.robot2.phase });
+    // 편집 중 START = 편집 취소 후 시작 절차 (명세서 3.8): 스윗스팟 모드면 들어오기 전 값으로 되돌린 초안으로 검사
+    let current = drafts;
+    if (fieldEdit?.mode === 'SWEET_SPOT') {
+      current = cancelSweetSpotEdit(drafts, fieldEdit);
+      setDrafts(current);
+    }
+    setFieldEdit(null);
+    const blocking = startBlocker(current, { robot1: luts.robot1.phase, robot2: luts.robot2.phase });
     if (blocking) {
       setConfigTab(blocking.tab);
       setConfigOpen(true);
@@ -400,7 +492,16 @@ export default function MainScreen() {
     <div className={`main-screen${configOpen ? ' is-config-open' : ''}`} lang={lang} style={configOpen ? LAYOUT_STYLE_OPEN : LAYOUT_STYLE}>
       {status && <LeftPanel status={status} lang={lang} teams={{ robot1: drafts.applied.robot1, robot2: drafts.applied.robot2 }} />}
       {/* 종료 강조 5초 중 필드를 누르면 건너뛰기 */}
-      <div className="field-area" ref={areaRef} onClick={() => c()?.skipHighlight()}>
+      <div
+        className={`field-area${spotEdit ? ' is-picking' : ''}`}
+        ref={areaRef}
+        onClick={onFieldClick}
+        onPointerMove={onFieldPointerMove}
+        onPointerLeave={() => {
+          spotHoverRef.current = null;
+          setSpotHover(null);
+        }}
+      >
         <canvas ref={canvasRef} className="field-canvas" />
         <FieldNotices autoPauseReason={status?.autoPauseReason ?? null} toasts={toasts} lang={lang} />
         {activeEdit && (
@@ -409,9 +510,26 @@ export default function MainScreen() {
             alliance={editAlliance}
             lut={luts[activeEdit.robot]}
             pendingApply={lutInputsChanged(drafts.draft[activeEdit.robot], drafts.applied[activeEdit.robot])}
+            sweetSpot={
+              spotEdit && {
+                spot: readSweetSpot(drafts.draft[spotEdit.robot], editAlliance),
+                issues: sweetSpotIssueCodes(drafts.draft[spotEdit.robot]),
+                heatmapStale: lutInputsChanged(drafts.draft[spotEdit.robot], drafts.applied[spotEdit.robot]),
+              }
+            }
+            unit={settings.lengthUnit}
             lang={lang}
             onPiece={piece => setFieldEdit({ ...activeEdit, piece })}
-            onDone={() => setFieldEdit(null)}
+            onDone={doneEdit}
+            onCancel={cancelEdit}
+          />
+        )}
+        {spotEdit && spotHover && (
+          <SweetSpotHoverTip
+            at={spotHover}
+            issues={sweetSpotCandidateIssues(drafts.draft[spotEdit.robot], editAlliance, spotHover.cell)}
+            unit={settings.lengthUnit}
+            lang={lang}
           />
         )}
         {status?.endStage === 'HIGHLIGHT' && <EndOverlay key={status.endSeq} lang={lang} />}
@@ -460,6 +578,12 @@ export default function MainScreen() {
                   onRetry={() => trackerRef.current?.retry(configTab)}
                   heatmapOn={activeEdit?.mode === 'HEATMAP' && activeEdit.robot === configTab}
                   onHeatmap={() => setFieldEdit(current => toggleHeatmapEdit(current, configTab))}
+                  spotEditOn={spotEdit?.robot === configTab}
+                  onSetOnField={() => {
+                    spotHoverRef.current = null;
+                    setSpotHover(null);
+                    setFieldEdit(current => openSweetSpotEdit(current, drafts, configTab));
+                  }}
                   onEdit={editRobot(configTab)}
                   onCopy={() => copyRobot(configTab)}
                 />
