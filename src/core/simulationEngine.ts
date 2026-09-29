@@ -23,8 +23,10 @@ import {
   testCircleVsAABB,
   testOBBvsAABB,
   testOBBvsCircle,
+  testOBBvsFieldBounds,
+  testOBBvsOBB,
 } from './collision';
-import type { AABB, OBB, RobotBody, Vector2D } from './collision';
+import type { AABB, Circle, OBB, RobotBody, Vector2D } from './collision';
 import { DEFAULT_SHOOTER_BALLISTICS, planShotFlight, planVoidedHitBounce } from './ballistics';
 import { stepRobotKinematics } from './kinematics';
 import {
@@ -93,6 +95,9 @@ const FLOWER_BOTTOM_BONUS = 5;
 
 // 자율주행 잔여 공 산포 최대 시도 횟수
 const MAX_SCATTER_ATTEMPTS = 200;
+// 시작 자세 사전 보정 최대 반복 (겹침이 없어질 때까지 로봇 충돌 해결을 반복, 명세서 3.8).
+// 한 로봇이 장애물에 막히면 로봇끼리 겹침이 반복마다 절반씩 줄어들므로, 최대 겹침 18 in도 허용 오차 안으로 줄도록 50회
+const SPAWN_CORRECTION_ITERATIONS = 50;
 // 산포 실패 시 기준점 주변 링 탐색 간격 (inch) / 최대 링 수 (반경 = 링 × 간격)
 const SCATTER_FALLBACK_STEP = 3;
 const SCATTER_FALLBACK_RINGS = 40;
@@ -253,6 +258,78 @@ export function validateScenario(
   }
 
   return issues;
+}
+
+// ------------------------------------------------------------
+// 시작 자세 배치 검증 (GUI는 결과가 비어 있지 않으면 시나리오 확정을 비활성화, 명세서 3.8)
+// ------------------------------------------------------------
+
+// 닿음은 허용하고 이 깊이(inch)보다 깊이 파고들 때만 겹침 (벽에 붙은 기본 스폰 / 부동소수점 잔차 허용)
+export const PLACEMENT_TOLERANCE = 1e-6;
+
+export interface PlacementIssue {
+  code:
+    | 'PLACEMENT_OUT_OF_FIELD'
+    | 'PLACEMENT_IN_HIVE'
+    | 'PLACEMENT_IN_FLOWER'
+    | 'PLACEMENT_ROBOT_OVERLAP'
+    | 'PLACEMENT_PIECE_OVERLAP';
+  robots: ('robot1' | 'robot2')[]; // 문제가 된 로봇 (GUI가 해당 로봇을 빨간색으로 표시)
+  message: string;
+}
+
+// GARDEN 기물 배치 좌표 (reset과 배치 검증이 공유): 지정 수를 구역 길이에 균등 배치, 벽 밀착
+function gardenPiecePositions(side: 'RED' | 'BLUE', count: number): Vector2D[] {
+  const box = GARDEN_AABB[side];
+  const r = PIECE_PHYSICS.POLLEN.radius;
+  const spacing = (box.maxX - box.minX) / Math.max(1, count);
+  const y = box.minY < FIELD_SIZE / 2 ? r : FIELD_SIZE - r;
+  return Array.from({ length: Math.max(0, count) }, (_, i) => ({ x: box.minX + spacing * (i + 0.5), y }));
+}
+
+type RobotPlacement = { id: 'robot1' | 'robot2'; name: string; pose: RobotPose; config: RobotConfig };
+
+// 로봇 자세별 배치 문제: 필드 경계 / HIVE / FLOWER / 로봇끼리 / 고정 배치 기물 (침투 깊이 > PLACEMENT_TOLERANCE)
+function placementIssues(robots: readonly RobotPlacement[], fixedPieces: readonly Circle[]): PlacementIssue[] {
+  const issues: PlacementIssue[] = [];
+  const deep = (hit: { colliding: boolean; depth: number }) => hit.colliding && hit.depth > PLACEMENT_TOLERANCE;
+  const bodies = robots.map(r => getRobotOBB(r.pose, r.config));
+  robots.forEach((robot, i) => {
+    const body = bodies[i];
+    const add = (code: PlacementIssue['code'], message: string) => issues.push({ code, robots: [robot.id], message });
+    if (deep(testOBBvsFieldBounds(body))) add('PLACEMENT_OUT_OF_FIELD', `${robot.name} 몸체가 필드 밖으로 나감`);
+    if (deep(testOBBvsAABB(body, HIVE_AABB))) add('PLACEMENT_IN_HIVE', `${robot.name} 몸체가 HIVE와 겹침`);
+    const flowers = FLOWER_CIRCLES.flatMap((circle, k) => (deep(testOBBvsCircle(body, circle)) ? [k + 1] : []));
+    if (flowers.length > 0) add('PLACEMENT_IN_FLOWER', `${robot.name} 몸체가 FLOWER ${flowers.join(', ')}와 겹침`);
+    if (fixedPieces.some(piece => deep(testOBBvsCircle(body, piece)))) add('PLACEMENT_PIECE_OVERLAP', `${robot.name} 몸체가 GARDEN 기물과 겹침`);
+  });
+  for (let i = 0; i < robots.length; i++) {
+    for (let j = i + 1; j < robots.length; j++) {
+      if (deep(testOBBvsOBB(bodies[i], bodies[j]))) {
+        issues.push({ code: 'PLACEMENT_ROBOT_OVERLAP', robots: [robots[i].id, robots[j].id], message: `${robots[i].name}와 ${robots[j].name} 몸체가 겹침` });
+      }
+    }
+  }
+  return issues;
+}
+
+/**
+ * 시작 자세 배치 검증: 시작 자세 미지정 로봇은 진영별 기본 스폰으로 검사.
+ * 고정 배치 기물 = 시나리오가 정하는 GARDEN 기물 (바닥 산포 기물 / 오토 팁 NECTAR 슬롯은 이미 로봇을 피해 배치되므로 제외)
+ */
+export function validateRobotPlacement(scenario: ScenarioConfig, r1Config: RobotConfig, r2Config: RobotConfig): PlacementIssue[] {
+  const alliance = scenario.allianceColor;
+  const opponent = alliance === 'RED' ? 'BLUE' : 'RED';
+  const robots: RobotPlacement[] = [
+    { id: 'robot1', name: 'R1', pose: resolveSpawnPose(scenario.r1Spawn, DEFAULT_SPAWN_POSES[alliance].robot1), config: r1Config },
+    { id: 'robot2', name: 'R2', pose: resolveSpawnPose(scenario.r2Spawn, DEFAULT_SPAWN_POSES[alliance].robot2), config: r2Config },
+  ];
+  const r = PIECE_PHYSICS.POLLEN.radius;
+  const gardenPieces = [
+    ...gardenPiecePositions(alliance, clampCount(scenario.gardenPiecesCount?.ally, DEFAULT_GARDEN_PIECES, GARDEN_MAX_PIECES)),
+    ...gardenPiecePositions(opponent, clampCount(scenario.gardenPiecesCount?.opponent, DEFAULT_GARDEN_PIECES, GARDEN_MAX_PIECES)),
+  ].map(center => ({ center, radius: r }));
+  return placementIssues(robots, gardenPieces);
 }
 
 // FLOWER 용량 테이블 판정: 기물 1개를 더 넣은 뒤에도 NECTAR/POLLEN 한도 이내인지 (slot[0] 포함 전체 개수 기준)
@@ -493,6 +570,14 @@ export class SimulationEngine {
     this.r1 = createRobotState(resolveSpawnPose(sc?.r1Spawn, DEFAULT_SPAWN_POSES[alliance].robot1));
     this.r2 = createRobotState(resolveSpawnPose(sc?.r2Spawn, DEFAULT_SPAWN_POSES[alliance].robot2));
 
+    // (0) 시작 자세 사전 보정 (명세서 3.8): GUI 검증을 거치지 않은 겹친 시작 자세에 대비해, 기물을 놓기 전에
+    //     로봇–환경 / 로봇–로봇 겹침을 틱마다 쓰는 로봇 충돌 해결로 해소 (시간 진행 없음). 겹침이 없으면 아무것도 바꾸지 않음.
+    const robotsOverlap = () => placementIssues([
+      { id: 'robot1', name: 'R1', pose: this.r1, config: this.r1Config },
+      { id: 'robot2', name: 'R2', pose: this.r2, config: this.r2Config },
+    ], []).length > 0;
+    for (let i = 0; i < SPAWN_CORRECTION_ITERATIONS && robotsOverlap(); i++) this.resolveRobotCollisions();
+
     // --- 기물 생성 (POLLEN 32, 아군 NECTAR 8) ---
     // 배분 순서 (명세서 2.4): 로봇 적재물 → FLOWER → HIVE → GARDEN → 오토 팁 NECTAR(로딩 존) → 나머지 바닥 무작위 산포
     // 엔진은 validateScenario를 통과하지 못한 값도 아래 규칙으로 잘라서 수용 (GUI 검증의 안전장치)
@@ -564,14 +649,12 @@ export class SimulationEngine {
       [opponent]: clampCount(sc?.gardenPiecesCount?.opponent, DEFAULT_GARDEN_PIECES, GARDEN_MAX_PIECES),
     };
     for (const side of [alliance, opponent] as const) {
-      const box = GARDEN_AABB[side];
       const stack = takePollen(gardenCounts[side]);
-      const r = PIECE_PHYSICS.POLLEN.radius;
-      const spacing = (box.maxX - box.minX) / Math.max(1, stack.length);
+      const spots = gardenPiecePositions(side, stack.length);
       stack.forEach((piece, i) => {
         piece.state = 'IN_GARDEN';
-        piece.x = box.minX + spacing * (i + 0.5);
-        piece.y = box.minY < FIELD_SIZE / 2 ? r : FIELD_SIZE - r; // 벽 밀착
+        piece.x = spots[i].x;
+        piece.y = spots[i].y;
       });
     }
 

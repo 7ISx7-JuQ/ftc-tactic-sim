@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { SimulationEngine, DEFAULT_RNG_SEED, DEFAULT_SPAWN_POSES, validateScenario, getCarryCapacity, DT } from '../simulationEngine';
+import { SimulationEngine, DEFAULT_RNG_SEED, DEFAULT_SPAWN_POSES, validateScenario, validateRobotPlacement, PLACEMENT_TOLERANCE, getCarryCapacity, DT } from '../simulationEngine';
 import type { RobotDriveInput } from '../simulationEngine';
 import type { BumperZone, RobotConfig, RobotPose, ScenarioConfig, ShotProbabilityResolver } from '../types';
 import { createLUTShotResolver, generateRobotLUTs, bearingTo, shooterBallisticsFrom, planShotFlight, DEFAULT_SHOOTER_BALLISTICS } from '../ballistics';
-import { GARDEN_AABB, LOADING_ZONE_AABB, testCircleVsAABB, createIntakeZonePreset, getBumperZoneOBB, getRobotOBB, testOBBvsCircle, DEFAULT_PRESET_ZONE_DEPTH, HIVE_AABB, HIVE_HEIGHT, HIVE_OPENING_CENTROID_S, HIVE_RIM_Y, GRAVITY, PIECE_PHYSICS, hiveCellAimPoint } from '../collision';
+import { FLOWER_CIRCLES, GARDEN_AABB, LOADING_ZONE_AABB, testCircleVsAABB, createIntakeZonePreset, getBumperZoneOBB, getRobotOBB, testOBBvsCircle, DEFAULT_PRESET_ZONE_DEPTH, HIVE_AABB, HIVE_HEIGHT, HIVE_OPENING_CENTROID_S, HIVE_RIM_Y, GRAVITY, PIECE_PHYSICS, hiveCellAimPoint } from '../collision';
 
 const cfg = (id: 'robot1' | 'robot2', over: Partial<RobotConfig> = {}): RobotConfig => ({
   id, name: id, width: 18, length: 18, maxSpeed: 60, maxTurnRate: 4, maxLinearAccel: 120, maxAngularAccel: 10,
@@ -1043,5 +1043,93 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
     // 결정론: 같은 설정 / 입력의 다른 경기도 같은 내역
     assert(JSON.stringify(build().getFrame(6000)!.scoreBreakdown) === JSON.stringify(b), 'deterministic breakdown');
   }, TEST_TIMEOUT_MS);
-});
 
+  it('V. 시작 자세 배치 검증 / reset() 사전 보정 (09-5)', () => {
+    const place = (sc: Partial<ScenarioConfig>, c1 = C1, c2 = C2) => validateRobotPlacement({ allianceColor: 'RED', ...sc }, c1, c2);
+    const codes = (sc: Partial<ScenarioConfig>, c1 = C1, c2 = C2) => place(sc, c1, c2).map(i => `${i.code}:${i.robots.join('+')}`).sort().join(',');
+    const hiveLeft = HIVE_AABB.minX - 9; // 18 in 로봇이 HIVE 왼쪽 면에 닿는 중심 x
+    // 기본 스폰 (벽에 붙음) / 닿음(회전 헤딩의 부동소수점 잔차 포함) → 문제 없음
+    for (const alliance of ['RED', 'BLUE'] as const) {
+      assert(place({ allianceColor: alliance }).length === 0, `${alliance} default spawns are valid`);
+    }
+    const touching: [string, Partial<ScenarioConfig>][] = [
+      ['HIVE face', { r1Spawn: pose(hiveLeft, 72, 0) }],
+      ['HIVE face, heading π/2', { r1Spawn: pose(hiveLeft, 72, Math.PI / 2) }],
+      ['HIVE face, heading π', { r1Spawn: pose(hiveLeft, 72, Math.PI) }],
+      ['walls, heading -π/2 / π', { r1Spawn: pose(9, 9, -Math.PI / 2), r2Spawn: pose(135, 60, Math.PI) }],
+      ['robots side by side', { r1Spawn: pose(40, 40, Math.PI / 2), r2Spawn: pose(58, 40, -Math.PI / 2) }],
+      ['FLOWER 1 edge', { r1Spawn: pose(FLOWER_CIRCLES[0].center.x + 2 + 9, FLOWER_CIRCLES[0].center.y, Math.PI), r2Spawn: pose(9, 128) }],
+    ];
+    for (const [name, sc] of touching) assert(place(sc).length === 0, `touching (${name}) is allowed: ${codes(sc)}`);
+    assert(PLACEMENT_TOLERANCE === 1e-6, 'tolerance 1e-6 in');
+    // 각 오류 코드 + 문제 로봇
+    assert(codes({ r1Spawn: pose(hiveLeft + 0.01, 72) }) === 'PLACEMENT_IN_HIVE:robot1', `0.01 in into the HIVE (${codes({ r1Spawn: pose(hiveLeft + 0.01, 72) })})`);
+    assert(codes({ r2Spawn: pose(8.9, 108) }) === 'PLACEMENT_OUT_OF_FIELD:robot2', 'slightly past the wall');
+    assert(codes({ r1Spawn: pose(9, 36, Math.PI / 4) }) === 'PLACEMENT_OUT_OF_FIELD:robot1', 'rotated corners cross the wall');
+    assert(codes({ r2Spawn: pose(-30, 72) }) === 'PLACEMENT_OUT_OF_FIELD:robot2', 'fully outside the field');
+    const inFlower = place({ r1Spawn: pose(FLOWER_CIRCLES[0].center.x + 2 + 9 - 0.01, FLOWER_CIRCLES[0].center.y, Math.PI), r2Spawn: pose(9, 128) });
+    assert(inFlower.length === 1 && inFlower[0].code === 'PLACEMENT_IN_FLOWER' && /FLOWER 1/.test(inFlower[0].message), `FLOWER overlap names the flower (${inFlower[0]?.message})`);
+    const both = place({ r1Spawn: pose(40, 40), r2Spawn: pose(57.99, 40) });
+    assert(both.length === 1 && both[0].code === 'PLACEMENT_ROBOT_OVERLAP' && both[0].robots.join() === 'robot1,robot2', 'robot overlap lists both robots');
+    assert(codes({ r1Spawn: pose(hiveLeft + 1, 72), r2Spawn: pose(hiveLeft - 10, 72) }) === 'PLACEMENT_IN_HIVE:robot1,PLACEMENT_ROBOT_OVERLAP:robot1+robot2', 'issues accumulate');
+    assert(codes({ r1Spawn: pose(40, 40), r2Spawn: pose(52, 40) }, C1, cfg('robot2', { length: 6, width: 6 })) === '', 'uses each robot size (6 in robot fits)');
+    assert(place({ r1Spawn: pose(NaN, 40) }).length === 0, 'non-finite pose -> default spawn (as the engine)');
+    // GARDEN 기물: 시나리오 수량 / 진영(아군 · 상대)을 엔진 배치와 같은 좌표로 검사
+    {
+      const nearRedGarden = pose(12, 144 - 9);
+      assert(codes({ r1Spawn: nearRedGarden }) === 'PLACEMENT_PIECE_OVERLAP:robot1', 'RED ally GARDEN pieces under the robot');
+      assert(place({ r1Spawn: nearRedGarden, gardenPiecesCount: { ally: 0, opponent: 4 } }).length === 0, 'empty GARDEN -> no piece overlap');
+      assert(codes({ allianceColor: 'BLUE', r1Spawn: nearRedGarden, gardenPiecesCount: { ally: 0, opponent: 4 } }) === 'PLACEMENT_PIECE_OVERLAP:robot1', 'BLUE: RED GARDEN is the opponent GARDEN');
+      assert(codes({ r2Spawn: pose(132, 9) }) === 'PLACEMENT_PIECE_OVERLAP:robot2', 'opponent GARDEN pieces also fixed');
+      // 엔진이 실제 놓은 GARDEN 기물 위치와 일치: 바깥쪽 기물 가장자리에 닿음 = 허용, 0.01 in 파고듦 = 겹침
+      for (const n of [1, 3, 8]) {
+        const e = eng({ gardenPiecesCount: { ally: n, opponent: 0 } });
+        const garden = e.pieces.filter(p => p.state === 'IN_GARDEN');
+        const r = PIECE_PHYSICS.POLLEN.radius;
+        const top = Math.min(...garden.map(p => p.y)) - r;      // 기물 윗가장자리 (y)
+        const right = Math.max(...garden.map(p => p.x)) + r;    // 마지막 기물 오른쪽 가장자리 (x)
+        const sc = (x: number, y: number): Partial<ScenarioConfig> => ({ gardenPiecesCount: { ally: n, opponent: 0 }, r1Spawn: pose(x, y) });
+        assert(garden.length === n && place(sc(11.5, top - 9)).length === 0 && codes(sc(11.5, top - 9 + 0.01)) === 'PLACEMENT_PIECE_OVERLAP:robot1', `GARDEN ${n}: piece top edge (y) matches the engine`);
+        assert(place(sc(right + 9, 135)).length === 0 && codes(sc(right + 9 - 0.01, 135)) === 'PLACEMENT_PIECE_OVERLAP:robot1', `GARDEN ${n}: last piece right edge (x) matches the engine`);
+      }
+    }
+    // reset() 사전 보정: 겹친 시작 자세를 0번 프레임 전에 해소
+    {
+      const cases: [string, Partial<ScenarioConfig>][] = [
+        ['into HIVE', { r1Spawn: pose(hiveLeft + 6, 72, 0.3) }],
+        ['robots overlapping', { r1Spawn: pose(40, 40), r2Spawn: pose(46, 42, 0.5) }],
+        ['outside field', { r2Spawn: pose(-30, 72) }],
+        ['FLOWER + wall corner', { r1Spawn: pose(5, 94, Math.PI / 4) }],
+        ['robot pushed into HIVE by the other', { r1Spawn: pose(hiveLeft - 1, 72), r2Spawn: pose(hiveLeft - 12, 72) }],
+        ['identical poses next to the HIVE (18 in overlap)', { r1Spawn: pose(hiveLeft - 0.5, 72), r2Spawn: pose(hiveLeft - 0.5, 72) }],
+      ];
+      for (const [name, sc] of cases) {
+        assert(place(sc).some(i => i.code !== 'PLACEMENT_PIECE_OVERLAP'), `${name}: overlapping before correction`);
+        const e = eng({ ...sc, r1Loadout: [] });
+        const f0 = e.getFrame(0)!;
+        const after = place({ r1Spawn: pose(f0.r1.x, f0.r1.y, f0.r1.heading), r2Spawn: pose(f0.r2.x, f0.r2.y, f0.r2.heading), gardenPiecesCount: { ally: 0, opponent: 0 } });
+        assert(after.length === 0, `${name}: frame 0 has no overlap (${after.map(i => i.code).join()})`);
+        assert(f0.tick === 0 && f0.r1.vx === 0 && f0.r2.vy === 0 && f0.r1.heading === (sc.r1Spawn?.heading ?? 0), `${name}: no time passes, heading kept`);
+        // 바닥 산포는 보정된 로봇 위치를 피함
+        const floor = e.pieces.filter(p => p.state === 'ON_FIELD');
+        assert(floor.length === 4 && floor.every(p => [e.r1, e.r2].every((r, k) => !testOBBvsCircle(getRobotOBB(r, k === 0 ? C1 : C2), { center: { x: p.x, y: p.y }, radius: PIECE_PHYSICS[p.type].radius }).colliding)),
+          `${name}: scattered pieces avoid the corrected robots`);
+        const again = eng({ ...sc, r1Loadout: [] });
+        assert(JSON.stringify(again.getFrame(0)) === JSON.stringify(f0), `${name}: deterministic`);
+      }
+      // 보정은 기물 배치 전: 산포 기물이 많아도 보정된 로봇 자리를 피함 (필드 밖 로봇이 벽 안으로 들어온 자리)
+      for (const rngSeed of [1, 2, 3, 4, 5, 6]) {
+        const e = eng({ r1Spawn: pose(-40, 72), r2Spawn: pose(184, 30), r1Loadout: [], r2Loadout: [], flowerPiecesCount: [0, 0, 0, 0], gardenPiecesCount: { ally: 0, opponent: 0 }, rngSeed });
+        const floor = e.pieces.filter(p => p.state === 'ON_FIELD');
+        const hits = floor.filter(p => [e.r1, e.r2].some((r, k) => testOBBvsCircle(getRobotOBB(r, k === 0 ? C1 : C2), { center: { x: p.x, y: p.y }, radius: PIECE_PHYSICS[p.type].radius }).colliding));
+        assert(floor.length === 32 && e.r1.x === 9 && hits.length === 0, `seed ${rngSeed}: 32 scattered pieces avoid the corrected robots (${hits.length} overlapping)`);
+      }
+      // 겹침이 없으면 그대로 (기본 스폰 / 닿은 자세)
+      const d = eng({ r1Spawn: pose(hiveLeft, 72, Math.PI / 2) }).getFrame(0)!;
+      assert(d.r1.x === hiveLeft && d.r1.y === 72 && d.r2.x === 9 && d.r2.y === 108, 'no overlap -> spawn untouched');
+      // GARDEN 기물 겹침은 보정 대상이 아님 (로봇은 그대로, 다음 틱 충돌 처리에서 기물이 밀림)
+      const g = eng({ r1Spawn: pose(12, 135) }).getFrame(0)!;
+      assert(g.r1.x === 12 && g.r1.y === 135, 'piece overlap does not move the robot');
+    }
+  }, TEST_TIMEOUT_MS);
+});
