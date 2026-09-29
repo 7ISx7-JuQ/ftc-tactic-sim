@@ -4,7 +4,7 @@
 import { bearingTo, isAimWithinShooterRange } from '../core/ballistics';
 import { createIntakeZonePreset, hiveCellAimPoint } from '../core/collision';
 import { angleDifference } from '../core/kinematics';
-import type { RobotConfig, ShotProbabilityResolver } from '../core/types';
+import type { RobotConfig, ScenarioConfig, ShotProbabilityResolver } from '../core/types';
 import type { MatchSetup } from './appController';
 
 // 고정 기본 로봇 제원 (18 in 정사각, 앞면 흡입, 고정형 슈터 ±3°)
@@ -49,5 +49,17 @@ export function createSimpleResolver(r1: RobotConfig, r2: RobotConfig): ShotProb
 /** 고정 제원 + 간이 판정 함수 + 기본 시나리오(진영만 선택) + 기본 슈터 탄도 */
 export function createDefaultSetup(alliance: 'RED' | 'BLUE'): MatchSetup {
   const { robot1, robot2 } = DEFAULT_ROBOT_CONFIGS;
-  return { r1Config: robot1, r2Config: robot2, shotResolver: createSimpleResolver(robot1, robot2), scenario: { allianceColor: alliance } };
+  return buildMatchSetup(robot1, robot2, { allianceColor: alliance });
 }
+
+/** config 창에서 적용된 로봇 제원 / 시나리오로 경기 설정 (09-8a: 판정 함수는 간이 판정, LUT 판정은 09-10) */
+export function buildMatchSetup(r1Config: RobotConfig, r2Config: RobotConfig, scenario: ScenarioConfig): MatchSetup {
+  return { r1Config, r2Config, shotResolver: createSimpleResolver(r1Config, r2Config), scenario };
+}
+
+/** config 창 탭 기본값 (RESET TAB / 첫 실행): 고정 제원 + RED 기본 시나리오. 기본 프리셋(탄도 / 스윗스팟)은 09-9 / 09-10 */
+export const DEFAULT_DRAFT_VALUES: Readonly<{ robot1: RobotConfig; robot2: RobotConfig; scenario: ScenarioConfig }> = {
+  robot1: DEFAULT_ROBOT_CONFIGS.robot1,
+  robot2: DEFAULT_ROBOT_CONFIGS.robot2,
+  scenario: { allianceColor: 'RED' },
+};

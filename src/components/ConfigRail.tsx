@@ -1,13 +1,31 @@
-// 접힌 config 아이콘 띠 (명세서 3.8 우측 config 창, 09-6d: 표시만). 준비 상태 / LUT 진행률 링 / 펼치기는 09-8 ~ 09-10.
-// 09-6d의 고정 기본 설정은 간이 판정 함수라 LUT가 없고 항상 적용된 상태이므로 로봇 / 시나리오는 준비 완료로 표시한다.
-import { Bot, CircleCheck, Flag, Gamepad2, PanelRightOpen, TriangleAlert } from 'lucide-react';
+// 접힌 config 아이콘 띠 (명세서 3.8 우측 config 창, 09-8a): 로봇 / 시나리오 준비 신호(초록 체크 / 빨간 느낌표),
+// 게임패드 연결 수, 펼치기. 아이콘을 누르면 그 탭으로 펼침 (펼칠 수 있을 때만). LUT 진행률 링은 09-10.
+import { Bot, CircleAlert, CircleCheck, Flag, Gamepad2, PanelRightOpen, TriangleAlert } from 'lucide-react';
+import type { ReactNode } from 'react';
 import type { AppStatus } from '../app/appController';
 import { ALLIANCE_COLORS } from '../renderer/canvasRenderer';
+import type { ConfigTab, DraftTab, TabStatus } from '../ui/configDraft';
 import { t } from '../ui/i18n';
 import type { Language } from '../ui/i18n';
 import { gamepadSummary, robotLabel } from '../ui/mainScreenModel';
 
-export default function ConfigRail({ status, lang }: { status: AppStatus; lang: Language }) {
+function Mark({ status }: { status: TabStatus }) {
+  return status === 'OK' ? <CircleCheck className="rail-mark is-ok" /> : <CircleAlert className="rail-mark is-error" />;
+}
+
+export default function ConfigRail({
+  status,
+  lang,
+  statuses,
+  canOpen,
+  onOpen,
+}: {
+  status: AppStatus;
+  lang: Language;
+  statuses: Readonly<Record<DraftTab, TabStatus>>;
+  canOpen: boolean;
+  onOpen: (tab?: ConfigTab) => void;
+}) {
   const pads = gamepadSummary(status.gamepads);
   const padTitle = [
     t(lang, 'rail.gamepads', { count: pads.connected }),
@@ -20,33 +38,49 @@ export default function ConfigRail({ status, lang }: { status: AppStatus; lang: 
     ),
   ].join('\n');
 
+  const titleFor = (tab: DraftTab, name: string, ready: string) => (statuses[tab] === 'OK' ? ready : `${name}: ${t(lang, `config.status.${statuses[tab]}`)}`);
+
+  // 아이콘 = 그 탭으로 펼치는 버튼 (펼칠 수 없으면 표시만)
+  const item = (tab: ConfigTab, title: string, icon: ReactNode, label: ReactNode) => (
+    <button type="button" className="rail-item" key={tab} title={title} disabled={!canOpen} onClick={() => onOpen(tab)}>
+      <span className="rail-icon">{icon}</span>
+      <span className="rail-label">{label}</span>
+    </button>
+  );
+
   return (
     <nav className="config-rail">
-      {(['robot1', 'robot2'] as const).map(id => (
-        <div className="rail-item" key={id} title={t(lang, 'rail.robotReady', { robot: robotLabel(id) })}>
-          <span className="rail-icon">
+      {(['robot1', 'robot2'] as const).map(id =>
+        item(
+          id,
+          titleFor(id, robotLabel(id), t(lang, 'rail.robotReady', { robot: robotLabel(id) })),
+          <>
             <Bot />
-            <CircleCheck className="rail-mark is-ok" />
-          </span>
-          <span className="rail-label">{robotLabel(id)}</span>
-        </div>
-      ))}
-      <div className="rail-item" title={t(lang, 'rail.scenarioReady', { color: status.alliance })}>
-        <span className="rail-icon">
+            <Mark status={statuses[id]} />
+          </>,
+          robotLabel(id),
+        ),
+      )}
+      {item(
+        'scenario',
+        titleFor('scenario', t(lang, 'config.tab.scenario'), t(lang, 'rail.scenarioReady', { color: status.alliance })),
+        <>
           <Flag style={{ color: ALLIANCE_COLORS[status.alliance].base }} fill="currentColor" />
-          <CircleCheck className="rail-mark is-ok" />
-        </span>
-        <span className="rail-label">{t(lang, 'config.tab.scenario')}</span>
-      </div>
-      <div className="rail-item" title={padTitle}>
-        <span className="rail-icon">
+          <Mark status={statuses.scenario} />
+        </>,
+        t(lang, 'config.tab.scenario'),
+      )}
+      {item(
+        'settings',
+        padTitle,
+        <>
           <Gamepad2 />
           {pads.nonStandard && <TriangleAlert className="rail-mark is-warn" />}
-        </span>
-        <span className="rail-label">{pads.connected}</span>
-      </div>
+        </>,
+        pads.connected,
+      )}
       <div className="rail-spacer" />
-      <button type="button" className="icon-button rail-expand" disabled title={t(lang, 'config.open')} aria-label={t(lang, 'config.open')}>
+      <button type="button" className="icon-button rail-expand" disabled={!canOpen} title={t(lang, 'config.open')} aria-label={t(lang, 'config.open')} onClick={() => onOpen()}>
         <PanelRightOpen />
       </button>
     </nav>

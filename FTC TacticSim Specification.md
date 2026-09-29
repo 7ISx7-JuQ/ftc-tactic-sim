@@ -699,6 +699,13 @@
             | 일시정지 (경기 중 또는 복기) | 가능 | **읽기 전용** (경기가 존재하는 동안 잠금) | 표시 옵션 / 입력 출처 / 조작 모드 / 키보드 토글 / 언어 / 단위 / 기본 보기 편집 가능, `RESET ALL` 불가 |
 
         - 표시 옵션은 경기 전 또는 일시정지 중에만 바꿀 수 있다 (보기 방향 `VIEW`는 예외로 언제나 가능). `RESUME` / `BRANCH` / 재생을 누르면 config 창은 자동으로 접힌다.
+        - **09-8 확정 (사용자 결정):** ① 09-8a(창 틀 / 탭 / 초안 · 적용 / 아이콘 띠 / `START` 막기) + 09-8b(SETTINGS 내용 / 입력 출처 · 조작 모드 연결 / 자동 보관)로 분할 ② SETTINGS 탭은 바꾸는 즉시 적용(`APPLY` 없음), `APPLY`는 R1 / R2 / SCENARIO에만. `RESET ALL`은 확인창 → SETTINGS 즉시 기본값 + R1 / R2 / SCENARIO는 초안만 기본값(각 탭 `APPLY` 필요) ③ 경기 전 입력 출처는 `AUTO`(기본 규칙, 예상 결과 표시) / `LIVE` / `NONE`, `REPLAY`는 일시정지 중 그 로봇 입력 기록이 있을 때만 ④ `VIEW`는 현재 경기에서만 임시, 새 경기(`START` / `NEW`)는 SETTINGS 기본 보기 방향(기본값 `DRIVER`, 3.7항)으로 시작.
+        - **09-8 기본안 (사용자 승인):** 펼친 창 약 480u(필드를 밀어냄, 0.2초 전환), 위쪽 탭 4개 + 닫기, Esc로 닫기. 펼칠 수 없는 상태가 되면 자동으로 접힘. 경기가 있는 동안 R1 / R2 / SCENARIO는 입력칸을 흐리게 하고 "경기 중 잠금" 안내. 탭을 옮기거나 창을 닫아도 초안 유지(아이콘 빨간 느낌표 + `START` 막기). 막힌 `START` → 첫 문제 탭으로 펼침. `RESET ALL`은 확인창, 경기 전만. 게임패드 구역 읽기 전용. 입력 출처 / 조작 모드는 다음 `START` / `RESUME` / `BRANCH`부터(조작 모드 기본 `FIELD`). 언어는 SETTINGS 저장값(주소 `?lang` 폐기). 자동 보관 키 `ftc-tactic-sim/settings` + 버전, 없음 / 버전 다름 / 손상 → 기본값. 키보드 토글을 꺼도 단축키는 동작.
+        - **구현 (09-8a):**
+            - 순수 규칙 `src/ui/configDraft.ts`: `ConfigDrafts { applied, draft }`(탭 `robot1` / `robot2` / `scenario`의 `RobotConfig` / `ScenarioConfig`, 편집 / 적용 시 깊은 복사), `editDraft` / `applyTab`(`canApply` = 적용 값과 다름 + 초안 검증 통과일 때만) / `resetTabDraft`(초안만 기본값) / `canResetTab`(초안 ≠ 기본값), `isDirty`(깊은 비교, undefined 속성 = 없음), `tabIssues`(로봇 탭 = 제원 폼 전까지 없음, 시나리오 탭 = `validateScenario` + `validateRobotPlacement`를 로봇 초안과 함께), `tabStatus` = `INVALID` > `DIRTY` > `OK`, `firstBlockingTab`(R1 → R2 → SCENARIO), `configCanOpen`(경기 전 또는 경기 중 진행 · 재생 · 종료 강조 · 결과 팝업이 아닐 때), `draftTabsLocked`(경기 전이 아니면 잠금).
+            - 기본값 `DEFAULT_DRAFT_VALUES`(고정 제원 R1 / R2 + RED 기본 시나리오, `src/app/defaultSetup.ts`), 적용 값 → `buildMatchSetup(r1, r2, scenario)`(간이 판정 함수) → `AppController.setSetup`(경기 전에만).
+            - 화면: 접힌 띠(`ConfigRail`)의 로봇 / 시나리오 아이콘 = 탭 상태(초록 체크 / 빨간 느낌표 + 마우스 올리면 사유), 아이콘을 누르면 그 탭으로 펼침(게임패드 아이콘 → SETTINGS), 펼치기 버튼. 펼친 창(`ConfigPanel`): 탭 4개(문제 탭에 빨간 점) + 닫기, `START` 막힘 안내(빨간 띠), 잠금 안내, 탭 내용 자리(09-8b / 09-9 / 09-11), 하단 "적용 안 된 수정" + `RESET TAB` / `APPLY`(SETTINGS 탭은 하단 없음). 루트 CSS 변수 `--rail` = 72 ↔ 480(`layoutCssVars(configOpen)`), 그리드 열 전환 0.2초. 상태 알림에서 `configCanOpen`이 거짓이면 창을 접는다(Space 재개 포함).
+            - 1366 × 650 / 1600 × 650에서는 펼쳐도 필드 558 px 그대로(높이 제한), 3840 × 2160처럼 폭이 부족한 화면은 1901 → 1625 px로 줄어든다 (3.8항 화면 구성 그대로).
     - **앱 상태 흐름:**
 
         ```
@@ -1181,6 +1188,7 @@ export interface TimelineFrame {
 | 09-6d | 화면 뼈대: 좌측 득점 패널 / 필드 / 접힌 config 띠(표시만) / 스크러버 줄(기존 동작만), 화면 비례 단위 `--u`, 글꼴(Apple SD Gothic Neo → Pretendard) / lucide 아이콘, 새 GUI 기본 화면 + 하네스 `?harness` (아래 6.2.29) | `src/components/`, `src/ui/mainScreenModel.ts`, `src/app/defaultSetup.ts`, `src/renderer/fonts.ts`, `App.tsx`, `main.tsx`, `src/ui/__tests__/mainScreenModel.test.ts` |
 | 09-7a | 경기 흐름: 보는 틱 / 재생 · 배속 / 틱 · 1초 이동 / 재개 · 분기 / 종료 강조 5초 → 결과 팝업(기본형) → 복기, 상태별 단축키, 스크러버 줄 연결 (아래 6.2.30) | `appController.ts`, `realtimeLoop.ts`, `ScrubberBar.tsx`, `ResultPopup.tsx`, `MainScreen.tsx`, `mainScreenModel.ts`, 테스트 |
 | 09-7b | 확인창 모달(Enter / Esc, 필드 중앙), 경고 토스트(리프트 중 주행 입력, 로봇당 2초), 자동 일시정지 배너, 타임라인 클릭 / 끌기 (아래 6.2.31) | `ConfirmDialog.tsx`, `FieldNotices.tsx`, `ScrubberBar.tsx`, `MainScreen.tsx`, `appController.ts`, 테스트 |
+| 09-8a | config 창 틀: 펼치기(480u, 필드를 밀어냄) / 자동 접힘 / 탭 4개 / 잠금, 초안 · 적용 · `RESET TAB` 규칙, 아이콘 띠 탭 상태, `START` 막기 (아래 6.2.32) | `src/ui/configDraft.ts`, `ConfigPanel.tsx`, `ConfigRail.tsx`, `MainScreen.tsx`, `defaultSetup.ts`, `src/ui/__tests__/configDraft.test.ts` |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
@@ -1437,6 +1445,13 @@ export interface TimelineFrame {
 - **테스트:** `appController.test.ts` G(리프트 올린 채 W → R2 토스트 1회, 누르고 있어도 2초 안 반복 없음 · 2초 뒤 다시, 입력 없으면 없음, 리프트 내린 뒤 주행은 없음, 포커스 소실 배너 → 틱 이동 유지 → 재생 시작 해제, 재개 / 분기 / NEW 해제, 사용자 일시정지 배너 없음), `mainScreenModel.test.ts` 타임라인 위치 → 틱(양 끝 제한, 반올림, 폭 0 / 비유한값). 쿨다운 없음, 리프트 상태 검사 없음, 입력 축 검사 없음, 재생 시작 시 배너 유지, 사용자 일시정지도 배너 각각에서 실패함을 확인.
 - **헤드리스 Chromium 점검 (저장소 밖 1회성, 실제 개발 서버, 영어 / 한국어):** 시작 → 리프트 올리고 W(토스트) → 리프트 내리고 주행 → 창 포커스 소실(배너) → 타임라인 끌기(시간 표시 `1:59`, 주 버튼 `BRANCH`, 배너 유지) → `BRANCH` 확인창(문구 · Space 무시 · Esc 취소 · Enter 분기 → 진행) → 진행 중 `NEW`(일시정지 후 확인창, Esc → `RESUME` 상태로 남음). 브라우저 기본 대화상자 / 콘솔 오류 없음.
 
+### 6.2.32 Step 09-8a (config 창 틀 / 탭 / 초안 · 적용 / START 막기) 완료 항목
+
+- **결정:** 3.8항 우측 config 창 "09-8 확정" / "09-8 기본안" 참고.
+- **구현:** 3.8항 "구현 (09-8a)" 참고 (`configDraft.ts`, `ConfigPanel.tsx`, `ConfigRail.tsx`, `MainScreen.tsx`, `defaultSetup.ts` `DEFAULT_DRAFT_VALUES` / `buildMatchSetup`, 문구 `config.status.*` / `config.emptyTab`).
+- **테스트 (`src/ui/__tests__/configDraft.test.ts` A~E):** A 편집 → DIRTY → 적용(적용 값 반영, 초안 복사본, 적용할 것 없으면 그대로, 이전 상태 불변, 같은 값 편집 = 수정 아님), B 검증 실패(FLOWER 9개 → INVALID · 적용 불가 · 시나리오 탭이 막음, R1 시작 자세 HIVE 안 = 배치 오류, R2 수정이 시나리오 오류보다 먼저, 로봇 초안 적재 한도 축소 → 시나리오 적재 초과), C `RESET TAB`(초안만 기본값, 기본값이면 불가), D 열 수 있는 시점 9상태 / 잠금, E 깊은 비교. `mainScreenModel.test.ts` 펼친 열 480u(1366 기준 필드 유지). 검증 실패 적용 허용, 배치 검증 누락, 막는 탭 순서 뒤집힘, 재생 중 펼치기 허용, 복사 없음 각각에서 실패함을 확인 (undefined 속성 걸러내기는 중복 코드임을 발견해 삭제).
+- **헤드리스 Chromium 점검 (저장소 밖 1회성, 실제 개발 서버):** 경기 전 펼치기(1366 × 650 필드 558 px 유지, 3840 × 2160 1901 → 1625 px), 탭 전환, Esc 닫기, 로봇 아이콘 → R1 탭, `START` → 창 접힘 · 펼치기 비활성, Space 일시정지 → 펼침(잠금 안내, `APPLY` 비활성) → Space 재개 → 자동으로 접힘, 한국어. 콘솔 오류 없음. (`START` 막힘은 탭 폼이 생기는 09-9부터 화면에서 발생 — 규칙은 단위 테스트로 확인.)
+
 ### 6.3 남은 Step (권장 순서)
 
 > 모든 Step은 완료 시 `npm test`(엔진 회귀 테스트)가 통과해야 하며, 새로 추가한 규칙에는 테스트 그룹을 추가한다.
@@ -1461,7 +1476,7 @@ export interface TimelineFrame {
     - ~~08-5: HIVE(아군 셀 상태, 시차 낙하 연출), FLOWER 게이지(필드 밖 9칸, 잼, 가득 참 X), NECTAR 재고 게이지(게이지 틀은 정적 레이어에 추가), 경기 종료 강조.~~ (완료, 6.2.18)
     - ~~08-6: 비행 공(명목 구간 보간 + 높이 보정, 충돌 후 구간, 그림자 / 오프셋 / 크기), 표시 옵션 5종.~~ (완료, 6.2.19)
     - ~~08-7: 개발 하네스(정식 엔진 / 입력 / 루프 + 간이 판정 함수, 시작 회전 후 루프 시작, 옵션 체크박스) + 헤드리스 Chromium 점검.~~ (완료, 6.2.20)
-- **Step 9 — 웹 GUI (React, 상세 규칙 3.8항):** 09-1(명세), 09-2(탄도 사전 준비), 09-3(LUT Worker 풀), 09-4(LUT 캐시), 09-5(배치 검증), 09-6a(GUI 순수 기반), 09-6b(렌더러 전환), 09-6c(앱 컨트롤러), 09-6d(화면 뼈대), 09-7a(경기 흐름), 09-7b(확인창 / 토스트 / 배너 / 타임라인) 완료.
+- **Step 9 — 웹 GUI (React, 상세 규칙 3.8항):** 09-1(명세), 09-2(탄도 사전 준비), 09-3(LUT Worker 풀), 09-4(LUT 캐시), 09-5(배치 검증), 09-6a(GUI 순수 기반), 09-6b(렌더러 전환), 09-6c(앱 컨트롤러), 09-6d(화면 뼈대), 09-7a(경기 흐름), 09-7b(확인창 / 토스트 / 배너 / 타임라인), 09-8a(config 창 틀) 완료.
     - ~~09-1: 웹 GUI 명세 구체화.~~ (완료, 6.2.21)
     - ~~09-2: `ballistics.ts` 사전 준비 — `generateReferenceLUTRows`, `robotLUTSeeds`, `BALLISTICS_MODEL_VERSION`, 스윗스팟 진영 기준 변환 함수 + 분할 / 작업 계획 동일성 테스트.~~ (완료, 6.2.22)
     - ~~09-3: LUT Worker 풀(`src/workers/lutWorker.ts`) + 작업 대기열 + 조립 + 로봇별 상태 머신 / 취소 (React 비의존, 가짜 Worker 테스트).~~ (완료, 6.2.23)
@@ -1476,7 +1491,9 @@ export interface TimelineFrame {
     - 09-7: 경기 흐름 — 시작 / 일시정지 / 재개 / 분기(확인창) / 재생 / 배속 / 틱 · 1초 이동 / 새 경기, 상태별 키 공유, 경고 토스트 / 자동 일시정지 배너 (`ENDGAME` 타이머 색은 09-6d에서 완료). 행동 상태 배지 이미지 자산은 09-7 전에 추가 완료. 2단계로 분할:
         - ~~09-7a: 컨트롤러 흐름(보는 틱 / 재생 · 배속 / 틱 · 1초 이동 / 재개 · 분기 / 종료 강조 5초 → 결과 → 복기) + 상태별 단축키 + 스크러버 줄 버튼 연결 + 결과 팝업 기본형(점수 집계표), 확인창은 임시 `confirm`.~~ (완료, 6.2.30)
         - ~~09-7b: 확인창 모달, 경고 토스트, 자동 일시정지 배너, 타임라인 클릭 / 끌기 (스크린샷 확인).~~ (완료, 6.2.31) — 09-7 완료
-    - 09-8: config 창 — 아이콘 띠(준비 신호 / 진행률 링 / 깃발 / 게임패드) + 탭 틀 + 초안 / 적용 / 되돌리기 + SETTINGS 탭(게임패드 상태, 입력 출처, 조작 모드, 키보드 토글, 표시 옵션, 언어, 단위, 기본 보기) + 설정 자동 보관.
+    - 09-8: config 창 — 아이콘 띠(준비 신호 / 진행률 링 / 깃발 / 게임패드) + 탭 틀 + 초안 / 적용 / 되돌리기 + SETTINGS 탭(게임패드 상태, 입력 출처, 조작 모드, 키보드 토글, 표시 옵션, 언어, 단위, 기본 보기) + 설정 자동 보관. 2단계로 분할:
+        - ~~09-8a: 창 틀(펼치기 / 자동 접힘 / 탭 4개 / 잠금) + 초안 · 적용 · `RESET TAB` 틀 + 아이콘 띠 상태 + `START` 막기.~~ (완료, 6.2.32)
+        - 09-8b: SETTINGS 탭(게임패드 상태, 입력 출처 `AUTO` / `LIVE` / `NONE` / `REPLAY`, 조작 모드, 키보드 토글, 표시 옵션, 언어, 단위, 기본 보기, `RESET ALL`) + 컨트롤러 연결 + `localStorage` 자동 보관 (스크린샷 확인).
     - 09-9: 로봇 탭 — 제원 폼, `BumperZone` 편집기, 슈터 / 리프트, 팀 번호, 상대 탭 복사, 탭 되돌리기.
     - 09-10: 스윗스팟 / 히트맵 편집 모드 + LUT 진행 표시(v0 선표시 / 진행 막대 / 남은 시간 / 점진 히트맵) + 기본 프리셋 자동 생성.
     - 09-11: 시나리오 탭 + 시작 자세 편집 모드 + 시드 `REROLL` + 유효 배지.

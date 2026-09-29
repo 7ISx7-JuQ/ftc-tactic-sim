@@ -10,6 +10,7 @@
   --text-muted: #9ca3af;
   --accent: #f59e0b; /* ENDGAME 타이머 / 강조 주황 (렌더러 종료 강조와 같은 계열) */
   --ok: #22c55e;
+  --error: #ef4444;
   --warn: #f59e0b;
   --gap: calc(var(--u) * var(--gap-u));
 
@@ -21,6 +22,7 @@
   padding: var(--gap);
   display: grid;
   grid-template-columns: calc(var(--u) * var(--left-panel)) minmax(0, 1fr) calc(var(--u) * var(--rail));
+  transition: grid-template-columns 200ms ease-out; /* config 창 펼치기 / 접기 (09-8a) */
   grid-template-rows: minmax(0, 1fr) calc(var(--u) * var(--scrubber));
   grid-template-areas:
     'left field rail'
@@ -234,6 +236,19 @@
 }
 .rail-mark.is-warn {
   color: var(--warn);
+}
+.rail-mark.is-error {
+  color: var(--error);
+}
+.main-screen .rail-item {
+  padding: calc(var(--u) * 4) calc(var(--u) * 6);
+  border-radius: calc(var(--u) * 8);
+}
+.main-screen .rail-item:disabled {
+  opacity: 1; /* 펼칠 수 없을 때도 상태 표시는 그대로 (누르기만 불가) */
+}
+.main-screen .rail-item:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.08);
 }
 .rail-label {
   font-size: calc(var(--u) * 11);
@@ -691,4 +706,122 @@
   border-radius: calc(var(--u) * 4);
   border: 1px solid currentColor;
   opacity: 0.6;
+}
+
+/* ---------------- 펼친 config 창 (09-8a 틀) ---------------- */
+.config-panel {
+  grid-area: rail;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: calc(var(--u) * 10);
+  overflow: hidden;
+}
+.config-header {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 6);
+  padding: calc(var(--u) * 8) calc(var(--u) * 8) 0 calc(var(--u) * 10);
+  border-bottom: 1px solid var(--panel-border);
+}
+.config-tabs {
+  flex: 1;
+  display: flex;
+  gap: calc(var(--u) * 2);
+  min-width: 0;
+}
+.main-screen .config-tab {
+  position: relative;
+  padding: calc(var(--u) * 8) calc(var(--u) * 12) calc(var(--u) * 10);
+  font-size: calc(var(--u) * 13);
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  border-bottom: calc(var(--u) * 2) solid transparent;
+  white-space: nowrap;
+}
+.main-screen .config-tab.is-selected {
+  color: inherit;
+  border-bottom-color: #e5e7eb;
+}
+.main-screen .config-tab:not(.is-selected):hover {
+  color: inherit;
+}
+.config-tab-dot {
+  position: absolute;
+  top: calc(var(--u) * 6);
+  right: calc(var(--u) * 4);
+  width: calc(var(--u) * 7);
+  height: calc(var(--u) * 7);
+  border-radius: 50%;
+  background: var(--error);
+}
+.config-notice,
+.config-lock {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 8);
+  margin: calc(var(--u) * 10) calc(var(--u) * 12) 0;
+  padding: calc(var(--u) * 8) calc(var(--u) * 10);
+  border-radius: calc(var(--u) * 8);
+  font-size: calc(var(--u) * 13);
+  font-weight: 700;
+}
+.config-notice {
+  color: #fecaca;
+  background: rgba(239, 68, 68, 0.14);
+  border: 1px solid rgba(239, 68, 68, 0.5);
+}
+.config-lock {
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--panel-border);
+}
+.main-screen .config-notice svg.lucide,
+.main-screen .config-lock svg.lucide {
+  width: calc(var(--u) * 16);
+  height: calc(var(--u) * 16);
+}
+.config-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: calc(var(--u) * 14) calc(var(--u) * 16);
+}
+.config-empty {
+  margin: 0;
+  font-size: calc(var(--u) * 13);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.config-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: calc(var(--u) * 8);
+  padding: calc(var(--u) * 10) calc(var(--u) * 12);
+  border-top: 1px solid var(--panel-border);
+}
+.config-dirty {
+  margin-right: auto;
+  font-size: calc(var(--u) * 12);
+  font-weight: 700;
+  color: var(--error);
+}
+.main-screen .config-button {
+  height: calc(var(--u) * 34);
+  padding: 0 calc(var(--u) * 14);
+  border-radius: calc(var(--u) * 8);
+  border: 1px solid var(--panel-border);
+  font-size: calc(var(--u) * 13);
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+.main-screen .config-button.is-primary {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: #0b1a10;
 }

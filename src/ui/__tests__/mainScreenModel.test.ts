@@ -30,6 +30,12 @@ describe('A. 화면 비례 단위 / 필드 캔버스 크기', () => {
       '--scrubber': '56',
       '--gap-u': '12',
     });
+    // (09-8a) config 창을 펼치면 오른쪽 열 480u, 1366 기준에서도 필드(높이 제한)는 줄지 않음
+    expect(layoutCssVars(true)['--rail']).toBe('480');
+    const { leftPanel, configPanel, scrubber, gap } = LAYOUT_U;
+    const openWidth = DESIGN_WIDTH_PX - leftPanel - configPanel - gap * 4;
+    const height = DESIGN_HEIGHT_PX - scrubber - gap * 3;
+    expect(openWidth).toBeGreaterThanOrEqual(height);
     expect([DESIGN_WIDTH_PX, DESIGN_HEIGHT_PX]).toEqual([1366, 650]);
   });
 

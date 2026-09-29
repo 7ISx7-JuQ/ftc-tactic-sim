@@ -11,21 +11,22 @@ import { formatMatchTime } from './units';
 export const DESIGN_WIDTH_PX = 1366;
 export const DESIGN_HEIGHT_PX = 650;
 
-// 레이아웃 치수 (u 단위, 명세서 3.8: 좌측 패널 ≈ 260u, 접힌 config 띠 ≈ 72u, 스크러버 줄 ≈ 56u)
+// 레이아웃 치수 (u 단위, 명세서 3.8: 좌측 패널 ≈ 260u, 접힌 config 띠 ≈ 72u / 펼친 config 창 ≈ 480u, 스크러버 줄 ≈ 56u)
 export const LAYOUT_U = {
   leftPanel: 260,
   rail: 72,
+  configPanel: 480,
   scrubber: 56,
   gap: 12,
 } as const;
 
-/** 메인 화면 루트의 CSS 변수 (MainScreen.css의 --u 식 / 그리드 치수가 이 값을 쓴다) */
-export function layoutCssVars(): Record<string, string> {
+/** 메인 화면 루트의 CSS 변수 (MainScreen.css의 --u 식 / 그리드 치수가 이 값을 쓴다). config 창을 펼치면 오른쪽 열이 480u (필드를 밀어냄) */
+export function layoutCssVars(configOpen = false): Record<string, string> {
   return {
     '--design-w': String(DESIGN_WIDTH_PX),
     '--design-h': String(DESIGN_HEIGHT_PX),
     '--left-panel': String(LAYOUT_U.leftPanel),
-    '--rail': String(LAYOUT_U.rail),
+    '--rail': String(configOpen ? LAYOUT_U.configPanel : LAYOUT_U.rail),
     '--scrubber': String(LAYOUT_U.scrubber),
     '--gap-u': String(LAYOUT_U.gap),
   };
