@@ -173,9 +173,11 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     h.reset();
     frames.advance(VIEW_ANIMATION_MS + 50);
     h.setMatchView('AUDIENCE');
+    assert(h.status().matchView === 'DRIVER', '(09-8b) VIEW ignored before the match: the start view comes from the default view');
+    h.setDefaultView('AUDIENCE');
     h.start();
     frames.advance(VIEW_ANIMATION_MS + 50);
-    assert(h.status().phase === 'MATCH' && h.status().loopState === 'RUNNING' && h.status().viewAngle === 0, 'audience-view match: starts after the (no-rotation) transition');
+    assert(h.status().phase === 'MATCH' && h.status().loopState === 'RUNNING' && h.status().viewAngle === 0, 'audience-view match (default view AUDIENCE): starts after the (no-rotation) transition');
     h.dispose();
   });
 
@@ -399,6 +401,73 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     win.dispatchEvent(new Event('blur'));
     h.reset();
     assert(h.status().autoPauseReason === null, 'NEW clears the banner');
+    h.dispose();
+  });
+
+  it('H. 입력 출처 / 조작 모드 / 키보드 / 기본 보기 (09-8b): 다음 START · RESUME · BRANCH부터, 녹화 덧입히기', () => {
+    const { h, frames, win } = setup();
+    // 경기 전: AUTO 예상 (패드 없음 + 키보드 켬 → R1 NONE, R2 LIVE), REPLAY / 진행 중 선택 불가
+    let input = h.status().input;
+    assert(input.choices.robot1 === 'AUTO' && input.autoPreview.robot1 === 'NONE' && input.autoPreview.robot2 === 'LIVE', 'AUTO preview before the match');
+    assert(!h.setSourceChoice('robot2', 'REPLAY'), 'REPLAY not selectable before the match');
+    // 키보드를 끄면 AUTO 예상도 바뀜 (R2 → NONE), 다시 켬
+    h.setKeyboardEnabled(false);
+    assert(h.status().input.autoPreview.robot2 === 'NONE', 'keyboard off -> R2 AUTO resolves to NONE');
+    h.setKeyboardEnabled(true);
+    // 기본 보기 AUTO → 시작하면 관중석에서 회전 없음
+    h.setDefaultView('AUDIENCE');
+    h.start();
+    frames.advance(VIEW_ANIMATION_MS + 50);
+    input = h.status().input;
+    assert(h.status().viewAngle === 0 && input.sources.robot1 === 'NONE' && input.sources.robot2 === 'LIVE' && input.choices.robot2 === 'LIVE', 'START resolves AUTO (R1 NONE, R2 LIVE) in the default view');
+    assert(!h.setSourceChoice('robot2', 'NONE'), 'source change refused while running');
+
+    // 1회차: R2 키보드로 1초 주행 → 일시정지
+    win.dispatchEvent(key('keydown', KEYBOARD_BINDINGS.forward));
+    frames.advance(1000, 20);
+    win.dispatchEvent(key('keyup', KEYBOARD_BINDINGS.forward));
+    frames.advance(500, 20);
+    h.pause();
+    const firstRunTick = h.status().tick;
+    const firstRunX = h.currentFrame().r2.x;
+    assert(firstRunX > 20, `first run: R2 driven by keyboard (${firstRunX.toFixed(1)})`);
+
+    // 경기 중 선택: AUTO 불가, REPLAY는 입력 기록이 있는 로봇만 (R1은 NONE이라 기록 없음)
+    assert(!h.setSourceChoice('robot2', 'AUTO'), 'AUTO not selectable during the match');
+    assert(!h.status().input.hasLog.robot1 && !h.setSourceChoice('robot1', 'REPLAY'), 'R1 (NONE) has no input log -> REPLAY refused');
+    assert(h.setSourceChoice('robot2', 'REPLAY') && h.status().input.choices.robot2 === 'REPLAY' && h.status().input.sources.robot2 === 'LIVE', 'REPLAY chosen, applied only from the next resume / branch');
+
+    // 녹화 덧입히기: 0틱으로 되감아 분기 → R2는 키를 누르지 않아도 기록대로 같은 궤적
+    h.setViewTick(0);
+    h.branch();
+    assert(h.status().input.sources.robot2 === 'REPLAY', 'branch applies REPLAY');
+    frames.advance(3000, 20);
+    h.pause();
+    h.setViewTick(firstRunTick);
+    assert(h.currentFrame().r2.x === firstRunX, `REPLAY reproduces the recorded drive exactly (${h.currentFrame().r2.x.toFixed(3)} vs ${firstRunX.toFixed(3)})`);
+
+    // 조작 모드 / 키보드 끄기: 재개부터 적용 → 키보드로 R2가 움직이지 않음
+    h.stepView(10_000);
+    h.setSourceChoice('robot2', 'LIVE');
+    h.setDriveMode('robot2', 'ROBOT');
+    h.setKeyboardEnabled(false);
+    input = h.status().input;
+    assert(input.modes.robot2 === 'ROBOT' && input.activeModes.robot2 === 'FIELD' && !input.keyboardEnabled && input.activeKeyboard, 'mode / keyboard pending until resume');
+    h.resume();
+    input = h.status().input;
+    assert(input.activeModes.robot2 === 'ROBOT' && !input.activeKeyboard && input.sources.robot2 === 'LIVE', 'resume applies mode / keyboard / source');
+    const xBefore = h.currentFrame().r2.x;
+    win.dispatchEvent(key('keydown', KEYBOARD_BINDINGS.forward));
+    frames.advance(600, 20);
+    win.dispatchEvent(key('keyup', KEYBOARD_BINDINGS.forward));
+    assert(Math.abs(h.currentFrame().r2.x - xBefore) < 1e-9, 'keyboard driving off: W does nothing');
+    // 경기 중 VIEW는 그 경기에서만: 드라이버로 바꾼 뒤 NEW → 다음 시작은 기본 보기(관중석)
+    h.setMatchView('DRIVER');
+    frames.advance(VIEW_ANIMATION_MS + 50);
+    h.reset();
+    frames.advance(VIEW_ANIMATION_MS + 50);
+    input = h.status().input;
+    assert(h.status().phase === 'SETUP' && h.status().matchView === 'AUDIENCE' && input.choices.robot2 === 'AUTO', 'NEW: view back to the default, choices back to the pre-match choices');
     h.dispose();
   });
 });

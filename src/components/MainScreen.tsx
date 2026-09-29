@@ -1,7 +1,7 @@
 // 메인 화면 (명세서 3.8 화면 구성, 09-6d 화면 뼈대): 좌측 득점 패널 / 필드 / 접힌 config 아이콘 띠 / 스크러버 줄.
 // 시뮬레이션 / 그리기는 AppController(React 밖)가 소유하고, React는 약 10 Hz 상태 알림으로 패널 / 버튼만 그린다.
 // 09-7b: 확인창 모달 / 경고 토스트 / 자동 일시정지 배너 / 타임라인 끌기. 09-7c: 경기 종료 연출(흰빛 / 배너 · 진행바). 09-8a: config 창 틀(펼치기 / 탭 / 초안 · 적용 / START 막기).
-// 경기 설정은 config 창(09-8 ~ 09-11) 전까지 고정 기본 설정(createDefaultSetup), 언어는 SETTINGS 탭(09-8) 전까지 주소 ?lang=ko.
+// 09-8b: SETTINGS 탭(즉시 적용) + localStorage 자동 보관, 언어는 SETTINGS 값.
 
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
@@ -9,7 +9,9 @@ import { AppController } from '../app/appController';
 import type { AppStatus, LiftToast } from '../app/appController';
 import { DEFAULT_DRAFT_VALUES, buildMatchSetup } from '../app/defaultSetup';
 import { DT, MATCH_TICKS } from '../core/simulationEngine';
-import { t, toLanguage } from '../ui/i18n';
+import { t } from '../ui/i18n';
+import { DEFAULT_SETTINGS, browserSettingsStorage, loadStoredConfig, saveStoredConfig } from '../ui/settings';
+import type { UiSettings } from '../ui/settings';
 import { branchConfirmParams, fieldCanvasSize, layoutCssVars } from '../ui/mainScreenModel';
 import {
   DRAFT_TABS,
@@ -35,6 +37,7 @@ import type { ToastItem } from './FieldNotices';
 import LeftPanel from './LeftPanel';
 import ResultPopup from './ResultPopup';
 import ScrubberBar from './ScrubberBar';
+import SettingsTab from './SettingsTab';
 import type { ScrubberActions } from './ScrubberBar';
 import './MainScreen.css';
 
@@ -43,24 +46,28 @@ const LAYOUT_STYLE_OPEN = layoutCssVars(true) as CSSProperties;
 const setupOf = (v: DraftValues) => buildMatchSetup(v.robot1, v.robot2, v.scenario);
 const TOAST_VISIBLE_MS = 1500; // 경고 토스트 표시 시간 (그 뒤 흐려지며 사라짐)
 const TOAST_FADE_MS = 300;
-const initialLanguage = () => toLanguage(new URLSearchParams(window.location.search).get('lang'));
+// 설정 자동 보관 (09-8b): 앱 시작 시 한 번 읽음 (SETTINGS + 마지막으로 적용한 로봇 / 시나리오)
+const settingsStorage = browserSettingsStorage();
 
 export default function MainScreen() {
   const areaRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const controllerRef = useRef<AppController | null>(null);
   const [status, setStatus] = useState<AppStatus | null>(null);
-  const [lang] = useState(initialLanguage);
+  const [stored] = useState(() => loadStoredConfig(settingsStorage, DEFAULT_DRAFT_VALUES));
+  const [settings, setSettings] = useState<UiSettings>(stored.settings);
+  const lang = settings.language;
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [confirm, setConfirm] = useState<{ request: ConfirmRequest; anchor: { x: number; y: number } | null; resolve: (ok: boolean) => void } | null>(null);
   const toastSeq = useRef(0);
   const toastTimers = useRef(new Set<number>());
   // config 창: 초안 / 적용 값 (적용 값이 경기 설정이 됨), 펼침 / 탭 / 안내
-  const [drafts, setDrafts] = useState<ConfigDrafts>(() => initialDrafts(DEFAULT_DRAFT_VALUES));
+  const [drafts, setDrafts] = useState<ConfigDrafts>(() => initialDrafts(stored.applied ?? DEFAULT_DRAFT_VALUES));
   const [configOpen, setConfigOpen] = useState(false);
   const [configTab, setConfigTab] = useState<ConfigTab>('robot1');
   const [configNotice, setConfigNotice] = useState<string | null>(null);
   const initialApplied = useRef(drafts.applied);
+  const initialSettings = useRef(settings);
 
   useEffect(() => {
     const area = areaRef.current;
@@ -100,7 +107,17 @@ export default function MainScreen() {
       setStatus(s);
       if (!configCanOpen(s)) setConfigOpen(false);
     };
-    const controller = new AppController({ ctx, dpr: measure().scale, setup: setupOf(initialApplied.current), onStatus, onToast });
+    const s0 = initialSettings.current;
+    const controller = new AppController({
+      ctx,
+      dpr: measure().scale,
+      setup: setupOf(initialApplied.current),
+      onStatus,
+      onToast,
+      input: { keyboardEnabled: s0.keyboardEnabled, driveModes: s0.driveModes },
+      defaultView: s0.defaultView,
+      options: s0.renderOptions,
+    });
     controllerRef.current = controller;
     setStatus(controller.status());
 
@@ -150,11 +167,49 @@ export default function MainScreen() {
     if (next === drafts) return;
     setDrafts(next);
     c()?.setSetup(setupOf(next.applied));
+    saveStoredConfig(settingsStorage, { settings, applied: next.applied });
   };
   const resetCurrentTab = () => {
     if (configTab === 'settings' || locked) return;
     setDrafts(resetTabDraft(drafts, configTab, DEFAULT_DRAFT_VALUES));
   };
+  // ---------------- SETTINGS (즉시 적용 + 자동 보관) ----------------
+  const pushSettings = (next: UiSettings, prev: UiSettings | null) => {
+    const controller = c();
+    if (!controller) return;
+    if (!prev || next.renderOptions !== prev.renderOptions) controller.setOptions(next.renderOptions);
+    if (!prev || next.defaultView !== prev.defaultView) controller.setDefaultView(next.defaultView);
+    if (!prev || next.keyboardEnabled !== prev.keyboardEnabled) controller.setKeyboardEnabled(next.keyboardEnabled);
+    if (!prev || next.driveModes !== prev.driveModes) {
+      controller.setDriveMode('robot1', next.driveModes.robot1);
+      controller.setDriveMode('robot2', next.driveModes.robot2);
+    }
+  };
+  const updateSettings = (patch: Partial<UiSettings>) => {
+    const next = { ...settings, ...patch };
+    setSettings(next);
+    pushSettings(next, settings);
+    saveStoredConfig(settingsStorage, { settings: next, applied: drafts.applied });
+  };
+  // RESET ALL (경기 전만, 확인창): SETTINGS 즉시 기본값, R1 / R2 / SCENARIO는 초안만 기본값 (각 탭 APPLY 필요)
+  const resetAll = () => {
+    if (status?.phase !== 'SETUP') return;
+    void ask(t(lang, 'confirm.resetAll'), t(lang, 'config.resetAll')).then(ok => {
+      if (!ok) return;
+      const next = { ...DEFAULT_SETTINGS, renderOptions: { ...DEFAULT_SETTINGS.renderOptions }, driveModes: { ...DEFAULT_SETTINGS.driveModes } };
+      setSettings(next);
+      pushSettings(next, null);
+      let d = drafts;
+      for (const tab of DRAFT_TABS) d = resetTabDraft(d, tab, DEFAULT_DRAFT_VALUES);
+      setDrafts(d);
+      saveStoredConfig(settingsStorage, { settings: next, applied: d.applied });
+    });
+  };
+  // 화면 언어 (문서 lang 속성도 맞춤)
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
+
   // 펼친 동안 Esc = 닫기 (확인창이 떠 있으면 확인창이 먼저 받음)
   useEffect(() => {
     if (!configOpen) return;
@@ -259,6 +314,16 @@ export default function MainScreen() {
             onClose={closeConfig}
             onApply={applyCurrentTab}
             onResetTab={resetCurrentTab}
+            settingsContent={
+              <SettingsTab
+                status={status}
+                lang={lang}
+                settings={settings}
+                onSettings={updateSettings}
+                onSourceChoice={(robot, choice) => c()?.setSourceChoice(robot, choice)}
+                onResetAll={resetAll}
+              />
+            }
           />
         ) : (
           <ConfigRail status={status} lang={lang} statuses={statuses} canOpen={canOpen} onOpen={openConfig} />

@@ -117,6 +117,23 @@ describe('브라우저 입력 어댑터 (명세서 3.6, 가짜 브라우저 환�
     off.win.dispatchEvent(w2);
     b.poll();
     assert(!w2.defaultPrevented && b.consumeTick().robot2.forward === 0, 'KEYBOARD_ENABLED = false -> keyboard ignored entirely');
+
+    // (09-8b) 런타임 토글: 켜면 주행, 누른 채로 끄면 눌린 키를 비우고 무시, 다시 켜면 새로 누른 키부터
+    b.setKeyboardEnabled(true);
+    assert(b.isKeyboardEnabled, 'toggled on');
+    off.win.dispatchEvent(key('keydown', K.forward));
+    b.poll();
+    assert(b.consumeTick().robot2.forward === 1, 'on at runtime -> W drives R2');
+    b.setKeyboardEnabled(false);
+    b.poll();
+    const w3 = key('keydown', K.shoot);
+    off.win.dispatchEvent(w3);
+    b.poll();
+    const offTick = b.consumeTick().robot2;
+    assert(offTick.forward === 0 && !offTick.shoot && !w3.defaultPrevented, 'off at runtime (W still held) -> held key cleared, new keys ignored');
+    b.setKeyboardEnabled(true);
+    b.poll();
+    assert(b.consumeTick().robot2.forward === 0, 'back on: the key held before turning off is not resurrected');
   });
 
   it('C. 게임패드 폴링 (슬롯 배정 / 연결 상태 / API 없음)', () => {

@@ -67,7 +67,7 @@ export class BrowserInputAdapter implements LiveControlSource {
   readonly collector: LiveControlCollector;
   private readonly keys = new Set<string>(); // 현재 눌린 매핑 키 (event.code)
   private readonly assignment: typeof DEVICE_ASSIGNMENT;
-  private readonly keyboardEnabled: boolean;
+  private keyboardEnabled: boolean;
   private readonly env: BrowserInputEnv;
   private detachFn: (() => void) | null = null;
 
@@ -151,6 +151,18 @@ export class BrowserInputAdapter implements LiveControlSource {
   // 일시정지 / 재개 시 루프가 호출: 누적 에지 / 레벨 초기화 (눌린 키 집합은 유지 → 다음 poll에서 복원)
   reset(): void {
     this.collector.reset();
+  }
+
+  /** 키보드 주행 켜기 / 끄기 (09-8b 런타임 토글). 끄면 주행 키를 무시(기본 동작도 막지 않음)하고 눌린 키를 비운다 */
+  setKeyboardEnabled(enabled: boolean): void {
+    if (enabled === this.keyboardEnabled) return;
+    this.keyboardEnabled = enabled;
+    this.keys.clear();
+    this.collector.setKeyboardEnabled(enabled);
+  }
+
+  get isKeyboardEnabled(): boolean {
+    return this.keyboardEnabled;
   }
 
   // 배정된 슬롯별 연결 상태 (슬롯 오름차순)

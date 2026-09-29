@@ -1,5 +1,6 @@
 // 펼친 config 창 (명세서 3.8 우측 config 창, 09-8a 틀): 탭 R1 / R2 / SCENARIO / SETTINGS + 닫기, 탭 하단 RESET TAB / APPLY.
 // 탭 내용(폼)은 09-8b(SETTINGS) / 09-9(로봇) / 09-11(시나리오)에서 채운다. 경기가 있는 동안 R1 / R2 / SCENARIO는 읽기 전용.
+import type { ReactNode } from 'react';
 import { CircleAlert, PanelRightClose, Lock } from 'lucide-react';
 import type { DraftTab, ConfigTab, TabStatus } from '../ui/configDraft';
 import { CONFIG_TABS, TAB_LABEL_KEYS } from '../ui/configDraft';
@@ -18,6 +19,7 @@ export interface ConfigPanelProps {
   onClose: () => void;
   onApply: () => void;
   onResetTab: () => void;
+  settingsContent: ReactNode;    // SETTINGS 탭 내용 (09-8b)
 }
 
 export default function ConfigPanel(props: ConfigPanelProps) {
@@ -64,7 +66,7 @@ export default function ConfigPanel(props: ConfigPanelProps) {
       )}
 
       <div className="config-body" role="tabpanel">
-        <p className="config-empty">{t(lang, 'config.emptyTab')}</p>
+        {draftTab ? <p className="config-empty">{t(lang, 'config.emptyTab')}</p> : props.settingsContent}
       </div>
 
       {draftTab && (

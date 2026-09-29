@@ -23,7 +23,7 @@ export class LiveControlCollector implements LiveControlSource {
   private readonly gamepadLatches = new Map<number, ControlLatch>(); // 배정된 게임패드 슬롯만
   private readonly keyboardLatch = new ControlLatch();
   private readonly assignment: typeof DEVICE_ASSIGNMENT;
-  private readonly keyboardEnabled: boolean;
+  private keyboardEnabled: boolean;
 
   constructor(assignment = DEVICE_ASSIGNMENT, keyboardEnabled = KEYBOARD_ENABLED) {
     this.assignment = assignment;
@@ -52,6 +52,13 @@ export class LiveControlCollector implements LiveControlSource {
 
   reset(): void {
     for (const latch of this.gamepadLatches.values()) latch.reset();
+    this.keyboardLatch.reset();
+  }
+
+  /** 키보드 주행 켜기 / 끄기 (09-8b SETTINGS 런타임 토글). 바꿀 때 키보드 누적 입력을 비움 */
+  setKeyboardEnabled(enabled: boolean): void {
+    if (enabled === this.keyboardEnabled) return;
+    this.keyboardEnabled = enabled;
     this.keyboardLatch.reset();
   }
 }

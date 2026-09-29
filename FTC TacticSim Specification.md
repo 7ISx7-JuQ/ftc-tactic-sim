@@ -810,6 +810,13 @@
 
         - **기본 입력 출처:** 경기 시작 시 R1 = 슬롯 0 패드 연결 시 `LIVE`, 아니면 `NONE` / R2 = 슬롯 1 패드 연결 **또는 키보드 켜짐**이면 `LIVE`, 아니면 `NONE` (패드 없이 키보드로 R2를 몰 수 있고, 키보드를 끄면 패드 1개일 때 R2 = `NONE`). 이후 일시정지 중 변경 가능.
         - **설정 자동 보관 (`localStorage`):** 마지막으로 적용한 로봇 프로필 / 시나리오와 UI 환경설정(언어, 단위, 기본 보기, 표시 옵션, 키보드 토글)을 보관해 새로고침 후 복원한다. 경기 기록은 보관하지 않는다 (3.6항, 새로고침 시 경기 폐기 유지). 저장소를 쓸 수 없으면 기본값으로 시작. JSON 내보내기 / 불러오기는 Step 10.
+        - **09-8b 확정 (사용자 결정):** ① 로봇별 조작 모드도 보관 (입력 출처는 보관하지 않고 앱을 켤 때마다 `AUTO`) ② 일시정지 중 입력 출처 선택지는 `LIVE` / `REPLAY` / `NONE`(시작 때 풀린 값이 선택된 상태, `REPLAY`는 그 로봇 입력 기록이 있을 때만) + 녹화 덧입히기 안내 ③ 입력 구역 아래 키보드 조작표 ④ 경기 전 `VIEW` 비활성 (시작 시점은 기본 보기 방향으로만). 기본 보기 방향의 기본값은 `DRIVER` 유지 — 새 경기도 경기 전에는 관중석, 시작하면 진영 드라이버 시점으로 회전.
+        - **구현 (09-8b):**
+            - 입력 출처 규칙 `src/app/inputPlan.ts`: `autoSource`(그 로봇에 배정된 패드 슬롯 중 연결된 것 / 켜진 키보드가 있으면 `LIVE`, 아니면 `NONE`), `resolveSource`, `sourceChoiceAllowed`(경기 전 `AUTO` / `LIVE` / `NONE`, 경기 중 `LIVE` / `NONE` / 기록 있으면 `REPLAY`).
+            - `AppController`: `setSourceChoice`(경기 전 선택 / 경기 중 선택을 따로 보관, 진행 중 거부), `setDriveMode`, `setKeyboardEnabled`, `setDefaultView`, 생성 인자 `input` / `defaultView` / `options`. `START`에서 경기 전 선택을 시작 순간의 게임패드 상태로 풀어 적용하고, `RESUME` / `BRANCH`에서 경기 중 선택 · 조작 모드 · 키보드를 입력 허브 / 어댑터에 적용(분기는 적용 후 `LIVE` 로봇 로그만 폐기 → `REPLAY` 로봇은 기록 유지 = 녹화 덧입히기). `REPLAY`인데 기록이 없으면 `NONE`. 새 경기(앱 시작 / `NEW` / 경기 전 설정 교체)마다 경기 중 보기 = 기본 보기 방향, 경기 전 `setMatchView`는 무시. 상태 `input`: 선택 / `AUTO` 예상 / 적용 중 출처 / 기록 유무 / 조작 모드(선택 · 적용 중) / 키보드(선택 · 적용 중).
+            - 입력 계층: `LiveControlCollector.setKeyboardEnabled` / `BrowserInputAdapter.setKeyboardEnabled`(런타임 토글, 끄면 눌린 키를 비우고 주행 키를 가로채지 않음, 다시 켜도 끄기 전 눌린 키는 되살아나지 않음), `isKeyboardEnabled`.
+            - 설정 `src/ui/settings.ts`: `UiSettings`(언어 / 길이 단위 / 기본 보기 / 표시 옵션 / 키보드 / 조작 모드), `DEFAULT_SETTINGS`, 저장 키 `ftc-tactic-sim/settings` + `SETTINGS_VERSION` = 1, `parseStoredConfig`(없음 · JSON 손상 · 버전 다름 → 전부 기본값, 항목별 형식 오류 → 그 항목만 기본값), 적용 값 복원은 기본 로봇과 같은 모양(숫자는 유한값) + 진영 유효 + 시나리오 · 배치 검증 통과일 때만(`sanitizeApplied`, `sameShape`), `loadStoredConfig` / `saveStoredConfig`(저장소 없음 / 오류 허용), `keyCodeLabel`.
+            - 화면: `SettingsTab.tsx` — 게임패드(슬롯 → 로봇, 패드 이름 / "버튼을 한 번 눌러 연결", 비표준 경고), 입력(로봇별 출처 버튼 묶음 + `AUTO` 옆 "지금: …", 조작 모드 필드 기준 / 로봇 기준, 키보드 토글, "다음 시작 / 재개 / 분기부터 적용" + 선택과 적용 중 값이 다르면 "적용 대기", 경기 중 녹화 덧입히기 안내, 접는 키보드 조작표), 표시 옵션 토글 5개(이름 + 한 줄 설명), 화면(언어 / 길이 단위 / 기본 보기 + 안내), 초기화(`RESET ALL`, 경기 전만). 바꾸는 즉시 컨트롤러에 반영 + 저장. `RESET ALL`은 확인창 → SETTINGS 즉시 기본값 + R1 / R2 / SCENARIO 초안만 기본값. `APPLY` 시 적용 값도 저장. 언어는 저장값(주소 `?lang` 폐기), 문서 `lang` 속성 동기화. 스크러버 줄 `VIEW`는 경기 전 비활성.
         - **키보드 단축키 (상태별 키 공유):** 주행 키는 루프 `RUNNING`에서만, 스크러빙 단축키는 일시정지 / 복기 중에만 쓰이므로 같은 키를 겹쳐 쓴다. 키보드 주행을 꺼도 단축키는 항상 동작.
 
             | 키 | 진행 중 (`RUNNING`) | 일시정지 / 복기 | 재생 중 |
@@ -1197,6 +1204,7 @@ export interface TimelineFrame {
 | 09-7b | 확인창 모달(Enter / Esc, 필드 중앙), 경고 토스트(리프트 중 주행 입력, 로봇당 2초), 자동 일시정지 배너, 타임라인 클릭 / 끌기 (아래 6.2.31) | `ConfirmDialog.tsx`, `FieldNotices.tsx`, `ScrubberBar.tsx`, `MainScreen.tsx`, `appController.ts`, 테스트 |
 | 09-8a | config 창 틀: 펼치기(480u, 필드를 밀어냄) / 자동 접힘 / 탭 4개 / 잠금, 초안 · 적용 · `RESET TAB` 규칙, 아이콘 띠 탭 상태, `START` 막기 (아래 6.2.32) | `src/ui/configDraft.ts`, `ConfigPanel.tsx`, `ConfigRail.tsx`, `MainScreen.tsx`, `defaultSetup.ts`, `src/ui/__tests__/configDraft.test.ts` |
 | 09-7c | 경기 종료 연출(사용자 피드백): 마지막 10초 타이머 빨강 맥박, 종료 흰빛, `MATCH COMPLETE` 배너 + 5초 진행바, 점수 카운트업 + 항목 칩, 종료 신호 `endSeq` (아래 6.2.33) | `EndOverlay.tsx`, `LeftPanel.tsx`, `mainScreenModel.ts`, `appController.ts`, 테스트 |
+| 09-8b | SETTINGS 탭(게임패드 / 입력 출처 · 조작 모드 · 키보드 + 조작표 / 표시 옵션 / 언어 · 단위 · 기본 보기 / `RESET ALL`), 입력 선택을 START · RESUME · BRANCH에 적용(녹화 덧입히기), 새 경기 = 기본 보기, `localStorage` 자동 보관 (아래 6.2.34) | `src/app/inputPlan.ts`, `src/ui/settings.ts`, `SettingsTab.tsx`, `appController.ts`, `browserInput.ts`, `liveControls.ts`, 테스트 |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
@@ -1467,6 +1475,13 @@ export interface TimelineFrame {
 - **테스트:** `mainScreenModel.test.ts` E(마지막 10초 경계 = 5500틱 · 경기 전 제외, 집계 시작 점수 / 칩 순서 · 0점 제외, 카운트업 시작 / 끝 / 단조 정수 / easeOut / 비정상 입력), `appController.test.ts` F(실제 종료 `endSeq` 1, 복기 재생이 종료 틱까지 가도 불변, 분기 후 재종료 2, NEW 0). 신호 증가 누락, NEW 초기화 누락, 10초 경계 미포함, 0점 칩 포함, 선형 카운트업, 집계 시작 점수 0 각각에서 실패함을 확인.
 - **헤드리스 Chromium 점검 (저장소 밖 1회성, 실제 개발 서버, 한국어, 120초 경기):** 0:06.8 빨강 타이머, 종료 직후 카운트업 중간(4점 + `+4 GARDEN`) · 배너 · 진행바, 약 2초 뒤 9점 + `+4 GARDEN` / `+5 PARK`, 5초 뒤 결과 팝업(연출 사라짐). 콘솔 오류 없음.
 
+### 6.2.34 Step 09-8b (SETTINGS 탭 / 입력 출처 · 조작 모드 연결 / 설정 자동 보관) 완료 항목
+
+- **결정:** 3.8항 SETTINGS 탭 "09-8b 확정" 참고.
+- **구현:** 3.8항 SETTINGS 탭 "구현 (09-8b)" 참고 (`inputPlan.ts`, `settings.ts`, `SettingsTab.tsx`, `AppController`, `browserInput.ts` / `liveControls.ts` 키보드 런타임 토글, 문구 `settings.*` / `option.*` / `confirm.resetAll`).
+- **테스트:** `src/app/__tests__/inputPlan.test.ts` A~B(`AUTO` 규칙 6조합 · 배정 안 된 슬롯, 풀이, 경기 전 / 경기 중 선택지), `src/ui/__tests__/settings.test.ts` A~F(기본값, 저장 → 복원 왕복 · 입력 출처 미보관, 없음 / 손상 / 버전 다름 / 항목별 형식 오류, 적용 값 모양 · 유한값 · 진영 · 시나리오 · 배치 검증, 메모리 / 없음 / 오류 저장소, 키 이름), `appController.test.ts` H(`AUTO` 예상 · 키보드 끄면 R2 `NONE`, 시작 시 풀이 + 기본 보기 관중석, 진행 중 변경 거부, 경기 중 `AUTO` · 기록 없는 `REPLAY` 거부, 녹화 덧입히기 — R2를 1회차 기록대로 `REPLAY` 분기 → 같은 틱에서 위치 비트 단위 일치, 조작 모드 / 키보드는 재개 때 적용 · 키보드 끄면 W 무반응, 경기 중 `VIEW` 후 `NEW` → 기본 보기 · 경기 전 선택 복귀), C 갱신(경기 전 `VIEW` 무시, 기본 보기로 관중석 경기), `browserInput.test.ts` B 런타임 키보드 토글. 재개 시 적용 누락, 새 경기 보기 초기화 누락, 경기 전 `VIEW` 허용, 분기 시 적용 누락, 진행 중 변경 허용, 키보드 끔 무시, 적용 값 검증 생략, 비유한값 허용, 버전 무시, 끌 때 눌린 키 유지 각각에서 실패함을 확인.
+- **헤드리스 Chromium 점검 (저장소 밖 1회성, 실제 개발 서버 1366 × 768):** 경기 전 `VIEW` 비활성, 게임패드 아이콘 → SETTINGS(영어), 키보드 조작표, 한국어 · 명중 확률 켬 · 기본 보기 관중석 → `localStorage` 저장 확인 → 새로고침 후 복원(한국어, 명중 확률 줄 표시), 시작 → 관중석 그대로 → 일시정지 → R2 `REPLAY` 선택("적용 대기"), R1 `REPLAY` 비활성(기록 없음), `RESET ALL` 비활성. 콘솔 오류 없음.
+
 ### 6.3 남은 Step (권장 순서)
 
 > 모든 Step은 완료 시 `npm test`(엔진 회귀 테스트)가 통과해야 하며, 새로 추가한 규칙에는 테스트 그룹을 추가한다.
@@ -1491,7 +1506,7 @@ export interface TimelineFrame {
     - ~~08-5: HIVE(아군 셀 상태, 시차 낙하 연출), FLOWER 게이지(필드 밖 9칸, 잼, 가득 참 X), NECTAR 재고 게이지(게이지 틀은 정적 레이어에 추가), 경기 종료 강조.~~ (완료, 6.2.18)
     - ~~08-6: 비행 공(명목 구간 보간 + 높이 보정, 충돌 후 구간, 그림자 / 오프셋 / 크기), 표시 옵션 5종.~~ (완료, 6.2.19)
     - ~~08-7: 개발 하네스(정식 엔진 / 입력 / 루프 + 간이 판정 함수, 시작 회전 후 루프 시작, 옵션 체크박스) + 헤드리스 Chromium 점검.~~ (완료, 6.2.20)
-- **Step 9 — 웹 GUI (React, 상세 규칙 3.8항):** 09-1(명세), 09-2(탄도 사전 준비), 09-3(LUT Worker 풀), 09-4(LUT 캐시), 09-5(배치 검증), 09-6a(GUI 순수 기반), 09-6b(렌더러 전환), 09-6c(앱 컨트롤러), 09-6d(화면 뼈대), 09-7a(경기 흐름), 09-7b(확인창 / 토스트 / 배너 / 타임라인), 09-8a(config 창 틀), 09-7c(경기 종료 연출) 완료.
+- **Step 9 — 웹 GUI (React, 상세 규칙 3.8항):** 09-1(명세), 09-2(탄도 사전 준비), 09-3(LUT Worker 풀), 09-4(LUT 캐시), 09-5(배치 검증), 09-6a(GUI 순수 기반), 09-6b(렌더러 전환), 09-6c(앱 컨트롤러), 09-6d(화면 뼈대), 09-7a(경기 흐름), 09-7b(확인창 / 토스트 / 배너 / 타임라인), 09-8a(config 창 틀), 09-7c(경기 종료 연출), 09-8b(SETTINGS / 자동 보관) 완료.
     - ~~09-1: 웹 GUI 명세 구체화.~~ (완료, 6.2.21)
     - ~~09-2: `ballistics.ts` 사전 준비 — `generateReferenceLUTRows`, `robotLUTSeeds`, `BALLISTICS_MODEL_VERSION`, 스윗스팟 진영 기준 변환 함수 + 분할 / 작업 계획 동일성 테스트.~~ (완료, 6.2.22)
     - ~~09-3: LUT Worker 풀(`src/workers/lutWorker.ts`) + 작업 대기열 + 조립 + 로봇별 상태 머신 / 취소 (React 비의존, 가짜 Worker 테스트).~~ (완료, 6.2.23)
@@ -1509,7 +1524,7 @@ export interface TimelineFrame {
         - ~~09-7c: 경기 종료 연출 (사용자 피드백 추가) — 마지막 10초 빨강 맥박, 종료 흰빛, 종료 배너 + 5초 진행바, 점수 카운트업 + 항목 칩.~~ (완료, 6.2.33) — 09-7 완료
     - 09-8: config 창 — 아이콘 띠(준비 신호 / 진행률 링 / 깃발 / 게임패드) + 탭 틀 + 초안 / 적용 / 되돌리기 + SETTINGS 탭(게임패드 상태, 입력 출처, 조작 모드, 키보드 토글, 표시 옵션, 언어, 단위, 기본 보기) + 설정 자동 보관. 2단계로 분할:
         - ~~09-8a: 창 틀(펼치기 / 자동 접힘 / 탭 4개 / 잠금) + 초안 · 적용 · `RESET TAB` 틀 + 아이콘 띠 상태 + `START` 막기.~~ (완료, 6.2.32)
-        - 09-8b: SETTINGS 탭(게임패드 상태, 입력 출처 `AUTO` / `LIVE` / `NONE` / `REPLAY`, 조작 모드, 키보드 토글, 표시 옵션, 언어, 단위, 기본 보기, `RESET ALL`) + 컨트롤러 연결 + `localStorage` 자동 보관 (스크린샷 확인).
+        - ~~09-8b: SETTINGS 탭(게임패드 상태, 입력 출처 `AUTO` / `LIVE` / `NONE` / `REPLAY`, 조작 모드, 키보드 토글, 표시 옵션, 언어, 단위, 기본 보기, `RESET ALL`) + 컨트롤러 연결 + `localStorage` 자동 보관 (스크린샷 확인).~~ (완료, 6.2.34) — 09-8 완료
     - 09-9: 로봇 탭 — 제원 폼, `BumperZone` 편집기, 슈터 / 리프트, 팀 번호, 상대 탭 복사, 탭 되돌리기.
     - 09-10: 스윗스팟 / 히트맵 편집 모드 + LUT 진행 표시(v0 선표시 / 진행 막대 / 남은 시간 / 점진 히트맵) + 기본 프리셋 자동 생성.
     - 09-11: 시나리오 탭 + 시작 자세 편집 모드 + 시드 `REROLL` + 유효 배지.

@@ -182,7 +182,8 @@ export default function ScrubberBar({ status, lang, actions }: { status: AppStat
         ))}
       </div>
 
-      <button type="button" className="text-button" title={t(lang, viewKey)} onClick={blurAfter(actions.toggleView)}>
+      {/* 경기 전에는 비활성 (시작 시점은 SETTINGS 기본 보기 방향, 09-8 확정) */}
+      <button type="button" className="text-button" title={t(lang, viewKey)} disabled={status.phase === 'SETUP'} onClick={blurAfter(actions.toggleView)}>
         <SwitchCamera />
         <span>{t(lang, 'control.view')}</span>
       </button>

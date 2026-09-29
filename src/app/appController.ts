@@ -25,6 +25,11 @@ import type {
 import { createAnimationFrameScheduler, createBrowserRealtimeLoop, isEditableTarget } from '../input/browserInput';
 import type { BrowserInputAdapter, BrowserInputEnv, GamepadSlotStatus } from '../input/browserInput';
 import { LOG_RECORD_BYTES, MatchInputs } from '../input/inputLog';
+import type { InputSource } from '../input/inputLog';
+import { DEFAULT_DRIVE_MODE, KEYBOARD_ENABLED } from '../input/inputConfig';
+import type { DriveMode, RobotId } from '../input/inputConfig';
+import { autoSource, resolveSource, sourceChoiceAllowed } from './inputPlan';
+import type { SourceChoice } from './inputPlan';
 import type { FrameScheduler, LoopState, PauseReason, RealtimeLoop } from '../input/realtimeLoop';
 import { DEFAULT_RENDER_OPTIONS, hitProbabilities } from '../renderer/renderOptions';
 import type { RenderOptions, RobotHitProbability } from '../renderer/renderOptions';
@@ -89,6 +94,28 @@ export interface AppStatus {
   // 표시 옵션 hitProbability가 켜져 있을 때만 (좌측 패널 명중 확률, 상태 알림마다 판정 함수 4회 호출), 꺼져 있으면 null
   hitProbability: Record<'robot1' | 'robot2', RobotHitProbability> | null;
   gamepads: GamepadSlotStatus[];
+  input: InputStatus;
+}
+
+/**
+ * 입력 출처 / 조작 모드 / 키보드 (명세서 3.8 SETTINGS 탭 입력, 09-8b). 선택(choices / modes / keyboardEnabled)은
+ * 다음 START / RESUME / BRANCH부터 적용되고, sources / activeModes / activeKeyboard는 지금 경기에 적용 중인 값
+ */
+export interface InputStatus {
+  choices: Record<RobotId, SourceChoice>;   // 경기 전 = AUTO / LIVE / NONE, 경기 중 = LIVE / REPLAY / NONE
+  autoPreview: Record<RobotId, InputSource>; // 지금 시작하면 AUTO가 풀릴 값
+  sources: Record<RobotId, InputSource>;     // 경기 중 = 적용 중인 출처, 경기 전 = 지금 시작하면 적용될 출처
+  hasLog: Record<RobotId, boolean>;          // 입력 기록 있음 (REPLAY 가능)
+  modes: Record<RobotId, DriveMode>;
+  activeModes: Record<RobotId, DriveMode>;
+  keyboardEnabled: boolean;
+  activeKeyboard: boolean;
+}
+
+/** 입력 설정 초기값 (저장된 SETTINGS에서) */
+export interface InputSettings {
+  keyboardEnabled: boolean;
+  driveModes: Record<RobotId, DriveMode>;
 }
 
 /** 결과 팝업 값 (종료 프레임 = 6000틱에서 읽음, 명세서 3.8 경기 종료와 결과 팝업) */
@@ -108,6 +135,9 @@ export interface AppControllerDeps {
   now?: () => number;             // 보기 애니메이션용 벽시계 (ms)
   onStatus?: (status: AppStatus) => void;
   onToast?: (toast: LiftToast) => void;
+  input?: Partial<InputSettings>;
+  defaultView?: ViewMode;          // 새 경기의 경기 중 보기 (SETTINGS 기본 보기 방향, 09-8b)
+  options?: RenderOptions;
   statusIntervalMs?: number;      // 진행 중 상태 알림 최소 간격 (기본 100 ms ≈ 10 Hz)
 }
 
@@ -123,6 +153,12 @@ export class AppController {
 
   private setup: MatchSetup;
   private matchView: ViewMode = 'DRIVER';
+  private defaultView: ViewMode = 'DRIVER';
+  // 입력 선택 (09-8b): 경기 전 선택 / 경기 중 선택 / 조작 모드 / 키보드 — 다음 START / RESUME / BRANCH부터 적용
+  private setupChoices: Record<RobotId, SourceChoice> = { robot1: 'AUTO', robot2: 'AUTO' };
+  private matchChoices: Record<RobotId, InputSource> = { robot1: 'LIVE', robot2: 'LIVE' };
+  private driveModes: Record<RobotId, DriveMode> = { robot1: DEFAULT_DRIVE_MODE, robot2: DEFAULT_DRIVE_MODE };
+  private keyboardEnabled = KEYBOARD_ENABLED;
   private options: RenderOptions = { ...DEFAULT_RENDER_OPTIONS };
   private phase: AppPhase = 'SETUP';
   private readonly animator = new ViewAnimator(0);
@@ -159,6 +195,10 @@ export class AppController {
     this.onStatus = deps.onStatus ?? (() => {});
     this.onToast = deps.onToast ?? (() => {});
     this.statusIntervalMs = deps.statusIntervalMs ?? 100;
+    this.keyboardEnabled = deps.input?.keyboardEnabled ?? KEYBOARD_ENABLED;
+    if (deps.input?.driveModes) this.driveModes = { ...deps.input.driveModes };
+    this.defaultView = deps.defaultView ?? 'DRIVER';
+    if (deps.options) this.options = { ...deps.options };
     this.newMatch();
     this.attachShortcuts();
     this.requestRender();
@@ -175,12 +215,45 @@ export class AppController {
     return true;
   }
 
-  /** 경기 중 보기 (DRIVER / AUDIENCE). 경기 중이면 회전 애니메이션, 경기 전이면 설정만 */
+  /**
+   * 경기 중 보기 (DRIVER / AUDIENCE, 스크러버 줄 VIEW). 경기 중이면 회전 애니메이션, 그 경기에서만 유지 (새 경기는 기본 보기 방향).
+   * 경기 전(SETUP)에는 무시 — 시작 시점은 SETTINGS 기본 보기 방향으로만 정한다 (09-8 확정)
+   */
   setMatchView(mode: ViewMode): void {
-    if (mode === this.matchView) return;
+    if (mode === this.matchView || this.phase === 'SETUP') return;
     this.matchView = mode;
     if (this.phase === 'MATCH' || this.phase === 'ROTATING_IN') this.animator.start(viewAngle(mode, this.alliance), this.now());
     this.changed();
+  }
+
+  /** SETTINGS 기본 보기 방향: 새 경기(앱 시작 / NEW)의 경기 중 보기. 경기 전이면 이번 START에도 바로 적용 */
+  setDefaultView(mode: ViewMode): void {
+    this.defaultView = mode;
+    if (this.phase === 'SETUP') this.matchView = mode;
+    this.changed();
+  }
+
+  /** 로봇별 입력 출처 선택 (경기 전 AUTO / LIVE / NONE, 경기 중 진행 아닐 때 LIVE / NONE / 기록 있으면 REPLAY). 받아들였으면 true */
+  setSourceChoice(robot: RobotId, choice: SourceChoice): boolean {
+    const inMatch = this.phase !== 'SETUP';
+    if (inMatch && (this.phase !== 'MATCH' || this.loop.state === 'RUNNING')) return false;
+    if (!sourceChoiceAllowed(choice, inMatch, this.inputs.logs[robot].length > 0)) return false;
+    if (inMatch) this.matchChoices = { ...this.matchChoices, [robot]: choice as InputSource };
+    else this.setupChoices = { ...this.setupChoices, [robot]: choice };
+    this.emitStatus(true);
+    return true;
+  }
+
+  /** 로봇별 조작 모드 (FIELD / ROBOT), 다음 START / RESUME / BRANCH부터 */
+  setDriveMode(robot: RobotId, mode: DriveMode): void {
+    this.driveModes = { ...this.driveModes, [robot]: mode };
+    this.emitStatus(true);
+  }
+
+  /** 키보드 주행 켜기 / 끄기, 다음 START / RESUME / BRANCH부터 (단축키는 항상 동작) */
+  setKeyboardEnabled(enabled: boolean): void {
+    this.keyboardEnabled = enabled;
+    this.emitStatus(true);
   }
 
   setOptions(options: RenderOptions): void {
@@ -191,6 +264,12 @@ export class AppController {
   /** 시작: 보기 회전 애니메이션이 끝난 뒤 실시간 루프 시작 (회전 중 조종 방지) */
   start(): void {
     if (this.phase !== 'SETUP') return;
+    // 경기 전 선택을 시작 순간의 장치 상태로 풀어 적용 (AUTO → LIVE / NONE)
+    const pads = this.adapter.gamepadStatus();
+    for (const robot of ['robot1', 'robot2'] as const) {
+      this.matchChoices[robot] = resolveSource(this.setupChoices[robot], robot, pads, this.keyboardEnabled);
+    }
+    this.applyInputChoices();
     this.phase = 'ROTATING_IN';
     this.animator.start(viewAngle(this.matchView, this.alliance), this.now());
     this.changed();
@@ -204,6 +283,7 @@ export class AppController {
   resume(): void {
     if (!this.canResume()) return;
     this.stopPlayback();
+    this.applyInputChoices();
     this.loop.resume();
   }
 
@@ -216,6 +296,7 @@ export class AppController {
     this.stopPlayback();
     const tick = this.viewTick;
     this.engine.scrubTo(tick);
+    this.applyInputChoices(); // 분기부터 새 출처 (REPLAY로 바꾼 로봇은 기록 유지 = 녹화 덧입히기)
     for (const robot of ['robot1', 'robot2'] as const) {
       if (this.inputs.sources[robot] === 'LIVE') this.inputs.logs[robot].truncate(tick);
     }
@@ -366,6 +447,7 @@ export class AppController {
       rp: { ...frame.rpAchieved },
       hitProbability: this.options.hitProbability ? hitProbabilities(frame, this.setup.shotResolver) : null,
       gamepads: this.adapter.gamepadStatus(),
+      input: this.inputStatus(),
     };
   }
 
@@ -373,6 +455,33 @@ export class AppController {
 
   private get alliance(): 'RED' | 'BLUE' {
     return this.setup.scenario.allianceColor;
+  }
+
+  /** 입력 선택을 입력 허브 / 어댑터에 적용 (START / RESUME / BRANCH 순간) */
+  private applyInputChoices(): void {
+    for (const robot of ['robot1', 'robot2'] as const) {
+      const choice = this.matchChoices[robot];
+      // REPLAY는 기록이 있을 때만 (없으면 NONE과 같지만 명시적으로 NONE)
+      this.inputs.sources[robot] = choice === 'REPLAY' && this.inputs.logs[robot].length === 0 ? 'NONE' : choice;
+      this.inputs.modes[robot] = this.driveModes[robot];
+    }
+    this.adapter.setKeyboardEnabled(this.keyboardEnabled);
+  }
+
+  private inputStatus(): InputStatus {
+    const pads = this.adapter.gamepadStatus();
+    const inMatch = this.phase !== 'SETUP';
+    const map = <T,>(fn: (robot: RobotId) => T): Record<RobotId, T> => ({ robot1: fn('robot1'), robot2: fn('robot2') });
+    return {
+      choices: inMatch ? { ...this.matchChoices } : { ...this.setupChoices },
+      autoPreview: map(robot => autoSource(robot, pads, this.keyboardEnabled)),
+      sources: inMatch ? { ...this.inputs.sources } : map(robot => resolveSource(this.setupChoices[robot], robot, pads, this.keyboardEnabled)),
+      hasLog: map(robot => this.inputs.logs[robot].length > 0),
+      modes: { ...this.driveModes },
+      activeModes: { ...this.inputs.modes },
+      keyboardEnabled: this.keyboardEnabled,
+      activeKeyboard: this.adapter.isKeyboardEnabled,
+    };
   }
 
   private matchResult(): MatchResult | null {
@@ -420,7 +529,8 @@ export class AppController {
     this.disposeLoop?.();
     const { r1Config, r2Config, shotResolver, scenario, shooters } = this.setup;
     this.engine = new SimulationEngine(r1Config, r2Config, shotResolver, scenario.allianceColor, scenario, shooters);
-    this.inputs = new MatchInputs(); // R1 / R2 모두 LIVE (게임패드 0 → R1, 게임패드 1 + 키보드 → R2), 출처 규칙은 09-8
+    this.inputs = new MatchInputs(); // 출처 / 조작 모드는 START에서 선택을 풀어 적용 (09-8b)
+    this.matchView = this.defaultView; // 새 경기는 SETTINGS 기본 보기 방향 (VIEW는 그 경기에서만)
     this.viewTick = 0;
     this.playing = false;
     this.playbackLast = null;
@@ -450,6 +560,7 @@ export class AppController {
       },
       this.env,
       this.scheduler,
+      { keyboardEnabled: this.keyboardEnabled },
     );
     this.loop = created.loop;
     this.adapter = created.adapter;
