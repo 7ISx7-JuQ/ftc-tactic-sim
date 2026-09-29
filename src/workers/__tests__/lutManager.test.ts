@@ -231,4 +231,68 @@ describe('LUT 생성 관리자 (09-3)', () => {
       assert(JSON.parse(base).modelVersion >= 1, 'model version included');
     }
   }, 120_000);
+
+  it('F. (09-10a) 같은 요청 키의 두 로봇: 한 번만 생성하고 결과 공유, 앞선 로봇이 멈추거나 바뀌면 따라가던 로봇이 스스로 생성', () => {
+    const posted = (workers: { received: unknown[] }[]) => workers.reduce((n, w) => n + w.received.length, 0);
+    const jobsPerRobot = 2 + 2 * Math.ceil(LUT_GRID_SIZE / 4); // 탐색 2 + 행 작업 72
+    // 동시에 같은 설정 → R2는 R1을 따라감 (진행 공유), 작업은 한 로봇분만
+    {
+      const { manager, workers, changes, drain } = setup();
+      manager.request('robot1', REQ1);
+      manager.request('robot2', { ...REQ1, config: { ...CFG1, sweetSpot: { x: 60.3, y: 134.2 } } }); // 스냅 후 같은 키
+      workers.forEach(w => w.step());
+      workers.forEach(w => w.step());
+      const mid1 = manager.getStatus('robot1');
+      const mid2 = manager.getStatus('robot2');
+      assert(mid2.state === mid1.state && mid2.cellsDone === mid1.cellsDone && mid2.v0.POLLEN === mid1.v0.POLLEN && mid2.reference === mid1.reference, 'follower shows the leader progress');
+      drain();
+      const s1 = manager.getStatus('robot1');
+      const s2 = manager.getStatus('robot2');
+      assert(s1.state === 'READY' && s2.state === 'READY' && s2.result === s1.result && sameResult(s2.result!, direct1), 'both READY with the same result');
+      assert(posted(workers) === jobsPerRobot, `jobs for one robot only (${posted(workers)})`);
+      const r2States = changes.filter(c => c.robotId === 'robot2').map(c => c.state).filter((x, i, a) => i === 0 || a[i - 1] !== x);
+      assert(r2States.join('>') === 'SEARCHING>GENERATING>READY', `follower states ${r2States.join('>')}`);
+      // 결과를 받은 뒤에는 독립: 앞선 로봇이 설정을 바꿔도 READY 유지, 작업 없음
+      const before = posted(workers);
+      manager.request('robot1', REQ2);
+      assert(manager.getStatus('robot2').state === 'READY' && manager.getStatus('robot2').result === s1.result, 'follower stays READY after the leader changes');
+      drain();
+      assert(posted(workers) - before === jobsPerRobot && sameResult(manager.getStatus('robot1').result!, direct2), 'only the leader regenerates');
+      manager.request('robot1', REQ1);
+      assert(manager.getStatus('robot1').state === 'READY' && manager.getStatus('robot1').result === s1.result, 'leader back to the old config -> shares the READY result of robot2');
+      // 이미 READY인 로봇과 같은 설정으로 다시 요청 → 즉시 READY
+      manager.request('robot2', REQ2);
+      drain();
+      manager.request('robot2', REQ1);
+      assert(manager.getStatus('robot2').state === 'READY' && manager.getStatus('robot2').result === s1.result, 'same key as a READY robot -> READY at once');
+    }
+    // 앞선 로봇의 설정 변경 / 취소 / 오류 → 따라가던 로봇이 스스로 생성해 같은 결과
+    for (const stop of ['change', 'cancel', 'error'] as const) {
+      const { manager, workers, drain } = setup({ poolSize: 1 });
+      manager.request('robot1', REQ1);
+      manager.request('robot2', REQ1);
+      workers[0].step();
+      if (stop === 'change') manager.request('robot1', REQ2);
+      else if (stop === 'cancel') manager.cancel('robot1');
+      else {
+        workers[0].failNext = 'error';
+        workers[0].step();
+      }
+      assert(manager.getStatus('robot2').state === 'QUEUED' || manager.getStatus('robot2').state === 'SEARCHING', `${stop}: follower starts its own run`);
+      drain();
+      const s2 = manager.getStatus('robot2');
+      assert(s2.state === 'READY' && sameResult(s2.result!, direct1), `${stop}: follower finishes on its own`);
+      if (stop === 'change') assert(sameResult(manager.getStatus('robot1').result!, direct2), 'change: leader regenerated for its new config');
+    }
+    // 따라가던 로봇의 설정 변경 → 따라가기 끝, 앞선 로봇은 영향 없음
+    {
+      const { manager, workers, drain } = setup({ poolSize: 1 });
+      manager.request('robot1', REQ1);
+      manager.request('robot2', REQ1);
+      workers[0].step();
+      manager.request('robot2', REQ2);
+      drain();
+      assert(sameResult(manager.getStatus('robot1').result!, direct1) && sameResult(manager.getStatus('robot2').result!, direct2), 'follower re-request is independent');
+    }
+  }, 120_000);
 });

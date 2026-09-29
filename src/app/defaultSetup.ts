@@ -1,7 +1,9 @@
 // 임시 기본 경기 설정 (09-6d): config 창(09-8 ~ 09-11)과 LUT 판정(09-10)이 들어오기 전까지 새 GUI가 쓰는 고정 설정.
 // 08-7 개발 하네스 설정을 정식 코드로 옮긴 것 (하네스 src/dev는 09-12에서 삭제). 09-9 기본 프리셋과 09-10 LUT 판정으로 대체된다.
+// 09-10a: LUT가 준비되면 경기 판정 = LUT 판정(createLUTShotResolver) + 기물별 사출 속도. 준비 전 간이 판정은 START가 막힌 동안의 자리 채움.
 
-import { bearingTo, isAimWithinShooterRange } from '../core/ballistics';
+import { bearingTo, createLUTShotResolver, isAimWithinShooterRange } from '../core/ballistics';
+import type { RobotBallisticsResult } from '../core/ballistics';
 import { createIntakeZonePreset, hiveCellAimPoint } from '../core/collision';
 import { angleDifference } from '../core/kinematics';
 import type { RobotConfig, ScenarioConfig, ShooterBallistics, ShotProbabilityResolver } from '../core/types';
@@ -63,20 +65,30 @@ export function buildMatchSetup(
   r2Config: RobotConfig,
   scenario: ScenarioConfig,
   ballistics?: Record<'robot1' | 'robot2', Pick<ShooterBallistics, 'dz' | 'shooterPitch' | 'shooterOffset'>>,
+  luts?: Record<'robot1' | 'robot2', RobotBallisticsResult> | null,
 ): MatchSetup {
-  const shooters = ballistics && {
-    robot1: { dz: ballistics.robot1.dz, shooterPitch: ballistics.robot1.shooterPitch, shooterOffset: ballistics.robot1.shooterOffset },
-    robot2: { dz: ballistics.robot2.dz, shooterPitch: ballistics.robot2.shooterPitch, shooterOffset: ballistics.robot2.shooterOffset },
+  // 사출 속도: LUT가 찾은 기물별 v0 (없는 기물은 엔진 기본 계산)
+  const v0Of = (id: 'robot1' | 'robot2') => {
+    const found = luts?.[id].v0;
+    const v0: ShooterBallistics['v0'] = {};
+    if (found?.POLLEN != null) v0.POLLEN = found.POLLEN;
+    if (found?.NECTAR != null) v0.NECTAR = found.NECTAR;
+    return found ? { v0 } : {};
   };
-  return { r1Config, r2Config, shotResolver: createSimpleResolver(r1Config, r2Config), scenario, ...(shooters ? { shooters } : {}) };
+  const shooters = ballistics && {
+    robot1: { dz: ballistics.robot1.dz, shooterPitch: ballistics.robot1.shooterPitch, shooterOffset: ballistics.robot1.shooterOffset, ...v0Of('robot1') },
+    robot2: { dz: ballistics.robot2.dz, shooterPitch: ballistics.robot2.shooterPitch, shooterOffset: ballistics.robot2.shooterOffset, ...v0Of('robot2') },
+  };
+  const shotResolver = luts ? createLUTShotResolver({ robot1: luts.robot1.luts, robot2: luts.robot2.luts }, r1Config, r2Config) : createSimpleResolver(r1Config, r2Config);
+  return { r1Config, r2Config, shotResolver, scenario, ...(shooters ? { shooters } : {}) };
 }
 
-/** 적용 값(프로필 + 시나리오) → 경기 설정 */
-export function setupFromDrafts(values: DraftValues): MatchSetup {
-  return buildMatchSetup(values.robot1.config, values.robot2.config, values.scenario, { robot1: values.robot1.ballistics, robot2: values.robot2.ballistics });
+/** 적용 값(프로필 + 시나리오) → 경기 설정. LUT 결과가 있으면 LUT 판정 + 사출 속도 (09-10a) */
+export function setupFromDrafts(values: DraftValues, luts: Record<'robot1' | 'robot2', RobotBallisticsResult> | null = null): MatchSetup {
+  return buildMatchSetup(values.robot1.config, values.robot2.config, values.scenario, { robot1: values.robot1.ballistics, robot2: values.robot2.ballistics }, luts);
 }
 
-/** config 창 탭 기본값 (RESET TAB / 첫 실행): 팀 번호 / 팀명 없음 + 고정 제원 + RED 기본 시나리오 + 기본 탄도(09-9b). 스윗스팟은 09-10 */
+/** config 창 탭 기본값 (RESET TAB / 첫 실행): 팀 번호 / 팀명 없음 + 고정 제원 + RED 기본 시나리오 + 기본 탄도(09-9b) · 기본 스윗스팟(09-10a) */
 export const DEFAULT_DRAFT_VALUES: Readonly<DraftValues> = {
   robot1: { teamNumber: '', teamName: '', config: DEFAULT_ROBOT_CONFIGS.robot1, ballistics: DEFAULT_PROFILE_BALLISTICS },
   robot2: { teamNumber: '', teamName: '', config: DEFAULT_ROBOT_CONFIGS.robot2, ballistics: DEFAULT_PROFILE_BALLISTICS },

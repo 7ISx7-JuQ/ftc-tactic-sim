@@ -6,6 +6,8 @@
 //   - 결정론: 행 분할 / 순서 / Worker 수와 무관하게 결과 = generateRobotLUTs (09-2 격자별 독립 난수 구간).
 //   - 취소: 로봇별 세대 번호를 올리고 대기열의 이전 세대 작업을 제거. 실행 중인 작업은 끝까지 돌게 두고 결과를 무시한다.
 //   - 캐시 (09-4): 요청 시 캐시를 먼저 조회 → 적중하면 Worker 없이 즉시 READY, 미스 / 실패면 생성 후 저장.
+//   - 공유 (09-10a): 다른 로봇이 같은 요청 키로 생성 중 / 완료면 따라가기(follower)만 한다 — 진행은 앞선 로봇 것을 보여주고,
+//     앞선 로봇이 READY면 결과를 함께 쓰고, 멈추거나(취소 / 오류 / 설정 변경) 키가 바뀌면 그때부터 스스로 생성한다.
 // Worker 생성 함수 / 캐시를 주입받아 Node에서 가짜로 테스트한다 (브라우저는 createLUTWorker.ts, lutCache.ts).
 
 import {
@@ -135,6 +137,7 @@ interface RobotRun {
   jobProgress: Map<number, number>;   // 실행 중인 행 작업별 진행 격자 수
   result: RobotBallisticsResult | null;
   fromCache: boolean;
+  leader: LUTRobotId | null;          // 같은 키로 따라가는 다른 로봇 (09-10a 공유)
 }
 
 const perPiece = <T>(make: () => T): Record<LUTPieceType, T> => ({ POLLEN: make(), NECTAR: make() });
@@ -158,10 +161,12 @@ function emptyRun(generation: number): RobotRun {
     jobProgress: new Map(),
     result: null,
     fromCache: false,
+    leader: null,
   };
 }
 
 const IN_PROGRESS: ReadonlySet<LUTGenState> = new Set(['QUEUED', 'SEARCHING', 'GENERATING']);
+const OTHER: Readonly<Record<LUTRobotId, LUTRobotId>> = { robot1: 'robot2', robot2: 'robot1' };
 
 export class LUTManager {
   private readonly slots: WorkerSlot[];
@@ -209,7 +214,7 @@ export class LUTManager {
     if (issues.length > 0) {
       this.reset(robotId, 'IDLE');
       this.runs[robotId].issues = issues;
-      this.onChange(robotId);
+      this.emit(robotId);
       return;
     }
     const key = lutRequestKey(req, this.samples, this.searchSamples, this.seed);
@@ -217,40 +222,48 @@ export class LUTManager {
 
     if (IN_PROGRESS.has(run.state)) {
       this.reset(robotId, 'CANCELLED');
-      this.onChange(robotId);
+      this.emit(robotId);
     }
     const next = this.reset(robotId, 'QUEUED');
     next.key = key;
     next.config = { ...req.config, sweetSpot: snapSweetSpot(req.config.sweetSpot) };
     next.robotSize = { length: req.robotSize.length, width: req.robotSize.width };
-    this.onChange(robotId);
-    if (this.cache) this.lookupCache(robotId, next, this.cache);
-    else this.enqueueSearches(robotId, next);
+    // 다른 로봇이 같은 LUT를 생성 중 / 완료했으면 따라가기 (기본 프리셋처럼 R1 = R2면 한 번만 생성)
+    const otherId = OTHER[robotId];
+    const other = this.runs[otherId];
+    if (other.key === key && other.leader === null && (IN_PROGRESS.has(other.state) || other.state === 'READY')) {
+      next.leader = otherId;
+      this.syncFollower(otherId);
+      return;
+    }
+    this.emit(robotId);
+    this.startOwn(robotId, next);
   }
 
   /** 진행 중인 생성을 멈춘다 (CANCELLED). 진행 중이 아니면 아무것도 하지 않음 */
   cancel(robotId: LUTRobotId): void {
     if (!IN_PROGRESS.has(this.runs[robotId].state)) return;
     this.reset(robotId, 'CANCELLED');
-    this.onChange(robotId);
+    this.emit(robotId);
   }
 
   getStatus(robotId: LUTRobotId): RobotLUTStatus {
     const run = this.runs[robotId];
+    const src = run.leader ? this.runs[run.leader] : run; // 따라가는 중이면 진행은 앞선 로봇 것
     let inFlight = 0;
-    for (const cells of run.jobProgress.values()) inFlight += cells;
+    for (const cells of src.jobProgress.values()) inFlight += cells;
     return {
       state: run.state,
       generation: run.generation,
       issues: [...run.issues],
       error: run.error,
-      searched: { ...run.searched },
-      v0: { ...run.v0 },
-      sweetSpotHitRate: { ...run.hitRate },
-      cellsDone: run.cellsCompleted + inFlight,
+      searched: { ...src.searched },
+      v0: { ...src.v0 },
+      sweetSpotHitRate: { ...src.hitRate },
+      cellsDone: src.cellsCompleted + inFlight,
       cellsTotal: PIECE_TYPES.length * CELLS_PER_PIECE,
-      reference: run.reference,
-      rowsDone: run.rowsDone,
+      reference: src.reference,
+      rowsDone: src.rowsDone,
       result: run.result,
       fromCache: run.fromCache,
     };
@@ -285,6 +298,50 @@ export class LUTManager {
     this.searchQueue = this.searchQueue.filter(job => job.robotId !== robotId);
     this.rowQueue = this.rowQueue.filter(job => job.robotId !== robotId);
     return run;
+  }
+
+  // 상태 / 진행 알림 + 이 로봇을 따라가는 다른 로봇 갱신
+  private emit(robotId: LUTRobotId): void {
+    this.onChange(robotId);
+    this.syncFollower(robotId);
+  }
+
+  // 따라가는 로봇 갱신: 앞선 로봇이 같은 키로 진행 중이면 상태만 맞추고, READY면 결과를 함께 쓰고,
+  // 그 외(취소 / 오류 / 검증 실패 / 키 변경)면 따라가기를 끝내고 스스로 생성 (캐시 조회부터)
+  private syncFollower(leaderId: LUTRobotId): void {
+    const followerId = OTHER[leaderId];
+    const f = this.runs[followerId];
+    if (f.leader !== leaderId) return;
+    const lead = this.runs[leaderId];
+    if (lead.key === f.key && IN_PROGRESS.has(lead.state)) {
+      f.state = lead.state;
+    } else if (lead.key === f.key && lead.state === 'READY' && lead.result) {
+      for (const type of PIECE_TYPES) {
+        f.searched[type] = lead.searched[type];
+        f.v0[type] = lead.v0[type];
+        f.hitRate[type] = lead.hitRate[type];
+        f.rowsRemaining[type] = 0;
+      }
+      f.reference = lead.reference;
+      f.rowsDone = lead.rowsDone;
+      f.cellsCompleted = lead.cellsCompleted;
+      f.result = lead.result;
+      f.fromCache = lead.fromCache;
+      f.leader = null;
+      f.state = 'READY';
+    } else {
+      f.leader = null;
+      f.state = 'QUEUED';
+      this.onChange(followerId);
+      this.startOwn(followerId, f);
+      return;
+    }
+    this.onChange(followerId);
+  }
+
+  private startOwn(robotId: LUTRobotId, run: RobotRun): void {
+    if (this.cache) this.lookupCache(robotId, run, this.cache);
+    else this.enqueueSearches(robotId, run);
   }
 
   private enqueueSearches(robotId: LUTRobotId, run: RobotRun): void {
@@ -355,7 +412,7 @@ export class LUTManager {
       const run = this.runs[job.robotId];
       if (job.kind === 'search' && run.state === 'QUEUED') {
         run.state = 'SEARCHING';
-        this.onChange(job.robotId);
+        this.emit(job.robotId);
       }
       slot.worker.postMessage(job);
     }
@@ -367,7 +424,7 @@ export class LUTManager {
     if (message.kind === 'progress') {
       if (this.isCurrent(job) && job.kind === 'rows') {
         this.runs[job.robotId].jobProgress.set(job.jobId, message.cellsDone);
-        this.onChange(job.robotId);
+        this.emit(job.robotId);
       }
       return;
     }
@@ -390,7 +447,7 @@ export class LUTManager {
   private fail(robotId: LUTRobotId, message: string): void {
     const run = this.reset(robotId, 'ERROR');
     run.error = message;
-    this.onChange(robotId);
+    this.emit(robotId);
   }
 
   private onSearchResult(job: Job, v0: number | undefined, hitRate: number | undefined): void {
@@ -415,7 +472,7 @@ export class LUTManager {
       run.cellsCompleted += CELLS_PER_PIECE;
     }
     if (PIECE_TYPES.every(t => run.searched[t])) run.state = 'GENERATING';
-    this.onChange(job.robotId);
+    this.emit(job.robotId);
     this.completeIfDone(job.robotId);
   }
 
@@ -434,7 +491,7 @@ export class LUTManager {
     run.rowsRemaining[type] -= end - start;
     run.cellsCompleted += expected;
     run.jobProgress.delete(job.jobId);
-    this.onChange(job.robotId);
+    this.emit(job.robotId);
     this.completeIfDone(job.robotId);
   }
 
@@ -449,7 +506,7 @@ export class LUTManager {
       issues: [],
     };
     run.state = 'READY';
-    this.onChange(robotId);
+    this.emit(robotId);
     if (this.cache && !run.fromCache && run.key) {
       // 저장 실패는 무시 (다음에 다시 생성하면 됨)
       const entry: LUTCacheEntry = { v0: { ...run.v0 }, sweetSpotHitRate: { ...run.hitRate }, reference: run.reference };

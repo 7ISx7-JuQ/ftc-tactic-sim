@@ -2,12 +2,21 @@
 // 시뮬레이션 / 그리기는 AppController(React 밖)가 소유하고, React는 약 10 Hz 상태 알림으로 패널 / 버튼만 그린다.
 // 09-7b: 확인창 모달 / 경고 토스트 / 자동 일시정지 배너 / 타임라인 끌기. 09-7c: 경기 종료 연출(흰빛 / 배너 · 진행바). 09-8a: config 창 틀(펼치기 / 탭 / 초안 · 적용 / START 막기).
 // 09-8b: SETTINGS 탭(즉시 적용) + localStorage 자동 보관, 언어는 SETTINGS 값.
+// 09-10a: 명중 확률표(LUT) 생성 연결 — 앱 시작(자동 보관 / 기본 프리셋)과 로봇 탭 APPLY에서 요청, 두 로봇이 준비되면 경기 판정 = LUT,
+// 준비될 때까지 START를 막는다 (Worker 풀 / 캐시는 LUTTracker가 소유, React는 약 10 Hz 요약만 받음).
 
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { AppController } from '../app/appController';
 import type { AppStatus, LiftToast } from '../app/appController';
 import { DEFAULT_DRAFT_VALUES, setupFromDrafts } from '../app/defaultSetup';
+import { LUTTracker } from '../app/lutTracker';
+import type { MatchLUTResults } from '../app/lutTracker';
+import type { RobotId } from '../input/inputConfig';
+import { createBrowserLUTWorker } from '../workers/createLUTWorker';
+import { createBrowserLUTCache } from '../workers/lutCache';
+import { PENDING_LUT_VIEW, lutInputsChanged, startBlocker } from '../ui/lutView';
+import type { RobotLutView } from '../ui/lutView';
 import { DT, MATCH_TICKS } from '../core/simulationEngine';
 import { t } from '../ui/i18n';
 import { DEFAULT_SETTINGS, browserSettingsStorage, loadStoredConfig, saveStoredConfig } from '../ui/settings';
@@ -25,7 +34,6 @@ import {
   canResetTab,
   configCanOpen,
   draftTabsLocked,
-  firstBlockingTab,
   initialDrafts,
   resetTabDraft,
   tabStatus,
@@ -54,6 +62,7 @@ const TOAST_VISIBLE_MS = 1500; // 경고 토스트 표시 시간 (그 뒤 흐려
 const TOAST_FADE_MS = 300;
 // 설정 자동 보관 (09-8b): 앱 시작 시 한 번 읽음 (SETTINGS + 마지막으로 적용한 로봇 / 시나리오)
 const settingsStorage = browserSettingsStorage();
+const sameResults = (a: MatchLUTResults | null, b: MatchLUTResults | null) => a?.robot1 === b?.robot1 && a?.robot2 === b?.robot2;
 
 export default function MainScreen() {
   const areaRef = useRef<HTMLDivElement>(null);
@@ -74,6 +83,11 @@ export default function MainScreen() {
   const [configNotice, setConfigNotice] = useState<string | null>(null);
   const initialApplied = useRef(drafts.applied);
   const initialSettings = useRef(settings);
+  // 명중 확률표 (09-10a): 추적기 / 경기 설정에 쓴 적용 값 · LUT 결과 / 화면 요약
+  const trackerRef = useRef<LUTTracker | null>(null);
+  const appliedRef = useRef(drafts.applied);
+  const lutResultsRef = useRef<MatchLUTResults | null>(null);
+  const [lutViews, setLutViews] = useState<Record<RobotId, RobotLutView> | null>(null);
 
   useEffect(() => {
     const area = areaRef.current;
@@ -127,6 +141,22 @@ export default function MainScreen() {
     controllerRef.current = controller;
     setStatus(controller.status());
 
+    // 명중 확률표: 적용 값으로 생성 요청 (캐시 적중이면 곧 READY). 두 로봇 결과가 바뀌면 경기 설정을 LUT 판정으로 교체
+    lutResultsRef.current = null;
+    const tracker = new LUTTracker({
+      createWorker: createBrowserLUTWorker,
+      cache: createBrowserLUTCache(),
+      onUpdate: () => {
+        setLutViews({ robot1: tracker.view('robot1'), robot2: tracker.view('robot2') });
+        const results = tracker.results();
+        if (sameResults(results, lutResultsRef.current)) return;
+        lutResultsRef.current = results;
+        controller.setSetup(setupOf(appliedRef.current, results));
+      },
+    });
+    trackerRef.current = tracker;
+    tracker.request(initialApplied.current);
+
     const fit = () => {
       const { scale, resized } = measure();
       controller.setRenderScale(scale);
@@ -145,6 +175,8 @@ export default function MainScreen() {
       window.removeEventListener('resize', fit);
       timers.forEach(id => window.clearTimeout(id));
       timers.clear();
+      tracker.dispose();
+      trackerRef.current = null;
       controller.dispose();
       controllerRef.current = null;
     };
@@ -154,6 +186,7 @@ export default function MainScreen() {
 
   // ---------------- config 창 ----------------
   const statuses = Object.fromEntries(DRAFT_TABS.map(tab => [tab, tabStatus(drafts, tab)])) as Record<DraftTab, TabStatus>;
+  const luts = lutViews ?? { robot1: PENDING_LUT_VIEW, robot2: PENDING_LUT_VIEW };
   const canOpen = status ? configCanOpen(status) : false;
   const locked = status ? draftTabsLocked(status.phase) : false;
   const openConfig = (tab?: ConfigTab) => {
@@ -166,13 +199,17 @@ export default function MainScreen() {
     setConfigOpen(false);
     setConfigNotice(null);
   };
-  // APPLY: 경기 전에만 (경기가 있는 동안 잠금). 적용 값이 바뀌면 새 0틱 경기 설정
+  // APPLY: 경기 전에만 (경기가 있는 동안 잠금). 적용 값이 바뀌면 새 0틱 경기 설정 + LUT 요청 (입력이 같으면 그대로 READY)
   const applyCurrentTab = () => {
     if (configTab === 'settings' || locked) return;
     const next = applyTab(drafts, configTab);
     if (next === drafts) return;
     setDrafts(next);
-    c()?.setSetup(setupOf(next.applied));
+    appliedRef.current = next.applied;
+    const tracker = trackerRef.current;
+    tracker?.request(next.applied);
+    lutResultsRef.current = tracker?.results() ?? null;
+    c()?.setSetup(setupOf(next.applied, lutResultsRef.current));
     saveStoredConfig(settingsStorage, { settings, applied: next.applied });
   };
   const resetCurrentTab = () => {
@@ -252,13 +289,13 @@ export default function MainScreen() {
     return () => window.removeEventListener('keydown', onKey);
   }, [configOpen]);
 
-  // START: 적용 안 된 수정 / 검증 실패가 있으면 시작하지 않고 첫 문제 탭(R1 → R2 → SCENARIO)으로 펼침
+  // START: 적용 안 된 수정 / 검증 실패 / 명중 확률표 미준비가 있으면 시작하지 않고 첫 문제 탭(R1 → R2 → SCENARIO)으로 펼침
   const start = () => {
-    const blocking = firstBlockingTab(drafts);
+    const blocking = startBlocker(drafts, { robot1: luts.robot1.phase, robot2: luts.robot2.phase });
     if (blocking) {
-      setConfigTab(blocking);
+      setConfigTab(blocking.tab);
       setConfigOpen(true);
-      setConfigNotice(t(lang, 'config.startBlocked', { reason: `${t(lang, TAB_LABEL_KEYS[blocking])} — ${t(lang, `config.status.${tabStatus(drafts, blocking) as Exclude<TabStatus, 'OK'>}`)}` }));
+      setConfigNotice(t(lang, 'config.startBlocked', { reason: `${t(lang, TAB_LABEL_KEYS[blocking.tab])} — ${t(lang, `config.status.${blocking.reason}`)}` }));
       return;
     }
     closeConfig();
@@ -366,6 +403,10 @@ export default function MainScreen() {
                   lang={lang}
                   locked={locked}
                   canCopy={canCopyRobotTab(drafts, configTab)}
+                  alliance={drafts.draft.scenario.allianceColor}
+                  lut={luts[configTab]}
+                  lutPending={lutInputsChanged(drafts.draft[configTab], drafts.applied[configTab])}
+                  onRetry={() => trackerRef.current?.retry(configTab)}
                   onEdit={editRobot(configTab)}
                   onCopy={() => copyRobot(configTab)}
                 />
@@ -373,7 +414,7 @@ export default function MainScreen() {
             }
           />
         ) : (
-          <ConfigRail status={status} lang={lang} statuses={statuses} canOpen={canOpen} onOpen={openConfig} />
+          <ConfigRail status={status} lang={lang} statuses={statuses} luts={luts} canOpen={canOpen} onOpen={openConfig} />
         ))}
       {status && <ScrubberBar status={status} lang={lang} actions={actions} />}
       {status?.endStage === 'RESULT' && status.result && (

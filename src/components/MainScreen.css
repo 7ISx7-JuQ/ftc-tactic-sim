@@ -1489,3 +1489,86 @@
 .advanced > .form-grid {
   margin-top: calc(var(--u) * 8);
 }
+
+/* ---------------- 명중 확률표 상태 / 진행률 링 (09-10a) ---------------- */
+.main-screen svg.rail-mark.is-progress {
+  position: absolute;
+  right: calc(var(--u) * -7);
+  bottom: calc(var(--u) * -4);
+  width: calc(var(--u) * 15);
+  height: calc(var(--u) * 15);
+  background: var(--panel-bg);
+  border-radius: 50%;
+  fill: none;
+}
+.rail-mark .ring-track {
+  stroke: #3a404c;
+  stroke-width: 4;
+}
+.rail-mark .ring-fill {
+  stroke: var(--accent);
+  stroke-width: 4;
+  stroke-linecap: round;
+  transition: stroke-dasharray 200ms linear;
+}
+.lut-status {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 6);
+  padding: calc(var(--u) * 10);
+  border: 1px solid var(--panel-border);
+  border-radius: calc(var(--u) * 8);
+  background: rgba(255, 255, 255, 0.02);
+}
+.lut-status.is-error {
+  border-color: rgba(239, 68, 68, 0.6);
+}
+.lut-head {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 10);
+  min-height: calc(var(--u) * 28);
+}
+.lut-title {
+  font-size: calc(var(--u) * 13);
+  font-weight: 800;
+  white-space: nowrap;
+}
+.lut-state {
+  flex: 1;
+  font-size: calc(var(--u) * 12);
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.lut-status.is-ready .lut-state {
+  color: var(--ok);
+}
+.lut-status.is-error .lut-state {
+  color: var(--error);
+}
+.lut-bar {
+  height: calc(var(--u) * 6);
+  border-radius: 999px;
+  background: #2c313b;
+  overflow: hidden;
+}
+.lut-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 200ms linear;
+}
+.lut-piece {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 2);
+  font-size: calc(var(--u) * 12);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.lut-piece.is-pending {
+  color: var(--text-muted);
+}
+.lut-piece .form-warn {
+  font-size: calc(var(--u) * 11);
+}

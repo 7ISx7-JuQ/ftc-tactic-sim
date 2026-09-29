@@ -203,8 +203,8 @@ describe('LUT 캐시 (09-4)', () => {
       pending[2](sampleEntry(4));
       await new Promise(r => setTimeout(r, 0));
       assert(manager.getStatus('robot2').state === 'CANCELLED' && manager.getStatus('robot2').result === null, 'cancel during lookup wins');
-      // 조회 도중 정리 → 아무 작업도 보내지 않음
-      manager.request('robot2', REQ2);
+      // 조회 도중 정리 → 아무 작업도 보내지 않음 (R1과 다른 설정: 같은 설정이면 09-10a 공유로 조회 없이 READY)
+      manager.request('robot2', { ...REQ1, robotSize: { length: 16, width: 18 } });
       manager.dispose();
       pending[3](null);
       await new Promise(r => setTimeout(r, 0));

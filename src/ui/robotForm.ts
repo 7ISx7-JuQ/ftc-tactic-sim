@@ -1,5 +1,5 @@
 // 로봇 제원 탭 폼 규칙 (명세서 3.8 로봇 제원 탭, 09-9a): React / DOM 비의존
-// - 로봇 프로필 = GUI 전용 팀 번호 / 팀명 + 엔진 RobotConfig (RobotConfig 타입은 수정하지 않음) + 슈터 탄도 (09-9b, 스윗스팟은 09-10).
+// - 로봇 프로필 = GUI 전용 팀 번호 / 팀명 + 엔진 RobotConfig (RobotConfig 타입은 수정하지 않음) + 슈터 탄도 (09-9b) + 스윗스팟 (09-10a).
 // - 숫자 칸: 엔진 단위로 범위 검사 (화면 표시 / 입력은 units.ts 변환). 입력 글자가 올바르면 그 칸 값만 엔진 단위로 바꿔 저장
 //   (고친 칸만 변환 — 표시 반올림으로 다른 칸 값이 바뀌지 않음), 틀리면 글자를 그대로 보관하고 탭은 "설정 오류".
 // - 허용 범위 (09-9 확정): 가로 / 세로 6 ~ 18 in, 최고 속도 1 ~ 200 in/s, 최대 가속도 1 ~ 2000 in/s², 최고 각속도 0.1 ~ 30 rad/s,
@@ -7,28 +7,46 @@
 //   허용 조준 오차 0.1 ~ 45°, 터렛 한계 −180 ~ 180° (왼쪽 ≠ 오른쪽), 팀 번호 숫자 0 ~ 5자리, 팀명 24자까지.
 // - 09-9b 확정: 발사구 지상고 1 ~ 50 in, 발사각 5 ~ 85°, 발사구 오프셋 −18 ~ 18 in, 속도 편차 0 ~ 20 %, 방위 · 피치 편차 0 ~ 10°,
 //   흡입 구역 offset ± 변 길이 / 2, width 3.6 ~ 36 in(가장 큰 기물 NECTAR 직경부터, 09-9c), depth 0.25 ~ 12 in, 구역 0 ~ 8개.
+// - 09-10a: 스윗스팟은 기준 셀 RED_AUDIENCE 좌표로 보관하고, 폼은 시나리오 진영 기준으로 보여 주고 받는다 (BLUE = 필드 중심 점대칭).
+//   칸 범위 0 ~ 144 in, 입력은 1 in 격자 중심으로 맞춤, 검증(validateBallisticsConfig) 실패는 탭 문제.
 
-import { DEFAULT_HEADING_NOISE_RAD, DEFAULT_PITCH_NOISE_RAD, DEFAULT_SHOOTER_BALLISTICS, DEFAULT_V0_NOISE_PERCENT } from '../core/ballistics';
-import { HIVE_RIM_Z, PIECE_PHYSICS } from '../core/collision';
-import type { BumperSide, BumperZone, RobotConfig } from '../core/types';
+import {
+  DEFAULT_HEADING_NOISE_RAD,
+  DEFAULT_PITCH_NOISE_RAD,
+  DEFAULT_SHOOTER_BALLISTICS,
+  DEFAULT_V0_NOISE_PERCENT,
+  sweetSpotFromBasis,
+  sweetSpotToBasis,
+  validateBallisticsConfig,
+} from '../core/ballistics';
+import { FIELD_SIZE, HIVE_RIM_Z, PIECE_PHYSICS } from '../core/collision';
+import type { BallisticsConfig, BumperSide, BumperZone, RobotConfig } from '../core/types';
 import type { RobotId } from '../input/inputConfig';
 import { DISPLAY_DECIMALS, formatNumber, fromDisplay, parseNumberInput, toDisplay, unitLabel } from './units';
 import type { LengthUnit, QuantityKind } from './units';
 
-/** 슈터 탄도 (BallisticsConfig에서 스윗스팟을 뺀 값 — 스윗스팟은 09-10). dz = 림 높이 − 발사구 지상고 */
+/** 슈터 탄도 = 엔진 BallisticsConfig (편차 3종은 값을 항상 채움). dz = 림 높이 − 발사구 지상고, 스윗스팟 = 기준 셀 RED_AUDIENCE 좌표 */
 export interface ProfileBallistics {
   dz: number;
   shooterPitch: number;
   shooterOffset: number;
+  sweetSpot: { x: number; y: number };
   v0NoisePercent: number;
   headingNoiseRad: number;
   pitchNoiseRad: number;
 }
 
+/**
+ * 기본 스윗스팟 (09-10a 사용자 확정, 후보 비교 C): 기준 셀 입구 정면 약 43 in. 기본 로봇(18 in, 발사구 14 in, 60°)에서
+ * 스윗스팟 명중률 POLLEN 99.0 % / NECTAR 97.9 %, 50 % 이상 구역이 가장 넓은 후보
+ */
+export const DEFAULT_SWEET_SPOT: Readonly<{ x: number; y: number }> = { x: 59.5, y: 131.5 };
+
 export const DEFAULT_PROFILE_BALLISTICS: Readonly<ProfileBallistics> = {
   dz: DEFAULT_SHOOTER_BALLISTICS.dz,
   shooterPitch: DEFAULT_SHOOTER_BALLISTICS.shooterPitch,
   shooterOffset: DEFAULT_SHOOTER_BALLISTICS.shooterOffset,
+  sweetSpot: { ...DEFAULT_SWEET_SPOT },
   v0NoisePercent: DEFAULT_V0_NOISE_PERCENT,
   headingNoiseRad: DEFAULT_HEADING_NOISE_RAD,
   pitchNoiseRad: DEFAULT_PITCH_NOISE_RAD,
@@ -134,7 +152,7 @@ const EPS = 1e-9;
 // 값 읽기 / 쓰기
 // ------------------------------------------------------------
 
-const BALLISTICS_KEYS: Readonly<Record<BallisticsFieldKey, keyof ProfileBallistics>> = {
+const BALLISTICS_KEYS: Readonly<Record<BallisticsFieldKey, Exclude<keyof ProfileBallistics, 'sweetSpot'>>> = {
   launchHeight: 'dz',
   shooterPitch: 'shooterPitch',
   shooterOffset: 'shooterOffset',
@@ -158,6 +176,41 @@ export function writeNumber(profile: RobotProfile, key: NumberFieldKey, value: n
   else if (key === 'turretRight') config.turretRange = [config.turretRange[0], value];
   else config[key] = value;
   return { ...profile, config };
+}
+
+// ------------------------------------------------------------
+// 스윗스팟 (09-10a): 보관 = 기준 셀 RED_AUDIENCE 좌표, 폼 = 시나리오 진영 기준 (BLUE는 점대칭), 입력은 격자 중심으로 맞춤
+// ------------------------------------------------------------
+
+export type SweetSpotAxis = 'x' | 'y';
+export const SWEET_SPOT_AXES: readonly SweetSpotAxis[] = ['x', 'y'];
+export const SWEET_SPOT_SPEC: Readonly<NumberFieldSpec> = { kind: 'coordinate', min: 0, max: FIELD_SIZE };
+/** 틀린 입력 글자 키: sweetSpot.x / sweetSpot.y */
+export const sweetSpotFieldKey = (axis: SweetSpotAxis) => `sweetSpot.${axis}`;
+
+/** 진영 기준 스윗스팟 (폼 표시, LUT가 실제로 쓰는 격자 중심) */
+export function readSweetSpot(profile: RobotProfile, alliance: 'RED' | 'BLUE'): { x: number; y: number } {
+  return sweetSpotToBasis(profile.ballistics.sweetSpot, alliance);
+}
+
+/** 진영 기준 좌표 한 축 입력 → 격자 중심으로 맞춰 기준 셀 좌표로 보관 (다른 축은 현재 값 유지) */
+export function writeSweetSpot(profile: RobotProfile, alliance: 'RED' | 'BLUE', axis: SweetSpotAxis, value: number): RobotProfile {
+  const basis = { ...readSweetSpot(profile, alliance), [axis]: value };
+  return { ...profile, ballistics: { ...profile.ballistics, sweetSpot: sweetSpotFromBasis(basis, alliance) } };
+}
+
+/** 프로필 → 엔진 탄도 설정 (LUT 요청 / 검증) */
+export function profileBallisticsConfig(profile: RobotProfile): BallisticsConfig {
+  const b = profile.ballistics;
+  return {
+    dz: b.dz,
+    shooterPitch: b.shooterPitch,
+    shooterOffset: b.shooterOffset,
+    sweetSpot: { x: b.sweetSpot.x, y: b.sweetSpot.y },
+    v0NoisePercent: b.v0NoisePercent,
+    headingNoiseRad: b.headingNoiseRad,
+    pitchNoiseRad: b.pitchNoiseRad,
+  };
 }
 
 /** 구역 하나의 칸 값 바꾸기 (구역 목록 복사) */
@@ -240,6 +293,13 @@ export function robotProfileIssues(profile: RobotProfile): RobotIssue[] {
           if (checkNumber(zoneFieldSpec(field, zone.side, profile.config), zone[field])) issues.push({ code: `FIELD_${zoneFieldKey(i, field)}`, message: `zone ${i} ${field}` });
         }
     });
+  // 스윗스팟 (09-10a): 칸 범위, 범위 안이고 다른 칸이 모두 올바르면 탄도 검증 (필드 밖 / HIVE / 해 없음)
+  const sweetSpot = profile.ballistics.sweetSpot;
+  const spotIssues = SWEET_SPOT_AXES.filter(axis => checkNumber(SWEET_SPOT_SPEC, sweetSpot?.[axis]));
+  for (const axis of spotIssues) issues.push({ code: `FIELD_${sweetSpotFieldKey(axis)}`, message: `sweetSpot.${axis}` });
+  if (spotIssues.length === 0 && issues.length === 0) {
+    for (const issue of validateBallisticsConfig(profileBallisticsConfig(profile), profile.config)) issues.push({ code: issue.code, message: issue.message });
+  }
   const [left, right] = profile.config.turretRange;
   if (profile.config.turretType === 'TURRET' && Math.abs(left - right) <= EPS) issues.push({ code: 'TURRET_WIDTH', message: 'turret left and right limits must differ' });
   if (profile.config.turretType !== 'FIXED' && profile.config.turretType !== 'TURRET') issues.push({ code: 'FIELD_turretType', message: 'turretType' });
@@ -258,7 +318,7 @@ export function copyRobotProfile(source: RobotProfile, target: RobotProfile, tar
     teamNumber: target.teamNumber,
     teamName: target.teamName,
     config: { ...structuredClone(source.config), id: targetId, name: target.config.name },
-    ballistics: { ...source.ballistics },
+    ballistics: { ...source.ballistics, sweetSpot: { ...source.ballistics.sweetSpot } },
   };
 }
 

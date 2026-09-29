@@ -1,8 +1,10 @@
 // 로봇 제원 탭 R1 / R2 (명세서 3.8 로봇 제원 탭, 09-9a): 팀 / 하드웨어 / 인테이크 / 슈터 / FLOWER 리프트 + COPY TO.
 // 값은 초안(config 창 초안 / 적용 규칙)에만 들어가고 APPLY로 확정한다. 경기가 있는 동안 모든 칸 읽기 전용.
 // 09-9b: 맨 위 로봇 미리보기, 흡입 구역 편집기(구역별 면 / 위치 / 폭 / 깊이, 추가 · 삭제, 프리셋 FRONT / ANY),
-// 슈터 탄도(발사구 지상고 / 발사각 / 오프셋 + 고급 설정의 편차 3종). 스윗스팟 / LUT는 09-10.
+// 슈터 탄도(발사구 지상고 / 발사각 / 오프셋 + 고급 설정의 편차 3종).
+// 09-10a: 스윗스팟 X / Y(시나리오 진영 기준, 기준 CELL 표시) + 검증 사유 + 명중 확률표 상태(적용한 설정 기준). 필드에서 찍기 / 히트맵은 09-10b.
 import { Copy, Plus, Trash2 } from 'lucide-react';
+import { sweetSpotBasisCell } from '../core/ballistics';
 import { createIntakeZonePreset } from '../core/collision';
 import type { BumperSide } from '../core/types';
 import type { RobotId } from '../input/inputConfig';
@@ -12,11 +14,17 @@ import {
   BUMPER_SIDES,
   MAX_INTAKE_ZONES,
   NUMBER_FIELDS,
+  SWEET_SPOT_AXES,
+  SWEET_SPOT_SPEC,
   TURRET_PRESETS,
   ZONE_FIELDS,
   newIntakeZone,
   readNumber,
+  readSweetSpot,
+  robotProfileIssues,
+  sweetSpotFieldKey,
   writeNumber,
+  writeSweetSpot,
   writeZone,
   zoneFieldKey,
   zoneFieldSpec,
@@ -24,7 +32,9 @@ import {
 import type { NumberFieldKey, RobotProfile } from '../ui/robotForm';
 import type { LengthUnit } from '../ui/units';
 import { robotLabel } from '../ui/mainScreenModel';
+import type { RobotLutView } from '../ui/lutView';
 import { NumberField, Section, Segmented, TextField, Toggle } from './FormControls';
+import LutStatus from './LutStatus';
 import RobotPreview from './RobotPreview';
 
 export interface RobotTabProps {
@@ -35,6 +45,10 @@ export interface RobotTabProps {
   lang: Language;
   locked: boolean;
   canCopy: boolean;
+  alliance: 'RED' | 'BLUE';                         // 스윗스팟 입력 / 표시 기준 (시나리오 초안 진영)
+  lut: RobotLutView;                                // 적용한 설정의 명중 확률표 상태
+  lutPending: boolean;                              // 초안의 LUT 입력이 적용 값과 다름
+  onRetry: () => void;
   /** 초안 편집: 새 프로필(없으면 값은 그대로) + 칸 키가 있으면 그 칸의 틀린 글자(null = 지움) + 함께 지울 칸 글자 */
   onEdit: (profile: RobotProfile | null, key: string | null, invalidText: string | null, clearKeys?: readonly string[]) => void;
   onCopy: () => void;
@@ -63,7 +77,7 @@ const LABELS: Readonly<Record<NumberFieldKey, MessageKey>> = {
   pitchNoiseRad: 'robot.pitchNoiseRad',
 };
 
-export default function RobotTab({ robotId, profile, fieldText, unit, lang, locked, canCopy, onEdit, onCopy }: RobotTabProps) {
+export default function RobotTab({ robotId, profile, fieldText, unit, lang, locked, canCopy, alliance, lut, lutPending, onRetry, onEdit, onCopy }: RobotTabProps) {
   const other: RobotId = robotId === 'robot1' ? 'robot2' : 'robot1';
   const { config } = profile;
   const num = (key: NumberFieldKey) => (
@@ -87,6 +101,9 @@ export default function RobotTab({ robotId, profile, fieldText, unit, lang, lock
   // 구역 목록 구조가 바뀌면(추가 / 삭제 / 프리셋) 번호가 밀리므로 구역 칸의 틀린 글자는 모두 지움
   const zoneTextKeys = Object.keys(fieldText).filter(k => k.startsWith('zone.'));
   const setZones = (intakeZones: RobotProfile['config']['intakeZones']) => onEdit({ ...profile, config: { ...config, intakeZones } }, null, null, zoneTextKeys);
+  // 스윗스팟: 진영 기준 표시 / 입력, 탄도 검증 사유 (필드 밖 / HIVE / 해 없음)
+  const spot = readSweetSpot(profile, alliance);
+  const spotIssues = robotProfileIssues(profile).filter(issue => issue.code.startsWith('SWEET_SPOT_'));
 
   return (
     <div className="settings-tab robot-tab">
@@ -247,6 +264,34 @@ export default function RobotTab({ robotId, profile, fieldText, unit, lang, lock
             {num('pitchNoiseRad')}
           </div>
         </details>
+      </Section>
+
+      <Section title={t(lang, 'robot.section.sweetSpot')}>
+        <span className="settings-note">{t(lang, 'robot.sweetSpotBasis', { key: sweetSpotBasisCell(alliance) })}</span>
+        <div className="form-grid">
+          {SWEET_SPOT_AXES.map(axis => (
+            <NumberField
+              key={axis}
+              id={`${robotId}-sweetSpot-${axis}`}
+              label={t(lang, axis === 'x' ? 'robot.sweetSpotX' : 'robot.sweetSpotY')}
+              spec={SWEET_SPOT_SPEC}
+              value={spot[axis]}
+              invalidText={fieldText[sweetSpotFieldKey(axis)]}
+              unit={unit}
+              lang={lang}
+              disabled={locked}
+              onValue={v => onEdit(writeSweetSpot(profile, alliance, axis, v), sweetSpotFieldKey(axis), null)}
+              onInvalid={text => onEdit(null, sweetSpotFieldKey(axis), text)}
+            />
+          ))}
+        </div>
+        {spotIssues.map(issue => (
+          <span key={issue.code} className="form-error">
+            {t(lang, `issue.${issue.code}` as MessageKey)}
+          </span>
+        ))}
+        <p className="settings-note">{t(lang, 'robot.sweetSpotHint')}</p>
+        <LutStatus lut={lut} unit={unit} lang={lang} pendingApply={lutPending} locked={locked} onRetry={onRetry} />
       </Section>
 
       <Section title={t(lang, 'robot.section.lift')}>

@@ -20,6 +20,11 @@ import {
   readNumber,
   robotProfileIssues,
   writeNumber,
+  DEFAULT_SWEET_SPOT,
+  SWEET_SPOT_SPEC,
+  profileBallisticsConfig,
+  readSweetSpot,
+  writeSweetSpot,
 } from '../robotForm';
 
 const r1 = DEFAULT_DRAFT_VALUES.robot1;
@@ -152,5 +157,37 @@ describe('로봇 제원 폼 (09-9a)', () => {
     expect(previewAimSector({ turretType: 'FIXED', turretRange: [0, 0], aimTolerance: 0.1 })).toEqual({ start: -0.1, end: 0.1 });
     expect(previewAimSector({ turretType: 'TURRET', turretRange: [-1, 1], aimTolerance: 0.1 })).toEqual({ start: -1, end: 1 });
     expect(previewAimSector({ turretType: 'TURRET', turretRange: [2.5, -2.5], aimTolerance: 0.1 })).toEqual({ start: 2.5, end: -2.5 + 2 * Math.PI }); // 후방
+  });
+
+  it('J. (09-10a) 스윗스팟: 기본값 C, 진영 기준 읽기 / 쓰기(BLUE = 점대칭, 격자 중심으로 맞춤), 범위 / 탄도 검증, 복사', () => {
+    expect(r1.ballistics.sweetSpot).toEqual({ x: 59.5, y: 131.5 });
+    expect(DEFAULT_SWEET_SPOT).toEqual({ x: 59.5, y: 131.5 });
+    expect(readSweetSpot(r1, 'RED')).toEqual({ x: 59.5, y: 131.5 });
+    expect(readSweetSpot(r1, 'BLUE')).toEqual({ x: 84.5, y: 12.5 });
+    // RED: 60 → 칸 [60, 61)의 중심 60.5, 다른 축 유지
+    expect(writeSweetSpot(r1, 'RED', 'x', 60).ballistics.sweetSpot).toEqual({ x: 60.5, y: 131.5 });
+    expect(writeSweetSpot(r1, 'RED', 'y', 127.9).ballistics.sweetSpot).toEqual({ x: 59.5, y: 127.5 });
+    // BLUE: 화면 x 90.2 → 칸 중심 90.5 → 보관 144 − 90.5 = 53.5, y는 그대로 (보관 131.5)
+    const blue = writeSweetSpot(r1, 'BLUE', 'x', 90.2);
+    expect(blue.ballistics.sweetSpot).toEqual({ x: 53.5, y: 131.5 });
+    expect(readSweetSpot(blue, 'BLUE')).toEqual({ x: 90.5, y: 12.5 });
+    expect(r1.ballistics.sweetSpot).toEqual({ x: 59.5, y: 131.5 }); // 원본 불변
+    expect(SWEET_SPOT_SPEC).toMatchObject({ kind: 'coordinate', min: 0, max: 144 });
+    expect(profileBallisticsConfig(r1)).toEqual({ ...r1.ballistics, sweetSpot: { x: 59.5, y: 131.5 } });
+    // 검증: 칸 범위 → 탄도 검증 (HIVE / 해 없음 / 로봇 몸체 필드 밖)
+    const at = (x: number, y: number) => ({ ...r1, ballistics: { ...r1.ballistics, sweetSpot: { x, y } } });
+    expect(robotProfileIssues(at(-1, 131.5)).map(i => i.code)).toEqual(['FIELD_sweetSpot.x']);
+    expect(robotProfileIssues(at(59.5, 145)).map(i => i.code)).toEqual(['FIELD_sweetSpot.y']);
+    expect(robotProfileIssues(at(59.5, 100.5)).map(i => i.code)).toEqual(['SWEET_SPOT_IN_HIVE', 'SWEET_SPOT_NO_SOLUTION']); // 조준점 12 in: 몸체도 HIVE, 해도 없음
+    expect(robotProfileIssues(at(59.5, 108.5)).map(i => i.code)).toEqual(['SWEET_SPOT_NO_SOLUTION']);
+    expect(robotProfileIssues(at(59.5, 139.5)).map(i => i.code)).toEqual(['SWEET_SPOT_OUT_OF_FIELD']);
+    expect(robotProfileIssues({ ...at(59.5, 136.5), config: { ...r1.config, width: 6, length: 6 } })).toEqual([]); // 작은 로봇은 벽 가까이 가능
+    // 다른 칸이 틀리면 탄도 검증은 하지 않음 (그 칸 오류만)
+    expect(robotProfileIssues({ ...at(59.5, 100.5), config: { ...r1.config, width: 30 } }).map(i => i.code)).toEqual(['FIELD_width']);
+    // 복사는 스윗스팟도 깊은 복사
+    const src = at(40.5, 128.5);
+    const copied = copyRobotProfile(src, DEFAULT_DRAFT_VALUES.robot2, 'robot2');
+    expect(copied.ballistics.sweetSpot).toEqual({ x: 40.5, y: 128.5 });
+    expect(copied.ballistics.sweetSpot).not.toBe(src.ballistics.sweetSpot);
   });
 });
