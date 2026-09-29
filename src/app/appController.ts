@@ -24,7 +24,7 @@ import type {
 } from '../core/types';
 import { createAnimationFrameScheduler, createBrowserRealtimeLoop, isEditableTarget } from '../input/browserInput';
 import type { BrowserInputAdapter, BrowserInputEnv, GamepadSlotStatus } from '../input/browserInput';
-import { MatchInputs } from '../input/inputLog';
+import { LOG_RECORD_BYTES, MatchInputs } from '../input/inputLog';
 import type { FrameScheduler, LoopState, PauseReason, RealtimeLoop } from '../input/realtimeLoop';
 import { DEFAULT_RENDER_OPTIONS, hitProbabilities } from '../renderer/renderOptions';
 import type { RenderOptions, RobotHitProbability } from '../renderer/renderOptions';
@@ -51,6 +51,13 @@ export const END_HIGHLIGHT_MS = 5000;
 export const PLAYBACK_SPEEDS = [0.25, 0.5, 1, 2] as const;
 export type PlaybackSpeed = (typeof PLAYBACK_SPEEDS)[number];
 
+/** 경고 토스트 (명세서 3.8 필드 영역): 리프트 상태에서 주행 입력이 들어오면. 같은 로봇은 LIFT_TOAST_COOLDOWN_MS에 한 번 */
+export interface LiftToast {
+  robot: 'robot1' | 'robot2';
+}
+export const LIFT_TOAST_COOLDOWN_MS = 2000;
+const LIFT_STATES: ReadonlySet<string> = new Set(['FLOWER_SETUP', 'FLOWER_READY', 'FLOWER_DROPPING', 'FLOWER_LOWERING']);
+
 /** 1초 이동 = 50틱 */
 export const TICKS_PER_SECOND = Math.round(1 / DT);
 
@@ -61,6 +68,8 @@ export interface AppStatus {
   viewAngle: number;            // 현재 표시 중인 보기 회전각 (rad, 애니메이션 중간값 포함)
   loopState: LoopState;
   pauseReason: PauseReason | null;
+  // 자동 일시정지 배너 사유 (창 포커스 소실 / 탭 숨김 / 게임패드 해제로 멈췄을 때만, 재개 · 분기 · 재생 시작 · NEW에서 사라짐)
+  autoPauseReason: Exclude<PauseReason, 'USER'> | null;
   tick: number;                 // 보는 틱 (진행 중에는 엔진 머리와 같음). 아래 프레임 값은 모두 이 틱 기준
   headTick: number;             // 마지막 기록 틱 (엔진 머리)
   matchEnded: boolean;          // 머리가 6000틱 (종료 기록 있음)
@@ -97,6 +106,7 @@ export interface AppControllerDeps {
   scheduler?: FrameScheduler;
   now?: () => number;             // 보기 애니메이션용 벽시계 (ms)
   onStatus?: (status: AppStatus) => void;
+  onToast?: (toast: LiftToast) => void;
   statusIntervalMs?: number;      // 진행 중 상태 알림 최소 간격 (기본 100 ms ≈ 10 Hz)
 }
 
@@ -107,6 +117,7 @@ export class AppController {
   private readonly scheduler: FrameScheduler;
   private readonly now: () => number;
   private readonly onStatus: (status: AppStatus) => void;
+  private readonly onToast: (toast: LiftToast) => void;
   private readonly statusIntervalMs: number;
 
   private setup: MatchSetup;
@@ -129,6 +140,8 @@ export class AppController {
   private endStage: EndStage = 'NONE';
   private endStageAt = 0;
   private shortcutsEnabled = true;
+  private autoPauseReason: Exclude<PauseReason, 'USER'> | null = null;
+  private lastToastAt: Record<'robot1' | 'robot2', number> = { robot1: -Infinity, robot2: -Infinity };
   private detachKeys: (() => void) | null = null;
 
   private renderHandle: number | null = null;
@@ -142,6 +155,7 @@ export class AppController {
     this.scheduler = deps.scheduler ?? createAnimationFrameScheduler();
     this.now = deps.now ?? (() => performance.now());
     this.onStatus = deps.onStatus ?? (() => {});
+    this.onToast = deps.onToast ?? (() => {});
     this.statusIntervalMs = deps.statusIntervalMs ?? 100;
     this.newMatch();
     this.attachShortcuts();
@@ -240,6 +254,7 @@ export class AppController {
   play(): void {
     if (!this.canScrub() || this.playing) return;
     if (this.viewTick >= this.headTick()) this.viewTick = 0;
+    this.autoPauseReason = null;
     this.playing = true;
     this.playbackPos = this.viewTick;
     this.playbackLast = null;
@@ -330,6 +345,7 @@ export class AppController {
       viewAngle: this.animator.sample(this.now()).angle,
       loopState: this.loop.state,
       pauseReason: this.loop.pauseReason,
+      autoPauseReason: this.autoPauseReason,
       tick: frame.tick,
       headTick: head,
       matchEnded: head >= MATCH_TICKS,
@@ -406,14 +422,20 @@ export class AppController {
     this.playing = false;
     this.playbackLast = null;
     this.endStage = 'NONE';
+    this.autoPauseReason = null;
+    this.lastToastAt = { robot1: -Infinity, robot2: -Infinity };
     const created = createBrowserRealtimeLoop(
       this.engine,
       this.inputs,
       {
-        onFrame: () => this.renderNow(),
-        onStateChange: state => {
+        onFrame: stepped => {
+          this.checkLiftToasts(stepped);
+          this.renderNow();
+        },
+        onStateChange: (state, reason) => {
           // 진행이 멈추면 보는 틱 = 멈춘 틱. 6000틱 도달 → 종료 강조 시작
           if (state !== 'RUNNING') this.viewTick = this.engine.currentTick;
+          this.autoPauseReason = state === 'PAUSED' && reason !== null && reason !== 'USER' ? reason : null;
           if (state === 'ENDED') this.setEndStage('HIGHLIGHT');
           this.emitStatus(true);
           this.requestRender();
@@ -467,6 +489,30 @@ export class AppController {
     else if (this.playing) this.stopPlayback();
     else if (this.canResume()) this.resume();
     else this.play();
+  }
+
+  /**
+   * 이번 프레임에 진행한 틱마다: 그 틱 시작 상태가 리프트 상태인데 LIVE 입력 기록의 주행 축(qx, qy, qω)이 0이 아니면 경고 토스트.
+   * 입력 기록(양자화 후, 데드존 적용 뒤)을 읽으므로 스틱 떨림은 경고하지 않는다. 같은 로봇은 LIFT_TOAST_COOLDOWN_MS에 한 번
+   */
+  private checkLiftToasts(stepped: number): void {
+    if (stepped <= 0) return;
+    const now = this.now();
+    const end = this.engine.currentTick;
+    for (const robot of ['robot1', 'robot2'] as const) {
+      if (this.inputs.sources[robot] !== 'LIVE' || now - this.lastToastAt[robot] < LIFT_TOAST_COOLDOWN_MS) continue;
+      const log = this.inputs.logs[robot];
+      for (let tick = Math.max(0, end - stepped); tick < end; tick++) {
+        const state = this.engine.getFrame(tick)?.[robot === 'robot1' ? 'r1' : 'r2'].actionState;
+        if (!state || !LIFT_STATES.has(state) || !log.has(tick)) continue;
+        const at = tick * LOG_RECORD_BYTES;
+        if (log.data[at] !== 0 || log.data[at + 1] !== 0 || log.data[at + 2] !== 0) {
+          this.lastToastAt[robot] = now;
+          this.onToast({ robot });
+          break;
+        }
+      }
+    }
   }
 
   private changed(): void {

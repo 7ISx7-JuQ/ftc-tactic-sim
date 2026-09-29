@@ -1,14 +1,15 @@
 // 스크러버 줄 (명세서 3.8 화면 구성, 09-7a): 주 버튼(START / PAUSE / RESUME / BRANCH), 1초 · 1틱 이동(길게 누르면 반복),
-// 재생 / 배속, VIEW, NEW, RESULT. 타임라인 막대는 표시만 (보는 틱 + 기록 구간, 끌어서 이동은 09-7b).
-import { useEffect, useRef } from 'react';
+// 재생 / 배속, VIEW, NEW, RESULT. 타임라인 막대: 보는 틱 + 기록 구간, 클릭 / 끌기로 보는 틱 이동 (09-7b, 끄는 동안 시간 표시).
+import { useEffect, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import { ChevronLeft, ChevronRight, CirclePause, CirclePlay, FastForward, Gamepad2, GitBranch, Pause, Play, Rewind, RotateCcw, SwitchCamera, Trophy } from 'lucide-react';
 import { PLAYBACK_SPEEDS, TICKS_PER_SECOND } from '../app/appController';
 import type { AppStatus, PlaybackSpeed } from '../app/appController';
-import { MATCH_TICKS } from '../core/simulationEngine';
+import { DT, MATCH_TICKS } from '../core/simulationEngine';
 import { t } from '../ui/i18n';
 import type { Language, MessageKey } from '../ui/i18n';
-import { mainButton, timelineFraction, timelineMarks } from '../ui/mainScreenModel';
+import { formatMatchTime } from '../ui/units';
+import { mainButton, timelineFraction, timelineMarks, timelineTickAt } from '../ui/mainScreenModel';
 
 export interface ScrubberActions {
   start: () => void;
@@ -16,6 +17,7 @@ export interface ScrubberActions {
   resume: () => void;
   branch: () => void;          // 확인창은 호출하는 쪽(MainScreen)
   stepView: (deltaTicks: number) => void;
+  setViewTick: (tick: number) => void;   // 타임라인 클릭 / 끌기 (기록 밖이면 컨트롤러가 마지막 기록 틱에 붙임)
   togglePlayback: () => void;
   setSpeed: (speed: PlaybackSpeed) => void;
   toggleView: () => void;
@@ -86,6 +88,13 @@ function RepeatButton({ label, icon, onStep, disabled }: { label: string; icon: 
 }
 
 export default function ScrubberBar({ status, lang, actions }: { status: AppStatus; lang: Language; actions: ScrubberActions }) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const seek = (clientX: number) => {
+    const rect = trackRef.current?.getBoundingClientRect();
+    if (rect) actions.setViewTick(timelineTickAt(clientX, rect.left, rect.width, MATCH_TICKS));
+  };
+  const isDragging = dragging && status.canScrub; // 끄는 도중 조작 불가 상태가 되면 끌기 무효
   const main = mainButton(status);
   const mainSpec: Record<typeof main.kind, { key: MessageKey; icon: ReactNode; action: () => void }> = {
     START: { key: 'control.start', icon: <Play />, action: actions.start },
@@ -111,13 +120,40 @@ export default function ScrubberBar({ status, lang, actions }: { status: AppStat
         <RepeatButton label={t(lang, 'control.stepBackTick')} icon={<ChevronLeft />} disabled={scrubDisabled} onStep={() => actions.stepView(-1)} />
       </div>
 
-      <div className="timeline" role="slider" aria-label={t(lang, 'control.timeline')} aria-valuemin={0} aria-valuemax={MATCH_TICKS} aria-valuenow={status.tick} aria-disabled="true">
-        <div className="timeline-track">
+      <div
+        className={`timeline${status.canScrub ? ' is-active' : ''}${isDragging ? ' is-dragging' : ''}`}
+        role="slider"
+        aria-label={t(lang, 'control.timeline')}
+        aria-valuemin={0}
+        aria-valuemax={MATCH_TICKS}
+        aria-valuenow={status.tick}
+        aria-valuetext={formatMatchTime((MATCH_TICKS - status.tick) * DT)}
+        aria-disabled={!status.canScrub}
+        onPointerDown={e => {
+          if (!status.canScrub || e.button !== 0) return;
+          e.preventDefault();
+          e.currentTarget.setPointerCapture(e.pointerId);
+          setDragging(true);
+          seek(e.clientX);
+        }}
+        onPointerMove={e => {
+          if (isDragging) seek(e.clientX);
+        }}
+        onPointerUp={e => {
+          if (!dragging) return;
+          e.currentTarget.releasePointerCapture(e.pointerId);
+          setDragging(false);
+        }}
+        onPointerCancel={() => setDragging(false)}
+      >
+        <div className="timeline-track" ref={trackRef}>
           <div className="timeline-recorded" style={{ width: `${headFraction * 100}%` }} />
           {MARKS.map(m => (
             <span key={m.fraction} className={`timeline-mark${m.major ? ' is-major' : ''}`} style={{ left: `${m.fraction * 100}%` }} />
           ))}
-          <span className="timeline-thumb" style={{ left: `${viewFraction * 100}%` }} />
+          <span className="timeline-thumb" style={{ left: `${viewFraction * 100}%` }}>
+            {isDragging && <span className="timeline-time">{formatMatchTime((MATCH_TICKS - status.tick) * DT)}</span>}
+          </span>
         </div>
       </div>
 

@@ -15,6 +15,7 @@ import {
   robotLabel,
   timelineFraction,
   timelineMarks,
+  timelineTickAt,
   timerIsEndgame,
   tipDisplay,
 } from '../mainScreenModel';
@@ -121,6 +122,17 @@ describe('C. 스크러버 줄 / config 띠', () => {
     expect(marks[0].fraction).toBe(0);
     expect(marks[12].fraction).toBe(1);
     expect(marks.filter(m => m.major).map(m => m.fraction)).toEqual([ENDGAME_START_TICK / MATCH_TICKS]);
+  });
+
+  it('타임라인 클릭 / 끌기 위치 → 틱 (09-7b): 막대 비율 × 6000 반올림, 막대 밖은 양 끝', () => {
+    expect(timelineTickAt(100, 100, 600, MATCH_TICKS)).toBe(0);
+    expect(timelineTickAt(250, 100, 600, MATCH_TICKS)).toBe(1500);
+    expect(timelineTickAt(700, 100, 600, MATCH_TICKS)).toBe(MATCH_TICKS);
+    expect(timelineTickAt(100.06, 100, 600, MATCH_TICKS)).toBe(1); // 0.06 / 600 × 6000 = 0.6 → 1
+    expect(timelineTickAt(50, 100, 600, MATCH_TICKS)).toBe(0);
+    expect(timelineTickAt(900, 100, 600, MATCH_TICKS)).toBe(MATCH_TICKS);
+    expect(timelineTickAt(300, 100, 0, MATCH_TICKS)).toBe(0);
+    expect(timelineTickAt(Number.NaN, 100, 600, MATCH_TICKS)).toBe(0);
   });
 
   it('게임패드 요약: 연결된 패드 수, 연결된 패드 중 비표준 매핑이 있으면 경고', () => {

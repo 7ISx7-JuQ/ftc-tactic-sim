@@ -7,8 +7,8 @@ import type { FrameScheduler } from '../../input/realtimeLoop';
 import { DEFAULT_RENDER_OPTIONS } from '../../renderer/renderOptions';
 import { VIEW_ANIMATION_MS, viewAngle } from '../../renderer/viewTransform';
 import { MATCH_TICKS } from '../../core/simulationEngine';
-import { AppController, END_HIGHLIGHT_MS } from '../appController';
-import type { AppStatus, MatchSetup } from '../appController';
+import { AppController, END_HIGHLIGHT_MS, LIFT_TOAST_COOLDOWN_MS } from '../appController';
+import type { AppStatus, LiftToast, MatchSetup } from '../appController';
 
 // 각 검증은 메시지와 함께 expect로 확인 (실패 시 어떤 조건이 깨졌는지 메시지로 표시)
 const assert = (c: boolean, m: string) => {
@@ -96,8 +96,9 @@ const setup = (initial: MatchSetup = makeSetup('RED')) => {
   const { env, win } = fakeEnv();
   const { ctx, counter } = countingCtx();
   const statuses: AppStatus[] = [];
-  const h = new AppController({ ctx, setup: initial, env, scheduler: frames, now: () => frames.time, onStatus: s => statuses.push(s) });
-  return { h, frames, win, counter, statuses };
+  const toasts: LiftToast[] = [];
+  const h = new AppController({ ctx, setup: initial, env, scheduler: frames, now: () => frames.time, onStatus: s => statuses.push(s), onToast: t => toasts.push(t) });
+  return { h, frames, win, counter, statuses, toasts };
 };
 
 describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이전)', () => {
@@ -339,6 +340,62 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     h.reset();
     s = h.status();
     assert(s.phase === 'ROTATING_OUT' && s.tick === 0 && s.headTick === 0 && s.endStage === 'NONE' && !s.playing && s.result === null, 'NEW -> fresh match, end stage cleared');
+    h.dispose();
+  });
+
+  it('G. 경고 토스트 (리프트 중 주행 입력, 로봇당 2초에 한 번) / 자동 일시정지 배너 사유 (09-7b)', () => {
+    const { h, frames, win, toasts } = setup();
+    h.start();
+    frames.advance(VIEW_ANIMATION_MS + 50);
+    // R2 리프트 올림 (기본 시작 자리에서 투입 가능) → 올리는 중 / 올린 채 대기에서 W → R2 경고 1회, 누르고 있어도 2초 안에는 다시 없음
+    win.dispatchEvent(key('keydown', KEYBOARD_BINDINGS.lift));
+    frames.advance(60, 20);
+    win.dispatchEvent(key('keyup', KEYBOARD_BINDINGS.lift));
+    frames.advance(200, 20);
+    const lift = h.currentFrame().r2.actionState;
+    assert(lift === 'FLOWER_SETUP' || lift === 'FLOWER_READY', `R2 lift raised (${lift})`);
+    win.dispatchEvent(key('keydown', KEYBOARD_BINDINGS.forward));
+    frames.advance(100, 20);
+    assert(toasts.length === 1 && toasts[0].robot === 'robot2', 'drive input while lifted -> toast for R2');
+    frames.advance(LIFT_TOAST_COOLDOWN_MS - 300, 20);
+    assert(toasts.length === 1, 'same robot: no repeat within 2 s while holding');
+    frames.advance(400, 20);
+    assert(toasts.length === 2, 'after 2 s: toast again while still holding');
+    win.dispatchEvent(key('keyup', KEYBOARD_BINDINGS.forward));
+    frames.advance(LIFT_TOAST_COOLDOWN_MS + 200, 20);
+    assert(toasts.length === 2, 'no drive input: no toast even in the lift state');
+    // 리프트를 내린 뒤의 주행은 경고 없음
+    win.dispatchEvent(key('keydown', KEYBOARD_BINDINGS.lift));
+    frames.advance(60, 20);
+    win.dispatchEvent(key('keyup', KEYBOARD_BINDINGS.lift));
+    frames.advance(1500, 20);
+    assert(h.currentFrame().r2.actionState === 'IDLE', `lift lowered (${h.currentFrame().r2.actionState})`);
+    win.dispatchEvent(key('keydown', KEYBOARD_BINDINGS.forward));
+    frames.advance(500, 20);
+    win.dispatchEvent(key('keyup', KEYBOARD_BINDINGS.forward));
+    assert(toasts.length === 2 && h.currentFrame().r2.x > 10, 'driving outside the lift states: no toast');
+
+    // 자동 일시정지 배너: 포커스 소실 → 사유 표시, 재개하면 사라짐. 사용자 일시정지는 배너 없음
+    win.dispatchEvent(new Event('blur'));
+    assert(h.status().loopState === 'PAUSED' && h.status().autoPauseReason === 'BLUR', 'window blur -> banner reason BLUR');
+    h.stepView(-10);
+    assert(h.status().autoPauseReason === 'BLUR', 'scrubbing keeps the banner');
+    h.play();
+    assert(h.status().autoPauseReason === null, 'playback start clears the banner');
+    h.stopPlayback();
+    h.stepView(10_000);
+    h.resume();
+    assert(h.status().loopState === 'RUNNING' && h.status().autoPauseReason === null, 'resume: no banner');
+    h.pause();
+    assert(h.status().autoPauseReason === null && h.status().pauseReason === 'USER', 'user pause: no banner');
+    h.resume();
+    win.dispatchEvent(new Event('blur'));
+    h.stepView(-10);
+    h.branch();
+    assert(h.status().loopState === 'RUNNING' && h.status().autoPauseReason === null, 'branch clears the banner');
+    win.dispatchEvent(new Event('blur'));
+    h.reset();
+    assert(h.status().autoPauseReason === null, 'NEW clears the banner');
     h.dispose();
   });
 });

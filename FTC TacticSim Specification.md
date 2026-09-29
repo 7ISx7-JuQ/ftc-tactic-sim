@@ -735,6 +735,11 @@
             - 상태 추가: `headTick`, `matchEnded`, `canScrub`, `canResume`, `canBranch`, `playing`, `playbackSpeed`, `endStage`, `result`(종료 프레임의 총점 / `scoreBreakdown` / RP / 오토 + 텔레옵 TIP — 보는 틱과 무관). `tick` 이하 프레임 값은 보는 틱 기준.
             - 단축키(컨트롤러가 창 `keydown` 직접 처리, 주행 키는 입력 어댑터): Space = 경기 중 [종료 강조 → 건너뛰기, 결과 팝업 → 무시, 진행 → 일시정지, 재생 → 멈춤, 재개 가능 → 재개, 그 외 → 재생] (분기하지 않음, 자동 반복 무시, 텍스트 입력칸 제외 항상 기본 동작 막음). ← / →(Shift = 50틱)는 보는 틱을 움직일 수 있을 때만(진행 중에는 R2 회전), 키 자동 반복 = 연속 이동.
             - 화면(09-7a): 주 버튼 `mainButton` = `START` / 회전 중 비활성 / `PAUSE` / `BRANCH`(`GitBranch`, 주황) / `RESUME` / 비활성(종료 강조 · 결과 중, 종료 틱은 `BRANCH` 비활성). 1초 / 1틱 버튼(길게 누르면 반복), 재생 버튼(`CirclePlay` ↔ `CirclePause`), 배속, `NEW`(회전 중 비활성), `RESULT`(복기 중만). 타임라인은 보는 틱 동그라미 + 기록 구간 채움(끌기는 09-7b). 확인창은 09-7b 전까지 브라우저 기본 `confirm`(문구 `confirm.branch` = `branchConfirmParams`: 보는 틱 경기 시계 + 삭제될 기록 초 소수 1자리). 결과 팝업 기본형 `ResultPopup.tsx`: 뒤 흐림, 앱 이름 / `TELEOP MATCH COMPLETED` / 진영, 총점, `HIVE` / `FLOWER` / `GARDEN` / `PARK` 점수, `RP` 카드 3개(달성 초록 체크) + TIP 횟수, `RESTART`(= `NEW`, 확인창) / `REVIEW`. 종료 강조 중 필드 클릭 = 건너뛰기.
+        - **확인창 / 알림 / 타임라인 구현 (09-7b):**
+            - 확인창 `ConfirmDialog.tsx`: 화면 전체 흐림(결과 팝업 위에서도 열림, `RESTART`) + 필드 영역 중앙 상자. 문구 + `취소 Esc` / 동작 이름 버튼(`BRANCH` · `NEW`, 주황) `Enter`. 창 `keydown`을 캡처 단계에서 받아 Enter = 확인, Esc = 취소, Space는 막음(초점 버튼을 누르지 않음). 열린 동안 컨트롤러 단축키 꺼짐(`setShortcutsEnabled`). `BRANCH`는 재생을 멈추고 그 틱으로 확인, `NEW`는 먼저 일시정지.
+            - 경고 토스트: 컨트롤러가 틱마다(이번 프레임에 진행한 틱 전부) 그 틱 시작 상태가 리프트 4상태이고 `LIVE` 입력 기록의 주행 축(qx, qy, qω, 양자화 · 데드존 뒤)이 0이 아니면 `onToast({ robot })`. 같은 로봇은 `LIFT_TOAST_COOLDOWN_MS` = 2000 (벽시계)에 한 번. 화면(`FieldNotices.tsx`)은 필드 위쪽 중앙 빨강(`#DC2626`) 알약 + 경고 아이콘 + `R2 · LOWER LIFT (A) TO MOVE`, 1.5초 뒤 0.3초 동안 흐려지며 사라짐, 같은 로봇 토스트는 새 것으로 교체.
+            - 자동 일시정지 배너: 상태 `autoPauseReason`(루프가 `USER` 외 사유로 멈추면 설정, 진행 재개 · 분기 · 재생 시작 · `NEW`에서 해제, 보는 틱 이동은 유지). 필드 위쪽 중앙 어두운 띠 + 주황 테두리 + 경고 아이콘, 사유(`pause.*`) + `pause.resumeHint`.
+            - 타임라인: 보는 틱을 움직일 수 있을 때 막대 클릭 / 끌기(포인터 캡처) → `timelineTickAt`(막대 비율 × 6000 반올림) → `setViewTick`(기록 밖은 마지막 기록 틱, 재생 멈춤). 끄는 동안 동그라미 위에 경기 시계(`M:SS`) 표시, 올리면 동그라미 1.2배. 조작 불가 상태가 되면 끌기 무효.
     - **로봇 제원 탭 (R1 / R2):**
 
         | 구역 | 항목 |
@@ -1175,6 +1180,7 @@ export interface TimelineFrame {
 | 09-6c | 앱 컨트롤러 `AppController`(경기 설정 주입, 하네스 흐름 일반화, 상태에 TIP / RP / 명중 확률), 하네스를 그 위로 이전 (아래 6.2.28) | `src/app/appController.ts`, `src/dev/devSetup.ts`, `DevHarness.tsx`, `src/app/__tests__/appController.test.ts` |
 | 09-6d | 화면 뼈대: 좌측 득점 패널 / 필드 / 접힌 config 띠(표시만) / 스크러버 줄(기존 동작만), 화면 비례 단위 `--u`, 글꼴(Apple SD Gothic Neo → Pretendard) / lucide 아이콘, 새 GUI 기본 화면 + 하네스 `?harness` (아래 6.2.29) | `src/components/`, `src/ui/mainScreenModel.ts`, `src/app/defaultSetup.ts`, `src/renderer/fonts.ts`, `App.tsx`, `main.tsx`, `src/ui/__tests__/mainScreenModel.test.ts` |
 | 09-7a | 경기 흐름: 보는 틱 / 재생 · 배속 / 틱 · 1초 이동 / 재개 · 분기 / 종료 강조 5초 → 결과 팝업(기본형) → 복기, 상태별 단축키, 스크러버 줄 연결 (아래 6.2.30) | `appController.ts`, `realtimeLoop.ts`, `ScrubberBar.tsx`, `ResultPopup.tsx`, `MainScreen.tsx`, `mainScreenModel.ts`, 테스트 |
+| 09-7b | 확인창 모달(Enter / Esc, 필드 중앙), 경고 토스트(리프트 중 주행 입력, 로봇당 2초), 자동 일시정지 배너, 타임라인 클릭 / 끌기 (아래 6.2.31) | `ConfirmDialog.tsx`, `FieldNotices.tsx`, `ScrubberBar.tsx`, `MainScreen.tsx`, `appController.ts`, 테스트 |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
@@ -1425,6 +1431,12 @@ export interface TimelineFrame {
 - **테스트:** `appController.test.ts` E(Space 경기 전 무반응 · 진행 중 일시정지, ← 1틱 / Shift + ← 50틱 / 머리 · 0 제한, 되감은 틱에서 재개 무시, Space 재생(분기 아님) 1× ≈ 25틱 / 0.5초 · 2× ≈ 50틱, 재생 멈춤 유지, 머리에서 자동 정지 → 재개 가능, 머리에서 재생 = 0틱부터, 틱 이동이 재생 멈춤, 분기 → 이후 기록 교체(주행 안 한 R2가 원래 주행 위치보다 뒤) · 옛 프레임 사라짐, 단축키 끔, 진행 중 ←는 주행), F(6000틱 → 종료 강조 · 조작 잠금 · 결과 총점 = 항목 합, 5초 전 / 후, 결과 팝업 중 단축키 무시, 복기 RESUME / BRANCH 없음 · Space 처음부터 재생, RESULT 다시 열기, 종료 후 분기 → 다시 종료 강조, 클릭 / Space 건너뛰기, NEW 초기화), `mainScreenModel.test.ts` 주 버튼 9상태 + 분기 확인 문구 값, `realtimeLoop.test.ts` E 종료 후 되감으면 재개. 재개 조건에서 머리 비교 누락, 머리에서 재생 시 0틱 복귀 누락, Space 분기, 5초 대기 없음, 결과 팝업 중 Space 허용, 멈출 때 보는 틱 미갱신, 배속 무시, Shift 1초 무시, 분기 시 종료 단계 미초기화, 결과 팝업 조건 뒤집힘 각각에서 실패함을 확인.
 - **헤드리스 Chromium 점검 (저장소 밖 1회성, 실제 개발 서버):** 시작 → W 주행 → Space 일시정지(`RESUME`) → Shift + ← / ←(`BRANCH`, 타이머 되감김) → Space 재생 → 머리에서 멈춤(`RESUME`) → 되감고 `BRANCH` 클릭 → 확인창 문구 "Recorded match after 1:59 (1.0 s) will be deleted…" 확인 → 진행 → 120초 경기 끝까지 → 종료 강조(주 버튼 비활성) → 5초 뒤 결과 팝업(9점: GARDEN 4 + PARK 5) → `REVIEW`. 콘솔 오류 없음.
 
+### 6.2.31 Step 09-7b (확인창 / 경고 토스트 / 자동 일시정지 배너 / 타임라인 끌기) 완료 항목 — 09-7 완료
+
+- **구현:** 3.8항 "확인창 / 알림 / 타임라인 구현 (09-7b)" 참고 (`ConfirmDialog.tsx`, `FieldNotices.tsx`, `ScrubberBar.tsx` 타임라인, `AppController` `onToast` / `autoPauseReason`, 문구 `pause.resumeHint`). 09-7a의 임시 `confirm` 제거.
+- **테스트:** `appController.test.ts` G(리프트 올린 채 W → R2 토스트 1회, 누르고 있어도 2초 안 반복 없음 · 2초 뒤 다시, 입력 없으면 없음, 리프트 내린 뒤 주행은 없음, 포커스 소실 배너 → 틱 이동 유지 → 재생 시작 해제, 재개 / 분기 / NEW 해제, 사용자 일시정지 배너 없음), `mainScreenModel.test.ts` 타임라인 위치 → 틱(양 끝 제한, 반올림, 폭 0 / 비유한값). 쿨다운 없음, 리프트 상태 검사 없음, 입력 축 검사 없음, 재생 시작 시 배너 유지, 사용자 일시정지도 배너 각각에서 실패함을 확인.
+- **헤드리스 Chromium 점검 (저장소 밖 1회성, 실제 개발 서버, 영어 / 한국어):** 시작 → 리프트 올리고 W(토스트) → 리프트 내리고 주행 → 창 포커스 소실(배너) → 타임라인 끌기(시간 표시 `1:59`, 주 버튼 `BRANCH`, 배너 유지) → `BRANCH` 확인창(문구 · Space 무시 · Esc 취소 · Enter 분기 → 진행) → 진행 중 `NEW`(일시정지 후 확인창, Esc → `RESUME` 상태로 남음). 브라우저 기본 대화상자 / 콘솔 오류 없음.
+
 ### 6.3 남은 Step (권장 순서)
 
 > 모든 Step은 완료 시 `npm test`(엔진 회귀 테스트)가 통과해야 하며, 새로 추가한 규칙에는 테스트 그룹을 추가한다.
@@ -1449,7 +1461,7 @@ export interface TimelineFrame {
     - ~~08-5: HIVE(아군 셀 상태, 시차 낙하 연출), FLOWER 게이지(필드 밖 9칸, 잼, 가득 참 X), NECTAR 재고 게이지(게이지 틀은 정적 레이어에 추가), 경기 종료 강조.~~ (완료, 6.2.18)
     - ~~08-6: 비행 공(명목 구간 보간 + 높이 보정, 충돌 후 구간, 그림자 / 오프셋 / 크기), 표시 옵션 5종.~~ (완료, 6.2.19)
     - ~~08-7: 개발 하네스(정식 엔진 / 입력 / 루프 + 간이 판정 함수, 시작 회전 후 루프 시작, 옵션 체크박스) + 헤드리스 Chromium 점검.~~ (완료, 6.2.20)
-- **Step 9 — 웹 GUI (React, 상세 규칙 3.8항):** 09-1(명세), 09-2(탄도 사전 준비), 09-3(LUT Worker 풀), 09-4(LUT 캐시), 09-5(배치 검증), 09-6a(GUI 순수 기반), 09-6b(렌더러 전환), 09-6c(앱 컨트롤러), 09-6d(화면 뼈대), 09-7a(경기 흐름) 완료.
+- **Step 9 — 웹 GUI (React, 상세 규칙 3.8항):** 09-1(명세), 09-2(탄도 사전 준비), 09-3(LUT Worker 풀), 09-4(LUT 캐시), 09-5(배치 검증), 09-6a(GUI 순수 기반), 09-6b(렌더러 전환), 09-6c(앱 컨트롤러), 09-6d(화면 뼈대), 09-7a(경기 흐름), 09-7b(확인창 / 토스트 / 배너 / 타임라인) 완료.
     - ~~09-1: 웹 GUI 명세 구체화.~~ (완료, 6.2.21)
     - ~~09-2: `ballistics.ts` 사전 준비 — `generateReferenceLUTRows`, `robotLUTSeeds`, `BALLISTICS_MODEL_VERSION`, 스윗스팟 진영 기준 변환 함수 + 분할 / 작업 계획 동일성 테스트.~~ (완료, 6.2.22)
     - ~~09-3: LUT Worker 풀(`src/workers/lutWorker.ts`) + 작업 대기열 + 조립 + 로봇별 상태 머신 / 취소 (React 비의존, 가짜 Worker 테스트).~~ (완료, 6.2.23)
@@ -1463,7 +1475,7 @@ export interface TimelineFrame {
     - (09-7 전 자산) 행동 배지 SVG 6종 + 파비콘 추가, TIP 아이콘은 09-6d 것 유지 (3.7항 "배지 자산 확정", 3.8항 "파비콘").
     - 09-7: 경기 흐름 — 시작 / 일시정지 / 재개 / 분기(확인창) / 재생 / 배속 / 틱 · 1초 이동 / 새 경기, 상태별 키 공유, 경고 토스트 / 자동 일시정지 배너 (`ENDGAME` 타이머 색은 09-6d에서 완료). 행동 상태 배지 이미지 자산은 09-7 전에 추가 완료. 2단계로 분할:
         - ~~09-7a: 컨트롤러 흐름(보는 틱 / 재생 · 배속 / 틱 · 1초 이동 / 재개 · 분기 / 종료 강조 5초 → 결과 → 복기) + 상태별 단축키 + 스크러버 줄 버튼 연결 + 결과 팝업 기본형(점수 집계표), 확인창은 임시 `confirm`.~~ (완료, 6.2.30)
-        - 09-7b: 확인창 모달, 경고 토스트, 자동 일시정지 배너, 타임라인 클릭 / 끌기 (스크린샷 확인).
+        - ~~09-7b: 확인창 모달, 경고 토스트, 자동 일시정지 배너, 타임라인 클릭 / 끌기 (스크린샷 확인).~~ (완료, 6.2.31) — 09-7 완료
     - 09-8: config 창 — 아이콘 띠(준비 신호 / 진행률 링 / 깃발 / 게임패드) + 탭 틀 + 초안 / 적용 / 되돌리기 + SETTINGS 탭(게임패드 상태, 입력 출처, 조작 모드, 키보드 토글, 표시 옵션, 언어, 단위, 기본 보기) + 설정 자동 보관.
     - 09-9: 로봇 탭 — 제원 폼, `BumperZone` 편집기, 슈터 / 리프트, 팀 번호, 상대 탭 복사, 탭 되돌리기.
     - 09-10: 스윗스팟 / 히트맵 편집 모드 + LUT 진행 표시(v0 선표시 / 진행 막대 / 남은 시간 / 점진 히트맵) + 기본 프리셋 자동 생성.

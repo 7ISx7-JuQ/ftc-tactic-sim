@@ -538,3 +538,157 @@
   color: #15171c;
   border-color: #e5e7eb;
 }
+
+/* ---------------- 타임라인 클릭 / 끌기 (09-7b) ---------------- */
+.timeline.is-active {
+  cursor: pointer;
+  touch-action: none;
+}
+.timeline.is-active:hover .timeline-thumb,
+.timeline.is-dragging .timeline-thumb {
+  transform: translate(-50%, -50%) scale(1.2);
+}
+.timeline.is-dragging {
+  cursor: grabbing;
+}
+.timeline-time {
+  position: absolute;
+  bottom: calc(100% + var(--u) * 10);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: calc(var(--u) * 3) calc(var(--u) * 8);
+  border-radius: calc(var(--u) * 6);
+  background: #e5e7eb;
+  color: #15171c;
+  font-size: calc(var(--u) * 12);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* ---------------- 필드 위쪽 알림: 자동 일시정지 배너 / 경고 토스트 (09-7b) ---------------- */
+.field-notices {
+  position: absolute;
+  top: calc(var(--u) * 16);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--u) * 8);
+  pointer-events: none;
+}
+.pause-banner {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 10);
+  padding: calc(var(--u) * 10) calc(var(--u) * 16);
+  border-radius: calc(var(--u) * 10);
+  border: calc(var(--u) * 2) solid var(--accent);
+  background: rgba(21, 23, 28, 0.92);
+  box-shadow: 0 calc(var(--u) * 6) calc(var(--u) * 20) rgba(0, 0, 0, 0.35);
+  white-space: nowrap;
+}
+.main-screen .pause-banner svg.lucide {
+  color: var(--accent);
+  width: calc(var(--u) * 24);
+  height: calc(var(--u) * 24);
+}
+.pause-banner-title {
+  font-size: calc(var(--u) * 15);
+  font-weight: 800;
+}
+.pause-banner-hint {
+  font-size: calc(var(--u) * 12);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.lift-toast {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 8);
+  padding: calc(var(--u) * 8) calc(var(--u) * 16);
+  border-radius: calc(var(--u) * 999);
+  background: #dc2626;
+  color: #ffffff;
+  font-size: calc(var(--u) * 14);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  box-shadow: 0 calc(var(--u) * 6) calc(var(--u) * 20) rgba(0, 0, 0, 0.35);
+  animation: toast-in 150ms ease-out;
+  transition: opacity 300ms ease-in;
+}
+.lift-toast.is-leaving {
+  opacity: 0;
+}
+.main-screen .lift-toast svg.lucide {
+  width: calc(var(--u) * 18);
+  height: calc(var(--u) * 18);
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(calc(var(--u) * -6));
+  }
+}
+
+/* ---------------- 확인창 (09-7b): 화면 전체 흐림 + 필드 중앙 상자 ---------------- */
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgba(10, 11, 14, 0.45);
+  backdrop-filter: blur(calc(var(--u) * 4));
+}
+.confirm-box {
+  position: fixed;
+  transform: translate(-50%, -50%);
+  width: calc(var(--u) * 400);
+  max-width: calc(100vw - var(--u) * 32);
+  padding: calc(var(--u) * 22) calc(var(--u) * 24) calc(var(--u) * 18);
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: calc(var(--u) * 12);
+  box-shadow: 0 calc(var(--u) * 20) calc(var(--u) * 60) rgba(0, 0, 0, 0.5);
+  outline: none;
+}
+.confirm-message {
+  margin: 0 0 calc(var(--u) * 18);
+  font-size: calc(var(--u) * 15);
+  font-weight: 600;
+  line-height: 1.5;
+}
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: calc(var(--u) * 10);
+}
+.main-screen .confirm-button {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 8);
+  height: calc(var(--u) * 36);
+  padding: 0 calc(var(--u) * 14);
+  border-radius: calc(var(--u) * 8);
+  border: 1px solid var(--panel-border);
+  font-size: calc(var(--u) * 14);
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+.main-screen .confirm-button.is-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #1a1204;
+}
+.confirm-button kbd {
+  font: inherit;
+  font-size: calc(var(--u) * 10);
+  font-weight: 700;
+  padding: calc(var(--u) * 1) calc(var(--u) * 5);
+  border-radius: calc(var(--u) * 4);
+  border: 1px solid currentColor;
+  opacity: 0.6;
+}

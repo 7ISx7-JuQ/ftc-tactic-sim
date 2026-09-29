@@ -108,6 +108,12 @@ export function timelineFraction(tick: number, matchTicks: number): number {
   return Math.min(1, Math.max(0, tick / matchTicks));
 }
 
+/** 타임라인 클릭 / 끌기 위치 → 틱 (막대 안 비율 × 6000, 반올림, [0, 6000] 제한 — 기록 밖이면 컨트롤러가 마지막 기록 틱에 붙임) */
+export function timelineTickAt(clientX: number, trackLeft: number, trackWidth: number, matchTicks: number): number {
+  if (!(trackWidth > 0) || !Number.isFinite(clientX)) return 0;
+  return Math.round(Math.min(1, Math.max(0, (clientX - trackLeft) / trackWidth)) * matchTicks);
+}
+
 /** 타임라인 눈금: 10초마다 (0, 500, …, 6000틱), ENDGAME 시작(남은 60초) 눈금은 major */
 export function timelineMarks(matchTicks: number, ticksPerSecond: number, endgameSec = 60): { fraction: number; major: boolean }[] {
   const step = 10 * ticksPerSecond;

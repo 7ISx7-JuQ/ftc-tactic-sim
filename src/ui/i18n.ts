@@ -69,6 +69,7 @@ const en = {
   'pause.HIDDEN': 'Paused: tab hidden',
   'pause.BLUR': 'Paused: window lost focus',
   'pause.GAMEPAD_DISCONNECTED': 'Paused: gamepad disconnected',
+  'pause.resumeHint': 'Press Space or RESUME to continue',
 
   // config 창
   'config.open': 'Open settings',
@@ -176,6 +177,7 @@ const ko: Record<MessageKey, string> = {
   'pause.HIDDEN': '일시정지: 탭 숨김',
   'pause.BLUR': '일시정지: 창 포커스 잃음',
   'pause.GAMEPAD_DISCONNECTED': '일시정지: 게임패드 연결 해제',
+  'pause.resumeHint': 'Space 또는 재개 버튼으로 이어서 조종',
 
   'config.open': '설정 열기',
   'config.close': '설정 닫기',
