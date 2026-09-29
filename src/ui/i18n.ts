@@ -143,7 +143,7 @@ const ko: Record<MessageKey, string> = {
   'panel.noLoadout': '적재 없음',
   'panel.noResolver': '판정 함수 없음',
 
-  'toast.lowerLift': 'LOWER LIFT (A) TO MOVE',
+  'toast.lowerLift': 'A로 리프트를 내려야 이동 가능',
   'pause.USER': '일시정지',
   'pause.HIDDEN': '일시정지: 탭 숨김',
   'pause.BLUR': '일시정지: 창 포커스 잃음',

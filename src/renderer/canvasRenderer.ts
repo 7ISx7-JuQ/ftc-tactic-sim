@@ -121,6 +121,37 @@ export const INITIAL_HIVE_VIEW: Record<Alliance, HiveView> = {
 };
 
 // 4. 색상 팔레트
+// 진영 공식 색 (명세서 3.8, 09-6b): RGB 두 값에서 모든 진영 색을 계산 — 기본(로봇 몸체 / 진영 NECTAR / 상향 셀),
+// 어둡게 15%(테두리 / 라벨 글자 가독성), 흰색과 7 : 3으로 섞은 옅은 색(하향 셀), 25% 투명(GARDEN / 로딩 존 바탕)
+export const ALLIANCE_RGB: Readonly<Record<Alliance, readonly [number, number, number]>> = {
+  RED: [223, 0, 27],
+  BLUE: [15, 83, 167],
+};
+
+export interface AllianceShades {
+  base: string;
+  dark: string;
+  tint: string;
+  fill: string;
+}
+
+const toHex = (rgb: readonly number[]) =>
+  `#${rgb.map((v) => Math.round(Math.min(255, Math.max(0, v))).toString(16).padStart(2, '0')).join('').toUpperCase()}`;
+
+export function allianceShades(rgb: readonly [number, number, number]): AllianceShades {
+  return {
+    base: toHex(rgb),
+    dark: toHex(rgb.map((v) => v * 0.85)),
+    tint: toHex(rgb.map((v) => v * 0.3 + 255 * 0.7)),
+    fill: `rgba(${rgb.join(', ')}, 0.25)`,
+  };
+}
+
+export const ALLIANCE_COLORS: Readonly<Record<Alliance, AllianceShades>> = {
+  RED: allianceShades(ALLIANCE_RGB.RED),
+  BLUE: allianceShades(ALLIANCE_RGB.BLUE),
+};
+
 export const COLORS = {
   fieldBg: '#d9d9d9',
   tileLine: 'rgba(0, 0, 0, 0.12)',
@@ -130,14 +161,14 @@ export const COLORS = {
   upHighlight: '#facc15',
   flowerFill: '#f28ad0',
   flowerStroke: '#8e2f6f',
-  redFill: 'rgba(220, 38, 38, 0.30)',
-  redCellDown: '#e8b4b4',
-  redCellUp: '#dc2626',
-  redStroke: '#b91c1c',
-  blueFill: 'rgba(37, 99, 235, 0.30)',
-  blueCellDown: '#b4c6e8',
-  blueCellUp: '#2563eb',
-  blueStroke: '#1d4ed8',
+  redFill: ALLIANCE_COLORS.RED.fill,
+  redCellDown: ALLIANCE_COLORS.RED.tint,
+  redCellUp: ALLIANCE_COLORS.RED.base,
+  redStroke: ALLIANCE_COLORS.RED.dark,
+  blueFill: ALLIANCE_COLORS.BLUE.fill,
+  blueCellDown: ALLIANCE_COLORS.BLUE.tint,
+  blueCellUp: ALLIANCE_COLORS.BLUE.base,
+  blueStroke: ALLIANCE_COLORS.BLUE.dark,
   label: '#111111',
   labelOnDark: '#ffffff',
   pollenFill: '#fde047',
@@ -246,8 +277,8 @@ export function drawLoadingZones(ctx: CanvasRenderingContext2D, withLabels = tru
   fillStrokeRect(ctx, RED, unused('RED') ? COLORS.unusedFill : COLORS.redFill, unused('RED') ? COLORS.unusedStroke : COLORS.redStroke, true);
   fillStrokeRect(ctx, BLUE, unused('BLUE') ? COLORS.unusedFill : COLORS.blueFill, unused('BLUE') ? COLORS.unusedStroke : COLORS.blueStroke, true);
   if (!withLabels) return;
-  drawLabel(ctx, 'RED LOADING', rectCenter(RED), { size: 10, color: COLORS.redStroke, rotate: -Math.PI / 2 });
-  drawLabel(ctx, 'BLUE LOADING', rectCenter(BLUE), { size: 10, color: COLORS.blueStroke, rotate: Math.PI / 2 });
+  drawLabel(ctx, 'RED LOADING ZONE', rectCenter(RED), { size: 10, color: COLORS.redStroke, rotate: -Math.PI / 2 });
+  drawLabel(ctx, 'BLUE LOADING ZONE', rectCenter(BLUE), { size: 10, color: COLORS.blueStroke, rotate: Math.PI / 2 });
 }
 
 const HIVE_CELL_INSET = 0.8;   // 프레임 안쪽 셀 박스 여백 (inch)

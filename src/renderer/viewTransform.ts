@@ -1,4 +1,4 @@
-// 캔버스 레이아웃 / 보기 방향 / 좌표 변환 (명세서 3.7, 08-4)
+// 캔버스 레이아웃 / 보기 방향 / 좌표 변환 (명세서 3.7, 08-4 / 09-6b 필드 뷰포트 전용)
 // DOM 비의존 순수 함수. 좌표 단위: 필드 inch, 논리 px (1 in = 5 px, devicePixelRatio 적용 전), 화면(CSS) px
 
 import { FIELD_SIZE } from '../core/collision';
@@ -8,10 +8,10 @@ export const PX_PER_INCH = 5;
 export const FIELD_MARGIN_INCH = 8;                                   // 필드 사방 여백 (게이지 / 재고 / 라벨)
 export const VIEWPORT_INCH = FIELD_SIZE + 2 * FIELD_MARGIN_INCH;       // 160 in 정사각형
 export const VIEWPORT_PX = VIEWPORT_INCH * PX_PER_INCH;                // 800
-export const SIDE_PANEL_PX = 40 * PX_PER_INCH;                         // 좌우 정보 패널 각 200 px (왼쪽 R1, 오른쪽 R2)
-export const SCENE_WIDTH_PX = VIEWPORT_PX + 2 * SIDE_PANEL_PX;         // 1200
+// 캔버스 = 필드 뷰포트만 (09-6b: 좌우 정보 패널 삭제, 명중 확률 글자는 좌측 HTML 득점 패널로 — 명세서 3.8)
+export const SCENE_WIDTH_PX = VIEWPORT_PX;                             // 800
 export const SCENE_HEIGHT_PX = VIEWPORT_PX;                            // 800
-export const VIEWPORT_CENTER_PX = { x: SIDE_PANEL_PX + VIEWPORT_PX / 2, y: VIEWPORT_PX / 2 }; // (600, 400)
+export const VIEWPORT_CENTER_PX = { x: VIEWPORT_PX / 2, y: VIEWPORT_PX / 2 }; // (400, 400)
 const FIELD_CENTER_INCH = FIELD_SIZE / 2;
 
 export interface Point2 {

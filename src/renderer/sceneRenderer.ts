@@ -1,6 +1,7 @@
 // 장면 렌더러 (명세서 3.7, 08-4 ~ 08-6): TimelineFrame 한 장 + 로봇 제원 + 보기 변환 + 표시 옵션으로 캔버스를 그림
 // 엔진을 호출 / 수정하지 않으며, 그림은 (프레임, 제원, 보기, 옵션)만의 함수 (스크러빙 / 재생에서 같은 틱 = 같은 그림)
-// (예외: 표시 옵션 hitProbability가 켜지면 장면의 판정 함수를 그리는 프레임마다 호출 — 엔진 상태와 무관)
+// 캔버스 = 필드 뷰포트(800 × 800)만 (09-6b). 표시 옵션 hitProbability의 글자는 좌측 HTML 득점 패널이 그린다 (명세서 3.8).
+// 테마 (09-6b 확정): 필드 바닥은 밝은 회색 타일, 필드 둘레(게이지 여백)는 어두운 배경 — 주변 UI / 팝업과 같은 톤.
 // 좌표계: 필드 도형은 필드 px(inch × 5) 공간에서 그리고 보기 변환 행렬(회전 / 배율)로 옮긴다.
 //         글자 / 배지는 보기 회전을 상쇄해 화면 기준으로 똑바로 그린다.
 
@@ -16,12 +17,13 @@ import {
 import type { OBB } from '../core/collision';
 import { getCarryCapacity } from '../core/simulationEngine';
 import { hiveTipPollenThreshold } from '../core/types';
-import type { DeepReadonly, GamePiece, HiveState, RobotConfig, RobotState, ShotProbabilityResolver, TimelineFrame } from '../core/types';
+import type { DeepReadonly, GamePiece, HiveState, RobotConfig, RobotState, TimelineFrame } from '../core/types';
 import { airborneDisplay, shotElapsed, shotPositionAt, shotTrail } from './flightView';
-import { DEFAULT_RENDER_OPTIONS, aimGuide, hitProbabilities, intakeProgress } from './renderOptions';
+import { DEFAULT_RENDER_OPTIONS, aimGuide, intakeProgress } from './renderOptions';
 import type { RenderOptions } from './renderOptions';
 import { badgeImage } from './badgeAssets';
 import {
+  ALLIANCE_COLORS,
   COLORS,
   FIELD_LAYOUT,
   drawFieldBackground,
@@ -61,7 +63,6 @@ import {
   PX_PER_INCH,
   SCENE_HEIGHT_PX,
   SCENE_WIDTH_PX,
-  SIDE_PANEL_PX,
   VIEWPORT_PX,
   fieldPxMatrix,
   fieldToCanvas,
@@ -76,12 +77,11 @@ export interface SceneInput {
   r2Config: RobotConfig;
   view: ViewTransform;
   options?: RenderOptions;                 // 미지정 = 모두 꺼짐
-  shotResolver?: ShotProbabilityResolver;  // 표시 옵션 hitProbability용 (엔진에 주입된 판정 함수)
 }
 
 const SCENE_COLORS = {
-  pageBg: '#f3f4f6',
-  robot: { RED: '#dc2626', BLUE: '#2563eb' } as Record<Alliance, string>,
+  pageBg: '#15171c', // 필드 둘레 (어두운 테마)
+  robot: { RED: ALLIANCE_COLORS.RED.base, BLUE: ALLIANCE_COLORS.BLUE.base } as Record<Alliance, string>,
   robotStroke: '#111827',
   heading: '#ffffff',
   intakeIdle: 'rgba(22, 163, 74, 0.18)',
@@ -112,9 +112,6 @@ const SCENE_COLORS = {
   aimSector: 'rgba(250, 204, 21, 0.25)',
   aimSectorStroke: 'rgba(161, 98, 7, 0.6)',
   intakeArc: '#15803d',
-  panelTitle: '#111827',
-  panelText: '#374151',
-  panelMuted: '#9ca3af',
 };
 
 const MARGIN_PX = FIELD_MARGIN_INCH * PX_PER_INCH;
@@ -550,7 +547,7 @@ export function fieldLabels(ally: Alliance): FieldLabel[] {
   ];
   for (const side of ['RED', 'BLUE'] as const) {
     const zone = loadingZones[side];
-    labels.push({ text: 'LOADING', anchor: { x: midX(zone), y: zone.y + zone.height / 2 }, outward: null, size: 9, color: allyColor(side, side === ally) });
+    labels.push({ text: 'LOADING\nZONE', anchor: { x: midX(zone), y: zone.y + zone.height / 2 }, outward: null, size: 9, color: allyColor(side, side === ally) });
     // HIVE: 프레임 OPPOSITE(−y) 쪽 변 바깥
     labels.push({ text: `${side} HIVE`, anchor: { x: HIVE_CENTER_X[side], y: hive.y }, outward: { x: 0, y: -1 }, size: 11, color: allyColor(side, side === ally) });
   }
@@ -567,14 +564,21 @@ export function fieldLabels(ally: Alliance): FieldLabel[] {
 
 const LABEL_GAP_PX = 3;
 
+const LABEL_LINE_HEIGHT = 1.15; // 여러 줄 라벨의 줄 간격 (글자 크기 배수)
+
 function drawFieldLabels(ctx: CanvasRenderingContext2D, ally: Alliance, view: ViewTransform): void {
   for (const label of fieldLabels(ally)) {
+    // 여러 줄 라벨('\n'): 좁은 구역 안에 들어가도록 (예: 로딩 존 "LOADING / ZONE")
+    const lines = label.text.split('\n');
     ctx.font = `bold ${label.size}px system-ui, sans-serif`;
-    const w = ctx.measureText(label.text).width;
+    const w = Math.max(...lines.map((line) => ctx.measureText(line).width));
+    const h = label.size * (1 + (lines.length - 1) * LABEL_LINE_HEIGHT);
     const at = label.outward
-      ? labelCenter(view, label.anchor, label.outward, w, label.size, LABEL_GAP_PX)
+      ? labelCenter(view, label.anchor, label.outward, w, h, LABEL_GAP_PX)
       : fieldToCanvas(view, label.anchor.x, label.anchor.y);
-    drawText(ctx, label.text, at, label.size, label.color);
+    lines.forEach((line, i) => {
+      drawText(ctx, line, { x: at.x, y: at.y + (i - (lines.length - 1) / 2) * label.size * LABEL_LINE_HEIGHT }, label.size, label.color);
+    });
   }
 }
 
@@ -672,25 +676,6 @@ function drawScoredLabels(ctx: CanvasRenderingContext2D, frame: DeepReadonly<Tim
   }
 }
 
-// 표시 옵션 hitProbability: 좌우 패널 (왼쪽 R1, 오른쪽 R2)에 POLLEN / NECTAR 명중 확률, 적재함 0번 종류 강조
-function drawHitProbabilityPanels(ctx: CanvasRenderingContext2D, frame: DeepReadonly<TimelineFrame>, resolver: ShotProbabilityResolver | undefined): void {
-  const panels: ['robot1' | 'robot2', number][] = [['robot1', SIDE_PANEL_PX / 2], ['robot2', SCENE_WIDTH_PX - SIDE_PANEL_PX / 2]];
-  const probs = resolver ? hitProbabilities(frame, resolver) : null;
-  for (const [id, x] of panels) {
-    drawText(ctx, id === 'robot1' ? 'R1 명중 확률' : 'R2 명중 확률', { x, y: 40 }, 14, SCENE_COLORS.panelTitle);
-    if (!probs) {
-      drawText(ctx, '판정 함수 없음', { x, y: 66 }, 12, SCENE_COLORS.panelMuted);
-      continue;
-    }
-    const p = probs[id];
-    (['POLLEN', 'NECTAR'] as const).forEach((type, i) => {
-      const next = p.next === type;
-      drawText(ctx, `${next ? '▶ ' : ''}${type} ${Math.round(p[type] * 100)}%`, { x, y: 66 + i * 22 }, next ? 14 : 12, next ? SCENE_COLORS.panelTitle : SCENE_COLORS.panelText);
-    });
-    if (p.next === null) drawText(ctx, '적재 없음', { x, y: 110 }, 11, SCENE_COLORS.panelMuted);
-  }
-}
-
 function drawBadge(ctx: CanvasRenderingContext2D, robot: DeepReadonly<RobotState>, config: RobotConfig, view: ViewTransform): void {
   const badge = robotBadge(robot);
   if (!badge) return;
@@ -725,10 +710,10 @@ function drawBadge(ctx: CanvasRenderingContext2D, robot: DeepReadonly<RobotState
 // ------------------------------------------------------------
 
 /**
- * 장면 전체를 그림. ctx는 SCENE_WIDTH_PX × SCENE_HEIGHT_PX 논리 크기 × dpr 버퍼의 캔버스
- * 순서: 배경 / 좌우 패널 → 정적 레이어(게이지 틀 포함) → 구조물 라벨 → HIVE 셀 상태 / 게이지 내용 → 바닥 기물 → 종료 강조(GARDEN / FLOWER)
+ * 장면 전체를 그림. ctx는 SCENE_WIDTH_PX × SCENE_HEIGHT_PX(= 필드 뷰포트 800 × 800) 논리 크기 × dpr 버퍼의 캔버스
+ * 순서: 둘레 배경 → 정적 레이어(게이지 틀 포함) → 구조물 라벨 → HIVE 셀 상태 / 게이지 내용 → 바닥 기물 → 종료 강조(GARDEN / FLOWER)
  *       → [조준선] → 로봇 → 종료 강조(주차) → [흡입 진행] → 팁 낙하 → 비행 공([잔상] / [결과 색])
- *       → HIVE 글자 / 종료 점수 / 번호 / 배지 → [좌우 패널 명중 확률]   ([ ] = 표시 옵션)
+ *       → HIVE 글자 / 종료 점수 / 번호 / 배지   ([ ] = 표시 옵션)
  */
 export function renderScene(ctx: CanvasRenderingContext2D, scene: SceneInput, dpr = 1): void {
   const { frame, view } = scene;
@@ -740,10 +725,10 @@ export function renderScene(ctx: CanvasRenderingContext2D, scene: SceneInput, dp
   ctx.fillStyle = SCENE_COLORS.pageBg;
   ctx.fillRect(0, 0, SCENE_WIDTH_PX, SCENE_HEIGHT_PX);
 
-  // 필드 뷰포트 (좌우 패널 사이 정사각형)로 제한
+  // 필드 뷰포트로 제한 (회전 중 필드 모서리가 캔버스 밖으로 번지지 않게)
   ctx.save();
   ctx.beginPath();
-  ctx.rect(SIDE_PANEL_PX, 0, VIEWPORT_PX, VIEWPORT_PX);
+  ctx.rect(0, 0, VIEWPORT_PX, VIEWPORT_PX);
   ctx.clip();
 
   ctx.setTransform(...fieldPxMatrix(view, dpr));
@@ -782,7 +767,4 @@ export function renderScene(ctx: CanvasRenderingContext2D, scene: SceneInput, dp
   }
   for (const [robot, config] of robots) drawBadge(ctx, robot, config, view);
   ctx.restore();
-
-  // 좌우 패널 (뷰포트 밖, 회전 없음): 표시 옵션이 꺼져 있으면 판정 함수를 호출하지 않음
-  if (options.hitProbability) drawHitProbabilityPanels(ctx, frame, scene.shotResolver);
 }

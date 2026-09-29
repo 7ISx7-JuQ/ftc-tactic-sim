@@ -35,7 +35,7 @@ export interface HarnessStatus {
 }
 
 export interface HarnessDeps {
-  ctx: CanvasRenderingContext2D; // 1200 × 800 논리 크기 × dpr 버퍼 캔버스
+  ctx: CanvasRenderingContext2D; // 800 × 800 논리 크기(필드 뷰포트) × dpr 버퍼 캔버스
   dpr?: number;
   env?: BrowserInputEnv;
   scheduler?: FrameScheduler;
@@ -204,7 +204,7 @@ export class HarnessController {
     const view = this.animator.sample(this.now());
     const frame = this.currentFrame();
     const { robot1, robot2 } = DEV_ROBOT_CONFIGS;
-    renderScene(this.ctx, { frame, r1Config: robot1, r2Config: robot2, view, options: this.options, shotResolver: this.engine.shotResolver }, this.dpr);
+    renderScene(this.ctx, { frame, r1Config: robot1, r2Config: robot2, view, options: this.options }, this.dpr);
 
     if (!view.done) {
       this.requestRender(); // 보기 애니메이션 진행 중 (루프가 돌면 onFrame이 이어서 그림)

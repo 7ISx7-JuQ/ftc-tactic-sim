@@ -10,7 +10,7 @@ import type { DeepReadonly, GamePiece, RobotConfig, RobotState, ShotProbabilityR
 export interface RenderOptions {
   aimGuide: boolean;       // 조준선 (고정형 허용 오차 부채꼴 / 터렛 범위 부채꼴 + 발사 방향)
   intakeProgress: boolean; // 흡입 접촉 진행 호
-  hitProbability: boolean; // 실시간 명중 확률 (좌우 패널 글자)
+  hitProbability: boolean; // 실시간 명중 확률 (좌측 HTML 득점 패널 글자, 09-6d — 캔버스에는 그리지 않음)
   flightTrail: boolean;    // 비행 잔상
   flightResult: boolean;   // 비행 중 결과 색 (기본은 도착 전까지 숨김)
 }

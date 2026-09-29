@@ -77,7 +77,7 @@ describe('표시 옵션 (명세서 3.7, 08-6)', () => {
     assert(p.robot1.next === 'POLLEN' && hitProbabilities({ ...frame, r2: { ...frame.r2, controlledPieces: [] } }, resolver).robot2.next === null, 'next piece type from the FIFO head (none when empty)');
   });
 
-  it('D. 장면 그리기: 옵션이 꺼져 있으면 판정 함수 호출 0회, 풀매치 프레임 전부 그리기', () => {
+  it('D. 장면 그리기: 렌더러는 판정 함수를 호출하지 않음 (09-6b, 명중 확률은 HTML 패널), 풀매치 프레임 전부 그리기', () => {
     let calls = 0;
     const counting: ShotProbabilityResolver = () => {
       calls++;
@@ -91,16 +91,16 @@ describe('표시 옵션 (명세서 3.7, 08-6)', () => {
     const engineCalls = calls;
     assert(e.timeline.some(f => f.field.pendingShots.length > 0), 'match has flights to draw');
     const ctx = noopCtx();
-    const draw = (frame: Frame, options?: RenderOptions, resolver: ShotProbabilityResolver | undefined = counting) =>
-      renderScene(ctx, { frame, r1Config: C1, r2Config: C2, view: restingView('DRIVER', 'RED'), options, shotResolver: resolver }, 2);
+    const draw = (frame: Frame, options?: RenderOptions) =>
+      renderScene(ctx, { frame, r1Config: C1, r2Config: C2, view: restingView('DRIVER', 'RED'), options }, 2);
     calls = 0;
     for (const frame of e.timeline) draw(frame);
     draw(e.timeline[100], DEFAULT_RENDER_OPTIONS);
-    assert(calls === 0, `options off (default / explicit): resolver never called by the renderer (${calls})`);
     for (let t = 0; t < e.timeline.length; t += 7) draw(e.timeline[t], ALL_ON);
-    const perFrame = calls / Math.ceil(e.timeline.length / 7);
-    assert(perFrame === 4, `hitProbability on: 4 calls per drawn frame (${perFrame})`);
-    expect(() => draw(e.timeline[500], ALL_ON, undefined)).not.toThrow();
+    assert(calls === 0, `options off or all on: the renderer never calls the resolver (${calls})`);
+    // 명중 확률 계산 함수 자체는 그대로 (HTML 패널이 호출): 로봇 2 × 기물 2 = 4회
+    hitProbabilities(e.timeline[500], counting);
+    assert(calls === 4, `hitProbabilities still calls the resolver 4 times (${calls})`);
     assert(engineCalls > 0, 'engine itself still calls the resolver only when firing');
   }, 120_000);
 });

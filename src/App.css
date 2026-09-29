@@ -10,7 +10,7 @@
 /* 개발 하네스 (08-7, 개발 서버 전용) */
 .dev-harness {
   width: 100%;
-  max-width: 1200px;
+  max-width: 800px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -34,11 +34,11 @@
   background: currentColor;
   opacity: 0.3;
 }
-/* 논리 1200 × 800 캔버스를 폭에 맞춰 비율 유지 확대 / 축소 (내부 버퍼는 devicePixelRatio 반영) */
+/* 논리 800 × 800 캔버스(필드 뷰포트)를 폭에 맞춰 비율 유지 확대 / 축소 (내부 버퍼는 devicePixelRatio 반영) */
 .dev-canvas {
   width: 100%;
   height: auto;
-  aspect-ratio: 3 / 2;
+  aspect-ratio: 1 / 1;
   display: block;
   border-radius: 6px;
 }

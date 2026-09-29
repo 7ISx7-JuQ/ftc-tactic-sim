@@ -4,7 +4,6 @@ import {
   PX_PER_INCH,
   SCENE_HEIGHT_PX,
   SCENE_WIDTH_PX,
-  SIDE_PANEL_PX,
   VIEWPORT_CENTER_PX,
   VIEWPORT_INCH,
   VIEWPORT_PX,
@@ -32,12 +31,12 @@ const near = (a: number, b: number, tol = 1e-9) => Math.abs(a - b) < tol;
 describe('보기 변환 (명세서 3.7, 08-4)', () => {
   it('A. 캔버스 레이아웃', () => {
     assert(PX_PER_INCH === 5 && VIEWPORT_INCH === FIELD_SIZE + 16 && VIEWPORT_PX === 800, 'viewport = field 144 in + 8 in margins = 160 in = 800 px');
-    assert(SIDE_PANEL_PX === 200 && SCENE_WIDTH_PX === 1200 && SCENE_HEIGHT_PX === 800, 'scene 1200 × 800 (R1 / R2 side panels 200 px each)');
-    assert(VIEWPORT_CENTER_PX.x === 600 && VIEWPORT_CENTER_PX.y === 400, 'viewport centered between the panels');
+    assert(SCENE_WIDTH_PX === 800 && SCENE_HEIGHT_PX === 800, 'scene = field viewport 800 × 800 (09-6b: side panels removed)');
+    assert(VIEWPORT_CENTER_PX.x === 400 && VIEWPORT_CENTER_PX.y === 400, 'viewport center = canvas center');
     const aud = restingView('AUDIENCE', 'RED');
     const tl = fieldToCanvas(aud, 0, 0);
     const br = fieldToCanvas(aud, FIELD_SIZE, FIELD_SIZE);
-    assert(near(tl.x, 240) && near(tl.y, 40) && near(br.x, 960) && near(br.y, 760), 'AUDIENCE: field (0,0)-(144,144) at 240..960 × 40..760 (identity, 5 px/in)');
+    assert(near(tl.x, 40) && near(tl.y, 40) && near(br.x, 760) && near(br.y, 760), 'AUDIENCE: field (0,0)-(144,144) at 40..760 × 40..760 (identity, 5 px/in)');
   });
 
   it('B. 보기 방향 (DRIVER: 아군 벽이 화면 아래, 회전만)', () => {
@@ -89,7 +88,7 @@ describe('보기 변환 (명세서 3.7, 08-4)', () => {
     const lr = labelCenter(red, edge, { x: 0, y: -1 }, 70, 10, 3);
     const er = fieldToCanvas(red, edge.x, edge.y);
     assert(near(lr.x, er.x - 38) && near(lr.y, er.y), 'RED DRIVER: strip is vertical on screen -> pushed left by half width + gap (no overlap)');
-    const half = cssToCanvas(300, 200, 600, 400);
+    const half = cssToCanvas(300, 200, 400, 400);
     assert(near(half.x, 600) && near(half.y, 400), 'CSS px scaled back to logical px (half-size canvas)');
   });
 
@@ -103,7 +102,7 @@ describe('보기 변환 (명세서 3.7, 08-4)', () => {
       const v = { angle, scale: fitScale(angle) };
       for (const [x, y] of [[inset, inset], [FIELD_SIZE - inset, inset], [inset, FIELD_SIZE - inset], [FIELD_SIZE - inset, FIELD_SIZE - inset]]) {
         const c = fieldToCanvas(v, x, y);
-        assert(c.x >= SIDE_PANEL_PX - 1e-9 && c.x <= SIDE_PANEL_PX + VIEWPORT_PX + 1e-9 && c.y >= -1e-9 && c.y <= VIEWPORT_PX + 1e-9, `corner (${x}, ${y}) inside the viewport at ${deg}°`);
+        assert(c.x >= -1e-9 && c.x <= VIEWPORT_PX + 1e-9 && c.y >= -1e-9 && c.y <= VIEWPORT_PX + 1e-9, `corner (${x}, ${y}) inside the viewport at ${deg}°`);
       }
     }
     const anim = new ViewAnimator(0);
