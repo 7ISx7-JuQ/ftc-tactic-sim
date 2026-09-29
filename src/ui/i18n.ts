@@ -45,6 +45,10 @@ const en = {
   'confirm.ok': 'OK',
   'confirm.cancel': 'Cancel',
 
+  // 경기 종료 연출 (09-7c)
+  'end.banner': 'MATCH COMPLETE',
+  'end.skipHint': 'Click or press Space to see the results',
+
   // 결과 팝업 (3.8 경기 종료와 결과 팝업, 09-7a 기본형)
   'result.title': 'TELEOP MATCH COMPLETED',
   'result.total': 'TOTAL SCORE',
@@ -158,6 +162,9 @@ const ko: Record<MessageKey, string> = {
   'confirm.newMatch': '이 경기를 버리고 같은 설정으로 새 경기를 시작할까요?',
   'confirm.ok': '확인',
   'confirm.cancel': '취소',
+
+  'end.banner': '경기 종료',
+  'end.skipHint': '클릭 / Space로 결과 바로 보기',
 
   'result.title': 'TELEOP 경기 종료',
   'result.total': '총점',

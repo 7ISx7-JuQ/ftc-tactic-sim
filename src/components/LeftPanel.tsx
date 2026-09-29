@@ -1,14 +1,51 @@
 // 좌측 득점 패널 (명세서 3.8 화면 구성, 09-6d): 타이머 / 진영 점수 / TIP 횟수 / 로봇 + 명중 확률. AppStatus만 읽는다.
+// 09-7c: 마지막 10초 타이머 빨강 + 1초 맥박, 경기 종료 강조 동안 점수 카운트업 + 종료 시 더해진 항목 칩.
+import { useEffect, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { Check } from 'lucide-react';
 import type { AppStatus } from '../app/appController';
 import { ALLIANCE_COLORS } from '../renderer/canvasRenderer';
 import { t } from '../ui/i18n';
 import type { Language } from '../ui/i18n';
 import { formatMatchTime } from '../ui/units';
-import { formatPercent, robotLabel, timerIsEndgame, tipDisplay } from '../ui/mainScreenModel';
+import { END_CHIP_STAGGER_MS, END_TALLY_MS, endScoreTally, formatPercent, robotLabel, tallyValue, timerIsEndgame, timerIsFinalCountdown, tipDisplay } from '../ui/mainScreenModel';
+import type { EndTally } from '../ui/mainScreenModel';
 import HiveIcon from './HiveIcon';
 
 const ROBOT_IDS = ['robot1', 'robot2'] as const;
+
+const prefersReducedMotion = () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+
+/** 종료 점수 카운트업 (텔레옵 점수 → 최종) + 더해진 항목 칩이 차례로 뜸. 종료마다 key로 새로 마운트 */
+function ScoreTally({ tally }: { tally: EndTally }) {
+  const [elapsed, setElapsed] = useState(() => (prefersReducedMotion() ? END_TALLY_MS : 0));
+  useEffect(() => {
+    if (prefersReducedMotion()) return;
+    let raf = 0;
+    const start = performance.now();
+    const frame = (now: number) => {
+      const e = now - start;
+      setElapsed(e);
+      if (e < END_TALLY_MS) raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return (
+    <>
+      <div className="score-value is-tallying">{tallyValue(tally.from, tally.to, elapsed)}</div>
+      {tally.chips.length > 0 && (
+        <div className="score-chips">
+          {tally.chips.map((chip, i) => (
+            <span key={chip.label} className="score-chip" style={{ animationDelay: `${i * END_CHIP_STAGGER_MS}ms` } as CSSProperties}>
+              +{chip.points} {chip.label}
+            </span>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
 
 export default function LeftPanel({ status, lang }: { status: AppStatus; lang: Language }) {
   const tip = tipDisplay(status.autoTipCount, status.tipCount);
@@ -18,12 +55,21 @@ export default function LeftPanel({ status, lang }: { status: AppStatus; lang: L
     <aside className="left-panel">
       <section className="panel-box timer-box" aria-label={t(lang, 'panel.timeRemaining')}>
         <div className="panel-caption">{t(lang, 'panel.timeRemaining')}</div>
-        <div className={`timer-value${timerIsEndgame(status) ? ' is-endgame' : ''}`}>{formatMatchTime(status.remainingSec)}</div>
+        <div className={`timer-value${timerIsFinalCountdown(status) ? ' is-final' : timerIsEndgame(status) ? ' is-endgame' : ''}`}>
+          {/* 마지막 10초 진행 중: 초가 바뀔 때마다 새로 마운트되어 맥박 애니메이션이 다시 시작 */}
+          <span key={timerIsFinalCountdown(status) && status.loopState === 'RUNNING' ? Math.ceil(status.remainingSec) : 'still'} className={timerIsFinalCountdown(status) && status.loopState === 'RUNNING' ? 'timer-pulse' : undefined}>
+            {formatMatchTime(status.remainingSec)}
+          </span>
+        </div>
       </section>
 
       <section className="panel-box score-box" style={{ background: colors.base, borderColor: colors.dark }} aria-label={t(lang, 'panel.score')}>
         <div className="score-alliance">{status.alliance}</div>
-        <div className="score-value">{status.score}</div>
+        {status.endStage === 'HIGHLIGHT' && status.result ? (
+          <ScoreTally key={status.endSeq} tally={endScoreTally(status.result)} />
+        ) : (
+          <div className="score-value">{status.score}</div>
+        )}
       </section>
 
       <section className="panel-box tip-box" title={t(lang, tip.allDone ? 'panel.tipAllDone' : 'panel.tipTarget')}>

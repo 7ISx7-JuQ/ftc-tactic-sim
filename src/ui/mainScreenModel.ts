@@ -74,6 +74,41 @@ export function timerIsEndgame(status: Pick<AppStatus, 'phase' | 'remainingSec'>
   return status.phase !== 'SETUP' && status.remainingSec <= endgameSec;
 }
 
+/** 마지막 10초 예고 (09-7c): 경기가 시작된 뒤 남은 10초 이하 → 타이머 빨강 (진행 중에는 1초마다 맥박). 소수 1자리 표시 구간과 같음 */
+export const FINAL_COUNTDOWN_SEC = 10;
+export function timerIsFinalCountdown(status: Pick<AppStatus, 'phase' | 'remainingSec'>): boolean {
+  return status.phase !== 'SETUP' && status.remainingSec <= FINAL_COUNTDOWN_SEC;
+}
+
+// ------------------------------------------------------------
+// 경기 종료 연출 (09-7c): 좌측 점수 상자가 텔레옵 확정 점수 → 최종 점수로 올라가고, 종료 시 더해진 항목이 칩으로 차례로 뜬다
+// ------------------------------------------------------------
+
+export const END_TALLY_MS = 1500;       // 점수 카운트업 시간
+export const END_CHIP_STAGGER_MS = 350; // 칩이 하나씩 뜨는 간격
+
+export interface EndTally {
+  from: number; // 종료 직전 점수 (텔레옵 TIP × 20 = HIVE)
+  to: number;   // 최종 점수
+  chips: { label: 'FLOWER' | 'GARDEN' | 'PARK'; points: number }[]; // 종료 시 더해진 항목 (0점 항목 제외)
+}
+
+export function endScoreTally(result: { total: number; breakdown: { flower: number; garden: number; park: number } }): EndTally {
+  const { flower, garden, park } = result.breakdown;
+  const chips = ([['FLOWER', flower], ['GARDEN', garden], ['PARK', park]] as const)
+    .filter(([, points]) => points > 0)
+    .map(([label, points]) => ({ label, points }));
+  return { from: result.total - flower - garden - park, to: result.total, chips };
+}
+
+/** 카운트업 표시 값: 처음 빠르고 끝에서 느려지는 곡선(easeOutCubic), 정수, 끝나면 정확히 최종 값 */
+export function tallyValue(from: number, to: number, elapsedMs: number, durationMs = END_TALLY_MS): number {
+  if (!(durationMs > 0) || !(elapsedMs < durationMs)) return to;
+  const p = Math.max(0, elapsedMs) / durationMs;
+  const eased = 1 - (1 - p) ** 3;
+  return Math.round(from + (to - from) * eased);
+}
+
 // ------------------------------------------------------------
 // 스크러버 줄 주 버튼 (명세서 3.8 스크러버 줄, 09-7a): 상태에 따라 하나
 //   경기 전 START / 회전 중 START 비활성 / 진행 중 PAUSE / 보는 틱 < 머리 BRANCH / 보는 틱 = 머리 + 미종료 RESUME

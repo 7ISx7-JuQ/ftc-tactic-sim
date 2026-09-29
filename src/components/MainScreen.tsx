@@ -1,6 +1,6 @@
 // 메인 화면 (명세서 3.8 화면 구성, 09-6d 화면 뼈대): 좌측 득점 패널 / 필드 / 접힌 config 아이콘 띠 / 스크러버 줄.
 // 시뮬레이션 / 그리기는 AppController(React 밖)가 소유하고, React는 약 10 Hz 상태 알림으로 패널 / 버튼만 그린다.
-// 09-7b: 확인창 모달 / 경고 토스트 / 자동 일시정지 배너 / 타임라인 끌기. 09-8a: config 창 틀(펼치기 / 탭 / 초안 · 적용 / START 막기).
+// 09-7b: 확인창 모달 / 경고 토스트 / 자동 일시정지 배너 / 타임라인 끌기. 09-7c: 경기 종료 연출(흰빛 / 배너 · 진행바). 09-8a: config 창 틀(펼치기 / 탭 / 초안 · 적용 / START 막기).
 // 경기 설정은 config 창(09-8 ~ 09-11) 전까지 고정 기본 설정(createDefaultSetup), 언어는 SETTINGS 탭(09-8) 전까지 주소 ?lang=ko.
 
 import { useEffect, useRef, useState } from 'react';
@@ -29,6 +29,7 @@ import ConfigPanel from './ConfigPanel';
 import ConfigRail from './ConfigRail';
 import ConfirmDialog from './ConfirmDialog';
 import type { ConfirmRequest } from './ConfirmDialog';
+import EndOverlay from './EndOverlay';
 import FieldNotices from './FieldNotices';
 import type { ToastItem } from './FieldNotices';
 import LeftPanel from './LeftPanel';
@@ -239,6 +240,7 @@ export default function MainScreen() {
       <div className="field-area" ref={areaRef} onClick={() => c()?.skipHighlight()}>
         <canvas ref={canvasRef} className="field-canvas" />
         <FieldNotices autoPauseReason={status?.autoPauseReason ?? null} toasts={toasts} lang={lang} />
+        {status?.endStage === 'HIGHLIGHT' && <EndOverlay key={status.endSeq} lang={lang} />}
       </div>
       {status &&
         (configOpen ? (

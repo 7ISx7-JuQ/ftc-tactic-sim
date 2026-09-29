@@ -825,3 +825,168 @@
   border-color: var(--ok);
   color: #0b1a10;
 }
+
+/* ---------------- 경기 종료 연출 (09-7c) ---------------- */
+/* E. 마지막 10초: 타이머 빨강 + 진행 중 1초마다 맥박 */
+.timer-value.is-final {
+  color: var(--error);
+}
+.timer-pulse {
+  display: inline-block;
+  animation: timer-pulse 420ms ease-out;
+}
+@keyframes timer-pulse {
+  0% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* D. 점수 카운트업 + 더해진 항목 칩 */
+.score-box {
+  flex-wrap: wrap;
+}
+.score-value.is-tallying {
+  animation: score-pop 1500ms ease-out;
+}
+@keyframes score-pop {
+  0% {
+    transform: scale(1);
+  }
+  15% {
+    transform: scale(1.08);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.score-chips {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: calc(var(--u) * 6);
+}
+.score-chip {
+  padding: calc(var(--u) * 2) calc(var(--u) * 8);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  font-size: calc(var(--u) * 12);
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  opacity: 0;
+  animation: chip-in 300ms ease-out forwards;
+}
+@keyframes chip-in {
+  from {
+    opacity: 0;
+    transform: translateY(calc(var(--u) * 6));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* A. 종료 순간 흰빛 + C. 배너 / 5초 진행바 (필드 위, 클릭은 필드로 통과 → 건너뛰기) */
+.end-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+}
+.end-flash {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.35) 70%);
+  opacity: 0;
+  animation: end-flash 350ms ease-out;
+}
+@keyframes end-flash {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.end-banner {
+  position: absolute;
+  top: calc(var(--u) * 16);
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: calc(var(--u) * 300);
+  padding: calc(var(--u) * 14) calc(var(--u) * 26) calc(var(--u) * 12);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--u) * 8);
+  border-radius: calc(var(--u) * 12);
+  border: calc(var(--u) * 2) solid var(--accent);
+  background: rgba(21, 23, 28, 0.92);
+  box-shadow: 0 calc(var(--u) * 10) calc(var(--u) * 30) rgba(0, 0, 0, 0.45);
+  animation: banner-in 280ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+@keyframes banner-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
+  }
+}
+.end-banner-title {
+  font-size: calc(var(--u) * 30);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.end-banner-bar {
+  width: 100%;
+  height: calc(var(--u) * 4);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+.end-banner-bar span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transform-origin: left center;
+  animation: end-countdown var(--end-ms) linear forwards;
+}
+@keyframes end-countdown {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+.end-banner-hint {
+  font-size: calc(var(--u) * 12);
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .timer-pulse,
+  .score-value.is-tallying,
+  .end-banner {
+    animation: none;
+  }
+  .end-flash {
+    display: none;
+  }
+  .score-chip {
+    animation: none;
+    opacity: 1;
+  }
+}

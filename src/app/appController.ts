@@ -79,6 +79,7 @@ export interface AppStatus {
   playing: boolean;             // 기록 재생 중
   playbackSpeed: PlaybackSpeed;
   endStage: EndStage;
+  endSeq: number;               // 이 경기에서 실제로 6000틱에 도달한 횟수 (종료 연출 트리거: 분기 후 재종료마다 +1, 재생 / 스크러빙으로는 불변)
   result: MatchResult | null;   // 종료 프레임 기준 결과 (경기 종료 후, 결과 팝업용 — 보는 틱과 무관)
   remainingSec: number;
   score: number;                // 확정 점수 (경기 중 = 텔레옵 TIP × 20, 종료 프레임 = 최종 합계)
@@ -139,6 +140,7 @@ export class AppController {
   private playbackLast: number | null = null;
   private endStage: EndStage = 'NONE';
   private endStageAt = 0;
+  private endSeq = 0;
   private shortcutsEnabled = true;
   private autoPauseReason: Exclude<PauseReason, 'USER'> | null = null;
   private lastToastAt: Record<'robot1' | 'robot2', number> = { robot1: -Infinity, robot2: -Infinity };
@@ -355,6 +357,7 @@ export class AppController {
       playing: this.playing,
       playbackSpeed: this.playbackSpeed,
       endStage: this.endStage,
+      endSeq: this.endSeq,
       result: head >= MATCH_TICKS ? this.matchResult() : null,
       remainingSec: Math.max(0, (MATCH_TICKS - frame.tick) * DT),
       score: frame.totalScore,
@@ -422,6 +425,7 @@ export class AppController {
     this.playing = false;
     this.playbackLast = null;
     this.endStage = 'NONE';
+    this.endSeq = 0;
     this.autoPauseReason = null;
     this.lastToastAt = { robot1: -Infinity, robot2: -Infinity };
     const created = createBrowserRealtimeLoop(
@@ -436,7 +440,10 @@ export class AppController {
           // 진행이 멈추면 보는 틱 = 멈춘 틱. 6000틱 도달 → 종료 강조 시작
           if (state !== 'RUNNING') this.viewTick = this.engine.currentTick;
           this.autoPauseReason = state === 'PAUSED' && reason !== null && reason !== 'USER' ? reason : null;
-          if (state === 'ENDED') this.setEndStage('HIGHLIGHT');
+          if (state === 'ENDED') {
+            this.endSeq++;
+            this.setEndStage('HIGHLIGHT');
+          }
           this.emitStatus(true);
           this.requestRender();
         },

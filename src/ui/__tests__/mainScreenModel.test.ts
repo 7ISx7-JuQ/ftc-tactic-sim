@@ -17,6 +17,10 @@ import {
   timelineMarks,
   timelineTickAt,
   timerIsEndgame,
+  timerIsFinalCountdown,
+  endScoreTally,
+  tallyValue,
+  END_TALLY_MS,
   tipDisplay,
 } from '../mainScreenModel';
 
@@ -153,5 +157,38 @@ describe('D. 글꼴 (09-6d 확정: Apple SD Gothic Neo → Pretendard)', () => {
     expect(FONT_FAMILY).toBe("'Apple SD Gothic Neo', 'Pretendard Variable', Pretendard, system-ui, sans-serif");
     expect(canvasFont(12)).toBe(`700 12px ${FONT_FAMILY}`);
     expect(canvasFont(9.5, 800)).toBe(`800 9.5px ${FONT_FAMILY}`);
+  });
+});
+
+describe('E. 경기 종료 연출 (09-7c)', () => {
+  it('마지막 10초 예고: 경기가 시작된 뒤 남은 10초 이하 (엔진 틱 경계)', () => {
+    const at = (tick: number) => (MATCH_TICKS - tick) * DT;
+    expect(timerIsFinalCountdown({ phase: 'MATCH', remainingSec: at(MATCH_TICKS - 501) })).toBe(false);
+    expect(timerIsFinalCountdown({ phase: 'MATCH', remainingSec: at(MATCH_TICKS - 500) })).toBe(true);
+    expect(timerIsFinalCountdown({ phase: 'MATCH', remainingSec: 0 })).toBe(true);
+    expect(timerIsFinalCountdown({ phase: 'SETUP', remainingSec: 5 })).toBe(false);
+  });
+
+  it('점수 집계: 종료 직전 점수 = 최종 − 종료 시 더해진 항목, 칩은 0점 제외 FLOWER → GARDEN → PARK', () => {
+    const tally = endScoreTally({ total: 69, breakdown: { flower: 0, garden: 4, park: 5 } });
+    expect(tally).toEqual({ from: 60, to: 69, chips: [{ label: 'GARDEN', points: 4 }, { label: 'PARK', points: 5 }] });
+    const all = endScoreTally({ total: 30, breakdown: { flower: 11, garden: 9, park: 10 } });
+    expect(all.from === 0 && all.chips.map(c => c.label).join() === 'FLOWER,GARDEN,PARK').toBe(true);
+    expect(endScoreTally({ total: 40, breakdown: { flower: 0, garden: 0, park: 0 } })).toEqual({ from: 40, to: 40, chips: [] });
+  });
+
+  it('카운트업 값: 시작 = 이전 점수, 끝 = 최종, 단조 증가 정수, 비정상 입력은 최종 값', () => {
+    expect(tallyValue(60, 69, 0)).toBe(60);
+    expect(tallyValue(60, 69, END_TALLY_MS)).toBe(69);
+    expect(tallyValue(60, 69, END_TALLY_MS * 5)).toBe(69);
+    let prev = 60;
+    for (let ms = 0; ms <= END_TALLY_MS; ms += 50) {
+      const v = tallyValue(60, 69, ms);
+      expect(Number.isInteger(v) && v >= prev && v <= 69).toBe(true);
+      prev = v;
+    }
+    expect(tallyValue(0, 100, END_TALLY_MS / 2)).toBeGreaterThan(50); // 처음 빠르게 (easeOut)
+    expect(tallyValue(0, 9, Number.NaN)).toBe(9);
+    expect(tallyValue(0, 9, 100, 0)).toBe(9);
   });
 });

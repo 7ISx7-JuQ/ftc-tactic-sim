@@ -296,6 +296,7 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     let s = h.status();
     assert(s.loopState === 'ENDED' && s.matchEnded && s.headTick === MATCH_TICKS && s.tick === MATCH_TICKS, 'match reached tick 6000');
     assert(s.endStage === 'HIGHLIGHT' && !s.canScrub && !s.canResume && !s.canBranch && !!s.result, 'end highlight: controls locked, result ready');
+    assert(s.endSeq === 1, 'end signal (endSeq) once at the real end (09-7c)');
     const r = s.result!;
     const b = r.breakdown;
     assert(r.total === b.hive + b.flower + b.garden + b.park && r.total === s.score, 'result total = breakdown sum = final score');
@@ -316,6 +317,8 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     press(win, 'Space');
     assert(h.status().playing && h.status().tick === 0, 'Space at the end tick -> playback from the start');
     frames.advance(200, 20);
+    frames.advance(130_000, 100); // 재생이 마지막 틱까지 가도 종료 연출 신호는 그대로
+    assert(!h.status().playing && h.status().tick === MATCH_TICKS && h.status().endSeq === 1 && h.status().endStage === 'REVIEW', 'playback reaching the end tick: no new end signal');
     h.openResult();
     assert(h.status().endStage === 'RESULT' && !h.status().playing, 'RESULT reopens the popup (playback stopped)');
     h.closeResult();
@@ -326,7 +329,7 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     h.branch();
     assert(h.status().loopState === 'RUNNING' && h.status().endStage === 'NONE' && !h.status().matchEnded, 'branch after the end -> running again');
     frames.advance(2500, 20);
-    assert(h.status().loopState === 'ENDED' && h.status().endStage === 'HIGHLIGHT', 'branched run ended -> highlight again');
+    assert(h.status().loopState === 'ENDED' && h.status().endStage === 'HIGHLIGHT' && h.status().endSeq === 2, 'branched run ended -> highlight + end signal again');
     h.skipHighlight();
     assert(h.status().endStage === 'RESULT', 'click (skipHighlight) skips the 5 s wait');
     h.closeResult();
@@ -339,7 +342,7 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     h.closeResult();
     h.reset();
     s = h.status();
-    assert(s.phase === 'ROTATING_OUT' && s.tick === 0 && s.headTick === 0 && s.endStage === 'NONE' && !s.playing && s.result === null, 'NEW -> fresh match, end stage cleared');
+    assert(s.phase === 'ROTATING_OUT' && s.tick === 0 && s.headTick === 0 && s.endStage === 'NONE' && !s.playing && s.result === null && s.endSeq === 0, 'NEW -> fresh match, end stage / end signal cleared');
     h.dispose();
   });
 
