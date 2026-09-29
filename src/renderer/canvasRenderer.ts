@@ -122,7 +122,8 @@ export const INITIAL_HIVE_VIEW: Record<Alliance, HiveView> = {
 
 // 4. 색상 팔레트
 // 진영 공식 색 (명세서 3.8, 09-6b): RGB 두 값에서 모든 진영 색을 계산 — 기본(로봇 몸체 / 진영 NECTAR / 상향 셀),
-// 어둡게 15%(테두리 / 라벨 글자 가독성), 흰색과 7 : 3으로 섞은 옅은 색(하향 셀), 25% 투명(GARDEN / 로딩 존 바탕)
+// 어둡게 15%(테두리 가독성), 흰색과 7 : 3으로 섞은 옅은 색(하향 셀), 25% 투명(GARDEN / 로딩 존 바탕)
+// 비활성(2v0에서 쓰이지 않는 상대 진영 전용 구조물): 회색에 진영 색을 조금만 섞어 진영은 알아보되 한눈에 비활성으로 보이게
 export const ALLIANCE_RGB: Readonly<Record<Alliance, readonly [number, number, number]>> = {
   RED: [223, 0, 27],
   BLUE: [15, 83, 167],
@@ -133,6 +134,9 @@ export interface AllianceShades {
   dark: string;
   tint: string;
   fill: string;
+  inactiveFill: string;   // 비활성 구역 바탕 (진영 색 8% 투명)
+  inactiveCell: string;   // 비활성 HIVE 셀 (진영 색 12% + 밝은 회색)
+  inactiveStroke: string; // 비활성 테두리 (진영 색 35% + 회색)
 }
 
 const toHex = (rgb: readonly number[]) =>
@@ -144,6 +148,9 @@ export function allianceShades(rgb: readonly [number, number, number]): Alliance
     dark: toHex(rgb.map((v) => v * 0.85)),
     tint: toHex(rgb.map((v) => v * 0.3 + 255 * 0.7)),
     fill: `rgba(${rgb.join(', ')}, 0.25)`,
+    inactiveFill: `rgba(${rgb.join(', ')}, 0.08)`,
+    inactiveCell: toHex(rgb.map((v) => v * 0.12 + 222 * 0.88)),
+    inactiveStroke: toHex(rgb.map((v) => v * 0.35 + 170 * 0.65)),
   };
 }
 
@@ -173,10 +180,6 @@ export const COLORS = {
   labelOnDark: '#ffffff',
   pollenFill: '#fde047',
   pollenStroke: '#a16207',
-  // 2v0에서 쓰이지 않는 상대 진영 전용 구조물 (채도 제거, 명세서 3.7)
-  unusedFill: 'rgba(156, 163, 175, 0.22)',
-  unusedCell: '#d1d5db',
-  unusedStroke: '#9ca3af',
 };
 
 // 5. 기본 도형 헬퍼
@@ -257,10 +260,15 @@ export function drawFieldBackground(ctx: CanvasRenderingContext2D): void {
 }
 
 // GARDEN은 높이 2인치(10px)라 라벨을 필드 안쪽 방향 바깥에 배치
-export function drawGardens(ctx: CanvasRenderingContext2D, withLabels = true): void {
+// ally가 주어지면 상대 진영 GARDEN은 비활성 스타일 (2v0, 명세서 3.8)
+export function drawGardens(ctx: CanvasRenderingContext2D, withLabels = true, ally?: Alliance): void {
   const { RED, BLUE } = FIELD_LAYOUT.gardens;
-  fillStrokeRect(ctx, RED, COLORS.redFill, COLORS.redStroke);
-  fillStrokeRect(ctx, BLUE, COLORS.blueFill, COLORS.blueStroke);
+  const style = (side: Alliance) =>
+    ally !== undefined && side !== ally
+      ? [ALLIANCE_COLORS[side].inactiveFill, ALLIANCE_COLORS[side].inactiveStroke] as const
+      : [ALLIANCE_COLORS[side].fill, ALLIANCE_COLORS[side].dark] as const;
+  fillStrokeRect(ctx, RED, ...style('RED'));
+  fillStrokeRect(ctx, BLUE, ...style('BLUE'));
   if (!withLabels) return;
 
   const rc = rectCenter(RED);
@@ -270,12 +278,15 @@ export function drawGardens(ctx: CanvasRenderingContext2D, withLabels = true): v
 }
 
 // LOADING ZONE은 세로로 긴 구역(11 x 23)이라 라벨을 90° 회전해 내부에 배치
-// ally가 주어지면 상대 진영 로딩 존은 채도를 뺀 "사용 불가" 스타일 (2v0, 명세서 3.7)
+// ally가 주어지면 상대 진영 로딩 존은 비활성 스타일 (2v0, 명세서 3.8)
 export function drawLoadingZones(ctx: CanvasRenderingContext2D, withLabels = true, ally?: Alliance): void {
   const { RED, BLUE } = FIELD_LAYOUT.loadingZones;
-  const unused = (side: Alliance) => ally !== undefined && side !== ally;
-  fillStrokeRect(ctx, RED, unused('RED') ? COLORS.unusedFill : COLORS.redFill, unused('RED') ? COLORS.unusedStroke : COLORS.redStroke, true);
-  fillStrokeRect(ctx, BLUE, unused('BLUE') ? COLORS.unusedFill : COLORS.blueFill, unused('BLUE') ? COLORS.unusedStroke : COLORS.blueStroke, true);
+  const style = (side: Alliance) =>
+    ally !== undefined && side !== ally
+      ? [ALLIANCE_COLORS[side].inactiveFill, ALLIANCE_COLORS[side].inactiveStroke] as const
+      : [ALLIANCE_COLORS[side].fill, ALLIANCE_COLORS[side].dark] as const;
+  fillStrokeRect(ctx, RED, ...style('RED'), true);
+  fillStrokeRect(ctx, BLUE, ...style('BLUE'), true);
   if (!withLabels) return;
   drawLabel(ctx, 'RED LOADING ZONE', rectCenter(RED), { size: 10, color: COLORS.redStroke, rotate: -Math.PI / 2 });
   drawLabel(ctx, 'BLUE LOADING ZONE', rectCenter(BLUE), { size: 10, color: COLORS.blueStroke, rotate: Math.PI / 2 });
@@ -385,7 +396,7 @@ export function drawHive(
 }
 
 // HIVE 정적 바탕 (장면 렌더러 정적 레이어용, 라벨 / 상태 없음): 프레임 + 셀 박스
-// 아군 셀은 진영 기본색, 상대 셀은 채도를 뺀 "사용 불가" 스타일 (상향 방향 / 개수 표시 없음, 명세서 3.7)
+// 아군 셀은 진영 기본색, 상대 셀은 비활성 스타일 (상향 방향 / 개수 표시 없음, 명세서 3.8)
 export function drawHiveBase(ctx: CanvasRenderingContext2D, ally: Alliance): void {
   const hive = FIELD_LAYOUT.hive;
   fillStrokeRect(ctx, hive, COLORS.hiveFrame, COLORS.hiveFrameStroke);
@@ -393,8 +404,8 @@ export function drawHiveBase(ctx: CanvasRenderingContext2D, ally: Alliance): voi
   const cells: HiveCell[] = ['OPPOSITE_CELL', 'AUDIENCE_CELL'];
   for (const alliance of alliances) {
     const isAlly = alliance === ally;
-    const fill = isAlly ? (alliance === 'RED' ? COLORS.redCellDown : COLORS.blueCellDown) : COLORS.unusedCell;
-    const stroke = isAlly ? (alliance === 'RED' ? COLORS.redStroke : COLORS.blueStroke) : COLORS.unusedStroke;
+    const fill = isAlly ? ALLIANCE_COLORS[alliance].tint : ALLIANCE_COLORS[alliance].inactiveCell;
+    const stroke = isAlly ? ALLIANCE_COLORS[alliance].dark : ALLIANCE_COLORS[alliance].inactiveStroke;
     for (const cell of cells) fillStrokeRect(ctx, hiveCellBox(alliance, cell), fill, stroke);
   }
   ctx.save();
@@ -414,7 +425,7 @@ export function pieceColors(piece: Pick<GamePiece, 'type' | 'alliance'>): { fill
     : { fill: COLORS.redCellUp, stroke: COLORS.redStroke };
 }
 
-// FLOWER 원통 (FLOWER 내용물은 장면 렌더러의 필드 밖 게이지로 표시, 명세서 3.7)
+// FLOWER 원통 (FLOWER 내용물은 장면 렌더러의 필드 밖 게이지로 표시, 명세서 3.7). FLOWER는 중립이라 진영색 테두리 없음 (09-6b)
 // FLOWER는 반지름 2인치(10px)라 라벨을 가장 가까운 벽의 반대편(필드 안쪽) 바깥에 배치
 export function drawFlowers(ctx: CanvasRenderingContext2D, withLabels = true): void {
   for (const [i, flower] of FIELD_LAYOUT.flowers.entries()) {
@@ -424,7 +435,7 @@ export function drawFlowers(ctx: CanvasRenderingContext2D, withLabels = true): v
     ctx.arc(pxX, pxY, inchToPx(flower.radius), 0, Math.PI * 2);
     ctx.fillStyle = COLORS.flowerFill;
     ctx.fill();
-    ctx.strokeStyle = flower.side === 'RED' ? COLORS.redStroke : COLORS.blueStroke;
+    ctx.strokeStyle = COLORS.flowerStroke;
     ctx.lineWidth = STROKE_WIDTH;
     ctx.stroke();
     ctx.restore();

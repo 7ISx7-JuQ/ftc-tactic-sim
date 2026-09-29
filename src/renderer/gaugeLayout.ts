@@ -13,6 +13,7 @@ export const GAUGE_SLOT_PITCH = 24 / 9;   // 칸 길이 (inch): FLOWER 게이지
 export const GAUGE_PIECE_RADIUS = 1.1;    // 칸 안 원 반지름 (지름 2.2 in, 기물 실제 크기 무시)
 export const FLOWER_GAUGE_SLOTS = 9;      // 용량 테이블 최대 총 개수
 export const STOCK_GAUGE_SLOTS = 5;       // 휴먼 플레이어 NECTAR 재고 (INITIAL_HUMAN_NECTAR_STOCK)
+export const STOCK_GAUGE_END_PAD = GAUGE_SLOT_PITCH; // 재고 게이지 양 끝 여유 (칸 하나 길이, 09-6b)
 
 export interface GaugeLayout {
   rect: AABB;       // 게이지 외곽 (축 정렬)
@@ -71,7 +72,7 @@ export function stockGaugeLayout(alliance: 'RED' | 'BLUE'): GaugeLayout {
   const half = (STOCK_GAUGE_SLOTS * GAUGE_SLOT_PITCH) / 2;
   const mid = FIELD_SIZE / 2;
   const red: GaugeLayout = {
-    rect: { minX: -GAUGE_WALL_GAP - GAUGE_THICKNESS, maxX: -GAUGE_WALL_GAP, minY: mid - half, maxY: mid + half },
+    rect: { minX: -GAUGE_WALL_GAP - GAUGE_THICKNESS, maxX: -GAUGE_WALL_GAP, minY: mid - half - STOCK_GAUGE_END_PAD, maxY: mid + half + STOCK_GAUGE_END_PAD },
     slots: Array.from({ length: STOCK_GAUGE_SLOTS }, (_, i) => ({ x: -GAUGE_WALL_GAP - GAUGE_THICKNESS / 2, y: mid - half + GAUGE_SLOT_PITCH * (i + 0.5) })),
     along: { x: 0, y: 1 },
     outward: { x: -1, y: 0 },
@@ -117,6 +118,15 @@ export function isFlowerFull(pieces: readonly (SlotPiece | null)[]): boolean {
 }
 
 /** FLOWER 게이지 9칸 내용: 칸 k = pieces[k], 가득 차면 나머지 칸 X */
+/**
+ * 경기 종료 하단 보너스 강조 칸 (09-6b): 유효 스코어링 볼륨(slot[1 .. N])에서 가장 아래 NECTAR의 칸 번호, 없으면 −1.
+ * (2v0 단순화 규칙상 볼륨에 NECTAR가 있으면 소유권과 하단 보너스가 동시에 성립 — 명세서 2.6.3)
+ */
+export function bottomBonusSlot(pieces: readonly (SlotPiece | null)[]): number {
+  for (let k = 1; k < pieces.length; k++) if (pieces[k]?.type === 'NECTAR') return k;
+  return -1;
+}
+
 export function flowerGaugeSlots(pieces: readonly (SlotPiece | null)[]): FlowerSlot[] {
   const full = isFlowerFull(pieces);
   return Array.from({ length: FLOWER_GAUGE_SLOTS }, (_, k): FlowerSlot => {

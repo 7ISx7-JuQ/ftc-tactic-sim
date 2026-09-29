@@ -1,13 +1,17 @@
 // 로봇 표시 배치 (명세서 3.7 로봇, 08-4). DOM 비의존 순수 함수
 // 로봇 기준 좌표: forward = 로봇 앞쪽(+) 거리, right = 로봇 오른쪽(+) 거리 (inch)
 
-import type { RobotState } from '../core/types';
+import type { RobotConfig, RobotState } from '../core/types';
+import { fieldToCanvas } from './viewTransform';
+import type { Point2, ViewTransform } from './viewTransform';
 
 // 1. 행동 상태 배지
-// 이미지 자산 키 (src/assets/badges/{key}.svg | .png, 사용자 제공). IDLE / INTAKING은 배지 없음 (흡입은 인테이크 구역 강조로 표시)
-export type BadgeKey = 'shooting' | 'lift-up' | 'lift-ready' | 'lift-drop' | 'lift-down';
+// 이미지 자산 키 (src/assets/badges/{key}.svg | .png, 사용자 제공). IDLE은 배지 없음.
+// INTAKING은 인테이크 구역 강조와 배지를 함께 표시 (09-6b)
+export type BadgeKey = 'intaking' | 'shooting' | 'lift-up' | 'lift-ready' | 'lift-drop' | 'lift-down';
 
 const BADGE_BY_STATE: Partial<Record<RobotState['actionState'], BadgeKey>> = {
+  INTAKING: 'intaking',
   SHOOTING: 'shooting',
   FLOWER_SETUP: 'lift-up',
   FLOWER_READY: 'lift-ready',
@@ -17,6 +21,7 @@ const BADGE_BY_STATE: Partial<Record<RobotState['actionState'], BadgeKey>> = {
 
 // 이미지 자산이 없을 때 대신 그리는 글자 배지
 export const BADGE_FALLBACK_TEXT: Readonly<Record<BadgeKey, string>> = {
+  intaking: 'INTAKE',
   shooting: 'SHOOT',
   'lift-up': 'LIFT ▲',
   'lift-ready': 'READY',
@@ -24,18 +29,43 @@ export const BADGE_FALLBACK_TEXT: Readonly<Record<BadgeKey, string>> = {
   'lift-down': 'LIFT ▼',
 };
 
+// 배지는 필드 위 물체가 아니라 표시이므로 살짝 반투명 (09-6b). 제동 중(정지 대기, 타이머 미차감)은 그 절반
+export const BADGE_OPACITY = 0.85;
+
 export interface RobotBadge {
   key: BadgeKey;
-  alpha: number; // 제동 중(정지 대기, 타이머 미차감) 0.5, 그 외 1
+  alpha: number; // 평소 BADGE_OPACITY, 제동 중 BADGE_OPACITY × 0.5
 }
 
 export function robotBadge(robot: Pick<RobotState, 'actionState' | 'isBraking'>): RobotBadge | null {
   const key = BADGE_BY_STATE[robot.actionState];
   if (!key) return null;
-  return { key, alpha: robot.isBraking ? 0.5 : 1 };
+  return { key, alpha: robot.isBraking ? BADGE_OPACITY * 0.5 : BADGE_OPACITY };
 }
 
 export const BADGE_SIZE_INCH = 6; // 필드 표시 크기 (배율 1에서 30 논리 px)
+export const BADGE_GAP_PX = 2;    // 몸체 윗꼭짓점과 배지 사이 (논리 px)
+
+/**
+ * 배지 중심 (논리 px, 09-6b): 로봇 중심과 같은 화면 x, 화면에서 회전된 몸체의 가장 위 꼭짓점 바로 위(gap).
+ * 로봇이 어떻게 회전해도 몸체와 겹치지 않으면서 가장 가깝게 붙는다. heightPx = 배지 높이 (이미지 / 글자 배지)
+ */
+export function badgeCenter(
+  robot: Pick<RobotState, 'x' | 'y' | 'heading'>,
+  config: Pick<RobotConfig, 'length' | 'width'>,
+  view: ViewTransform,
+  heightPx: number,
+  gapPx = BADGE_GAP_PX,
+): Point2 {
+  const hl = config.length / 2;
+  const hw = config.width / 2;
+  const corners = [[hl, hw], [hl, -hw], [-hl, hw], [-hl, -hw]].map(([forward, right]) => {
+    const p = localToField(robot, { forward, right });
+    return fieldToCanvas(view, p.x, p.y);
+  });
+  const top = Math.min(...corners.map((c) => c.y));
+  return { x: fieldToCanvas(view, robot.x, robot.y).x, y: top - gapPx - heightPx / 2 };
+}
 
 // 2. 몸체 안 배치: 앞에서부터 헤딩 화살표 → 적재물 받침(FIFO 줄) → 번호 라벨. 모두 몸체 길이 L의 비율이라 크기와 무관하게 겹치지 않음
 // 로봇 기준 좌표: forward = 로봇 앞쪽(+) 거리, right = 로봇 오른쪽(+) 거리 (inch)

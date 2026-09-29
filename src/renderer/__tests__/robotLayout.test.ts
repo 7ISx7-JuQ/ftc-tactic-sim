@@ -3,6 +3,9 @@ import type { RobotState } from '../../core/types';
 import { badgeKeyFromPath } from '../badgeAssets';
 import {
   BADGE_FALLBACK_TEXT,
+  BADGE_GAP_PX,
+  BADGE_OPACITY,
+  badgeCenter,
   carriedPieceRadius,
   carriedPieceSlots,
   carriedTray,
@@ -12,6 +15,7 @@ import {
   robotCircumradius,
   robotLabelOffset,
 } from '../robotLayout';
+import { PX_PER_INCH, fieldToCanvas, restingView } from '../viewTransform';
 
 // 각 검증은 메시지와 함께 expect로 확인 (실패 시 어떤 조건이 깨졌는지 메시지로 표시)
 const assert = (c: boolean, m: string) => {
@@ -22,9 +26,26 @@ const near = (a: number, b: number, tol = 1e-9) => Math.abs(a - b) < tol;
 describe('로봇 표시 배치 (명세서 3.7, 08-4)', () => {
   it('A. 행동 상태 배지', () => {
     const b = (actionState: RobotState['actionState'], isBraking = false) => robotBadge({ actionState, isBraking });
-    assert(b('IDLE') === null && b('INTAKING') === null, 'IDLE / INTAKING: no badge (intake shown by the zone highlight)');
+    assert(b('IDLE') === null && b('INTAKING')?.key === 'intaking', 'IDLE: no badge, INTAKING: badge (with the zone highlight, 09-6b)');
     assert(b('SHOOTING')?.key === 'shooting' && b('FLOWER_SETUP')?.key === 'lift-up' && b('FLOWER_READY')?.key === 'lift-ready' && b('FLOWER_DROPPING')?.key === 'lift-drop' && b('FLOWER_LOWERING')?.key === 'lift-down', 'badge key per action state');
-    assert(b('SHOOTING', true)?.alpha === 0.5 && b('SHOOTING')?.alpha === 1, 'braking (timer not running) -> 50% opacity');
+    assert(BADGE_OPACITY === 0.85 && b('SHOOTING')?.alpha === 0.85 && b('SHOOTING', true)?.alpha === 0.425, 'slightly transparent (not a field object), braking -> half of that');
+    // 배지 위치: 화면에서 회전된 몸체의 가장 위 꼭짓점 바로 위, 로봇 중심과 같은 x (보기 / 헤딩과 무관하게 겹치지 않음)
+    for (const view of [restingView('AUDIENCE', 'RED'), restingView('DRIVER', 'RED'), restingView('DRIVER', 'BLUE'), { angle: 0.7, scale: 0.8 }]) {
+      for (const heading of [0, 0.3, Math.PI / 4, Math.PI / 2, 2.5, -1]) {
+        const robot = { x: 50, y: 70, heading };
+        const size = { length: 18, width: 14 };
+        const h = 12;
+        const at = badgeCenter(robot, size, view, h);
+        const corners = [[9, 7], [9, -7], [-9, 7], [-9, -7]].map(([f, r]) => {
+          const p = localToField(robot, { forward: f, right: r });
+          return fieldToCanvas(view, p.x, p.y);
+        });
+        const top = Math.min(...corners.map(c => c.y));
+        assert(near(at.y + h / 2 + BADGE_GAP_PX, top) && near(at.x, fieldToCanvas(view, 50, 70).x), `badge sits ${BADGE_GAP_PX}px above the top corner (view ${view.angle.toFixed(2)}, heading ${heading})`);
+      }
+    }
+    const flat = badgeCenter({ x: 50, y: 70, heading: 0 }, { length: 18, width: 18 }, restingView('AUDIENCE', 'RED'), 12);
+    assert(near(flat.y, fieldToCanvas(restingView('AUDIENCE', 'RED'), 50, 70).y - 9 * PX_PER_INCH - BADGE_GAP_PX - 6), 'unrotated robot: badge right above the top edge (closer than the old circumradius placement)');
     assert(Object.values(BADGE_FALLBACK_TEXT).every(t => t.length > 0), 'text fallback for every badge');
     assert(badgeKeyFromPath('/src/assets/badges/lift-up.svg') === 'lift-up' && badgeKeyFromPath('../assets/badges/shooting.png') === 'shooting' && badgeKeyFromPath('x/badges/a.gif') === null, 'asset path -> badge key');
   });
