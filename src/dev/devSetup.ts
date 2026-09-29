@@ -6,6 +6,7 @@ import { createIntakeZonePreset, hiveCellAimPoint } from '../core/collision';
 import { angleDifference } from '../core/kinematics';
 import { SimulationEngine } from '../core/simulationEngine';
 import type { RobotConfig, ShotProbabilityResolver } from '../core/types';
+import type { MatchSetup } from '../app/appController';
 
 // 고정 기본 로봇 제원 (18 in 정사각, 앞면 흡입, 고정형 슈터 ±3°)
 const base = (id: 'robot1' | 'robot2', name: string): RobotConfig => ({
@@ -46,8 +47,14 @@ export function createDevResolver(r1: RobotConfig, r2: RobotConfig): ShotProbabi
   };
 }
 
-/** 기본 시나리오(진영만 선택) + 기본 슈터 탄도 엔진 */
-export function createDevEngine(alliance: 'RED' | 'BLUE'): SimulationEngine {
+/** 하네스 경기 설정 (AppController 주입용, 09-6c): 고정 제원 + 간이 판정 함수 + 기본 시나리오(진영만 선택) + 기본 슈터 탄도 */
+export function createDevSetup(alliance: 'RED' | 'BLUE'): MatchSetup {
   const { robot1, robot2 } = DEV_ROBOT_CONFIGS;
-  return new SimulationEngine(robot1, robot2, createDevResolver(robot1, robot2), alliance, { allianceColor: alliance });
+  return { r1Config: robot1, r2Config: robot2, shotResolver: createDevResolver(robot1, robot2), scenario: { allianceColor: alliance } };
+}
+
+/** 하네스 설정의 엔진 */
+export function createDevEngine(alliance: 'RED' | 'BLUE'): SimulationEngine {
+  const { r1Config, r2Config, shotResolver, scenario } = createDevSetup(alliance);
+  return new SimulationEngine(r1Config, r2Config, shotResolver, alliance, scenario);
 }

@@ -1,13 +1,14 @@
 // 개발 하네스 화면 (명세서 3.7, 08-7): 개발 서버 전용, 사용자 비공개. Step 9 GUI가 들어오면 대체된다.
-// 시뮬레이션 / 그리기는 HarnessController(React 바깥)가 맡고, React는 버튼 / 체크박스 / 상태 글자만 담당한다.
+// 시뮬레이션 / 그리기는 AppController(React 바깥, 09-6c)에 하네스 고정 설정을 넣어 쓰고, React는 버튼 / 체크박스 / 상태 글자만 담당한다.
 
 import { useEffect, useRef, useState } from 'react';
 import { SCENE_HEIGHT_PX, SCENE_WIDTH_PX } from '../renderer/viewTransform';
 import type { ViewMode } from '../renderer/viewTransform';
 import { DEFAULT_RENDER_OPTIONS } from '../renderer/renderOptions';
 import type { RenderOptions } from '../renderer/renderOptions';
-import { HarnessController } from './harnessController';
-import type { HarnessStatus } from './harnessController';
+import { AppController } from '../app/appController';
+import type { AppStatus } from '../app/appController';
+import { createDevSetup } from './devSetup';
 
 const OPTION_LABELS: Record<keyof RenderOptions, string> = {
   aimGuide: '조준선',
@@ -26,8 +27,8 @@ const PAUSE_TEXT: Record<string, string> = {
 
 export default function DevHarness() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const controllerRef = useRef<HarnessController | null>(null);
-  const [status, setStatus] = useState<HarnessStatus | null>(null);
+  const controllerRef = useRef<AppController | null>(null);
+  const [status, setStatus] = useState<AppStatus | null>(null);
   const [options, setOptions] = useState<RenderOptions>({ ...DEFAULT_RENDER_OPTIONS });
 
   useEffect(() => {
@@ -37,7 +38,7 @@ export default function DevHarness() {
     const dpr = window.devicePixelRatio || 1;
     canvas.width = Math.round(SCENE_WIDTH_PX * dpr);
     canvas.height = Math.round(SCENE_HEIGHT_PX * dpr);
-    const controller = new HarnessController({ ctx, dpr, onStatus: setStatus });
+    const controller = new AppController({ ctx, dpr, setup: createDevSetup('RED'), onStatus: setStatus });
     controllerRef.current = controller;
     setStatus(controller.status());
     return () => {
@@ -63,7 +64,7 @@ export default function DevHarness() {
         <strong>개발 하네스</strong>
         <label>
           진영{' '}
-          <select value={status?.alliance ?? 'RED'} disabled={!inSetup} onChange={e => c()?.setAlliance(e.target.value as 'RED' | 'BLUE')}>
+          <select value={status?.alliance ?? 'RED'} disabled={!inSetup} onChange={e => c()?.setSetup(createDevSetup(e.target.value as 'RED' | 'BLUE'))}>
             <option value="RED">RED</option>
             <option value="BLUE">BLUE</option>
           </select>
