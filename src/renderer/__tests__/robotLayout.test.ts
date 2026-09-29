@@ -71,4 +71,21 @@ describe('로봇 표시 배치 (명세서 3.7, 08-4)', () => {
     assert(near(p.x, 8) && near(p.y, 23), 'heading 90° (facing +y): forward 3 -> +y, right 2 -> −x');
     assert(near(robotCircumradius(18, 18), 9 * Math.SQRT2), 'circumradius');
   });
+
+  it('C. 배지 이미지 자산 (src/assets/badges, 09-7 전 확정): 키마다 SVG 1개, 캔버스 이미지로 그릴 수 있는 규격', () => {
+    const files = import.meta.glob('../../assets/badges/*.{svg,png}', { eager: true, query: '?raw', import: 'default' }) as Record<string, string>;
+    const keys = Object.keys(BADGE_FALLBACK_TEXT);
+    const found = Object.keys(files).map(badgeKeyFromPath);
+    assert(found.length === keys.length && keys.every(k => found.filter(f => f === k).length === 1), `exactly one asset per badge key (found ${found.join(', ')})`);
+    for (const [path, svg] of Object.entries(files)) {
+      assert(path.endsWith('.svg'), `${path}: SVG`);
+      // 정사각형으로 늘려 그리므로 정사각 viewBox, 브라우저가 크기를 알도록 width = height 명시
+      const vb = /viewBox="0 0 (\S+) (\S+)"/.exec(svg);
+      const w = /<svg[^>]*\swidth="(\d+)"/.exec(svg)?.[1];
+      const h = /<svg[^>]*\sheight="(\d+)"/.exec(svg)?.[1];
+      assert(!!vb && vb[1] === vb[2] && !!w && w === h, `${path}: square viewBox + width = height`);
+      // 이미지 SVG에서는 currentColor / 웹폰트 / 외부 참조가 동작하지 않음
+      assert(!/currentColor|<text|<image|href=|@import/.test(svg), `${path}: self-contained, fixed colors, no text`);
+    }
+  });
 });

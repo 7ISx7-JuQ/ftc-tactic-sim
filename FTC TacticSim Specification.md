@@ -516,6 +516,11 @@
         - **행동 상태 배지:** `SHOOTING` / `FLOWER_SETUP` / `FLOWER_READY` / `FLOWER_DROPPING` / `FLOWER_LOWERING`에서 로봇 외접원 바깥 화면 위쪽에 똑바로 그린다. `IDLE` / `INTAKING`은 배지 없음 (흡입은 인테이크 구역 강조로 표시). `isBraking` 중에는 배지를 50% 불투명도로 그려 "정지 대기(타이머 미차감)"를 나타낸다.
         - **(09-6b 변경)** `INTAKING`에도 배지(`intaking`)를 표시한다 (인테이크 구역 강조와 함께). 배지는 로봇 중심과 같은 화면 x, 화면에서 회전된 몸체의 가장 위 꼭짓점 바로 위(2 px)에 붙여 회전과 무관하게 몸체와 겹치지 않으면서 가장 가깝게 둔다 (`badgeCenter`, 이전: 외접원 바깥). 필드 위 물체가 아닌 표시임을 알리도록 불투명도 85%, 제동 중은 그 절반.
         - **배지 이미지 자산 (사용자 제공 예정):** `src/assets/badges/{key}.svg`(또는 `.png`), key = `shooting`, `lift-up`(`FLOWER_SETUP`), `lift-ready`(`FLOWER_READY`), `lift-drop`(`FLOWER_DROPPING`), `lift-down`(`FLOWER_LOWERING`). 정사각형, 투명 배경, 필드 표시 크기 약 6 in(30 논리 px)에서 식별 가능해야 한다. 자산이 없으면 글자 배지(둥근 사각형 + 짧은 글자)로 대신 그리므로 렌더러 구현은 자산 제공 시점과 무관하다.
+        - **배지 자산 확정 (09-7 전):** 6종 모두 SVG로 들어감 (`intaking`, `shooting`, `lift-up`, `lift-ready`, `lift-drop`, `lift-down`). 사용자 시안(투명 배경 선화)은 실제 표시 크기(1366 화면 약 21 px)에서 세부가 뭉개지고 어두운 여백 위에서 보이지 않아, 같은 아이디어를 단순화해 다시 그렸다 (사용자 승인).
+            - 공통 틀: `viewBox 0 0 24 24`, `width = height = 256`, 흰 원판(r 11) + 짙은 테두리 `#111827` 1.6 → 밝은 필드와 어두운 여백 모두에서 보임. 그림 선 `#111827` 굵기 2~2.4, 둥근 끝.
+            - 강조색 보라 `#7C3AED` 하나만 사용 (필드에서 뜻이 있는 진영 빨강 / 파랑, POLLEN 노랑, 인테이크 초록, 강조 주황, FLOWER 분홍과 겹치지 않음). 기물 / 리프트처럼 움직이는 부분에 칠한다.
+            - 모양: `intaking` 양쪽에서 가운데로 모이는 화살표 + 가운데 기물 점, `shooting` 왼쪽 아래 → 오른쪽 위 화살표 + 날아가는 기물 + 오른쪽 위 과녁, `lift-up` ▲ + 아래 막대, `lift-ready` 위 막대 + 일시정지 두 줄, `lift-drop` 기물이 바구니로 떨어짐, `lift-down` 위 막대 + ▼.
+            - 이미지로 그리므로 고정 색만 (`currentColor` / `<text>` / 외부 참조 금지). 테스트 `robotLayout.test.ts` C가 키마다 자산 1개 + 정사각 viewBox + `width = height` + 고정 색 / 글자 없음을 검사한다.
         - (09-6b) 자산 키에 `intaking` 추가 (글자 대체 `INTAKE`). 권장 형식 SVG (PNG는 투명 배경 정사각형 256 px 이상), 표시 크기 6 in 정사각형.
     - **기물 상태별 표시:**
 
@@ -613,7 +618,8 @@
             - 상태 `AppStatus`: 단계, 진영, 경기 보기, 보기 각도, 루프 상태 / 일시정지 사유, 틱, 남은 시간, 확정 점수, 텔레옵 / 오토 TIP 횟수, RP, 게임패드 슬롯 상태, 명중 확률(표시 옵션 `hitProbability`가 켜져 있을 때만 `hitProbabilities` — 상태를 만들 때마다 판정 함수 4회, 꺼져 있으면 `null`이고 호출 없음). 좌측 득점 패널(09-6d)이 이 값만 읽는다.
         - **개발 하네스 대체:** Step 9 GUI가 정식 빌드와 개발 서버 모두의 화면이 된다. 하네스(`src/dev/`)는 Step 9 마지막 하위 Step에서 삭제. **(09-6d)** 그 사이 하네스는 개발 서버 `?harness`로만 연다.
         - **글꼴 (09-6d 확정):** `'Apple SD Gothic Neo', 'Pretendard Variable', Pretendard, system-ui, sans-serif` (`src/renderer/fonts.ts` `FONT_FAMILY` 한 곳에서 정의 — `main.tsx`가 HTML 루트에, `canvasFont(크기, 굵기)`가 캔버스 글자에 사용). macOS는 설치된 Apple SD 산돌고딕 Neo, 그 외는 Pretendard(OFL, npm `pretendard`, 사용 글자만 나눠 받는 dynamic subset 웹폰트). 굵기는 세미볼드 600 / 볼드 700 / 엑스트라볼드 800만 쓴다. 웹폰트가 늦게 도착하면 캔버스를 한 번 다시 그린다 (`document.fonts.ready` → `AppController.redraw()`).
-        - **아이콘 (09-6d 임시 확정):** `lucide-react`(ISC) 선 아이콘, `currentColor`. TIP 옆 HIVE 아이콘만 자체 제작(`HiveIcon.tsx`, 같은 24 × 24 / 선 굵기 2 규격). 사용자가 바꾸고 싶은 아이콘은 같은 규격(24 × 24 viewBox, `currentColor`) SVG로 제공하면 교체한다. 역할 대응: `START` Play / `PAUSE` Pause / `RESUME` Gamepad2 / `BRANCH` GitBranch / 1초 이동 Rewind · FastForward / 1틱 이동 ChevronLeft · ChevronRight / 재생 CirclePlay / `VIEW` SwitchCamera / `NEW` RotateCcw / `RESULT` Trophy / 로봇 Bot / 시나리오 Flag(진영색 채움) / 게임패드 Gamepad2 / 펼치기 PanelRightOpen / 준비 CircleCheck / 경고 TriangleAlert.
+        - **파비콘 (09-7 전 확정):** `public/favicon.svg` = lucide Gamepad2 선(흰색)을 어두운 둥근 사각형(`#15171C`)에 넣고 두 버튼을 진영 빨강 `#DF001B` / 파랑 계열로 칠함. 밝은 / 어두운 탭 모두에서 16 px 식별 가능.
+        - **아이콘 (09-6d 임시 확정 → 09-7 전 확정: TIP 아이콘 포함 그대로 사용):** `lucide-react`(ISC) 선 아이콘, `currentColor`. TIP 옆 HIVE 아이콘만 자체 제작(`HiveIcon.tsx`, 같은 24 × 24 / 선 굵기 2 규격). 사용자가 바꾸고 싶은 아이콘은 같은 규격(24 × 24 viewBox, `currentColor`) SVG로 제공하면 교체한다. 역할 대응: `START` Play / `PAUSE` Pause / `RESUME` Gamepad2 / `BRANCH` GitBranch / 1초 이동 Rewind · FastForward / 1틱 이동 ChevronLeft · ChevronRight / 재생 CirclePlay / `VIEW` SwitchCamera / `NEW` RotateCcw / `RESULT` Trophy / 로봇 Bot / 시나리오 Flag(진영색 채움) / 게임패드 Gamepad2 / 펼치기 PanelRightOpen / 준비 CircleCheck / 경고 TriangleAlert.
         - **화면 뼈대 구현 (09-6d, `src/components/MainScreen.tsx` / `LeftPanel.tsx` / `ConfigRail.tsx` / `ScrubberBar.tsx` / `MainScreen.css`, 순수 규칙 `src/ui/mainScreenModel.ts`):**
             - 배치: CSS 그리드 `좌측 패널 | 필드 | config 띠` + 아래 줄 전체 스크러버. 치수(기준 1366 × 650, 260u / 72u / 56u, 간격 12u)는 `LAYOUT_U` / `layoutCssVars()`가 루트 CSS 변수로 넘기고, CSS가 `--u = max(1px, min(100vw / 기준 폭, 100vh / 기준 높이))`로 곱한다. 1366 × 650 기준 필드 약 558 px, 3840 × 2160 약 1900 px.
             - 필드: `fieldCanvasSize(영역 폭, 높이, dpr)` → CSS 크기 = 짧은 변 내림, 버퍼 = CSS × dpr 반올림, 렌더 배율 = 버퍼 / 800. `ResizeObserver` + 창 `resize`(dpr만 바뀐 경우)마다 `AppController.setRenderScale(배율)`, 버퍼가 바뀌었으면 `redraw()`. 컨트롤러 생성 시 첫 배율을 넘긴다.
@@ -1310,7 +1316,7 @@ export interface TimelineFrame {
 
 - **`viewTransform.ts` (순수):** 레이아웃 상수(뷰포트 160 in = 800 px, 좌우 패널 200 px, 장면 1200 × 800), `viewAngle` / `restingView`(AUDIENCE 0, DRIVER RED −90° / BLUE +90°), `fitScale`, `easeInOutCubic`, `ViewAnimator`(700 ms, 벽시계 주입, 도중 전환 시 현재 각도에서 이어감, `jump`), `fieldToCanvas` / `canvasToField` / `cssToCanvas`, `fieldPxMatrix`(필드 px 공간 그리기용 캔버스 행렬 × dpr), `labelCenter`, `screenUpInField`.
 - **`robotLayout.ts` (순수):** 행동 상태 배지 키 / 제동 중 50% / 글자 배지 문구, 헤딩 화살표 · 적재물 받침 · 칸 · 번호 라벨 배치(몸체 길이 비율), `localToField`, 외접원 반지름.
-- **`badgeAssets.ts`:** `src/assets/badges/{key}.svg | .png`를 `import.meta.glob`으로 찾아 로드, 없으면 null(글자 배지). 아직 자산 없음.
+- **`badgeAssets.ts`:** `src/assets/badges/{key}.svg | .png`를 `import.meta.glob`으로 찾아 로드, 없으면 null(글자 배지). 아직 자산 없음 (09-7 전에 6종 SVG 추가, 3.7항 "배지 자산 확정").
 - **`sceneRenderer.ts`:** `renderScene(ctx, {frame, r1Config, r2Config, view}, dpr)` — 배경 / 좌우 패널, 뷰포트 클립, 정적 레이어(오프스크린 캐시, 없으면 직접 그림), 구조물 라벨, 바닥 기물(`IN_GARDEN` 초록 테두리), 로봇(인테이크 구역 / 몸체 / 앞 변 / 화살표 / 받침 · 적재물 · 빈 칸), 번호, 배지. HIVE 셀 상태 / 게이지 / 비행 공 / 경기 종료 강조 / 표시 옵션은 이후 단계.
 - **`canvasRenderer.ts`:** 색상 / `pieceColors` 공개, 라벨 없이 그리기 옵션, 상대 로딩 존 채도 제거, `drawHiveBase`(아군 셀 기본색 / 상대 셀 채도 제거, 상태 표시 없음). 기존 `renderField`(정식 빌드 정적 화면) 출력은 그대로.
 - **`collision.ts`:** `getRobotOBB` 매개변수 타입을 사용하는 필드(위치 / 헤딩 / 크기)로 좁힘 (읽기 전용 프레임에서 호출, 로직 변경 없음).
@@ -1435,7 +1441,8 @@ export interface TimelineFrame {
         - ~~09-6b: 렌더러 전환 — 캔버스를 필드 뷰포트(800 × 800)만 남기고 좌우 정보 패널 삭제, 진영 공식 색, 캔버스 글자 정리, 하네스를 새 캔버스 크기에 맞춤 (스크린샷 확인).~~ (완료, 6.2.27)
         - ~~09-6c: 앱 컨트롤러 — 하네스 컨트롤러를 React 비의존 `AppController`로 확장 (엔진 / 입력 / 루프 / 렌더링 예약 / 10 Hz 상태 알림, 기능은 하네스 수준: 시작 · 일시정지 · 재개 · 리셋).~~ (완료, 6.2.28)
         - ~~09-6d: 화면 뼈대 — 좌측 득점 패널 / 필드 / 접힌 config 아이콘 띠(표시만) / 스크러버 줄(기존 동작만), 화면 비례 단위 `--u`, 명중 확률 좌측 패널 (스크린샷 확인).~~ (완료, 6.2.29)
-    - 09-7: 경기 흐름 — 시작 / 일시정지 / 재개 / 분기(확인창) / 재생 / 배속 / 틱 · 1초 이동 / 새 경기, 상태별 키 공유, 경고 토스트 / 자동 일시정지 배너 (`ENDGAME` 타이머 색은 09-6d에서 완료). 시작 전 행동 상태 배지 이미지 자산(`src/assets/badges/`)을 사용자에게 요청.
+    - (09-7 전 자산) 행동 배지 SVG 6종 + 파비콘 추가, TIP 아이콘은 09-6d 것 유지 (3.7항 "배지 자산 확정", 3.8항 "파비콘").
+    - 09-7: 경기 흐름 — 시작 / 일시정지 / 재개 / 분기(확인창) / 재생 / 배속 / 틱 · 1초 이동 / 새 경기, 상태별 키 공유, 경고 토스트 / 자동 일시정지 배너 (`ENDGAME` 타이머 색은 09-6d에서 완료). 행동 상태 배지 이미지 자산은 09-7 전에 추가 완료.
     - 09-8: config 창 — 아이콘 띠(준비 신호 / 진행률 링 / 깃발 / 게임패드) + 탭 틀 + 초안 / 적용 / 되돌리기 + SETTINGS 탭(게임패드 상태, 입력 출처, 조작 모드, 키보드 토글, 표시 옵션, 언어, 단위, 기본 보기) + 설정 자동 보관.
     - 09-9: 로봇 탭 — 제원 폼, `BumperZone` 편집기, 슈터 / 리프트, 팀 번호, 상대 탭 복사, 탭 되돌리기.
     - 09-10: 스윗스팟 / 히트맵 편집 모드 + LUT 진행 표시(v0 선표시 / 진행 막대 / 남은 시간 / 점진 히트맵) + 기본 프리셋 자동 생성.
