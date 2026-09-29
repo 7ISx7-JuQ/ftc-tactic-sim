@@ -28,7 +28,7 @@ describe('로봇 표시 배치 (명세서 3.7, 08-4)', () => {
     const b = (actionState: RobotState['actionState'], isBraking = false) => robotBadge({ actionState, isBraking });
     assert(b('IDLE') === null && b('INTAKING')?.key === 'intaking', 'IDLE: no badge, INTAKING: badge (with the zone highlight, 09-6b)');
     assert(b('SHOOTING')?.key === 'shooting' && b('FLOWER_SETUP')?.key === 'lift-up' && b('FLOWER_READY')?.key === 'lift-ready' && b('FLOWER_DROPPING')?.key === 'lift-drop' && b('FLOWER_LOWERING')?.key === 'lift-down', 'badge key per action state');
-    assert(BADGE_OPACITY === 0.85 && b('SHOOTING')?.alpha === 0.85 && b('SHOOTING', true)?.alpha === 0.425, 'slightly transparent (not a field object), braking -> half of that');
+    assert(BADGE_OPACITY === 0.6 && b('SHOOTING')?.alpha === 0.6 && b('SHOOTING', true)?.alpha === 0.3, 'semi-transparent so the field behind shows through (09-7 prep: 85% -> 60%), braking -> half of that');
     // 배지 위치: 화면에서 회전된 몸체의 가장 위 꼭짓점 바로 위, 로봇 중심과 같은 x (보기 / 헤딩과 무관하게 겹치지 않음)
     for (const view of [restingView('AUDIENCE', 'RED'), restingView('DRIVER', 'RED'), restingView('DRIVER', 'BLUE'), { angle: 0.7, scale: 0.8 }]) {
       for (const heading of [0, 0.3, Math.PI / 4, Math.PI / 2, 2.5, -1]) {

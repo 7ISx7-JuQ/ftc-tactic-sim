@@ -29,8 +29,9 @@ export const BADGE_FALLBACK_TEXT: Readonly<Record<BadgeKey, string>> = {
   'lift-down': 'LIFT ▼',
 };
 
-// 배지는 필드 위 물체가 아니라 표시이므로 살짝 반투명 (09-6b). 제동 중(정지 대기, 타이머 미차감)은 그 절반
-export const BADGE_OPACITY = 0.85;
+// 배지는 필드 위 물체가 아니라 표시이므로 반투명 (09-6b 85% → 09-7 전 60%: 흰 원판이 뒤의 기물 / 로봇을 가리지 않도록).
+// 제동 중(정지 대기, 타이머 미차감)은 그 절반
+export const BADGE_OPACITY = 0.6;
 
 export interface RobotBadge {
   key: BadgeKey;
