@@ -210,6 +210,14 @@
             - **메시지 규약:** 메인 → Worker `{ kind: 'search' | 'rows', jobId, generation, robotId, pieceType, config, robotSize, samples, seed, gyStart?, gyEnd?, v0? }`, Worker → 메인 `{ kind: 'progress', jobId, cellsDone }` (행 1개마다) / `{ kind: 'result', jobId, generation, v0?, hitRate?, rows? }` / `{ kind: 'error', jobId, message }`. 결과 `Float32Array`는 transferable로 넘겨 복사 비용 0.
             - **조립:** 메인 스레드가 (로봇, 기물)별 기준 LUT `Float32Array(144 × 144)`에 행 결과를 복사하고, 모든 행이 모이면 `mirrorLUTSet`으로 4셀을 만들어 `RobotHeatmapLUTs` 완성.
             - **예상 시간:** 8코어 기준 로봇 1대 약 8~10초, 4코어 약 15~20초 (단일 스레드 30~60초 ÷ Worker 수 + 분배 오버헤드). 두 로봇이 동시에 진행되므로 전체 대기도 비슷한 수준. 모바일은 더 느림.
+            - **구현 (09-3, `src/workers/`):**
+                - `lutProtocol.ts`: 메시지 타입 + 순수 작업 처리기 `handleLUTJob(job, post)` (탐색 = `searchLaunchSpeed` 결과 1회, 행 = 행 1개마다 `progress` 후 `result` + transferable). 닫힌 해가 없으면 `v0` 없는 결과, 예외는 `error` 메시지.
+                - `lutWorker.ts`: 처리기 연결만 하는 Worker 진입점. `createLUTWorker.ts`: `new Worker(new URL('./lutWorker.ts', import.meta.url), { type: 'module' })`.
+                - `lutManager.ts` (`LUTManager`, Worker 생성 함수 주입): 풀(`defaultLUTPoolSize`, 코어 수를 모르면 4코어로 가정), **v0 탐색 작업이 행 작업보다 우선**(두 번째 로봇의 v0가 첫 번째 로봇 행 작업 뒤로 밀리지 않음), 행 작업은 요청 순서(FIFO), 조립 후 `mirrorLUTSet`으로 완성. 탐색 / LUT 작업에 보내는 설정은 스윗스팟을 스냅한 설정 (행 계산은 스윗스팟과 무관).
+                - 상태 스냅샷 `getStatus(robotId)`: 상태 / 세대 / 검증 사유 / 오류 / 기물별 탐색 완료 · v0 · 스윗스팟 명중률 / 완료 격자(실행 중 작업의 행 단위 진행 포함) / 조립 중 기준 LUT + 행별 완료 표시(점진 히트맵용) / 결과. `onChange(robotId)`는 변화마다 호출하고 GUI가 rAF로 모은다. `matchLUTs()` = 두 로봇 `READY`일 때만 경기용 LUT.
+                - **재요청 무시:** LUT를 결정하는 입력의 정규화 키 `lutRequestKey`(모델 버전 + 스냅한 스윗스팟 · 편차 기본값을 채운 탄도 설정 + 로봇 길이 / 폭 + 시드 + 샘플 수, 속성 순서 고정 JSON)가 진행 중 / `READY`인 요청과 같으면 아무것도 하지 않는다 (속도 등 무관한 제원 변경으로 다시 `APPLY`해도 재생성 없음). 09-4 캐시 키는 이 문자열의 SHA-256.
+                - **오류:** Worker `error` 메시지 / `onerror` / 행 결과 길이 불일치 → 그 로봇 `ERROR`(사유 포함) + 대기 작업 제거, 다른 로봇은 계속. 같은 설정을 다시 요청하면 새로 생성.
+                - **실측 (헤드리스 Chromium, 4코어 컨테이너, Worker 3개):** 로봇 2대 × 기물 2종 기본 정밀도(격자당 2000 / 후보당 20000 샘플) 전체 약 9.3초. 개발 서버와 정식 빌드(`lutWorker` 별도 청크) 모두에서 실제 Worker 결과가 `generateRobotLUTs`와 비트 단위로 같음을 확인 (저장소 밖 1회성 점검).
         2. **진행 상황 표시:**
             - **v0 결과 선표시:** 단계 ① 완료 즉시 기물 종류별 v0와 스윗스팟 명중률(`sweetSpotHitRate`) 표시. 0이면 경고 ("이 스윗스팟에서는 명중 불가 — 설정 확인"), 생성은 계속 진행.
             - **진행 막대:** 로봇별 `완료 격자 / 전체 격자` (기물 2종 합산, 전체 = 2 × 20,736). HIVE 겹침 / 도달 불가로 생략되는 격자는 행 처리 시 즉시 완료로 집계. 단계 ① 동안은 "v0 탐색 중" 표시.
@@ -220,7 +228,7 @@
             - **로봇별 상태 머신:** `IDLE`(설정 없음 / 검증 실패) → `QUEUED` → `SEARCHING`(단계 ①) → `GENERATING`(단계 ②, 진행률) → `READY` | `ERROR`. 설정 변경 시 `CANCELLED`를 거쳐 다시 `QUEUED`.
             - **시작 시점:** 탄도 설정 확정 버튼(로봇 탭 `APPLY`, 검증 `validateBallisticsConfig` 통과 시에만 활성화)을 누를 때. 입력 중 자동 재생성은 하지 않음. **예외 (09-1):** 앱 시작 시 기본 프리셋 / 자동 보관 설정(3.8항)의 LUT는 자동으로 생성한다 (캐시 적중이면 즉시 `READY`).
             - **무효화 조건:** 해당 로봇의 `BallisticsConfig`, 로봇 `length` / `width`(HIVE 겹침 격자 / 검증에 영향), 기준 시드, 샘플 수가 바뀔 때만. 그 외 `RobotConfig` 변경(속도, 인테이크 등)과 시나리오 변경은 LUT를 무효화하지 않음.
-            - **취소:** 로봇별 세대 번호(`generation`)를 올리고, 대기열의 이전 세대 작업을 제거, 실행 중인 작업의 결과 / 진행 메시지는 세대가 다르면 무시. 행 묶음이 작아(수백 ms) Worker 강제 종료는 하지 않음 (종료 시 풀 재생성 비용 발생).
+            - **취소:** (09-3 구현: `request`의 설정 변경 / `cancel(robotId)`, `cancel`은 진행 중일 때만 `CANCELLED`로 멈추고 `READY`는 유지) 로봇별 세대 번호(`generation`)를 올리고, 대기열의 이전 세대 작업을 제거, 실행 중인 작업의 결과 / 진행 메시지는 세대가 다르면 무시. 행 묶음이 작아(수백 ms) Worker 강제 종료는 하지 않음 (종료 시 풀 재생성 비용 발생).
             - **막는 동작:** 시뮬레이션 시작(및 LUT가 필요한 경기 재생 / 분기 실행)만 두 로봇이 모두 `READY`일 때 활성화하고, 비활성 사유를 표시 ("로봇 2 확률표 생성 중 63%"). 로봇 / 시나리오 / 스윗스팟 편집, 필드 탐색 등 나머지는 모두 계속 가능.
             - **사용 흐름 예:** 로봇 1 탄도 확정 → 생성 시작 → 그동안 로봇 2 입력 / 확정 → 시나리오 입력 → 대부분 입력이 끝날 즈음 생성 완료.
         4. **IndexedDB 캐시:**
@@ -1092,6 +1100,7 @@ export interface TimelineFrame {
 | 08-7 | 개발 하네스: 정식 엔진 / 입력 / 실시간 루프 / 렌더러 화면 연결, 회전 후 루프 시작, 옵션 체크박스 (아래 6.2.20) — Step 8 완료 | `src/dev/devSetup.ts`, `harnessController.ts`, `DevHarness.tsx`, `src/dev/__tests__/harness.test.ts`, `App.tsx`, `App.css` |
 | 09-1 | 웹 GUI 명세 구체화 (메인 화면 / config 창 / 앱 상태 흐름 / 재생 · 재개 · 분기 / 단위 / 스윗스팟 진영 기준 / 배치 검증 / 결과 팝업 / 하위 Step 분할) (아래 6.2.21) | 명세서 |
 | 09-2 | `ballistics.ts` LUT 병렬 생성 사전 준비: 행 범위 LUT, 시드 파생 공개, 모델 버전, 스윗스팟 진영 기준 변환 (아래 6.2.22) | `ballistics.ts`, `__tests__/ballistics.test.ts` |
+| 09-3 | LUT Worker 풀 + 작업 대기열(v0 탐색 우선) + 조립 + 로봇별 상태 머신 / 취소 / 재요청 무시 / 오류 처리 (아래 6.2.23) | `src/workers/lutProtocol.ts`, `lutWorker.ts`, `createLUTWorker.ts`, `lutManager.ts`, `src/workers/__tests__/lutManager.test.ts` |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
@@ -1291,6 +1300,12 @@ export interface TimelineFrame {
 - **리팩터링 동일성:** 이전 커밋의 `ballistics.ts`와 `generateRobotLUTs` 결과(탄도 설정 2종 × 로봇 크기 2종, v0 / 명중률 / LUT 8장)가 비트 단위로 같음을 일회성 비교로 확인.
 - **테스트 (`__tests__/ballistics.test.ts` Q):** 행 분할(1행 / 7행 / 불균등 / 전체, 역순 처리) 조립 === `generateReferenceLUT`, 부분 행 = 전체의 해당 구간, 빈 / 역순 / 범위 밖 / 소수 범위, `skipUnreachable` 전달, 시드 파생(기본값 고정 값, 4개 서로 다름, 기준 시드 의존), 작업 계획(로봇 2대 × 기물 2종, v0 탐색 → 4행 묶음 역순 → 조립 → 대칭 복사) 16장 === `generateRobotLUTs`, 모델 버전 양의 정수, 스윗스팟 진영 기준(RED 스냅만, BLUE 점대칭, 경계 클릭 격자 유지, 필드 가장자리 포함 왕복, BLUE 조준점 = 기준 조준점 점대칭, BLUE 기준 HIVE 앞 → `SWEET_SPOT_IN_HIVE`, BLUE 기준 스윗스팟 격자의 `BLUE_OPPOSITE` 값 = 기준 값). 난수 구간 지역 인덱스 사용, 행 오프셋 누락, 변환 후 스냅, 시드 용도 뒤바뀜, 점대칭 143 기준, 범위 제한 누락 각각에서 실패함을 확인.
 
+### 6.2.23 Step 09-3 (LUT Worker 풀 / 대기열 / 상태 머신) 완료 항목
+
+- **구현:** 2.6.2항 "LUT 생성 실행 / 사용자 경험" 1의 "구현 (09-3)" 참고 (`handleLUTJob`, `lutWorker.ts`, `createBrowserLUTWorker`, `LUTManager`, `defaultLUTPoolSize`, `lutRequestKey`).
+- **테스트 (`src/workers/__tests__/lutManager.test.ts` A~E, 가짜 Worker가 실제 처리기를 구조화 복제 경계로 호출, 처리 순서를 테스트가 조종):** A 처리기(탐색 결과 = `searchLaunchSpeed`, 행마다 진행 144 / 288 / 432, 행 결과 = `generateReferenceLUTRows`, transferable, v0 없는 행 작업 오류, 닫힌 해 없음), B 결정론(풀 1 / 3 / 8 / 2, 행 묶음 4 / 7 / 144, 완료 순서 역순 → 로봇 2대 결과 === `generateRobotLUTs`, 진행 완료, `matchLUTs`), C 상태 전이(`QUEUED > SEARCHING > GENERATING > READY`, 탐색 직후 v0 선표시, 부분 조립 행 = 최종 LUT 행, 두 번째 로봇 탐색이 대기 중 행 작업보다 먼저, 진행 단조 증가 · 행 단위 진행), D 재요청(같은 입력 무시, 로봇 크기 변경 재생성, 생성 중 설정 변경 → `CANCELLED > QUEUED` · 새 세대 · 이전 작업 결과 무시, `cancel` 유지 / `READY`에는 무시, 검증 실패 → `IDLE` + 사유), E 오류(`error` 메시지 / `onerror` / 행 길이 불일치 → `ERROR`, 다른 로봇 계속, 재요청 복구, 잃은 작업의 늦은 응답 무시), 풀 크기 공식, `dispose`, 요청 키 정규화. v0 탐색 우선 없음, 세대 확인 없음, 대기열 정리 없음, 재요청 무시 없음, 실행 중 진행 미집계, 오류 시 작업 유지, 기물 LUT 뒤바뀜, `CANCELLED` 알림 없음, 행 길이 검사 없음 각각에서 실패함을 확인.
+- **헤드리스 Chromium 점검 (저장소 밖 1회성):** 임시 페이지에서 실제 Worker 3개로 로봇 2대 생성 → 개발 서버 / 정식 빌드(미리보기) 모두 `generateRobotLUTs`와 비트 단위 동일, 콘솔 오류는 리소스 404 1건뿐(임시 페이지에 파비콘이 없어 생긴 것으로 추정). 기본 정밀도 전체 약 9.3초 (4코어).
+
 ### 6.3 남은 Step (권장 순서)
 
 > 모든 Step은 완료 시 `npm test`(엔진 회귀 테스트)가 통과해야 하며, 새로 추가한 규칙에는 테스트 그룹을 추가한다.
@@ -1315,10 +1330,10 @@ export interface TimelineFrame {
     - ~~08-5: HIVE(아군 셀 상태, 시차 낙하 연출), FLOWER 게이지(필드 밖 9칸, 잼, 가득 참 X), NECTAR 재고 게이지(게이지 틀은 정적 레이어에 추가), 경기 종료 강조.~~ (완료, 6.2.18)
     - ~~08-6: 비행 공(명목 구간 보간 + 높이 보정, 충돌 후 구간, 그림자 / 오프셋 / 크기), 표시 옵션 5종.~~ (완료, 6.2.19)
     - ~~08-7: 개발 하네스(정식 엔진 / 입력 / 루프 + 간이 판정 함수, 시작 회전 후 루프 시작, 옵션 체크박스) + 헤드리스 Chromium 점검.~~ (완료, 6.2.20)
-- **Step 9 — 웹 GUI (React, 상세 규칙 3.8항):** 09-1(명세), 09-2(탄도 사전 준비) 완료.
+- **Step 9 — 웹 GUI (React, 상세 규칙 3.8항):** 09-1(명세), 09-2(탄도 사전 준비), 09-3(LUT Worker 풀) 완료.
     - ~~09-1: 웹 GUI 명세 구체화.~~ (완료, 6.2.21)
     - ~~09-2: `ballistics.ts` 사전 준비 — `generateReferenceLUTRows`, `robotLUTSeeds`, `BALLISTICS_MODEL_VERSION`, 스윗스팟 진영 기준 변환 함수 + 분할 / 작업 계획 동일성 테스트.~~ (완료, 6.2.22)
-    - 09-3: LUT Worker 풀(`src/workers/lutWorker.ts`) + 작업 대기열 + 조립 + 로봇별 상태 머신 / 취소 (React 비의존, 가짜 Worker 테스트).
+    - ~~09-3: LUT Worker 풀(`src/workers/lutWorker.ts`) + 작업 대기열 + 조립 + 로봇별 상태 머신 / 취소 (React 비의존, 가짜 Worker 테스트).~~ (완료, 6.2.23)
     - 09-4: IndexedDB LUT 캐시 (캐시 키 / LRU 20개 / 실패 허용).
     - 09-5: `validateRobotPlacement()` + `reset()` 사전 보정 + 엔진 회귀 테스트 그룹.
     - 09-6: GUI 기반 — 앱 컨트롤러(하네스 컨트롤러 확장), 문구 사전 / 언어 토글, 단위 변환, 진영 공식 색, 화면 뼈대(좌측 패널 / 필드 / 접힌 config / 스크러버 줄), 캔버스 필드 뷰포트 전용 전환(좌우 패널 삭제, 명중 확률 좌측 패널 이동).
