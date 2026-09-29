@@ -760,6 +760,15 @@
         | 편의 | `COPY TO R2`(R1 탭) / `COPY TO R1`(R2 탭): 팀 번호 / 이름을 뺀 전 항목을 상대 탭 초안으로 복사 |
 
         - 팀 번호 / 이름은 GUI 프로필(`RobotProfile { teamNumber, config: RobotConfig, ballistics: BallisticsConfig }`)에 두고 `RobotConfig` 타입은 수정하지 않는다.
+        - **09-9 확정 (사용자 결정):** ① 09-9a(프로필 / 입력칸 규칙 / 식별 · 하드웨어 · 인테이크 딜레이 · 슈터 형식 · 리프트 / COPY / 저장 형식 / 좌측 패널 팀 표시) + 09-9b(인테이크 구역 편집기 + 슈터 탄도 입력칸)로 분할 ② '로봇 이름' 대신 **팀명**(GUI 전용 `teamName`, 사용자가 보기에 '팀명'이어야 납득됨) — `RobotConfig.name`은 엔진용 R1 / R2 그대로 ③ 슈터 탄도(발사구 지상고 / 발사각 / 오프셋 / 편차 3종)는 09-9b에서 폼 + 엔진 비행 연결, 스윗스팟 / LUT는 09-10 ④ 터렛 범위는 왼쪽 / 오른쪽 한계 두 칸 + `±90°` / `360°` 프리셋 ⑤ 좌측 패널은 팀 번호가 있으면 `#번호`(크게) + 팀명(작게), 없으면 R1 / R2 + 팀명. config 탭 이름 / 결과 팝업 / 캔버스 로봇 번호는 R1 / R2 그대로.
+        - **입력 허용 범위 (09-9 확정):** 가로 / 세로 6 ~ 18 in, 최고 속도 1 ~ 200 in/s, 최대 가속도 1 ~ 2000 in/s², 최고 각속도 0.1 ~ 30 rad/s, 최대 각가속도 0.1 ~ 300 rad/s², 최대 적재 수 정수 1 ~ 4, 흡입 · 발사 딜레이 / 리프트 준비 시간 / 투입 간격 정수 0 ~ 5000 ms, 허용 조준 오차 0.1 ~ 45°, 터렛 한계 −180 ~ 180°(터렛이면 왼쪽 ≠ 오른쪽), 팀 번호 비움 또는 숫자 1 ~ 5자리, 팀명 24자까지.
+        - **구현 (09-9a):**
+            - 순수 규칙 `src/ui/robotForm.ts`: `RobotProfile { teamNumber, teamName, config }`(탄도는 09-9b에서 추가), `NUMBER_FIELDS`(칸별 물리량 종류 / 엔진 단위 범위 / 정수), `parseNumberField`(입력 단위에서 한 번 변환 → 범위 / 정수 검사, 빈 칸 · 숫자 아님 = 입력 필요), `formatField`, `checkText`, `readNumber` / `writeNumber`(터렛 한계 = `turretRange[0]` / `[1]`), `robotProfileIssues`(모든 칸 범위 + 터렛 폭 0 + 형식), `TURRET_PRESETS`, `copyRobotProfile`(팀 번호 / 팀명 / 슬롯 id / 엔진 이름은 대상 유지, 깊은 복사).
+            - 초안 규칙(`configDraft.ts`): 로봇 탭 값 = 프로필, 틀린 입력 글자 `fieldText`(탭별 칸 → 글자, 남아 있는 동안 INVALID · 적용 불가, 탭 이동 / 창 닫기에도 유지, `RESET TAB` · 복사 대상에서 지움), 로봇 탭 검증 = `robotProfileIssues`, 시나리오 검증은 프로필의 `config`로, `copyRobotTab` / `canCopyRobotTab`(원본이 틀리면 불가).
+            - 입력칸(`FormControls.tsx`): 숫자 칸은 단위 표시 + 칠 때마다 검사 → 올바르면 그 칸 값만 엔진 단위로 초안에 반영(고친 칸만 변환), 틀리면 글자 보관 + 빨간 테두리 + 빨간 설명("6.00 – 18.00 in 사이", "정수만 입력", "숫자를 입력"). 초점이 있는 동안은 친 글자 그대로, 초점을 잃거나 Enter면 표시 형식. SETTINGS와 공용인 구역 제목 / 버튼 묶음 / 토글도 이 파일로 옮김.
+            - 로봇 탭(`RobotTab.tsx`): 팀(팀 번호 / 팀명) · 하드웨어 7칸 · 인테이크(딜레이, NECTAR 흡입 토글, 흡입 구역 요약 — 0개면 "흡입 불가" 경고, 편집기는 09-9b) · 슈터(형식 `FIXED` 허용 조준 오차 / `TURRET` 왼쪽 · 오른쪽 한계 + 안내 + 프리셋, 터렛으로 바꿀 때 폭 0이면 ±90°로 시작, 숨는 칸의 틀린 글자는 지움, 발사 딜레이) · FLOWER 리프트 2칸 · `COPY TO R2` / `COPY TO R1`(상대 탭에 적용 안 된 수정이 있으면 확인창, 복사 후 "R2 초안에 복사함 — R2 탭에서 적용" 안내). 경기가 있는 동안 모든 칸 비활성. 고치기 시작하면 `START` 막힘 안내를 지움.
+            - 저장(`settings.ts`): 적용한 프로필을 저장하고, 복원 시 `mergeWithDefaults`로 기본 프로필 모양에 맞춤(없는 항목 = 기본값으로 채움 → 이후 항목이 늘어도 저장한 로봇 유지, 종류가 다르면 버림) + `robotProfileIssues` 통과 + 슬롯 id 강제. 09-8b 형식(프로필 없이 `RobotConfig`)은 기본 프로필이 된다.
+            - 좌측 패널: `#번호` + 작은 팀명.
         - LUT 시드 / 샘플 수는 고정값(`DEFAULT_BALLISTICS_SEED`, 격자당 2000 / v0 후보당 20000)이며 화면에 표시하지 않는다.
         - **단위 (화면 ↔ 엔진 변환은 GUI가 수행, 엔진에는 항상 명세 단위 = inch 기반):**
 
@@ -1205,6 +1214,7 @@ export interface TimelineFrame {
 | 09-8a | config 창 틀: 펼치기(480u, 필드를 밀어냄) / 자동 접힘 / 탭 4개 / 잠금, 초안 · 적용 · `RESET TAB` 규칙, 아이콘 띠 탭 상태, `START` 막기 (아래 6.2.32) | `src/ui/configDraft.ts`, `ConfigPanel.tsx`, `ConfigRail.tsx`, `MainScreen.tsx`, `defaultSetup.ts`, `src/ui/__tests__/configDraft.test.ts` |
 | 09-7c | 경기 종료 연출(사용자 피드백): 마지막 10초 타이머 빨강 맥박, 종료 흰빛, `MATCH COMPLETE` 배너 + 5초 진행바, 점수 카운트업 + 항목 칩, 종료 신호 `endSeq` (아래 6.2.33) | `EndOverlay.tsx`, `LeftPanel.tsx`, `mainScreenModel.ts`, `appController.ts`, 테스트 |
 | 09-8b | SETTINGS 탭(게임패드 / 입력 출처 · 조작 모드 · 키보드 + 조작표 / 표시 옵션 / 언어 · 단위 · 기본 보기 / `RESET ALL`), 입력 선택을 START · RESUME · BRANCH에 적용(녹화 덧입히기), 새 경기 = 기본 보기, `localStorage` 자동 보관 (아래 6.2.34) | `src/app/inputPlan.ts`, `src/ui/settings.ts`, `SettingsTab.tsx`, `appController.ts`, `browserInput.ts`, `liveControls.ts`, 테스트 |
+| 09-9a | 로봇 탭 1: 프로필(팀 번호 / 팀명), 입력칸 규칙(단위 · 범위 · 빨간 오류, 틀린 글자 보관), 하드웨어 · 인테이크 딜레이 · 슈터 형식 / 범위 · 리프트 폼, COPY TO, 저장 형식(없는 항목 채우기), 좌측 패널 팀 표시 (아래 6.2.35) | `src/ui/robotForm.ts`, `configDraft.ts`, `settings.ts`, `FormControls.tsx`, `RobotTab.tsx`, `LeftPanel.tsx`, `MainScreen.tsx`, 테스트 |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
@@ -1482,6 +1492,13 @@ export interface TimelineFrame {
 - **테스트:** `src/app/__tests__/inputPlan.test.ts` A~B(`AUTO` 규칙 6조합 · 배정 안 된 슬롯, 풀이, 경기 전 / 경기 중 선택지), `src/ui/__tests__/settings.test.ts` A~F(기본값, 저장 → 복원 왕복 · 입력 출처 미보관, 없음 / 손상 / 버전 다름 / 항목별 형식 오류, 적용 값 모양 · 유한값 · 진영 · 시나리오 · 배치 검증, 메모리 / 없음 / 오류 저장소, 키 이름), `appController.test.ts` H(`AUTO` 예상 · 키보드 끄면 R2 `NONE`, 시작 시 풀이 + 기본 보기 관중석, 진행 중 변경 거부, 경기 중 `AUTO` · 기록 없는 `REPLAY` 거부, 녹화 덧입히기 — R2를 1회차 기록대로 `REPLAY` 분기 → 같은 틱에서 위치 비트 단위 일치, 조작 모드 / 키보드는 재개 때 적용 · 키보드 끄면 W 무반응, 경기 중 `VIEW` 후 `NEW` → 기본 보기 · 경기 전 선택 복귀), C 갱신(경기 전 `VIEW` 무시, 기본 보기로 관중석 경기), `browserInput.test.ts` B 런타임 키보드 토글. 재개 시 적용 누락, 새 경기 보기 초기화 누락, 경기 전 `VIEW` 허용, 분기 시 적용 누락, 진행 중 변경 허용, 키보드 끔 무시, 적용 값 검증 생략, 비유한값 허용, 버전 무시, 끌 때 눌린 키 유지 각각에서 실패함을 확인.
 - **헤드리스 Chromium 점검 (저장소 밖 1회성, 실제 개발 서버 1366 × 768):** 경기 전 `VIEW` 비활성, 게임패드 아이콘 → SETTINGS(영어), 키보드 조작표, 한국어 · 명중 확률 켬 · 기본 보기 관중석 → `localStorage` 저장 확인 → 새로고침 후 복원(한국어, 명중 확률 줄 표시), 시작 → 관중석 그대로 → 일시정지 → R2 `REPLAY` 선택("적용 대기"), R1 `REPLAY` 비활성(기록 없음), `RESET ALL` 비활성. 콘솔 오류 없음.
 
+### 6.2.35 Step 09-9a (로봇 탭 1: 프로필 / 입력칸 규칙 / 제원 폼 / COPY) 완료 항목
+
+- **결정:** 3.8항 로봇 제원 탭 "09-9 확정" / "입력 허용 범위 (09-9 확정)" 참고.
+- **구현:** 3.8항 로봇 제원 탭 "구현 (09-9a)" 참고 (`robotForm.ts`, `configDraft.ts`, `settings.ts`, `FormControls.tsx`, `RobotTab.tsx`, `SettingsTab.tsx`, `ConfigPanel.tsx`, `LeftPanel.tsx`, `MainScreen.tsx`, `defaultSetup.ts`, 문구 `robot.*` / `form.*` / `confirm.copyOverwrite`).
+- **테스트:** `src/ui/__tests__/robotForm.test.ts` A~F(기본 프로필 유효, 입력 → 엔진 값: in / cm 변환 · 표시값 재입력 = 원래 inch · 범위 · 정수 · 빈 칸 · 45° = π/4 · ±180° · rad/s 그대로, 표시 in / cm / ° / 개수, 팀 번호 / 팀명, 범위 밖 칸 · 터렛 폭 0(고정형 무관) · 후방 터렛 · 쓰기 복사본, COPY 대상 유지 항목 · 깊은 복사), `configDraft.test.ts` F~G(틀린 글자 보관 → INVALID · 적용 불가 · 지우면 DIRTY · 같은 글자 무변화 · 틀린 글자만 있어도 되돌리기 가능 · RESET TAB이 지움, COPY 결과 · 대상 틀린 글자 지움 · 원본이 틀리면 불가 · 로봇 값 범위 밖 = INVALID), `settings.test.ts` B / D 갱신(프로필 저장 왕복, 범위 밖 / 팀 번호 오류 버림, 없는 항목 채우기 + 슬롯 id 강제, 09-8b 형식 → 기본 프로필, `mergeWithDefaults`). 정수 검사 누락은 없음(중복 검사 제거 후), 범위 확대, 팀 번호 6자리 허용, 고정형 터렛 폭 검사, COPY 팀 번호 덮어씀, 틀린 글자 무시(적용 / 상태), 복사 대상 글자 유지, 로봇 탭 검증 없음, 채우기 없음, 프로필 검증 생략 각각에서 실패함을 확인. (돌연변이 점검에서 입력 글자 정수 검사와 경계값 맞춤이 중복 코드임을 발견해 삭제, 약한 테스트 1개 보강.)
+- **헤드리스 Chromium 점검 (저장소 밖 1회성, 실제 개발 서버 1366 × 768):** 로봇 아이콘 → R1 탭, 팀 번호 / 팀명 입력, 가로 30 → "Must be 6.00 – 18.00 in", 적재 2.5 → "Whole numbers only", `START` → "Cannot start: R1 — invalid settings", 고침 + 터렛 전환(±90°로 시작), `COPY TO R2`(안내), R1 `APPLY` → 필드 로봇 16 in / 적재 3, R2 탭 cm 표시(40.64 cm, 190.50 cm/s, 팀 번호 비어 있음) → `APPLY`, 좌측 패널 `#19049 Bumblebees`, 새로고침 후 복원, 한국어 cm 오류 "15.24 ~ 45.72 cm 사이". 콘솔 오류 없음. 점검 후 `COPY TO` 버튼 줄바꿈과 고친 뒤에도 남는 막힘 안내를 수정.
+
 ### 6.3 남은 Step (권장 순서)
 
 > 모든 Step은 완료 시 `npm test`(엔진 회귀 테스트)가 통과해야 하며, 새로 추가한 규칙에는 테스트 그룹을 추가한다.
@@ -1506,7 +1523,7 @@ export interface TimelineFrame {
     - ~~08-5: HIVE(아군 셀 상태, 시차 낙하 연출), FLOWER 게이지(필드 밖 9칸, 잼, 가득 참 X), NECTAR 재고 게이지(게이지 틀은 정적 레이어에 추가), 경기 종료 강조.~~ (완료, 6.2.18)
     - ~~08-6: 비행 공(명목 구간 보간 + 높이 보정, 충돌 후 구간, 그림자 / 오프셋 / 크기), 표시 옵션 5종.~~ (완료, 6.2.19)
     - ~~08-7: 개발 하네스(정식 엔진 / 입력 / 루프 + 간이 판정 함수, 시작 회전 후 루프 시작, 옵션 체크박스) + 헤드리스 Chromium 점검.~~ (완료, 6.2.20)
-- **Step 9 — 웹 GUI (React, 상세 규칙 3.8항):** 09-1(명세), 09-2(탄도 사전 준비), 09-3(LUT Worker 풀), 09-4(LUT 캐시), 09-5(배치 검증), 09-6a(GUI 순수 기반), 09-6b(렌더러 전환), 09-6c(앱 컨트롤러), 09-6d(화면 뼈대), 09-7a(경기 흐름), 09-7b(확인창 / 토스트 / 배너 / 타임라인), 09-8a(config 창 틀), 09-7c(경기 종료 연출), 09-8b(SETTINGS / 자동 보관) 완료.
+- **Step 9 — 웹 GUI (React, 상세 규칙 3.8항):** 09-1(명세), 09-2(탄도 사전 준비), 09-3(LUT Worker 풀), 09-4(LUT 캐시), 09-5(배치 검증), 09-6a(GUI 순수 기반), 09-6b(렌더러 전환), 09-6c(앱 컨트롤러), 09-6d(화면 뼈대), 09-7a(경기 흐름), 09-7b(확인창 / 토스트 / 배너 / 타임라인), 09-8a(config 창 틀), 09-7c(경기 종료 연출), 09-8b(SETTINGS / 자동 보관), 09-9a(로봇 탭 1) 완료.
     - ~~09-1: 웹 GUI 명세 구체화.~~ (완료, 6.2.21)
     - ~~09-2: `ballistics.ts` 사전 준비 — `generateReferenceLUTRows`, `robotLUTSeeds`, `BALLISTICS_MODEL_VERSION`, 스윗스팟 진영 기준 변환 함수 + 분할 / 작업 계획 동일성 테스트.~~ (완료, 6.2.22)
     - ~~09-3: LUT Worker 풀(`src/workers/lutWorker.ts`) + 작업 대기열 + 조립 + 로봇별 상태 머신 / 취소 (React 비의존, 가짜 Worker 테스트).~~ (완료, 6.2.23)
@@ -1525,7 +1542,9 @@ export interface TimelineFrame {
     - 09-8: config 창 — 아이콘 띠(준비 신호 / 진행률 링 / 깃발 / 게임패드) + 탭 틀 + 초안 / 적용 / 되돌리기 + SETTINGS 탭(게임패드 상태, 입력 출처, 조작 모드, 키보드 토글, 표시 옵션, 언어, 단위, 기본 보기) + 설정 자동 보관. 2단계로 분할:
         - ~~09-8a: 창 틀(펼치기 / 자동 접힘 / 탭 4개 / 잠금) + 초안 · 적용 · `RESET TAB` 틀 + 아이콘 띠 상태 + `START` 막기.~~ (완료, 6.2.32)
         - ~~09-8b: SETTINGS 탭(게임패드 상태, 입력 출처 `AUTO` / `LIVE` / `NONE` / `REPLAY`, 조작 모드, 키보드 토글, 표시 옵션, 언어, 단위, 기본 보기, `RESET ALL`) + 컨트롤러 연결 + `localStorage` 자동 보관 (스크린샷 확인).~~ (완료, 6.2.34) — 09-8 완료
-    - 09-9: 로봇 탭 — 제원 폼, `BumperZone` 편집기, 슈터 / 리프트, 팀 번호, 상대 탭 복사, 탭 되돌리기.
+    - 09-9: 로봇 탭 — 제원 폼, `BumperZone` 편집기, 슈터 / 리프트, 팀 번호, 상대 탭 복사, 탭 되돌리기. 2단계로 분할:
+        - ~~09-9a: 로봇 프로필(팀 번호 / 팀명) + 입력칸 공통 규칙 + 식별 · 하드웨어 · 인테이크 딜레이 · 슈터 형식 / 범위 / 딜레이 · 리프트 + COPY + 저장 형식 + 좌측 패널 팀 표시.~~ (완료, 6.2.35)
+        - 09-9b: 인테이크 구역 편집기(면 / offset / width / depth, 프리셋, 로봇 기준 미리보기 + 터렛 부채꼴) + 슈터 탄도 입력칸(발사구 지상고, 발사각, 오프셋, 고급 설정 편차 3종) + 엔진 비행 연결 (스크린샷 확인).
     - 09-10: 스윗스팟 / 히트맵 편집 모드 + LUT 진행 표시(v0 선표시 / 진행 막대 / 남은 시간 / 점진 히트맵) + 기본 프리셋 자동 생성.
     - 09-11: 시나리오 탭 + 시작 자세 편집 모드 + 시드 `REROLL` + 유효 배지.
     - 09-12: 결과 팝업 세부 디자인 확정(09-7a 기본형 기반, 사용자와 확정), 개발 하네스 삭제 — Step 9 완료.

@@ -6,6 +6,7 @@ import { createIntakeZonePreset, hiveCellAimPoint } from '../core/collision';
 import { angleDifference } from '../core/kinematics';
 import type { RobotConfig, ScenarioConfig, ShotProbabilityResolver } from '../core/types';
 import type { MatchSetup } from './appController';
+import type { DraftValues } from '../ui/configDraft';
 
 // 고정 기본 로봇 제원 (18 in 정사각, 앞면 흡입, 고정형 슈터 ±3°)
 const base = (id: 'robot1' | 'robot2', name: string): RobotConfig => ({
@@ -57,9 +58,9 @@ export function buildMatchSetup(r1Config: RobotConfig, r2Config: RobotConfig, sc
   return { r1Config, r2Config, shotResolver: createSimpleResolver(r1Config, r2Config), scenario };
 }
 
-/** config 창 탭 기본값 (RESET TAB / 첫 실행): 고정 제원 + RED 기본 시나리오. 기본 프리셋(탄도 / 스윗스팟)은 09-9 / 09-10 */
-export const DEFAULT_DRAFT_VALUES: Readonly<{ robot1: RobotConfig; robot2: RobotConfig; scenario: ScenarioConfig }> = {
-  robot1: DEFAULT_ROBOT_CONFIGS.robot1,
-  robot2: DEFAULT_ROBOT_CONFIGS.robot2,
+/** config 창 탭 기본값 (RESET TAB / 첫 실행): 팀 번호 / 팀명 없음 + 고정 제원 + RED 기본 시나리오. 기본 탄도 / 스윗스팟은 09-9b / 09-10 */
+export const DEFAULT_DRAFT_VALUES: Readonly<DraftValues> = {
+  robot1: { teamNumber: '', teamName: '', config: DEFAULT_ROBOT_CONFIGS.robot1 },
+  robot2: { teamNumber: '', teamName: '', config: DEFAULT_ROBOT_CONFIGS.robot2 },
   scenario: { allianceColor: 'RED' },
 };

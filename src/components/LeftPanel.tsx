@@ -47,7 +47,13 @@ function ScoreTally({ tally }: { tally: EndTally }) {
   );
 }
 
-export default function LeftPanel({ status, lang }: { status: AppStatus; lang: Language }) {
+/** 좌측 패널 로봇 표시 (09-9 확정): 팀 번호가 있으면 #번호, 없으면 R1 / R2 + 옆에 작게 팀명 */
+export interface PanelTeam {
+  teamNumber: string;
+  teamName: string;
+}
+
+export default function LeftPanel({ status, lang, teams }: { status: AppStatus; lang: Language; teams?: Readonly<Record<'robot1' | 'robot2', PanelTeam>> }) {
   const tip = tipDisplay(status.autoTipCount, status.tipCount);
   const colors = ALLIANCE_COLORS[status.alliance];
 
@@ -87,7 +93,10 @@ export default function LeftPanel({ status, lang }: { status: AppStatus; lang: L
           const hit = status.hitProbability?.[id];
           return (
             <div className="robot-row" key={id}>
-              <div className="robot-name">{robotLabel(id)}</div>
+              <div className="robot-name">
+                {robotLabel(id, teams?.[id].teamNumber)}
+                {teams?.[id].teamName && <span className="robot-team-name">{teams[id].teamName}</span>}
+              </div>
               {hit && (
                 <div className="hit-rows" aria-label={t(lang, 'panel.hitProbability')}>
                   {(['POLLEN', 'NECTAR'] as const).map(type => (

@@ -8,7 +8,7 @@ import {
   keyCodeLabel,
   loadStoredConfig,
   parseStoredConfig,
-  sameShape,
+  mergeWithDefaults,
   sanitizeSettings,
   saveStoredConfig,
   serializeStoredConfig,
@@ -48,7 +48,11 @@ describe('SETTINGS / 자동 보관 (09-8b)', () => {
   });
 
   it('B. 저장 → 복원 왕복 (설정 + 적용한 로봇 / 시나리오), 입력 출처는 보관하지 않음', () => {
-    const applied = { ...defaults, robot1: { ...defaults.robot1, maxSpeed: 72 }, scenario: { allianceColor: 'BLUE' as const, flowerPiecesCount: [4, 3, 2, 1] as [number, number, number, number] } };
+    const applied = {
+      ...defaults,
+      robot1: { teamNumber: '19049', teamName: 'Bumblebees', config: { ...defaults.robot1.config, maxSpeed: 72 } },
+      scenario: { allianceColor: 'BLUE' as const, flowerPiecesCount: [4, 3, 2, 1] as [number, number, number, number] },
+    };
     const text = serializeStoredConfig({ settings: custom, applied });
     const back = parseStoredConfig(text, defaults);
     expect(back.settings).toEqual(custom);
@@ -75,21 +79,30 @@ describe('SETTINGS / 자동 보관 (09-8b)', () => {
     expect(partial.settings.keyboardEnabled).toBe(false);
   });
 
-  it('D. 적용 값 검사: 모양이 다르거나 시나리오 검증 실패면 버림 (기본값 사용)', () => {
+  it('D. 적용 값 검사: 없는 항목은 기본값으로 채우고, 종류가 다르거나 범위 / 시나리오 검증 실패면 버림 (기본값 사용)', () => {
     const wrap = (applied: unknown) => JSON.stringify({ version: SETTINGS_VERSION, settings: custom, applied });
-    expect(parseStoredConfig(wrap({ ...defaults, robot1: { ...defaults.robot1, maxSpeed: 'fast' } }), defaults).applied).toBeNull();
-    expect(parseStoredConfig(wrap({ ...defaults, robot2: { ...defaults.robot2, intakeZones: null } }), defaults).applied).toBeNull();
-    expect(parseStoredConfig(wrap({ ...defaults, robot1: { ...defaults.robot1, width: Number.NaN } }), defaults).applied).toBeNull();
+    const cfg = (patch: Record<string, unknown>) => ({ ...defaults.robot1, config: { ...defaults.robot1.config, ...patch } });
+    expect(parseStoredConfig(wrap({ ...defaults, robot1: cfg({ maxSpeed: 'fast' }) }), defaults).applied).toBeNull();
+    expect(parseStoredConfig(wrap({ ...defaults, robot2: { ...defaults.robot2, config: { ...defaults.robot2.config, intakeZones: null } } }), defaults).applied).toBeNull();
+    expect(parseStoredConfig(wrap({ ...defaults, robot1: cfg({ width: Number.NaN }) }), defaults).applied).toBeNull();
+    expect(parseStoredConfig(wrap({ ...defaults, robot1: cfg({ width: 30 }) }), defaults).applied).toBeNull(); // 범위 밖 (6 ~ 18 in)
+    expect(parseStoredConfig(wrap({ ...defaults, robot1: { ...defaults.robot1, teamNumber: '12345678' } }), defaults).applied).toBeNull();
     expect(parseStoredConfig(wrap({ ...defaults, scenario: { allianceColor: 'GREEN' } }), defaults).applied).toBeNull();
     expect(parseStoredConfig(wrap({ ...defaults, scenario: { allianceColor: 'RED', flowerPiecesCount: [9, 4, 4, 4] } }), defaults).applied).toBeNull();
     expect(parseStoredConfig(wrap({ ...defaults, scenario: { allianceColor: 'RED', r1Spawn: { x: 72, y: 72, heading: 0 } } }), defaults).applied).toBeNull();
     expect(parseStoredConfig(wrap({ ...defaults, scenario: { allianceColor: 'RED', gardenPiecesCount: 'many' } }), defaults).applied).toBeNull();
     expect(parseStoredConfig(wrap(defaults), defaults).applied).toEqual(defaults);
-    // 모양 비교
-    expect(sameShape({ a: 1, b: [1], c: { d: 'x' } }, { a: 2, b: [], c: { d: 'y' } })).toBe(true);
-    expect(sameShape({ a: 1, b: {} }, { a: 2, b: [] })).toBe(false);
-    expect(sameShape({ a: 1 }, { a: 2, b: 3 })).toBe(false);
-    expect(sameShape({ a: Infinity }, { a: 1 })).toBe(false);
+    // 없는 항목 채우기: 팀명이 없던 저장값 → 기본값(빈 팀명)으로 채우고 나머지 유지, 슬롯 id 강제
+    const noName = { robot1: { teamNumber: '19049', config: { ...defaults.robot1.config, maxSpeed: 80, id: 'robot2' } }, robot2: defaults.robot2, scenario: defaults.scenario };
+    const filled = parseStoredConfig(wrap(noName), defaults).applied;
+    expect(filled?.robot1).toEqual({ teamNumber: '19049', teamName: '', config: { ...defaults.robot1.config, maxSpeed: 80 } });
+    // 09-8b 형식 (RobotConfig를 프로필 없이 저장) → 기본 프로필
+    expect(parseStoredConfig(wrap({ robot1: defaults.robot1.config, robot2: defaults.robot2.config, scenario: defaults.scenario }), defaults).applied).toEqual(defaults);
+    // 모양 맞추기
+    expect(mergeWithDefaults({ a: 1, b: [1], c: { d: 'x' }, extra: 5 }, { a: 2, b: [] as number[], c: { d: 'y', e: 3 } })).toEqual({ a: 1, b: [1], c: { d: 'x', e: 3 } });
+    expect(mergeWithDefaults({ a: 1, b: {} }, { a: 2, b: [] as number[] })).toBeNull();
+    expect(mergeWithDefaults({ a: Infinity }, { a: 1 })).toBeNull();
+    expect(mergeWithDefaults('x', { a: 1 })).toBeNull();
   });
 
   it('E. 저장소: 메모리 저장 / 불러오기, 저장소 없음 / 오류는 기본값 · 저장 실패(false)', () => {

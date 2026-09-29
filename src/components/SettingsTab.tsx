@@ -1,7 +1,6 @@
 // SETTINGS 탭 (명세서 3.8 SETTINGS 탭, 09-8b): 게임패드(읽기 전용) / 입력(출처 · 조작 모드 · 키보드 + 키보드 조작표) /
 // 표시 옵션 / 화면(언어 · 단위 · 기본 보기) / 초기화(RESET ALL, 경기 전만). 바꾸는 즉시 적용 (APPLY 없음).
 // 입력 출처 / 조작 모드 / 키보드는 다음 START / RESUME / BRANCH부터 경기에 적용된다 (컨트롤러가 보관).
-import type { ReactNode } from 'react';
 import { TriangleAlert } from 'lucide-react';
 import type { AppStatus } from '../app/appController';
 import { MATCH_SOURCE_CHOICES, SETUP_SOURCE_CHOICES } from '../app/inputPlan';
@@ -16,55 +15,13 @@ import { LENGTH_UNITS } from '../ui/units';
 import type { LengthUnit } from '../ui/units';
 import { robotLabel } from '../ui/mainScreenModel';
 import { keyCodeLabel } from '../ui/settings';
+import { Section, Segmented, Toggle } from './FormControls';
 import type { UiSettings } from '../ui/settings';
 
 const ROBOTS: readonly RobotId[] = ['robot1', 'robot2'];
 const OPTION_KEYS: readonly (keyof RenderOptions)[] = ['aimGuide', 'intakeProgress', 'hitProbability', 'flightTrail', 'flightResult'];
 const DRIVE_MODES: readonly DriveMode[] = ['FIELD', 'ROBOT'];
 const VIEWS: readonly ViewMode[] = ['DRIVER', 'AUDIENCE'];
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="settings-section">
-      <h3 className="settings-title">{title}</h3>
-      {children}
-    </section>
-  );
-}
-
-/** 여러 개 중 하나 고르기 (버튼 묶음) */
-function Segmented<T extends string>({ value, options, label, disabled, onChange, ariaLabel }: {
-  value: T;
-  options: readonly T[];
-  label: (v: T) => string;
-  disabled?: (v: T) => boolean;
-  onChange: (v: T) => void;
-  ariaLabel: string;
-}) {
-  return (
-    <div className="segmented" role="radiogroup" aria-label={ariaLabel}>
-      {options.map(v => (
-        <button key={v} type="button" role="radio" aria-checked={v === value} className={`segmented-button${v === value ? ' is-selected' : ''}`} disabled={disabled?.(v)} onClick={() => onChange(v)}>
-          {label(v)}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/** 켜기 / 끄기 */
-function Toggle({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
-  return (
-    <label className="toggle-row">
-      <span className="toggle-text">
-        <span className="toggle-label">{label}</span>
-        {hint && <span className="toggle-hint">{hint}</span>}
-      </span>
-      <input type="checkbox" className="toggle-input" checked={checked} onChange={e => onChange(e.target.checked)} />
-      <span className="toggle-switch" aria-hidden="true" />
-    </label>
-  );
-}
 
 export default function SettingsTab({
   status,

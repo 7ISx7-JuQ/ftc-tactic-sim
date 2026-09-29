@@ -1221,3 +1221,110 @@
   background: rgba(255, 255, 255, 0.05);
   white-space: nowrap;
 }
+
+/* ---------------- 로봇 탭 폼 (09-9a) ---------------- */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: calc(var(--u) * 10) calc(var(--u) * 12);
+}
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 4);
+  min-width: 0;
+}
+.form-label {
+  font-size: calc(var(--u) * 12);
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.form-input-wrap {
+  display: flex;
+  align-items: center;
+  height: calc(var(--u) * 32);
+  border: 1px solid var(--panel-border);
+  border-radius: calc(var(--u) * 7);
+  background: rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+}
+.form-input-wrap:focus-within {
+  border-color: #9ca3af;
+}
+.form-field.has-error .form-input-wrap {
+  border-color: var(--error);
+  background: rgba(239, 68, 68, 0.08);
+}
+.form-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 calc(var(--u) * 10);
+  border: none;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: calc(var(--u) * 14);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.form-input:disabled {
+  color: var(--text-muted);
+}
+.form-input::placeholder {
+  color: #5b6270;
+}
+.form-unit {
+  padding: 0 calc(var(--u) * 10);
+  font-size: calc(var(--u) * 12);
+  font-weight: 700;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.form-error {
+  font-size: calc(var(--u) * 11);
+  font-weight: 700;
+  color: var(--error);
+}
+.form-readonly {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 4);
+  font-size: calc(var(--u) * 13);
+  font-weight: 600;
+}
+.form-warn {
+  color: var(--warn);
+  font-weight: 700;
+}
+.toggle-row.is-disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.preset-buttons {
+  display: flex;
+  gap: calc(var(--u) * 6);
+  flex: none;
+}
+.copy-row {
+  padding-top: calc(var(--u) * 10);
+  border-top: 1px solid var(--panel-border);
+}
+.main-screen .config-button {
+  white-space: nowrap;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 6);
+}
+.main-screen .config-button svg.lucide {
+  width: calc(var(--u) * 15);
+  height: calc(var(--u) * 15);
+}
+.robot-team-name {
+  margin-left: calc(var(--u) * 8);
+  font-size: calc(var(--u) * 13);
+  font-weight: 600;
+  color: var(--text-muted);
+}

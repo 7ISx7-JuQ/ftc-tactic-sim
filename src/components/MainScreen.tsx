@@ -12,11 +12,15 @@ import { DT, MATCH_TICKS } from '../core/simulationEngine';
 import { t } from '../ui/i18n';
 import { DEFAULT_SETTINGS, browserSettingsStorage, loadStoredConfig, saveStoredConfig } from '../ui/settings';
 import type { UiSettings } from '../ui/settings';
-import { branchConfirmParams, fieldCanvasSize, layoutCssVars } from '../ui/mainScreenModel';
+import { branchConfirmParams, fieldCanvasSize, layoutCssVars, robotLabel } from '../ui/mainScreenModel';
 import {
   DRAFT_TABS,
   TAB_LABEL_KEYS,
   applyTab,
+  canCopyRobotTab,
+  copyRobotTab,
+  editDraft,
+  setFieldText,
   canApply,
   canResetTab,
   configCanOpen,
@@ -38,12 +42,14 @@ import LeftPanel from './LeftPanel';
 import ResultPopup from './ResultPopup';
 import ScrubberBar from './ScrubberBar';
 import SettingsTab from './SettingsTab';
+import RobotTab from './RobotTab';
+import type { RobotFieldKey, RobotProfile } from '../ui/robotForm';
 import type { ScrubberActions } from './ScrubberBar';
 import './MainScreen.css';
 
 const LAYOUT_STYLE = layoutCssVars(false) as CSSProperties;
 const LAYOUT_STYLE_OPEN = layoutCssVars(true) as CSSProperties;
-const setupOf = (v: DraftValues) => buildMatchSetup(v.robot1, v.robot2, v.scenario);
+const setupOf = (v: DraftValues) => buildMatchSetup(v.robot1.config, v.robot2.config, v.scenario);
 const TOAST_VISIBLE_MS = 1500; // 경고 토스트 표시 시간 (그 뒤 흐려지며 사라짐)
 const TOAST_FADE_MS = 300;
 // 설정 자동 보관 (09-8b): 앱 시작 시 한 번 읽음 (SETTINGS + 마지막으로 적용한 로봇 / 시나리오)
@@ -173,6 +179,31 @@ export default function MainScreen() {
     if (configTab === 'settings' || locked) return;
     setDrafts(resetTabDraft(drafts, configTab, DEFAULT_DRAFT_VALUES));
   };
+  // ---------------- 로봇 탭 (09-9a): 초안 편집 / 틀린 입력 글자 / COPY TO ----------------
+  const editRobot = (tab: 'robot1' | 'robot2') => (profile: RobotProfile | null, key: RobotFieldKey | null, invalidText: string | null) => {
+    if (locked) return;
+    setConfigNotice(null); // 고치기 시작하면 START 막힘 / 복사 안내는 지움
+    setDrafts(d => {
+      let next = profile ? editDraft(d, tab, profile) : d;
+      if (key) next = setFieldText(next, tab, key, invalidText);
+      return next;
+    });
+  };
+  const copyRobot = (from: 'robot1' | 'robot2') => {
+    const to = from === 'robot1' ? 'robot2' : 'robot1';
+    if (locked || !canCopyRobotTab(drafts, from)) return;
+    const doCopy = () => {
+      setDrafts(d => copyRobotTab(d, from));
+      setConfigNotice(t(lang, 'robot.copied', { robot: robotLabel(to) }));
+    };
+    // 상대 탭에 적용 안 된 수정 / 틀린 글자가 있으면 덮어쓰기 전에 확인
+    if (tabStatus(drafts, to) === 'OK') doCopy();
+    else
+      void ask(t(lang, 'confirm.copyOverwrite', { target: robotLabel(to), source: robotLabel(from) }), t(lang, 'robot.copyTo', { robot: robotLabel(to) })).then(ok => {
+        if (ok) doCopy();
+      });
+  };
+
   // ---------------- SETTINGS (즉시 적용 + 자동 보관) ----------------
   const pushSettings = (next: UiSettings, prev: UiSettings | null) => {
     const controller = c();
@@ -290,7 +321,7 @@ export default function MainScreen() {
 
   return (
     <div className={`main-screen${configOpen ? ' is-config-open' : ''}`} lang={lang} style={configOpen ? LAYOUT_STYLE_OPEN : LAYOUT_STYLE}>
-      {status && <LeftPanel status={status} lang={lang} />}
+      {status && <LeftPanel status={status} lang={lang} teams={{ robot1: drafts.applied.robot1, robot2: drafts.applied.robot2 }} />}
       {/* 종료 강조 5초 중 필드를 누르면 건너뛰기 */}
       <div className="field-area" ref={areaRef} onClick={() => c()?.skipHighlight()}>
         <canvas ref={canvasRef} className="field-canvas" />
@@ -314,15 +345,30 @@ export default function MainScreen() {
             onClose={closeConfig}
             onApply={applyCurrentTab}
             onResetTab={resetCurrentTab}
-            settingsContent={
-              <SettingsTab
-                status={status}
-                lang={lang}
-                settings={settings}
-                onSettings={updateSettings}
-                onSourceChoice={(robot, choice) => c()?.setSourceChoice(robot, choice)}
-                onResetAll={resetAll}
-              />
+            content={
+              configTab === 'settings' ? (
+                <SettingsTab
+                  status={status}
+                  lang={lang}
+                  settings={settings}
+                  onSettings={updateSettings}
+                  onSourceChoice={(robot, choice) => c()?.setSourceChoice(robot, choice)}
+                  onResetAll={resetAll}
+                />
+              ) : configTab === 'robot1' || configTab === 'robot2' ? (
+                <RobotTab
+                  key={configTab}
+                  robotId={configTab}
+                  profile={drafts.draft[configTab]}
+                  fieldText={drafts.fieldText[configTab]}
+                  unit={settings.lengthUnit}
+                  lang={lang}
+                  locked={locked}
+                  canCopy={canCopyRobotTab(drafts, configTab)}
+                  onEdit={editRobot(configTab)}
+                  onCopy={() => copyRobot(configTab)}
+                />
+              ) : null
             }
           />
         ) : (

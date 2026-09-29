@@ -3,11 +3,15 @@
 // - 적용 안 된 수정 / 검증 실패가 있으면 그 탭 아이콘이 빨간 느낌표가 되고 START를 막는다 (첫 문제 탭: R1 → R2 → SCENARIO).
 // - SETTINGS 탭은 바꾸는 즉시 적용 (09-8 확정, APPLY 없음) — 여기서 다루지 않는다.
 // 탭 내용(폼)은 09-9(로봇) / 09-11(시나리오)에서 채운다.
+// 09-9a: 로봇 탭 값 = 로봇 프로필(팀 번호 / 팀명 + RobotConfig). 폼에서 틀리게 입력한 칸의 글자는 fieldText에 보관
+// (탭을 옮기거나 창을 닫아도 남고, 남아 있는 동안 그 탭은 INVALID).
 
 import { validateRobotPlacement, validateScenario } from '../core/simulationEngine';
-import type { RobotConfig, ScenarioConfig } from '../core/types';
+import type { ScenarioConfig } from '../core/types';
 import type { AppPhase, AppStatus } from '../app/appController';
 import type { MessageKey } from './i18n';
+import { copyRobotProfile, robotProfileIssues } from './robotForm';
+import type { RobotProfile } from './robotForm';
 
 export type ConfigTab = 'robot1' | 'robot2' | 'scenario' | 'settings';
 export type DraftTab = 'robot1' | 'robot2' | 'scenario';
@@ -23,15 +27,21 @@ export const TAB_LABEL_KEYS: Readonly<Record<ConfigTab, MessageKey>> = {
 };
 
 export interface DraftValues {
-  robot1: RobotConfig;
-  robot2: RobotConfig;
+  robot1: RobotProfile;
+  robot2: RobotProfile;
   scenario: ScenarioConfig;
 }
+
+/** 탭별 틀린 입력 글자 (칸 키 → 글자). 비어 있으면 모든 칸이 올바름 */
+export type FieldTexts = Record<DraftTab, Readonly<Record<string, string>>>;
 
 export interface ConfigDrafts {
   applied: DraftValues;
   draft: DraftValues;
+  fieldText: FieldTexts;
 }
+
+const NO_FIELD_TEXT: FieldTexts = { robot1: {}, robot2: {}, scenario: {} };
 
 /** 탭 검증 문제 (코드는 문구 사전 issue.* 키와 같음) */
 export interface TabIssue {
@@ -43,23 +53,50 @@ export interface TabIssue {
 export type TabStatus = 'OK' | 'DIRTY' | 'INVALID';
 
 export function initialDrafts(values: DraftValues): ConfigDrafts {
-  return { applied: clone(values), draft: clone(values) };
+  return { applied: clone(values), draft: clone(values), fieldText: NO_FIELD_TEXT };
 }
 
-/** 초안 편집 (적용된 값은 그대로) */
+/** 초안 편집 (적용된 값 / 틀린 입력 글자는 그대로) */
 export function editDraft<T extends DraftTab>(state: ConfigDrafts, tab: T, value: DraftValues[T]): ConfigDrafts {
-  return { applied: state.applied, draft: { ...state.draft, [tab]: clone(value) } };
+  return { ...state, draft: { ...state.draft, [tab]: clone(value) } };
+}
+
+/** 칸 입력 글자: 틀린 글자면 보관, null이면 지움 (올바른 값이 들어와 초안에 반영됐을 때) */
+export function setFieldText(state: ConfigDrafts, tab: DraftTab, key: string, text: string | null): ConfigDrafts {
+  const current = state.fieldText[tab];
+  if (text === null ? !(key in current) : current[key] === text) return state;
+  const next = { ...current };
+  if (text === null) delete next[key];
+  else next[key] = text;
+  return { ...state, fieldText: { ...state.fieldText, [tab]: next } };
+}
+
+export function hasFieldErrors(state: ConfigDrafts, tab: DraftTab): boolean {
+  return Object.keys(state.fieldText[tab]).length > 0;
 }
 
 /** 초안 → 적용 (canApply일 때만, 아니면 그대로) */
 export function applyTab(state: ConfigDrafts, tab: DraftTab): ConfigDrafts {
   if (!canApply(state, tab)) return state;
-  return { applied: { ...state.applied, [tab]: clone(state.draft[tab]) }, draft: state.draft };
+  return { ...state, applied: { ...state.applied, [tab]: clone(state.draft[tab]) } };
 }
 
-/** RESET TAB: 그 탭 초안을 기본값으로 (적용은 APPLY로) */
+/** RESET TAB: 그 탭 초안을 기본값으로, 틀린 입력 글자도 지움 (적용은 APPLY로) */
 export function resetTabDraft(state: ConfigDrafts, tab: DraftTab, defaults: DraftValues): ConfigDrafts {
-  return editDraft(state, tab, defaults[tab]);
+  const next = editDraft(state, tab, defaults[tab]);
+  return { ...next, fieldText: { ...next.fieldText, [tab]: {} } };
+}
+
+/** COPY TO R2 / COPY TO R1: 팀 번호 / 팀명을 뺀 전 항목을 상대 탭 초안으로 (상대 탭의 틀린 입력 글자는 지움). 원본 탭이 INVALID면 그대로 */
+export function copyRobotTab(state: ConfigDrafts, from: 'robot1' | 'robot2'): ConfigDrafts {
+  if (!canCopyRobotTab(state, from)) return state;
+  const to = from === 'robot1' ? 'robot2' : 'robot1';
+  const next = editDraft(state, to, copyRobotProfile(state.draft[from], state.draft[to], to));
+  return { ...next, fieldText: { ...next.fieldText, [to]: {} } };
+}
+
+export function canCopyRobotTab(state: ConfigDrafts, from: 'robot1' | 'robot2'): boolean {
+  return !hasFieldErrors(state, from) && tabIssues(state.draft, from).length === 0;
 }
 
 export function isDirty(state: ConfigDrafts, tab: DraftTab): boolean {
@@ -67,24 +104,26 @@ export function isDirty(state: ConfigDrafts, tab: DraftTab): boolean {
 }
 
 /**
- * 초안 검증: 로봇 탭은 제원 폼(09-9)이 생기기 전까지 문제 없음, 시나리오 탭은 엔진 시나리오 검증 + 시작 자세 배치 검증
- * (시나리오는 로봇 크기 / 적재 한도에 따라 달라지므로 로봇 초안과 함께 검사)
+ * 초안 검증: 로봇 탭 = 프로필 값 범위 검사(robotProfileIssues, 폼을 거치지 않은 값의 안전장치),
+ * 시나리오 탭 = 엔진 시나리오 검증 + 시작 자세 배치 검증 (로봇 크기 / 적재 한도에 따라 달라지므로 로봇 초안과 함께 검사)
  */
 export function tabIssues(values: DraftValues, tab: DraftTab): TabIssue[] {
-  if (tab !== 'scenario') return [];
-  const { scenario, robot1, robot2 } = values;
+  if (tab !== 'scenario') return robotProfileIssues(values[tab]);
+  const { scenario } = values;
+  const r1 = values.robot1.config;
+  const r2 = values.robot2.config;
   return [
-    ...validateScenario(scenario, robot1, robot2).map(({ code, message }) => ({ code, message })),
-    ...validateRobotPlacement(scenario, robot1, robot2).map(({ code, message }) => ({ code, message })),
+    ...validateScenario(scenario, r1, r2).map(({ code, message }) => ({ code, message })),
+    ...validateRobotPlacement(scenario, r1, r2).map(({ code, message }) => ({ code, message })),
   ];
 }
 
 export function canApply(state: ConfigDrafts, tab: DraftTab): boolean {
-  return isDirty(state, tab) && tabIssues(state.draft, tab).length === 0;
+  return isDirty(state, tab) && !hasFieldErrors(state, tab) && tabIssues(state.draft, tab).length === 0;
 }
 
 export function tabStatus(state: ConfigDrafts, tab: DraftTab): TabStatus {
-  if (tabIssues(state.draft, tab).length > 0) return 'INVALID';
+  if (hasFieldErrors(state, tab) || tabIssues(state.draft, tab).length > 0) return 'INVALID';
   return isDirty(state, tab) ? 'DIRTY' : 'OK';
 }
 
@@ -93,9 +132,9 @@ export function firstBlockingTab(state: ConfigDrafts): DraftTab | null {
   return DRAFT_TABS.find(tab => tabStatus(state, tab) !== 'OK') ?? null;
 }
 
-/** RESET TAB 가능: 초안이 기본값과 다를 때 */
+/** RESET TAB 가능: 초안이 기본값과 다르거나 틀린 입력 글자가 있을 때 */
 export function canResetTab(state: ConfigDrafts, tab: DraftTab, defaults: DraftValues): boolean {
-  return !deepEqual(state.draft[tab], defaults[tab]);
+  return hasFieldErrors(state, tab) || !deepEqual(state.draft[tab], defaults[tab]);
 }
 
 // ------------------------------------------------------------
