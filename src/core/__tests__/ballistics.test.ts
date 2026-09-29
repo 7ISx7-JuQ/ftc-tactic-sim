@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BALLISTICS_MODEL_VERSION,
   bearingTo,
   canPossiblyHit,
   createAimTrajectory,
@@ -9,6 +10,7 @@ import {
   descendingDistanceAtHeight,
   estimateHitRate,
   generateReferenceLUT,
+  generateReferenceLUTRows,
   generateRobotLUTs,
   heightAtDistance,
   hiveCellKey,
@@ -31,10 +33,14 @@ import {
   HIVE_TOP_MAX_BOUNCES,
   RNG_DRAWS_PER_SAMPLE,
   sampleLUT,
+  robotLUTSeeds,
   searchLaunchSpeed,
   shooterBallisticsFrom,
   shotLaunchHeading,
   snapSweetSpot,
+  sweetSpotBasisCell,
+  sweetSpotFromBasis,
+  sweetSpotToBasis,
   validateBallisticsConfig,
   landingDistance,
   landingPoint,
@@ -675,4 +681,104 @@ describe('충돌 후 낙하 (08-2, 06-6 개정)', () => {
       assert(!insideBox(f.landing.x, f.landing.y) && f.landing.y > box.maxY, 'degenerate contact inside the box -> landing pushed outside');
     }
   });
+});
+
+describe('LUT 병렬 생성 사전 준비 (09-2)', () => {
+  const bitEqual = (a: Float32Array, b: Float32Array) => a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
+  // 행 경계 목록으로 나눠 계산한 뒤 이어 붙인 LUT (계산 순서는 뒤에서부터 → 순서 무관 확인)
+  const assembleRows = (
+    cfg: BallisticsConfig, size: { length: number; width: number }, type: 'POLLEN' | 'NECTAR',
+    v0: number, samples: number, seed: number, bounds: number[],
+  ) => {
+    const lut = new Float32Array(LUT_GRID_SIZE * LUT_GRID_SIZE);
+    for (let k = bounds.length - 2; k >= 0; k--) {
+      lut.set(generateReferenceLUTRows(cfg, size, type, v0, samples, seed, bounds[k], bounds[k + 1]), bounds[k] * LUT_GRID_SIZE);
+    }
+    return lut;
+  };
+  const range = (step: number) => [...Array.from({ length: Math.ceil(LUT_GRID_SIZE / step) }, (_, i) => i * step), LUT_GRID_SIZE];
+
+  it('Q. 행 범위 LUT / 시드 파생 / 작업 계획 동일성 / 모델 버전 / 스윗스팟 진영 기준', () => {
+    const n = LUT_GRID_SIZE;
+    // 행 범위 분할 → 이어 붙이면 generateReferenceLUT와 비트 단위로 같음
+    {
+      const v0 = searchLaunchSpeed(MC, 'POLLEN', 1000)!.v0;
+      const full = generateReferenceLUT(MC, SIZE, 'POLLEN', v0, 20, 13);
+      assert(full.some(v => v > 0), 'reference LUT has a hit band');
+      for (const [name, bounds] of [['1 row', range(1)], ['7 rows', range(7)], ['uneven', [0, 5, 50, 51, 144]], ['whole', [0, 144]]] as const) {
+        assert(bitEqual(assembleRows(MC, SIZE, 'POLLEN', v0, 20, 13, [...bounds]), full), `${name} partition === generateReferenceLUT`);
+      }
+      const rows = (a: number, b: number) => generateReferenceLUTRows(MC, SIZE, 'POLLEN', v0, 20, 13, a, b);
+      assert(rows(130, 134).length === 4 * n && bitEqual(rows(130, 134), full.subarray(130 * n, 134 * n)), 'row r of the result = full row gyStart + r');
+      assert(rows(10, 10).length === 0 && rows(20, 10).length === 0, 'empty / reversed range -> empty array');
+      assert(bitEqual(rows(-5, 3), full.subarray(0, 3 * n)) && bitEqual(rows(140, 999), full.subarray(140 * n)), 'range clamped to [0, 144]');
+      assert(bitEqual(rows(2.7, 4.2), full.subarray(2 * n, 4 * n)), 'fractional bounds floored');
+      const noSkip = generateReferenceLUT(MC, SIZE, 'POLLEN', v0, 20, 13, { skipUnreachable: false });
+      assert(bitEqual(assembleRows(MC, SIZE, 'POLLEN', v0, 20, 13, range(7)), noSkip)
+        && bitEqual(generateReferenceLUTRows(MC, SIZE, 'POLLEN', v0, 20, 13, 60, 70, { skipUnreachable: false }), noSkip.subarray(60 * n, 70 * n)), 'skipUnreachable option passed through');
+    }
+    // 시드 파생: 기물 종류 × 용도별 서로 다른 값, 결정론, 기본값 고정
+    // (값이 바뀌면 같은 설정의 LUT가 달라지므로 BALLISTICS_MODEL_VERSION을 올려야 함)
+    {
+      const s = robotLUTSeeds();
+      assert(JSON.stringify(s) === JSON.stringify(robotLUTSeeds(0x0ba1157)), 'default = DEFAULT_BALLISTICS_SEED');
+      assert(s.POLLEN.search === -1634899738 && s.POLLEN.lut === 1020584501 && s.NECTAR.search === -635667388 && s.NECTAR.lut === 2020079507,
+        `derived seeds pinned ${JSON.stringify(s)}`);
+      assert(new Set([s.POLLEN.search, s.POLLEN.lut, s.NECTAR.search, s.NECTAR.lut]).size === 4, 'four independent streams');
+      assert(robotLUTSeeds(5).POLLEN.lut !== s.POLLEN.lut, 'different base seed -> different streams');
+    }
+    // 작업 계획(로봇 2대 × 기물 2종: v0 탐색 1개 → 4행 묶음, 역순 처리 → 조립 → 대칭 복사)으로 만든 16장 === generateRobotLUTs
+    const robots = [
+      { cfg: MC, size: SIZE, opts: { samples: 30, searchSamples: 200, seed: 5 } },
+      { cfg: { ...BC, sweetSpot: { x: 59.2, y: 129.9 } }, size: { length: 14, width: 12 }, opts: { samples: 30, searchSamples: 200, seed: 8 } },
+    ];
+    const r1Direct = generateRobotLUTs(robots[0].cfg, robots[0].size, robots[0].opts);
+    let sheets = 0;
+    robots.forEach(({ cfg, size, opts }, r) => {
+      const direct = r === 0 ? r1Direct : generateRobotLUTs(cfg, size, opts);
+      const seeds = robotLUTSeeds(opts.seed);
+      const snapped = { ...cfg, sweetSpot: snapSweetSpot(cfg.sweetSpot) };
+      for (const type of ['POLLEN', 'NECTAR'] as const) {
+        const found = searchLaunchSpeed(snapped, type, opts.searchSamples, seeds[type].search)!;
+        assert(found.v0 === direct.v0[type] && found.hitRate === direct.sweetSpotHitRate[type], `robot${r + 1} ${type}: planned search = generateRobotLUTs v0 / hit rate`);
+        const set = mirrorLUTSet(assembleRows(cfg, size, type, found.v0, opts.samples, seeds[type].lut, range(4)));
+        for (const key of Object.keys(set) as HiveCellKey[]) {
+          assert(bitEqual(set[key], direct.luts[type][key]), `robot${r + 1} ${type} ${key}: planned === generateRobotLUTs`);
+          sheets++;
+        }
+      }
+    });
+    assert(sheets === 16, '16 LUT sheets compared');
+    // 모델 버전: 양의 정수
+    assert(Number.isInteger(BALLISTICS_MODEL_VERSION) && BALLISTICS_MODEL_VERSION >= 1, `BALLISTICS_MODEL_VERSION = ${BALLISTICS_MODEL_VERSION}`);
+    // 스윗스팟 진영 기준: RED = 기준 셀 그대로(스냅), BLUE = 필드 중심 점대칭
+    {
+      assert(sweetSpotBasisCell('RED') === 'RED_AUDIENCE' && sweetSpotBasisCell('BLUE') === 'BLUE_OPPOSITE', 'basis cells');
+      const same = (p: { x: number; y: number }, x: number, y: number) => p.x === x && p.y === y;
+      assert(same(sweetSpotFromBasis({ x: 60.2, y: 134.9 }, 'RED'), 60.5, 134.5) && same(sweetSpotToBasis({ x: 60.2, y: 134.9 }, 'RED'), 60.5, 134.5), 'RED: snap only');
+      assert(same(sweetSpotFromBasis({ x: 83.5, y: 9.5 }, 'BLUE'), 60.5, 134.5) && same(sweetSpotToBasis({ x: 60.5, y: 134.5 }, 'BLUE'), 83.5, 9.5), 'BLUE: point symmetry');
+      // 경계 위의 점: 진영 기준 좌표에서 먼저 스냅 (사용자가 본 격자 유지)
+      const edge = sweetSpotFromBasis({ x: 84, y: 10 }, 'BLUE');
+      assert(same(edge, 59.5, 133.5) && same(sweetSpotToBasis(edge, 'BLUE'), 84.5, 10.5), `BLUE boundary click keeps the clicked grid (${edge.x}, ${edge.y})`);
+      let roundTrip = true;
+      for (const p of [{ x: 0, y: 0 }, { x: 143.99, y: 144 }, { x: 72, y: 72 }, { x: 12.3, y: 101.7 }, { x: 96, y: 18 }]) {
+        for (const a of ['RED', 'BLUE'] as const) {
+          const back = sweetSpotToBasis(sweetSpotFromBasis(p, a), a);
+          roundTrip &&= same(back, snapSweetSpot(p).x, snapSweetSpot(p).y);
+        }
+      }
+      assert(roundTrip, 'basis -> reference -> basis = snapped input (incl. field edges)');
+      // BLUE 기준 셀 기하 = 기준 셀의 점대칭: 조준점, 검증, LUT 값이 대응
+      const redAim = hiveCellAimPoint('RED', 'AUDIENCE_CELL');
+      const blueAim = hiveCellAimPoint('BLUE', 'OPPOSITE_CELL');
+      assert(near(blueAim.x, 144 - redAim.x) && near(blueAim.y, 144 - redAim.y) && near(blueAim.z, redAim.z), 'BLUE_OPPOSITE aim point = point mirror of RED_AUDIENCE');
+      const inHive = validateBallisticsConfig({ ...MC, sweetSpot: sweetSpotFromBasis({ x: 84.75, y: 48 }, 'BLUE') }, SIZE);
+      assert(inHive.some(i => i.code === 'SWEET_SPOT_IN_HIVE'), 'BLUE basis point in front of the HIVE -> validated as SWEET_SPOT_IN_HIVE');
+      const b = sweetSpotToBasis(MC.sweetSpot, 'BLUE');
+      const set = r1Direct.luts.POLLEN;
+      const at = (lut: Float32Array, p: { x: number; y: number }) => lut[lutIndex(lutGridIndex(p.x), lutGridIndex(p.y))];
+      assert(at(set[sweetSpotBasisCell('BLUE')], b) === at(set.RED_AUDIENCE, MC.sweetSpot) && at(set.RED_AUDIENCE, MC.sweetSpot) > 0.5,
+        'BLUE basis sweet spot grid in BLUE_OPPOSITE LUT = reference sweet spot value');
+    }
+  }, 120_000);
 });

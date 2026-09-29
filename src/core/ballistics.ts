@@ -565,6 +565,12 @@ const REACH_NOISE_SIGMA = 6;
 const REACH_DISTANCE_STEP = 0.05;
 export const DEFAULT_BALLISTICS_SEED = 0x0ba1157;
 
+/**
+ * 탄도 모델 버전 (LUT 캐시 키 / 저장 레시피에 포함, 명세서 2.6.2 LUT 생성 실행 4)
+ * 명중 판정 / LUT 생성 규칙 / 투입구 기하가 바뀌는 커밋마다 1씩 올려 이전 캐시를 자동 무효화한다.
+ */
+export const BALLISTICS_MODEL_VERSION = 1;
+
 // v0 탐색 범위: 닫힌 해 ±20% (1% 간격) → 최고점 ±1% (0.1% 간격)
 const V0_COARSE_STEPS = 20;
 const V0_COARSE_STEP = 0.01;
@@ -613,6 +619,36 @@ export function sampleLUT(lut: HeatmapLUT, x: number, y: number): number {
  */
 export function snapSweetSpot(p: { x: number; y: number }): { x: number; y: number } {
   return { x: lutCellCenter(lutGridIndex(p.x)), y: lutCellCenter(lutGridIndex(p.y)) };
+}
+
+/**
+ * GUI 스윗스팟 입력 기준 셀 (명세서 3.8): 진영의 공식 시작 상향 셀.
+ * RED → RED_AUDIENCE(= 기준 셀 그대로), BLUE → BLUE_OPPOSITE(기준 셀의 필드 중심 점대칭)
+ */
+export function sweetSpotBasisCell(alliance: 'RED' | 'BLUE'): HiveCellKey {
+  return alliance === 'RED' ? 'RED_AUDIENCE' : 'BLUE_OPPOSITE';
+}
+
+// 필드 중심 (72, 72) 점대칭 (격자 중심 x.5 → x.5, mirrorLUTSet의 BLUE_OPPOSITE와 같은 변환)
+function pointMirror(p: { x: number; y: number }): { x: number; y: number } {
+  return { x: FIELD_SIZE - p.x, y: FIELD_SIZE - p.y };
+}
+
+/**
+ * 진영 기준 좌표(GUI 입력) → 저장용 기준 셀(RED_AUDIENCE) 좌표.
+ * 진영 기준 좌표에서 먼저 격자 중심으로 스냅한 뒤 변환하므로, 경계 위의 점도 사용자 화면에서 보인 격자가 그대로 쓰인다.
+ */
+export function sweetSpotFromBasis(p: { x: number; y: number }, alliance: 'RED' | 'BLUE'): { x: number; y: number } {
+  const snapped = snapSweetSpot(p);
+  return alliance === 'RED' ? snapped : pointMirror(snapped);
+}
+
+/**
+ * 저장된 기준 셀(RED_AUDIENCE) 좌표 → 진영 기준 좌표 (GUI 표시, LUT가 실제로 쓰는 격자 중심).
+ * 점대칭은 자기 자신이 역변환이므로 sweetSpotFromBasis와 같은 계산이다.
+ */
+export function sweetSpotToBasis(p: { x: number; y: number }, alliance: 'RED' | 'BLUE'): { x: number; y: number } {
+  return sweetSpotFromBasis(p, alliance);
 }
 
 export interface BallisticsIssue {
@@ -673,6 +709,18 @@ export function validateBallisticsConfig(config: BallisticsConfig, robotSize: Ro
 // 시드 파생: 같은 기준 시드에서 용도별 독립 스트림
 function deriveSeed(seed: number, salt: number): number {
   return (seed ^ Math.imul(salt + 1, 0x9e3779b1)) | 0;
+}
+
+/**
+ * 기준 시드 → 기물 종류별 용도 시드 (v0 탐색 = deriveSeed(seed, 2i), LUT = deriveSeed(seed, 2i + 1), i = PIECE_TYPES 순서)
+ * generateRobotLUTs와 Web Worker 작업 계획이 같은 시드를 쓰도록 공개 (명세서 2.6.2 LUT 생성 실행 1)
+ */
+export function robotLUTSeeds(seed = DEFAULT_BALLISTICS_SEED): Record<PieceType, { search: number; lut: number }> {
+  const out = {} as Record<PieceType, { search: number; lut: number }>;
+  PIECE_TYPES.forEach((type, i) => {
+    out[type] = { search: deriveSeed(seed, 2 * i), lut: deriveSeed(seed, 2 * i + 1) };
+  });
+  return out;
 }
 
 /**
@@ -825,11 +873,34 @@ export function generateReferenceLUT(
   seed = DEFAULT_BALLISTICS_SEED,
   options: ReferenceLUTOptions = {},
 ): HeatmapLUT {
+  return generateReferenceLUTRows(config, robotSize, pieceType, v0, samples, seed, 0, LUT_GRID_SIZE, options);
+}
+
+/**
+ * 기준 셀 LUT의 행 범위 [gyStart, gyEnd) 계산 (Web Worker 행 묶음 작업, 명세서 2.6.2 LUT 생성 실행 1)
+ * 반환 = Float32Array((gyEnd − gyStart) × 144), 반환 배열의 행 r = 전체 LUT의 행 gyStart + r.
+ * 격자 인덱스 / 난수 구간은 전체 LUT 기준 그대로이므로, 어떻게 나눠 계산해 이어 붙여도 generateReferenceLUT와 비트 단위로 같다.
+ * 범위는 정수로 내림한 뒤 [0, 144]로 제한하고, gyEnd < gyStart면 빈 배열.
+ */
+export function generateReferenceLUTRows(
+  config: BallisticsConfig,
+  robotSize: RobotSize,
+  pieceType: PieceType,
+  v0: number,
+  samples: number,
+  seed: number,
+  gyStart: number,
+  gyEnd: number,
+  options: ReferenceLUTOptions = {},
+): Float32Array {
+  const clampRow = (g: number) => Math.min(LUT_GRID_SIZE, Math.max(0, Math.floor(Number.isFinite(g) ? g : 0)));
+  const start = clampRow(gyStart);
+  const end = Math.max(start, clampRow(gyEnd));
   const skipUnreachable = options.skipUnreachable ?? true;
   const n = Math.max(1, Math.floor(samples));
-  const lut = new Float32Array(LUT_GRID_SIZE * LUT_GRID_SIZE);
+  const rows = new Float32Array((end - start) * LUT_GRID_SIZE);
   const aim = hiveCellAimPoint('RED', 'AUDIENCE_CELL');
-  for (let gy = 0; gy < LUT_GRID_SIZE; gy++) {
+  for (let gy = start; gy < end; gy++) {
     for (let gx = 0; gx < LUT_GRID_SIZE; gx++) {
       const x = lutCellCenter(gx);
       const y = lutCellCenter(gy);
@@ -837,10 +908,10 @@ export function generateReferenceLUT(
       if (skipUnreachable && !canPossiblyHit(x, y, v0, config)) continue;
       const index = lutIndex(gx, gy);
       const rng = createRng(seed, index * n * RNG_DRAWS_PER_SAMPLE);
-      lut[index] = estimateHitRate(x, y, v0, config, pieceType, n, rng);
+      rows[lutIndex(gx, gy - start)] = estimateHitRate(x, y, v0, config, pieceType, n, rng);
     }
   }
-  return lut;
+  return rows;
 }
 
 /**
@@ -910,12 +981,13 @@ export function generateRobotLUTs(
   if (issues.length > 0) return result;
 
   const snapped: BallisticsConfig = { ...config, sweetSpot: snapSweetSpot(config.sweetSpot) };
-  PIECE_TYPES.forEach((type, i) => {
-    const found = searchLaunchSpeed(snapped, type, options.searchSamples, deriveSeed(seed, 2 * i));
+  const seeds = robotLUTSeeds(seed);
+  PIECE_TYPES.forEach(type => {
+    const found = searchLaunchSpeed(snapped, type, options.searchSamples, seeds[type].search);
     if (!found) return;
     result.v0[type] = found.v0;
     result.sweetSpotHitRate[type] = found.hitRate;
-    const reference = generateReferenceLUT(config, robotSize, type, found.v0, options.samples, deriveSeed(seed, 2 * i + 1), options);
+    const reference = generateReferenceLUT(config, robotSize, type, found.v0, options.samples, seeds[type].lut, options);
     result.luts[type] = mirrorLUTSet(reference);
   });
   return result;

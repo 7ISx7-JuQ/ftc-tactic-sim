@@ -164,6 +164,7 @@
     - **스윗스팟 (한 점 입력):** 로봇마다 기준 셀 `RED_AUDIENCE`를 가장 잘 넣는 로봇 중심 좌표 **한 점**(`BallisticsConfig.sweetSpot`)만 입력받는다.
         - 기존 3-Tier(100% / 80% / 60%) 입력은 폐기: 명중 확률은 편차 모델의 몬테카를로가 계산하므로, 사용자가 추정한 80% / 60%로 보정하면 같은 편차를 이중 반영하고 덜 정확해진다. v0 고정 슈터의 명중 구역은 조준점 주변 거리 띠 형태로 넓게 나타나는데, 이는 입력이 아니라 LUT 결과로 드러난다. (실측 명중률은 향후 편차 파라미터 보정에 사용)
         - **GUI 입력 기준 (09-1):** GUI는 현재 시나리오 진영의 공식 시작 상향 셀(RED → `RED_AUDIENCE`, BLUE → `BLUE_OPPOSITE`)을 기준으로 스윗스팟을 입력 / 표시하고, BLUE는 필드 중심 점대칭 (x, y) ↔ (144 − x, 144 − y)로 변환해 저장한다. 저장값(`sweetSpot`)은 항상 `RED_AUDIENCE` 기준이므로 진영 변경은 LUT를 무효화하지 않는다 (3.8항).
+            - **구현 (09-2):** `sweetSpotBasisCell(alliance)`, `sweetSpotFromBasis(p, alliance)`(진영 기준 → 저장 좌표), `sweetSpotToBasis(p, alliance)`(저장 좌표 → 진영 기준). 두 변환 모두 **진영 기준 좌표에서 격자 중심으로 스냅한 뒤** 점대칭하여 격자 중심을 반환한다 → 격자 경계 위의 점(예: BLUE (84, 10))도 사용자가 화면에서 본 격자가 그대로 LUT / 검증에 쓰인다 (변환 후 스냅하면 경계에서 옆 격자가 선택됨).
         - **격자 중심 스냅 (`snapSweetSpot`):** 스윗스팟은 그 점을 담는 1 in 격자의 중심(x.5)으로 스냅한 뒤 검증 / v0 탐색한다 (경계 위의 점은 큰 쪽 격자, 예: (60, 135) → (60.5, 135.5)). LUT는 격자 중심에서만 명중률을 계산하므로, 격자 중심 기준으로 v0를 찾아야 스윗스팟 격자의 LUT 값이 탐색 명중률과 일치한다 (근거리 상승 사격은 명중 띠 폭이 격자보다 좁을 수 있음). GUI 격자 클릭 입력은 이미 격자 중심.
         - 검증 (`validateBallisticsConfig`, GUI 확정 버튼(LUT 생성) 비활성화, 스냅한 스윗스팟 기준, 엄격 적용 — 헤딩은 입력받지 않음. GUI는 조준점을 향해 돌린 로봇 몸체 윤곽과 실패 사유를 미리 보여줌): 조준점을 바라보는 로봇 몸체가 필드 안 — `SWEET_SPOT_OUT_OF_FIELD`, HIVE AABB와 겹치지 않음 — `SWEET_SPOT_IN_HIVE`, 닫힌 해 존재 — `SWEET_SPOT_NO_SOLUTION`, 파라미터 유효(발사각 (0, π/2), 유한값, 편차 ≥ 0, 로봇 크기 > 0) — `PARAM_INVALID`. v0 탐색 후 스윗스팟 명중률(`sweetSpotHitRate`)이 0이면 경고.
     - **2단계 몬테카를로 (로봇별 · 기물 종류별 독립):**
@@ -200,11 +201,12 @@
             - **풀 크기:** `max(1, min(navigator.hardwareConcurrency − 1, 8))` (UI 스레드용 코어 1개 남김). 풀은 앱 수명 동안 재사용.
             - **작업 단위:** (로봇, 기물 종류, 단계). 단계 ① v0 탐색 = 작업 1개 (분할 없음, 약 1~2초) → 단계 ② 기준 셀 LUT = 격자 행 묶음 작업 (기본 4행 = 576격자). 로봇 2대 × 기물 2종의 작업을 한 대기열에 넣고, 유휴 Worker가 다음 작업을 가져가는 동적 분배 (명중 띠가 지나는 행은 ③ 판정 비용이 커서 정적 분할보다 균형이 좋음). 같은 (로봇, 기물)의 ② 작업은 ① 완료 후 v0가 정해져야 대기열에 들어감.
             - **결정론:** 격자별 독립 난수 구간(2.6.2항 LUT 생성)이므로 어떤 분할 / 순서 / Worker 수로 계산해도 결과가 `generateRobotLUTs` 단일 스레드 결과와 비트 단위로 같다.
-            - **`ballistics.ts` 사전 준비 (Step 9 첫 작업):**
+            - **`ballistics.ts` 사전 준비 (Step 9 첫 작업, 09-2 구현 완료):**
                 - `generateReferenceLUTRows(config, robotSize, pieceType, v0, samples, seed, gyStart, gyEnd, options) → Float32Array((gyEnd − gyStart) × 144)`: `generateReferenceLUT`의 행 범위 버전. 격자 인덱스 / 난수 구간 계산은 전체 LUT 기준 그대로.
                 - `generateReferenceLUT`는 `generateReferenceLUTRows(…, 0, 144)`로 재작성하여 코드 중복 제거.
                 - 용도별 시드 파생(`deriveSeed(seed, 2i)` 탐색, `deriveSeed(seed, 2i + 1)` LUT)을 공개 함수(예: `robotLUTSeeds(seed)`)로 노출하여 Worker 작업 계획이 `generateRobotLUTs`와 같은 시드를 쓰게 함.
                 - 테스트: 임의 행 분할(예: 1행 / 7행 / 불균등)로 계산해 합친 LUT === `generateReferenceLUT` 결과, 작업 계획으로 만든 16장 === `generateRobotLUTs` 결과.
+                - **구현 (09-2):** `generateReferenceLUTRows`는 범위를 정수로 내림한 뒤 [0, 144]로 제한하고 `gyEnd < gyStart`면 빈 배열 (반환 행 r = 전체 행 `gyStart + r`). `robotLUTSeeds(seed = DEFAULT_BALLISTICS_SEED) → Record<PieceType, { search, lut }>`(`generateRobotLUTs`도 이 함수를 사용). 리팩터링 전후 `generateRobotLUTs` 결과가 비트 단위로 같음을 확인.
             - **메시지 규약:** 메인 → Worker `{ kind: 'search' | 'rows', jobId, generation, robotId, pieceType, config, robotSize, samples, seed, gyStart?, gyEnd?, v0? }`, Worker → 메인 `{ kind: 'progress', jobId, cellsDone }` (행 1개마다) / `{ kind: 'result', jobId, generation, v0?, hitRate?, rows? }` / `{ kind: 'error', jobId, message }`. 결과 `Float32Array`는 transferable로 넘겨 복사 비용 0.
             - **조립:** 메인 스레드가 (로봇, 기물)별 기준 LUT `Float32Array(144 × 144)`에 행 결과를 복사하고, 모든 행이 모이면 `mirrorLUTSet`으로 4셀을 만들어 `RobotHeatmapLUTs` 완성.
             - **예상 시간:** 8코어 기준 로봇 1대 약 8~10초, 4코어 약 15~20초 (단일 스레드 30~60초 ÷ Worker 수 + 분배 오버헤드). 두 로봇이 동시에 진행되므로 전체 대기도 비슷한 수준. 모바일은 더 느림.
@@ -223,7 +225,7 @@
             - **사용 흐름 예:** 로봇 1 탄도 확정 → 생성 시작 → 그동안 로봇 2 입력 / 확정 → 시나리오 입력 → 대부분 입력이 끝날 즈음 생성 완료.
         4. **IndexedDB 캐시:**
             - **캐시 키:** `crypto.subtle.digest('SHA-256')`로 만든 정규화 JSON의 해시 — `{ BALLISTICS_MODEL_VERSION, BallisticsConfig(스윗스팟은 스냅한 좌표, 편차 미지정 값은 기본값으로 채움), robot length / width, seed, samples, searchSamples }`. `skipUnreachable`은 결과가 같으므로 키에서 제외.
-            - **`BALLISTICS_MODEL_VERSION`:** `ballistics.ts`에 둘 정수 상수. 명중 판정 / LUT 생성 규칙 / 투입구 기하가 바뀌는 커밋마다 올려서 이전 캐시를 자동 무효화 (예: 06-4의 진입 면 / 림 벽 판정 변경은 버전 증가 대상).
+            - **`BALLISTICS_MODEL_VERSION`:** `ballistics.ts`의 정수 상수 (09-2에서 1로 시작). 명중 판정 / LUT 생성 규칙 / 투입구 기하가 바뀌는 커밋마다 올려서 이전 캐시를 자동 무효화 (예: 06-4의 진입 면 / 림 벽 판정 변경은 버전 증가 대상).
             - **저장 형식:** DB `ftc-tactic-sim`, 저장소 `lutCache`, 레코드 `{ key, modelVersion, createdAt, lastUsedAt, v0: {POLLEN, NECTAR}, sweetSpotHitRate: {POLLEN, NECTAR}, reference: {POLLEN: ArrayBuffer, NECTAR: ArrayBuffer} }`. 기준 셀 LUT만 저장(로봇당 2 × 82,944 B ≈ 166 KB)하고, 불러올 때 `mirrorLUTSet`으로 4셀 복원 (복원 비용 무시 가능).
             - **정리:** `lastUsedAt` 기준 LRU로 최대 20개(약 3.3 MB) 유지, 초과분은 저장 시 삭제.
             - **조회 흐름:** 확정 시 캐시 먼저 조회 → 적중하면 즉시 `READY` (Worker 미사용) → 없으면 생성 후 저장.
@@ -1089,6 +1091,7 @@ export interface TimelineFrame {
 | 08-6 | 장면 렌더러 3: 비행 공(명목 구간 보간 + 끝점 보정, 충돌 후 구간, 그림자 / 높이 오프셋 / 크기), 표시 옵션 5종 (아래 6.2.19) | `src/renderer/flightView.ts`, `renderOptions.ts`, `sceneRenderer.ts`, `__tests__/flightView.test.ts`, `__tests__/renderOptions.test.ts` |
 | 08-7 | 개발 하네스: 정식 엔진 / 입력 / 실시간 루프 / 렌더러 화면 연결, 회전 후 루프 시작, 옵션 체크박스 (아래 6.2.20) — Step 8 완료 | `src/dev/devSetup.ts`, `harnessController.ts`, `DevHarness.tsx`, `src/dev/__tests__/harness.test.ts`, `App.tsx`, `App.css` |
 | 09-1 | 웹 GUI 명세 구체화 (메인 화면 / config 창 / 앱 상태 흐름 / 재생 · 재개 · 분기 / 단위 / 스윗스팟 진영 기준 / 배치 검증 / 결과 팝업 / 하위 Step 분할) (아래 6.2.21) | 명세서 |
+| 09-2 | `ballistics.ts` LUT 병렬 생성 사전 준비: 행 범위 LUT, 시드 파생 공개, 모델 버전, 스윗스팟 진영 기준 변환 (아래 6.2.22) | `ballistics.ts`, `__tests__/ballistics.test.ts` |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
@@ -1282,6 +1285,12 @@ export interface TimelineFrame {
 - **배치 검증:** `validateRobotPlacement()` 오류 코드 5종(닿음 허용, 침투 > 1e-6 in만 오류) + `reset()` 사전 보정 (6.4항에서 Step 9로 이동).
 - **설정 자동 보관:** 마지막 적용 설정 + UI 환경설정을 `localStorage`에 보관 (경기 기록 제외). JSON 내보내기 / 불러오기는 Step 10.
 
+### 6.2.22 Step 09-2 (LUT 병렬 생성 사전 준비) 완료 항목
+
+- **`ballistics.ts`:** `generateReferenceLUTRows`(행 범위 [gyStart, gyEnd), 전체 LUT 기준 격자 인덱스 / 난수 구간, 범위 내림 · [0, 144] 제한 · 역순 = 빈 배열), `generateReferenceLUT` = `generateReferenceLUTRows(…, 0, 144)`, `robotLUTSeeds(seed)`(기물 종류별 탐색 / LUT 시드, `generateRobotLUTs`가 사용), `BALLISTICS_MODEL_VERSION = 1`, `sweetSpotBasisCell` / `sweetSpotFromBasis` / `sweetSpotToBasis`(진영 기준 좌표에서 스냅 후 점대칭).
+- **리팩터링 동일성:** 이전 커밋의 `ballistics.ts`와 `generateRobotLUTs` 결과(탄도 설정 2종 × 로봇 크기 2종, v0 / 명중률 / LUT 8장)가 비트 단위로 같음을 일회성 비교로 확인.
+- **테스트 (`__tests__/ballistics.test.ts` Q):** 행 분할(1행 / 7행 / 불균등 / 전체, 역순 처리) 조립 === `generateReferenceLUT`, 부분 행 = 전체의 해당 구간, 빈 / 역순 / 범위 밖 / 소수 범위, `skipUnreachable` 전달, 시드 파생(기본값 고정 값, 4개 서로 다름, 기준 시드 의존), 작업 계획(로봇 2대 × 기물 2종, v0 탐색 → 4행 묶음 역순 → 조립 → 대칭 복사) 16장 === `generateRobotLUTs`, 모델 버전 양의 정수, 스윗스팟 진영 기준(RED 스냅만, BLUE 점대칭, 경계 클릭 격자 유지, 필드 가장자리 포함 왕복, BLUE 조준점 = 기준 조준점 점대칭, BLUE 기준 HIVE 앞 → `SWEET_SPOT_IN_HIVE`, BLUE 기준 스윗스팟 격자의 `BLUE_OPPOSITE` 값 = 기준 값). 난수 구간 지역 인덱스 사용, 행 오프셋 누락, 변환 후 스냅, 시드 용도 뒤바뀜, 점대칭 143 기준, 범위 제한 누락 각각에서 실패함을 확인.
+
 ### 6.3 남은 Step (권장 순서)
 
 > 모든 Step은 완료 시 `npm test`(엔진 회귀 테스트)가 통과해야 하며, 새로 추가한 규칙에는 테스트 그룹을 추가한다.
@@ -1306,9 +1315,9 @@ export interface TimelineFrame {
     - ~~08-5: HIVE(아군 셀 상태, 시차 낙하 연출), FLOWER 게이지(필드 밖 9칸, 잼, 가득 참 X), NECTAR 재고 게이지(게이지 틀은 정적 레이어에 추가), 경기 종료 강조.~~ (완료, 6.2.18)
     - ~~08-6: 비행 공(명목 구간 보간 + 높이 보정, 충돌 후 구간, 그림자 / 오프셋 / 크기), 표시 옵션 5종.~~ (완료, 6.2.19)
     - ~~08-7: 개발 하네스(정식 엔진 / 입력 / 루프 + 간이 판정 함수, 시작 회전 후 루프 시작, 옵션 체크박스) + 헤드리스 Chromium 점검.~~ (완료, 6.2.20)
-- **Step 9 — 웹 GUI (React, 상세 규칙 3.8항):** 09-1(명세) 완료.
+- **Step 9 — 웹 GUI (React, 상세 규칙 3.8항):** 09-1(명세), 09-2(탄도 사전 준비) 완료.
     - ~~09-1: 웹 GUI 명세 구체화.~~ (완료, 6.2.21)
-    - 09-2: `ballistics.ts` 사전 준비 — `generateReferenceLUTRows`(+ `generateReferenceLUT` 재작성), `robotLUTSeeds`, `BALLISTICS_MODEL_VERSION`, 스윗스팟 진영 기준 변환 함수 + 분할 동일성 / 작업 계획 동일성 테스트 (2.6.2항 LUT 생성 실행 1).
+    - ~~09-2: `ballistics.ts` 사전 준비 — `generateReferenceLUTRows`, `robotLUTSeeds`, `BALLISTICS_MODEL_VERSION`, 스윗스팟 진영 기준 변환 함수 + 분할 / 작업 계획 동일성 테스트.~~ (완료, 6.2.22)
     - 09-3: LUT Worker 풀(`src/workers/lutWorker.ts`) + 작업 대기열 + 조립 + 로봇별 상태 머신 / 취소 (React 비의존, 가짜 Worker 테스트).
     - 09-4: IndexedDB LUT 캐시 (캐시 키 / LRU 20개 / 실패 허용).
     - 09-5: `validateRobotPlacement()` + `reset()` 사전 보정 + 엔진 회귀 테스트 그룹.
