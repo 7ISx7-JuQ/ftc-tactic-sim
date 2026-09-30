@@ -128,7 +128,7 @@ export function NumberField({ id, label, spec, value, invalidText, unit, lang, d
   unit: LengthUnit;
   lang: Language;
   disabled?: boolean;
-  checkValue?: boolean;          // 저장된 값 자체도 범위 검사 (범위가 다른 칸에 따라 바뀌는 흡입 구역 offset 등)
+  checkValue?: boolean;          // 저장된 값 자체도 범위 검사 (범위가 다른 칸에 따라 바뀌는 흡입 구역 offset 등, 10-2: 프리셋 파일로 들어온 범위 밖 값)
   onValue: (value: number) => void;
   onInvalid: (text: string) => void;
 }) {

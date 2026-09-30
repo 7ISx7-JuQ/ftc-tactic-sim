@@ -1981,3 +1981,38 @@
   border-color: var(--error);
   color: #fca5a5;
 }
+
+/* ---------------- 프리셋 파일 (10-2) ---------------- */
+.preset-file-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 6);
+}
+.preset-file-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--u) * 4) calc(var(--u) * 8);
+  padding: calc(var(--u) * 6) calc(var(--u) * 10);
+  border-radius: calc(var(--u) * 8);
+  border: 1px solid var(--panel-border);
+  font-size: calc(var(--u) * 12);
+}
+.preset-file-name {
+  font-weight: 800;
+  min-width: calc(var(--u) * 64);
+}
+.preset-file-desc {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.preset-file-error {
+  flex-basis: 100%;
+}

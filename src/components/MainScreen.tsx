@@ -24,6 +24,9 @@ import type { RobotLutView } from '../ui/lutView';
 import { DT, MATCH_TICKS } from '../core/simulationEngine';
 import { t } from '../ui/i18n';
 import { DEFAULT_SETTINGS, browserSettingsStorage, loadStoredConfig, saveStoredConfig } from '../ui/settings';
+import { buildPresetFile, importOverwriteTabs, importPresetToDrafts, parsePresetFile, presetErrorMessage, presetFileName, presetLoadedNotice, tabNames } from '../ui/presetFile';
+import type { PresetError, PresetRow } from '../ui/presetFile';
+import { downloadTextFile, pickTextFile } from '../ui/fileTransfer';
 import type { UiSettings } from '../ui/settings';
 import { branchConfirmParams, fieldCanvasSize, layoutCssVars, robotLabel } from '../ui/mainScreenModel';
 import {
@@ -114,6 +117,8 @@ export default function MainScreen() {
   const [configOpen, setConfigOpen] = useState(false);
   const [configTab, setConfigTab] = useState<ConfigTab>('robot1');
   const [configNotice, setConfigNotice] = useState<string | null>(null);
+  // 프리셋 불러오기 거부 사유 (그 줄 아래 빨간 글자, 10-2)
+  const [presetError, setPresetError] = useState<{ row: PresetRow; error: PresetError } | null>(null);
   const initialApplied = useRef(drafts.applied);
   const initialSettings = useRef(settings);
   // 명중 확률표 (09-10a): 추적기 / 경기 설정에 쓴 적용 값 · LUT 결과 / 화면 요약
@@ -344,6 +349,34 @@ export default function MainScreen() {
       for (const tab of DRAFT_TABS) d = resetTabDraft(d, tab, DEFAULT_DRAFT_VALUES);
       setDrafts(d);
       saveStoredConfig(settingsStorage, { settings: next, applied: d.applied });
+    });
+  };
+  // ---------------- 프리셋 파일 (10-2): EXPORT = 적용 값 → 파일(언제나), IMPORT = 파일 → 초안(경기 전만, APPLY는 각 탭) ----------------
+  const exportPreset = (row: PresetRow) => {
+    setPresetError(null);
+    downloadTextFile(presetFileName(row, drafts.applied, new Date()), buildPresetFile(row, drafts.applied));
+  };
+  const importPreset = (row: PresetRow) => {
+    if (locked) return;
+    setPresetError(null);
+    void pickTextFile().then(picked => {
+      if (!picked) return;
+      const parsed = picked.ok ? parsePresetFile(picked.text, row, DEFAULT_DRAFT_VALUES) : { ok: false as const, error: { code: picked.code } };
+      if (!parsed.ok) {
+        setPresetError({ row, error: parsed.error });
+        return;
+      }
+      const doImport = () => {
+        setDrafts(d => importPresetToDrafts(d, parsed.preset));
+        setConfigNotice(presetLoadedNotice(lang, row));
+      };
+      // 바꿀 탭에 적용 안 된 수정 / 틀린 입력이 있으면 덮어쓰기 전에 확인 (COPY TO와 같은 규칙)
+      const overwrite = importOverwriteTabs(drafts, row);
+      if (overwrite.length === 0) doImport();
+      else
+        void ask(t(lang, 'confirm.importOverwrite', { tabs: tabNames(lang, overwrite) }), t(lang, 'preset.import')).then(ok => {
+          if (ok) doImport();
+        });
     });
   };
   // 화면 언어 (문서 lang 속성도 맞춤)
@@ -683,6 +716,7 @@ export default function MainScreen() {
                 clearEditPointer();
               }
               setConfigNotice(null);
+              setPresetError(null);
             }}
             onClose={closeConfig}
             onApply={applyCurrentTab}
@@ -696,6 +730,10 @@ export default function MainScreen() {
                   onSettings={updateSettings}
                   onSourceChoice={(robot, choice) => c()?.setSourceChoice(robot, choice)}
                   onResetAll={resetAll}
+                  teams={{ robot1: drafts.applied.robot1, robot2: drafts.applied.robot2 }}
+                  presetError={presetError && { row: presetError.row, message: presetErrorMessage(lang, presetError.error) }}
+                  onPresetExport={exportPreset}
+                  onPresetImport={importPreset}
                 />
               ) : configTab === 'robot1' || configTab === 'robot2' ? (
                 <RobotTab

@@ -1016,6 +1016,12 @@
         - 파일 형식: `{ "format": "ftc-tactic-sim/preset", "presetVersion": 1, "kind": "ROBOT" | "SCENARIO" | "SETUP", "data": ... }` (`SETUP`의 `data` = `{ robot1, robot2, scenario }`).
         - `EXPORT`는 SETTINGS 탭을 볼 수 있으면 언제나(경기 중 일시정지 포함, 적용 값이라 경기에 영향 없음). `IMPORT`는 경기 전에만 (초안은 경기 전에만 편집 가능, 3.8항).
         - 불러오기 규칙: 파일 자체가 틀리면 거부(JSON 아님 / `format` 다름 / `kind`가 그 줄과 다름 / `presetVersion`이 현재보다 큼, 줄 아래 빨간 글자). 항목이 없거나 형식이 틀리면 **그 항목만 기본값**(자동 보관과 같은 정리 함수). 범위 검증에 걸리는 값은 버리지 않고 초안에 넣어 빨간 오류로 보여 준다 (사용자가 고쳐서 `APPLY`). 불러온 값은 **초안**에만 들어가고 기존 `APPLY` 흐름(LUT 재생성 포함)을 탄다. 적용 안 된 수정이 있는 탭에 넣으면 `COPY TO`와 같은 덮어쓰기 확인창.
+        - **구현 (10-2):**
+            - 순수 규칙 `src/ui/presetFile.ts`: `PRESET_FORMAT` / `PRESET_VERSION = 1`, 줄 `PresetRow`(`robot1` / `robot2` / `scenario` / `all`) → 종류(`ROW_KIND`) / 바꾸는 탭(`ROW_TABS`). `buildPresetFile`(적용 값 → 2칸 들여쓴 JSON, 로봇 데이터에 슬롯 id 없음), `presetFileName` / `fileTimestamp`(로컬 `YYYYMMDD-HHmm`, 10-4 재사용) / `safeFileName`. `parsePresetFile(text, row, defaults)` → 거부 코드 `NOT_JSON` / `NOT_PRESET`(형식 · 버전 · 종류 값 · `data` 틀림) / `MATCH_FILE`(경기 레시피) / `NEWER_VERSION` / `WRONG_KIND`, 파일 선택 쪽 `TOO_LARGE`(1 MB 초과) / `READ_FAILED`.
+            - 항목별 정리: 로봇(`sanitizeRobotPreset`) = 숫자 항목은 유한값만, 문자열 / 불리언 / 슈터 형식 / 터렛 범위(숫자 2개)는 형식이 맞을 때만, 흡입 구역은 형식이 맞는 구역만 남기고 최대 8개, 탄도는 항목별, 슬롯 id는 줄이 정함. 팀 번호 / 팀명이 입력칸 규칙에 어긋나면 값은 비우고 그 글자를 초안의 틀린 입력 글자로 보관(빨간 칸, 탭 `INVALID`). 시나리오(`sanitizeScenarioPreset`) = 선택 항목은 없으면 기본 시나리오 그대로, 형식이 틀린 항목만 기본값(시작 자세 x / y / heading, 적재물 `POLLEN` / `NECTAR` 목록, FLOWER 4개, GARDEN 두 값 등), 모르는 항목은 버림. 범위 검사는 하지 않음(초안의 탭 검증이 표시).
+            - `importPresetToDrafts`: 그 줄의 탭 초안 교체 + 그 탭의 틀린 입력 글자 지움 → 틀린 팀 글자만 다시 보관, 적용 값 불변. `importOverwriteTabs`(바꿀 탭 중 `OK`가 아닌 탭 → 덮어쓰기 확인창), `presetErrorMessage` / `presetLoadedNotice`(config 창 안내 줄).
+            - 화면: SETTINGS 탭 `Presets` / "프리셋" 구역(화면과 초기화 사이) — 줄 이름(`R1` / `R2` / `SCENARIO` / `ALL`, 한국어 탭 이름 / "전체") + 설명(로봇 = 적용된 `#팀 번호 팀명`, 전체 = `R1 + R2 + SCENARIO`) + `EXPORT` / `IMPORT`(lucide `Download` / `Upload`, 한국어 "내보내기" / "불러오기"). 경기 중에는 `IMPORT` 비활성 + 안내. 거부 사유는 오류 코드로 보관해 그릴 때 현재 언어로 만들고, 탭을 옮기면 지움. 파일 도우미 `src/ui/fileTransfer.ts`(`downloadTextFile` = Blob + `<a download>`, `pickTextFile` = 숨긴 `<input type=file>`, 취소 이벤트 → null). `MATCH` 줄은 10-4에서 추가.
+            - **(10-2 보완)** 로봇 탭 숫자 칸 전부에 저장 값 범위 검사(`checkValue`)를 켠다 (전에는 흡입 구역 칸만). 폼으로만 값이 들어오던 때는 범위 밖 값이 없었지만, 파일로 들어온 범위 밖 값이 탭 빨간 점만 뜨고 어느 칸인지 보이지 않았음.
     - **파일 이름 (로컬 시각, 파일 이름에 쓸 수 없는 글자는 `_`):**
         - 경기 `tacticsim-match_{YYYYMMDD-HHmm}_{RED|BLUE}_{총점}pts.json`, 원본이 아닌 가지는 끝에 `_b{번호}` (예: `tacticsim-match_20260930-1432_RED_87pts_b3.json`), 요약은 같은 이름의 `tacticsim-summary_….txt`.
         - 프리셋 `tacticsim-robot_{팀 번호, 없으면 R1 / R2}.json`, `tacticsim-scenario_{RED|BLUE}.json`, `tacticsim-setup_{YYYYMMDD-HHmm}.json`.
@@ -1371,6 +1377,7 @@ export interface TimelineFrame {
 | 09-11b | 시작 자세 편집 모드 `EDIT ON FIELD`: 몸체 끌기 = 위치, 회전 핸들 = 헤딩(스냅 없음, 0.1 in / 0.1° 반올림), 겹침 흰 빗금 + 사유, 로봇 위 좌표 글자, `DONE · APPLY` / `CANCEL` · Esc · `START` 되돌림 (아래 6.2.42) — 09-11 완료 | `src/renderer/spawnEditLayout.ts`, `editSceneRenderer.ts`, `src/ui/fieldEdit.ts`, `scenarioForm.ts`, `simulationEngine.ts`(GARDEN 좌표 공개), `FieldEditBanner.tsx`, `ScenarioTab.tsx`, `MainScreen.tsx`, `i18n.ts`, `MainScreen.css`, 테스트 |
 | 09-12 | 결과 팝업 확정(로봇 칩, 항목별 점수 + 한 줄 근거, RP 카드 조건 + 진행) + 개발 하네스 / `tmp_shots.ts` 삭제 (아래 6.2.43) — Step 9 완료 | `src/ui/resultModel.ts`, `ResultPopup.tsx`, `appController.ts`, `MainScreen.tsx`, `App.tsx`, `i18n.ts`, `MainScreen.css`, 삭제: `src/dev/`, `App.css`, `src/tmp_shots.ts`, 테스트 |
 | 10-1 | 분기 타임라인 / 경기 저장 · 공유 명세 구체화 (적용 입력 기록, 레시피 형식 · 체크섬 · 버전, 경기 불러오기 / 내보내기, 분기 트리 · 가지 상한 8 · 메모리 측정, 프리셋 파일, 하위 Step 분할) (아래 6.2.44) | 명세서 |
+| 10-2 | 프리셋 파일: 순수 직렬화 / 해석 / 항목별 정리 / 초안 반영 + SETTINGS 탭 `PRESETS` 구역(줄별 `EXPORT` / `IMPORT`, 거부 사유, 덮어쓰기 확인창) + 파일 도우미, 로봇 탭 숫자 칸 저장 값 범위 검사 (아래 6.2.45) | `src/ui/presetFile.ts`, `fileTransfer.ts`, `SettingsTab.tsx`, `MainScreen.tsx`, `RobotTab.tsx`, `FormControls.tsx`, `i18n.ts`, `MainScreen.css`, `src/ui/__tests__/presetFile.test.ts` |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
@@ -1717,6 +1724,13 @@ export interface TimelineFrame {
 - **보완 (3.6 / 3.8 / 2.6.2항):** 분기 폐기 규칙은 새 가지 사본에만 적용(10-1 변경 표기), 적용 입력 기록 항목, 상태 흐름 그림 / 분기 확인창 문구 / 스크러버 표 가지 줄, SETTINGS `PRESETS` 줄, 결과 팝업 내보내기 버튼, 5장 개발 지시사항 11 추가.
 - **측정 (저장소 밖 1회성, Node V8, 기본 설정 + 사인파 주행 / 흡입 / 발사 입력):** 끝까지 진행한 경기 6001프레임 힙 약 38 MB / 경기, `runFullMatch` 1.2 ~ 1.5초, 같은 입력 5회 종료 프레임 동일. 최악 8개 가지 약 370 MB 추정 → 데스크톱 Chrome 탭 힙 상한(약 4 GB) 안이라 전 가지 유지, 브라우저 실측은 10-5.
 
+### 6.2.45 Step 10-2 (프리셋 파일) 완료 항목
+
+- **결정:** 3.9항 프리셋 규칙 그대로. 명세에 없던 세부: ① 파일 크기 상한 1 MB ② 흡입 구역은 형식이 맞는 구역만 남기고 8개까지 자름 ③ 경기 파일을 프리셋 줄에 넣으면 따로 알림(`MATCH_FILE`) ④ 로봇 줄 설명 = 적용된 팀 번호 + 팀명 ⑤ 로봇 탭 숫자 칸 전부 저장 값 범위 검사 (3.9항 "구현 (10-2)").
+- **구현:** 3.9항 "구현 (10-2)" 참고.
+- **테스트:** `src/ui/__tests__/presetFile.test.ts` A~I(줄별 왕복 · 슬롯 id 없음 · R1 파일을 R2로, 거부 7종, 로봇 항목별 정리(범위 밖 유지 · 형식 틀림만 기본값 · 구역 8개 · 원본 불변), 틀린 팀 글자 → 틀린 입력 글자 · `INVALID`, 시나리오 항목별 정리 → 범위 밖이면 탭 `INVALID`, `ALL` 초안 3개 · 적용 값 불변 · 틀린 입력 글자 지움, 파일 이름, 덮어쓰기 대상 탭, 문구 영어 / 한국어). 돌연변이 12종 중 11종 실패 확인 — 남은 1종(시나리오 항목 값이 `undefined`면 건너뛰기)은 JSON에서 나올 수 없는 동등 변이라 조건을 지우고 단순화.
+- **헤드리스 Chromium 점검 (저장소 밖 1회성, 개발 서버 1366 × 768):** SETTINGS `Presets` 구역 4줄, R1 `EXPORT` → `tacticsim-robot_R1.json`(`kind` `ROBOT`, 슬롯 id 없음), `ALL` `EXPORT` → `tacticsim-setup_{시각}.json`, `ALL` 파일을 R1 줄에 → "This file goes on the ALL row", 틀린 팀 번호 + 최고 속도 999 파일을 R2 줄에 → 안내 줄 + R2 탭 빨간 점, R2 탭에서 "Digits only, up to 5" / "Must be 1.00 – 200.00 in/s"(이 점검에서 숫자 칸 범위 표시 누락을 발견해 보완) + `APPLY` 비활성, 고친 파일을 다시 R2 줄에 → 덮어쓰기 확인창 → Enter → 팀 `12345 Bumblebots` → `APPLY`, 한국어 화면(줄 이름 / 버튼 / "JSON 파일이 아님"). 콘솔 오류 없음.
+
 ### 6.3 남은 Step (권장 순서)
 
 > 모든 Step은 완료 시 `npm test`(엔진 회귀 테스트)가 통과해야 하며, 새로 추가한 규칙에는 테스트 그룹을 추가한다.
@@ -1774,7 +1788,7 @@ export interface TimelineFrame {
 - **Step 10 — 분기 타임라인 및 경기 저장/공유:** (09-1 추가) 로봇 프로필 / 시나리오 JSON 내보내기 · 불러오기(SETTINGS 탭 프리셋 관리), 결과 팝업 로그 / JSON 내보내기. 분기 트리(부모 프레임 공유, 분기 이후 프레임만 생성), 저장 레시피(설정 + 시나리오 + 시드 + 양자화 입력 로그 + 탄도 설정 / LUT 시드 / 샘플 수 / `BALLISTICS_MODEL_VERSION` + 엔진 버전 + 상태 체크섬, LUT 자체는 저장하지 않고 캐시 또는 재생성). 레시피 약 50 KB 수준으로 파일/IndexedDB 저장 가능 (10-1: v1은 파일만). 입력 로그 형식(로봇별 틱당 4 B, 8비트)은 3.6항, 저장 시 연속 중복 압축.
     - 10-1(명세) 완료. 상세 규칙 3.9항. 하위 Step (각 Step 완료 시 `npm test` / `npx tsc -b` / `npm run build` 통과):
     - ~~10-1: 분기 타임라인 / 경기 저장 · 공유 명세 구체화.~~ (완료, 6.2.44)
-    - 10-2: 프리셋 파일 — 순수 직렬화 / 해석 / 정리(`ROBOT` / `SCENARIO` / `SETUP`, 자동 보관 정리 함수 재사용) + SETTINGS 탭 `PRESETS` 구역(`R1` / `R2` / `SCENARIO` / `ALL` 줄 `EXPORT` / `IMPORT`, 초안 반영 · 덮어쓰기 확인창 · 거부 사유) + 파일 다운로드 / 선택 도우미 + 테스트 (스크린샷 확인).
+    - ~~10-2: 프리셋 파일 — 순수 직렬화 / 해석 / 정리(`ROBOT` / `SCENARIO` / `SETUP`, 자동 보관 정리 함수 재사용) + SETTINGS 탭 `PRESETS` 구역(`R1` / `R2` / `SCENARIO` / `ALL` 줄 `EXPORT` / `IMPORT`, 초안 반영 · 덮어쓰기 확인창 · 거부 사유) + 파일 다운로드 / 선택 도우미 + 테스트 (스크린샷 확인).~~ (완료, 6.2.45)
     - 10-3: 레시피 저장 순수 계층 — 적용 입력 기록(`MatchInputs.applied`, 분기 시 자름), `ENGINE_VERSION` / `RECIPE_VERSION`, `frameChecksum` + 체크포인트, 입력 RLE + Base64 부호화 / 해독, 레시피 만들기 / 해석 · 검증(거부 사유 코드) + 재현 테스트(저장 → 해독 → 재계산 체크섬 전부 일치, `REPLAY` → `NONE` 전환 경기, 버전 누락 방지 기대값).
     - 10-4: 경기 불러오기 / 내보내기 연결 — `IMPORT MATCH`(확인창 + 버전 경고, 적용 값 교체, LUT 준비 · 취소, 재계산, 복기 상태, 체크섬 불일치 배너) + 결과 팝업 `EXPORT MATCH` / `EXPORT SUMMARY`(요약 텍스트 규칙) + 파일 이름 규칙 (스크린샷 확인).
     - 10-5: 분기 트리 엔진 / 컨트롤러 — 엔진 타임라인 객체 교체 API(분기 = 0 ~ T 참조 공유, 전환 = 교체), 가지 트리 규칙(`MAX_BRANCHES = 8`, 번호 / 이름, 삭제 = 하위 포함, 원본 보호), 가지별 녹화 로그 사본 / 적용 입력 기록, 전환 시 루프 상태(일시정지 / 복기), `endSeq` 규칙, `NEW` = 트리 폐기 + 테스트 + 헤드리스 Chromium 8개 가지 힙 측정.

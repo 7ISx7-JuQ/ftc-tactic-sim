@@ -96,6 +96,7 @@ export default function RobotTab({ robotId, profile, fieldText, unit, lang, lock
       unit={unit}
       lang={lang}
       disabled={locked}
+      checkValue
       onValue={v => onEdit(writeNumber(profile, key, v), key, null)}
       onInvalid={text => onEdit(null, key, text)}
     />
@@ -285,6 +286,7 @@ export default function RobotTab({ robotId, profile, fieldText, unit, lang, lock
               unit={unit}
               lang={lang}
               disabled={locked}
+              checkValue
               onValue={v => onEdit(writeSweetSpot(profile, alliance, axis, v), sweetSpotFieldKey(axis), null)}
               onInvalid={text => onEdit(null, sweetSpotFieldKey(axis), text)}
             />

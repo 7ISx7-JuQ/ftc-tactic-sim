@@ -1,7 +1,8 @@
 // SETTINGS 탭 (명세서 3.8 SETTINGS 탭, 09-8b): 게임패드(읽기 전용) / 입력(출처 · 조작 모드 · 키보드 + 키보드 조작표) /
 // 표시 옵션 / 화면(언어 · 단위 · 기본 보기) / 초기화(RESET ALL, 경기 전만). 바꾸는 즉시 적용 (APPLY 없음).
 // 입력 출처 / 조작 모드 / 키보드는 다음 START / RESUME / BRANCH부터 경기에 적용된다 (컨트롤러가 보관).
-import { TriangleAlert } from 'lucide-react';
+// 10-2: 프리셋(PRESETS) — 줄별 EXPORT(적용 값 → 파일, 언제나) / IMPORT(파일 → 초안, 경기 전만), 거부 사유는 그 줄 아래 빨간 글자.
+import { Download, TriangleAlert, Upload } from 'lucide-react';
 import type { AppStatus } from '../app/appController';
 import { MATCH_SOURCE_CHOICES, SETUP_SOURCE_CHOICES } from '../app/inputPlan';
 import type { SourceChoice } from '../app/inputPlan';
@@ -14,6 +15,9 @@ import type { Language, MessageKey } from '../ui/i18n';
 import { LENGTH_UNITS } from '../ui/units';
 import type { LengthUnit } from '../ui/units';
 import { robotLabel } from '../ui/mainScreenModel';
+import { PRESET_ROWS } from '../ui/presetFile';
+import type { PresetRow } from '../ui/presetFile';
+import { TAB_LABEL_KEYS } from '../ui/configDraft';
 import { keyCodeLabel } from '../ui/settings';
 import { Section, Segmented, Toggle } from './FormControls';
 import type { UiSettings } from '../ui/settings';
@@ -22,6 +26,9 @@ const ROBOTS: readonly RobotId[] = ['robot1', 'robot2'];
 const OPTION_KEYS: readonly (keyof RenderOptions)[] = ['aimGuide', 'intakeProgress', 'hitProbability', 'flightTrail', 'flightResult'];
 const DRIVE_MODES: readonly DriveMode[] = ['FIELD', 'ROBOT'];
 const VIEWS: readonly ViewMode[] = ['DRIVER', 'AUDIENCE'];
+// 로봇 프리셋 줄 설명: 적용된 팀 번호 + 팀명 (없으면 빈칸)
+const teamText = ({ teamNumber, teamName }: { teamNumber: string; teamName: string }) =>
+  [teamNumber.trim() && `#${teamNumber.trim()}`, teamName.trim()].filter(Boolean).join(' ');
 
 export default function SettingsTab({
   status,
@@ -30,6 +37,10 @@ export default function SettingsTab({
   onSettings,
   onSourceChoice,
   onResetAll,
+  teams,
+  presetError,
+  onPresetExport,
+  onPresetImport,
 }: {
   status: AppStatus;
   lang: Language;
@@ -37,6 +48,10 @@ export default function SettingsTab({
   onSettings: (patch: Partial<UiSettings>) => void;
   onSourceChoice: (robot: RobotId, choice: SourceChoice) => void;
   onResetAll: () => void;
+  teams: Record<RobotId, { teamNumber: string; teamName: string }>; // 적용 값 (로봇 줄 설명)
+  presetError: { row: PresetRow; message: string } | null;
+  onPresetExport: (row: PresetRow) => void;
+  onPresetImport: (row: PresetRow) => void;
 }) {
   const { input } = status;
   const inMatch = status.phase !== 'SETUP';
@@ -167,6 +182,32 @@ export default function SettingsTab({
           />
         </div>
         <p className="settings-note">{t(lang, 'settings.defaultViewHint')}</p>
+      </Section>
+
+      <Section title={t(lang, 'settings.section.presets')}>
+        <p className="settings-note">{t(lang, 'preset.hint')}</p>
+        <ul className="preset-file-list">
+          {PRESET_ROWS.map(row => (
+            <li key={row} className="preset-file-row">
+              <span className="preset-file-name">{t(lang, row === 'all' ? 'preset.row.all' : TAB_LABEL_KEYS[row])}</span>
+              <span className="preset-file-desc">{row === 'all' ? t(lang, 'preset.row.allDesc') : row === 'scenario' ? '' : teamText(teams[row])}</span>
+              <button type="button" className="config-button" onClick={() => onPresetExport(row)}>
+                <Download />
+                {t(lang, 'preset.export')}
+              </button>
+              <button type="button" className="config-button" disabled={inMatch} title={inMatch ? t(lang, 'preset.importLocked') : undefined} onClick={() => onPresetImport(row)}>
+                <Upload />
+                {t(lang, 'preset.import')}
+              </button>
+              {presetError?.row === row && (
+                <span className="form-error preset-file-error" role="alert">
+                  {presetError.message}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+        {inMatch && <p className="settings-note">{t(lang, 'preset.importLocked')}</p>}
       </Section>
 
       <Section title={t(lang, 'settings.section.reset')}>
