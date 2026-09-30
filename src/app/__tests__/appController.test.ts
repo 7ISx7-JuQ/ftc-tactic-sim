@@ -21,6 +21,8 @@ const assert = (c: boolean, m: string) => {
   expect(c, m).toBe(true);
 };
 const near = (a: number, b: number, tol = 1e-9) => Math.abs(a - b) < tol;
+// 풀매치를 재계산 / 진행하는 테스트(J, K)의 제한 시간 (기본 5초는 전체 병렬 실행 부하에서 부족, 다른 풀매치 테스트와 같은 값)
+const FULL_MATCH_TIMEOUT_MS = 120_000;
 
 // 가짜 브라우저 환경 (입력 어댑터 테스트와 같은 방식)
 const fakeEnv = () => {
@@ -584,7 +586,7 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     h.pause();
     assert(h.recipeSource() === null, 'unfinished match: no recipe source');
     h.dispose();
-  });
+  }, FULL_MATCH_TIMEOUT_MS);
 
   it('K. 분기 트리 (10-5): BRANCH = 새 가지(원래 가지 보존), 전환 / 이름 / 삭제, 8개 상한, 종료 가지 전환 = 복기, NEW = 트리 폐기', () => {
     const { h, frames, win } = setup();
@@ -702,6 +704,6 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     s = h.status();
     assert(s.branches.length === 1 && s.currentBranchId === 1 && s.branchName === null, 'NEW discards the tree');
     h.dispose();
-  });
+  }, FULL_MATCH_TIMEOUT_MS);
 });
 

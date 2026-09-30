@@ -59,6 +59,7 @@ import type { ConfirmRequest } from './ConfirmDialog';
 import EndOverlay from './EndOverlay';
 import FieldEditBanner, { SpawnEditBanner, SpawnPoseTag, SweetSpotHoverTip } from './FieldEditBanner';
 import FieldNotices from './FieldNotices';
+import HelpDialog from './HelpDialog';
 import type { ToastItem } from './FieldNotices';
 import LeftPanel from './LeftPanel';
 import ResultPopup from './ResultPopup';
@@ -125,6 +126,8 @@ export default function MainScreen() {
   const [configNotice, setConfigNotice] = useState<string | null>(null);
   // 프리셋 불러오기 거부 사유 (그 줄 아래 빨간 글자, 10-2)
   const [presetError, setPresetError] = useState<{ row: PresetRow; error: PresetError } | null>(null);
+  // 도움말 창 (v1.0.0): 열면 진행 중인 경기 / 재생을 멈추고 단축키를 끔
+  const [helpOpen, setHelpOpen] = useState(false);
   // 경기 불러오기 (10-4): 명중 확률표 준비 대기 / 재계산 중, 거부 사유, 체크섬 불일치 배너
   const [matchImport, setMatchImport] = useState<'LUT' | 'COMPUTING' | null>(null);
   const [matchImportError, setMatchImportError] = useState<MatchImportError | null>(null);
@@ -677,6 +680,18 @@ export default function MainScreen() {
     c()?.start();
   };
 
+  const openHelp = () => {
+    const controller = c();
+    controller?.pause();
+    controller?.stopPlayback();
+    controller?.setShortcutsEnabled(false);
+    setHelpOpen(true);
+  };
+  const closeHelp = () => {
+    setHelpOpen(false);
+    c()?.setShortcutsEnabled(true);
+  };
+
   // 확인창 (09-7b): 필드 영역 중앙의 모달. 떠 있는 동안 컨트롤러 단축키를 끔
   // cancel = false: 확인 버튼 하나인 안내창 (10-6 가지 가득 참)
   const ask = (message: string, okLabel: string, cancel = true): Promise<boolean> =>
@@ -913,7 +928,7 @@ export default function MainScreen() {
             }
           />
         ) : (
-          <ConfigRail status={status} lang={lang} statuses={statuses} luts={luts} canOpen={canOpen} onOpen={openConfig} />
+          <ConfigRail status={status} lang={lang} statuses={statuses} luts={luts} canOpen={canOpen} onOpen={openConfig} onHelp={openHelp} />
         ))}
       {status && <ScrubberBar status={status} lang={lang} actions={actions} branchMenu={{ enabled: branchMenuEnabled(status) && !confirm, actions: branchActions }} />}
       {status?.endStage === 'RESULT' && status.result && (
@@ -926,6 +941,7 @@ export default function MainScreen() {
         />
       )}
       {confirm && <ConfirmDialog request={confirm.request} anchor={confirm.anchor} onClose={closeConfirm} />}
+      {helpOpen && <HelpDialog lang={lang} onClose={closeHelp} />}
     </div>
   );
 }

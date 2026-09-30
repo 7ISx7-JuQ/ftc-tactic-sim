@@ -1,7 +1,7 @@
 // 접힌 config 아이콘 띠 (명세서 3.8 우측 config 창, 09-8a): 로봇 / 시나리오 준비 신호(초록 체크 / 빨간 느낌표),
 // 게임패드 연결 수, 펼치기. 아이콘을 누르면 그 탭으로 펼침 (펼칠 수 있을 때만).
 // 09-10a: 로봇 아이콘 = 탭이 올바르고 명중 확률표 READY면 초록 체크, 생성 중이면 진행률 링(마우스 올리면 "63% · 약 7초 남음"), 실패면 빨간 느낌표.
-import { Bot, CircleAlert, CircleCheck, Flag, Gamepad2, PanelRightOpen, TriangleAlert } from 'lucide-react';
+import { Bot, CircleAlert, CircleCheck, CircleHelp, Flag, Gamepad2, PanelRightOpen, TriangleAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { AppStatus } from '../app/appController';
 import { ALLIANCE_COLORS } from '../renderer/canvasRenderer';
@@ -36,6 +36,7 @@ export default function ConfigRail({
   luts,
   canOpen,
   onOpen,
+  onHelp,
 }: {
   status: AppStatus;
   lang: Language;
@@ -43,6 +44,7 @@ export default function ConfigRail({
   luts: Readonly<Record<RobotId, RobotLutView>>;
   canOpen: boolean;
   onOpen: (tab?: ConfigTab) => void;
+  onHelp: () => void; // 도움말 창 (v1.0.0, 언제나)
 }) {
   const pads = gamepadSummary(status.gamepads);
   const padTitle = [
@@ -107,6 +109,9 @@ export default function ConfigRail({
         pads.connected,
       )}
       <div className="rail-spacer" />
+      <button type="button" className="icon-button rail-help" title={t(lang, 'help.open')} aria-label={t(lang, 'help.open')} onClick={onHelp}>
+        <CircleHelp />
+      </button>
       <button type="button" className="icon-button rail-expand" disabled={!canOpen} title={t(lang, 'config.open')} aria-label={t(lang, 'config.open')} onClick={() => onOpen()}>
         <PanelRightOpen />
       </button>

@@ -1,7 +1,13 @@
 {
   "name": "ftc-tactic-sim",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "2D tactic simulator for the FTC BioBuzz TeleOp period (2 v 0): drive, replay, branch and share alliance strategies.",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/7ISx7-JuQ/ftc-tactic-sim.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",

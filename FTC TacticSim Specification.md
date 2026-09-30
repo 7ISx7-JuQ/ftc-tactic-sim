@@ -1049,6 +1049,12 @@
         - 프리셋 `tacticsim-robot_{팀 번호, 없으면 R1 / R2}.json`, `tacticsim-scenario_{RED|BLUE}.json`, `tacticsim-setup_{YYYYMMDD-HHmm}.json`.
     - **문구:** 새 버튼 / 확인창 / 오류 / 배너 문구는 모두 문구 사전(영어 / 한국어)에 추가한다 (3.8항 규칙, 게임 용어 원어 대문자).
     - **10-1 확정 (사용자 결정):** ① 재현용 입력 = 적용 입력 기록(모든 출처, 틱마다) 채택 ② 조작 모드는 레시피에 넣지 않음(변환 후 값 기록) 확인 ③ v1은 파일 다운로드 / 불러오기만 ④ 가지 상한 8개(원본 포함), 모든 가지 프레임 메모리 유지(측정 근거 위, 문제 시 6.4항 대안) ⑤ 가지 UI = 스크러버 가지 버튼 + 목록 + 타임라인 분기 표식 + 결과 팝업 가지 비교 줄 ⑥ 프리셋 `ALL` = R1 + R2 + 시나리오 전부 ⑦ 결과 팝업에서 레시피(`EXPORT MATCH`)와 요약(`EXPORT SUMMARY`)을 버튼을 나눠 모두 제공, 동사는 `EXPORT` / `IMPORT`로 통일.
+10. **도움말 / 버그 리포트 / 라이선스 / 버전 (v1.0.0 릴리스 준비):**
+    - **버전:** `package.json` `version` = **1.0.0**. 빌드 설정(`vite.config.ts` `define`)이 `__APP_VERSION__`으로 앱에 넣어 도움말 / 버그 리포트에 표시한다 (`src/ui/helpInfo.ts` `APP_VERSION`, 선언 `src/vite-env.d.ts`).
+    - **라이선스:** PolyForm Noncommercial License 1.0.0 (`LICENSE`, 사용자 결정 — 비상업적 목적이면 사용 · 복사 · 수정 · 재배포 자유, 상업적 사용 불가). 필수 고지 `Required Notice: Copyright 2026 7ISx7JuQ (https://github.com/7ISx7-JuQ/ftc-tactic-sim)`. `package.json` `license` = `PolyForm-Noncommercial-1.0.0`. 배포 번들에 들어가는 서드파티(React · react-dom · scheduler MIT, lucide-react ISC, Pretendard 폰트 OFL-1.1)는 `THIRD_PARTY_NOTICES.md`에 원문과 함께 고지.
+    - **도움말 창 (`HelpDialog.tsx`):** 접힌 config 띠의 펼치기 버튼 위 `?` 버튼(lucide `CircleHelp`, 언제나). 열면 진행 중인 경기 / 재생을 멈추고 단축키를 끈다 (닫으면 다시 켬, 경기는 일시정지 상태로 남음). 화면 전체 모달(640u, 본문 스크롤), Esc · 닫기 · 바깥 클릭으로 닫힘. 내용(영어 / 한국어, 게임 용어 원어 대문자 규칙 준수): 소개, 빠른 시작 4단계, 조작표(게임패드 / 키보드 — 키보드 칸은 `inputConfig` 키 설정을 그대로 읽음, `controlRows`), 복기와 가지, 저장과 공유, 알아 두기(데스크톱 · HTTPS · 시뮬레이션 한계), 버그 리포트, 정보(버전 · 라이선스 한 줄 · 소스 코드 / 라이선스 / 서드파티 고지 링크).
+    - **버그 리포트 (사용자 결정: 폼 없이 메일):** 받는 사람 `7isx7juq@gmail.com`(`BUG_REPORT_EMAIL`). 주 버튼 = Gmail 쓰기 창 링크 `https://mail.google.com/mail/?view=cm&fs=1&to=…&su=…&body=…`(새 탭), 보조 = 기본 메일 앱 `mailto:` 링크, 그 아래 주소 글자. 제목 `[FTC TacticSim {버전}] Bug report`, 본문 = 현재 화면 언어의 작성 틀(무슨 일 / 재현 순서 / 기대 결과 / 첨부 안내) + 앱 버전 · 브라우저(User-Agent) · 화면(가로 × 세로 @배율) · 언어. 앱은 메일을 보내지 않고 링크만 연다 (서버 없음).
+    - **정리:** Vite 템플릿 잔여물 삭제(`public/icons.svg`, `src/assets/hero.png` · `react.svg` · `vite.svg`), `README.md`를 영어 / 한국어 소개 · 빠른 시작 · 조작 · 직접 실행 · 버그 리포트 · 라이선스로 교체, `package.json`에 설명 / 저장소 주소.
 
 ## 4. 데이터 인터페이스 명세 (`types.ts`)
 
@@ -1404,6 +1410,7 @@ export interface TimelineFrame {
 | 10-4 | 경기 불러오기 / 내보내기 연결: 컨트롤러 `loadMatch`(재계산 → 회전 → 종료 연출 없이 복기, `REPLAY`) / `recipeSource`, SETTINGS `MATCH` 줄(해석 · 거부 사유 · 확인창 버전 경고 · 명중 확률표 준비 진행 · `CANCEL`), 체크섬 불일치 배너, 결과 팝업 `EXPORT MATCH` / `EXPORT SUMMARY`, 요약 텍스트 / 파일 이름 (아래 6.2.47) | `appController.ts`, `inputLog.ts`, `src/ui/matchFile.ts`, `resultModel.ts`, `MainScreen.tsx`, `SettingsTab.tsx`, `FieldNotices.tsx`, `ResultPopup.tsx`, `i18n.ts`, `MainScreen.css`, 테스트 |
 | 10-5 | 분기 트리 엔진 / 컨트롤러: 엔진 가지 타임라인(분기 = 참조 공유 새 배열, 전환 = 설치), 순수 트리 규칙(8개 상한 / 번호 · 이름 / 하위 포함 삭제 / 원본 보호), 가지별 입력 기록 사본, 컨트롤러 `branch` / `switchBranch` / `deleteBranch` / `renameBranch` · 상태 가지 목록, 헤드리스 Chromium 8개 가지 힙 실측 (아래 6.2.48) | `simulationEngine.ts`, `src/app/branchTree.ts`, `inputLog.ts`, `appController.ts`, `MainScreen.tsx`, 테스트 `engineTimeline.test.ts` / `branchTree.test.ts` / `appController.test.ts` K / `inputLog.test.ts` H |
 | 10-6 | 분기 UI: 가지 버튼 / 목록(전환 · 이름 바꾸기 · 삭제), 타임라인 분기 표식, 분기 확인창 새 문구 / 가득 참 안내창, `NEW` 확인창 가지 수, 결과 팝업 가지 이름 + 가지 비교 줄, 파일 이름 `_b{번호}` (아래 6.2.49) — Step 10 완료 | `src/ui/branchView.ts`, `BranchMenu.tsx`, `ScrubberBar.tsx`, `ResultPopup.tsx`, `ConfirmDialog.tsx`, `MainScreen.tsx`, `matchFile.ts`, `mainScreenModel.ts`, `i18n.ts`, `MainScreen.css`, 테스트 |
+| v1.0.0 | 릴리스 준비: 버전 1.0.0, PolyForm Noncommercial 라이선스 + 서드파티 고지, 템플릿 잔여물 삭제, README 영 / 한, 앱 안 도움말 창 + 버그 리포트(Gmail 쓰기 창 / 메일 앱 링크), 풀매치 컨트롤러 테스트 제한 시간 (아래 6.2.50) | `LICENSE`, `THIRD_PARTY_NOTICES.md`, `README.md`, `package.json`, `vite.config.ts`, `src/vite-env.d.ts`, `src/ui/helpInfo.ts`, `HelpDialog.tsx`, `ConfigRail.tsx`, `MainScreen.tsx`, `i18n.ts`, `MainScreen.css`, 테스트 |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
@@ -1783,6 +1790,13 @@ export interface TimelineFrame {
 - **구현:** 3.9항 분기 트리 아래 "구현 (10-6)" 참고.
 - **테스트:** `src/ui/__tests__/branchView.test.ts` A~G(가지 이름 영어 / 한국어, 목록 줄 · 0틱 분기도 시각 표시, 목록 열기 조건, 분기 표식 순서 · 설명, 확인창 문구 4종 · 하위 수 · 가지 2개부터 NEW 문구, 결과 팝업 가지 이름 조건 · 비교 줄 · 동점 최고, 파일 이름 `_b{번호}`), `i18n.test.ts` / `mainScreenModel.test.ts` 갱신(새 분기 확인창 문구, 옛 계산 삭제). 돌연변이 12종 중 8종 실패 → 2종(0틱 분기 표시, 가지 2개 NEW 문구)은 테스트 보강으로 실패 확인, 2종(원본 = 번호 1, 종료 = 점수 있음)은 규칙상 같은 뜻인 동등 변이라 조건을 하나로 줄임.
 - **헤드리스 Chromium 점검 (저장소 밖 1회성, 개발 서버 1366 × 768, 가짜 시계):** 경기 끝까지 → 1:24 지점 `BRANCH` → 확인창 "Start a new branch at 1:24 … The current branch (Main) keeps its record." → 끝까지 → 결과 팝업 진영 옆 "Branch 2" + `BRANCHES` Main 9 / Branch 2 9(동점 둘 다 트로피) → `EXPORT MATCH` `…_9pts_b2.json` → 가지 목록 2줄 → 이름 "Fast cycle" → 분기 표식 설명 "Fast cycle · from Main at 1:24" → 원본으로 전환(표식 없음) → 삭제 확인창 → 목록 1줄 · 원본 휴지통 비활성 → 계속 분기해 8개 → 확인 버튼 하나 "All 8 branches are in use …" → `NEW` 확인창 "… with all 8 branches …" → 한국어 목록("원본 — 9점", "가지 3 1:36에서 1:36까지"). 7단계 중첩에서 영어 이름이 잘려 들여쓰기 14u → 10u, 목록 폭 380u → 420u로 고침. 콘솔 오류 없음.
+
+### 6.2.50 v1.0.0 릴리스 준비 완료 항목
+
+- **결정 (사용자):** ① 라이선스 = PolyForm Noncommercial 1.0.0(상업적 사용만 금지), 저작권 표기 `7ISx7JuQ` ② 버그 리포트 = 메일만(폼 없음), 받는 사람 `7isx7juq@gmail.com`, 링크를 누르면 Gmail 쓰기 창 ③ 앱 안 도움말 탑재 ④ README 영 / 한 간단 소개 + 사용법 ⑤ 버전 1.0.0. 세부(도움말 위치 = config 띠 `?`, 열면 일시정지, 기본 메일 앱 보조 링크, 본문 환경 정보)는 3.10항.
+- **구현:** 3.10항 참고.
+- **테스트:** `src/ui/__tests__/helpInfo.test.ts` A~D(앱 버전 = `package.json`, Gmail 링크의 받는 사람 / 제목 / 본문이 줄바꿈 · `&` · `#` · 한글까지 그대로 풀림, `mailto`, 본문 환경 정보 · 영어 / 한국어 틀, 조작표 = 키 설정). `i18n.test.ts`의 게임 용어 규칙으로 도움말 문구의 `TELEOP` / `ALLIANCE` 표기를 고침. 전체 실행에서 간헐적으로 5초 기본 제한을 넘던 풀매치 컨트롤러 테스트 J(10-4) / K(10-5)에 다른 풀매치 테스트와 같은 120초 제한 적용.
+- **헤드리스 Chromium 점검 (저장소 밖 1회성, 개발 서버 1366 × 768):** 경기 중 `?` → 도움말(경기 일시정지, Space로 재개되지 않음), Gmail 링크 받는 사람 / 제목 / 본문 끝 환경 정보, `mailto` 링크, 정보(버전 1.0.0 · 라이선스 · 링크 3개), Esc로 닫힘, 한국어 도움말 · 한국어 메일 틀. 운영 빌드 결과물에 `icons.svg` 없음. 콘솔 오류 없음.
 
 ### 6.3 남은 Step (권장 순서)
 
