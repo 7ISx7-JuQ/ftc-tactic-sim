@@ -43,6 +43,8 @@ npm test         # tests (Vitest)
 npm run build    # production build in dist/
 ```
 
+The design specification (rules, physics model, architecture — in Korean) is [FTC TacticSim Specification.md](FTC%20TacticSim%20Specification.md).
+
 ## Bug reports
 
 In the app: **? → Report a bug**, or email **7isx7juq@gmail.com**. Please include the steps and, if possible, a screenshot or an exported match file.
@@ -95,6 +97,8 @@ npm run dev      # 개발 서버
 npm test         # 테스트 (Vitest)
 npm run build    # 배포용 빌드 (dist/)
 ```
+
+게임 규칙, 물리 모델, 구조를 정리한 설계 명세서는 [FTC TacticSim Specification.md](FTC%20TacticSim%20Specification.md)에 있습니다.
 
 ### 버그 리포트
 

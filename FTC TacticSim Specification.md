@@ -1,41 +1,56 @@
-# FTC TacticSim Specification
+# FTC TacticSim 명세서
 
-# [프로젝트 명세서] FTC BioBuzz 2D 텔레옵(Teleop) 전술 시뮬레이터
+FTC BioBuzz TELEOP 2D 전술 시뮬레이터의 게임 규칙, 물리 모델, 구조, 화면 동작을 정리한 문서입니다.
 
-## 1. 프로젝트 개요 (Overview)
+> **읽는 법**
+> - 이 문서는 **v1.0.0의 현재 동작**을 기준으로 씁니다. 결정의 이유는 필요한 곳에 짧게 남기고, 단계별 개발 기록은 git 커밋 이력으로 대신합니다.
+> - 절 번호(2.6.2항, 3.8항 등)는 코드 주석이 참조하므로 바꾸지 않습니다.
+> - 좌표와 길이는 inch(in), 각도는 라디안(화면 표시는 도)입니다. 게임 용어(HIVE, FLOWER, NECTAR, TIP 등)는 룰북 표기를 따릅니다.
+> - 사용법은 [README](README.md)와 앱 안 도움말(`?`)을 참고하세요.
 
-- **목적:** 로봇 공학 대회(FIRST Tech Challenge - BioBuzz)의 TELEOP(텔레옵, 드라이버 조작 구간 120초)동안, 같은 동맹(Alliance) 소속인 2대의 로봇이 어떻게 동선을 짜고 점수를 낼지 시뮬레이션하고 복기하는 웹 기반 2D 시뮬레이터.
+## 목차
+
+1. [개요](#1-개요)
+2. [게임 규칙과 필드](#2-게임-규칙과-필드)
+3. [구조와 동작](#3-구조와-동작)
+4. [데이터 인터페이스 (`types.ts`)](#4-데이터-인터페이스-typests)
+5. [개발 현황과 향후 과제](#5-개발-현황과-향후-과제)
+
+## 1. 개요
+
+- **목적:** FIRST Tech Challenge BioBuzz 시즌의 TELEOP(드라이버 조작 구간 120초) 동안 같은 ALLIANCE의 로봇 2대가 어떤 동선으로 점수를 낼지 시뮬레이션하고 복기하는 웹 기반 2D 시뮬레이터.
 - **주요 특징:**
-    - 상대팀 로봇은 존재하지 않는 **2 v 0 (내 동맹 로봇 2대만 존재)** 시뮬레이션.
-    - 무거운 3D 물리엔진을 배제하고, 수학적 기구학(Kinematics)과 분리축 이론(SAT) 기반 충돌 처리만 사용하여 프레임 드랍이나 오차 없는 **100% 결정론적(Deterministic)** 작동 보장.
-    - 모든 틱(Tick)의 상태를 배열에 저장하여, 비디오 편집기처럼 뒤로 가기/앞으로 가기(Scrubbing) 지원.
+    - 상대 로봇이 없는 **2 v 0** 시뮬레이션 (우리 ALLIANCE 로봇 2대만 존재).
+    - 3D 물리 엔진 없이 기구학과 분리축 이론(SAT) 기반 충돌 처리만 사용하여 **100% 결정론적**으로 동작 (같은 설정 + 같은 입력 = 같은 경기).
+    - 모든 틱의 상태를 저장하여 비디오 편집기처럼 앞뒤로 탐색(스크러빙)하고, 원하는 시점에서 가지를 나눠 다른 작전을 시도.
+- **범위 밖:** 상대 로봇, 오토(Autonomous) 구간 시뮬레이션, 모바일 화면, 3D 보기 (5.3항).
 
-## 2. 게임 룰 & 환경 설정 (Game Rules & Environment)
+## 2. 게임 규칙과 필드
 
-### 2.1 경기장 및 시간 (Field & Time)
+### 2.1 경기장과 시간
 
-- **크기:** 144 x 144 인치. (Canvas 렌더링 시 1인치 = 5px로 환산하여 720x720px로 출력)
-- **좌표계:** 좌측 상단을 (0, 0), 우측 하단을 (144, 144)로 하는 Canvas 2D 표준 좌표계를 사용. (Y=144 방향이 Audience Side)
-- **시간:** 총 120초 (6000 틱, 50Hz 기준, dt = 0.02초).
-- **진영 선택:** 사용자가 Red 또는 Blue 진영을 선택하면 시뮬레이터는 선택된 진영을 ’아군’으로 간주하며, 상대 진영의 Nectar 등 불필요한 요소는 로직에서 배제됨.
-- **엔드게임 (Endgame):** 남은 시간이 60초 이하가 되는 시점.
+- **크기:** 144 × 144 in.
+- **좌표계:** 좌측 상단 (0, 0), 우측 하단 (144, 144)인 캔버스 2D 표준 좌표계 (y-down). y = 144 쪽이 관중석(Audience Side).
+- **시간:** 총 120초 = 6000틱 (50 Hz, dt = 0.02초).
+- **진영 선택:** 사용자가 RED 또는 BLUE를 고르면 그 진영을 우리 ALLIANCE로 보고, 상대 진영의 NECTAR 등 불필요한 요소는 로직에서 뺀다.
+- **ENDGAME:** 남은 시간이 60초 이하가 되는 시점부터.
 
-### 2.2 물리적 규격 및 정확한 좌표 (Physical Dimensions & Coordinates)
+### 2.2 필드 구조물의 치수와 좌표
 
-좌상단 (0,0) 좌표계를 기준으로 한 각 기물 및 구역의 정확한 위치는 다음과 같다.
+좌상단 (0, 0) 좌표계 기준 각 구조물과 구역의 위치는 다음과 같다.
 
 1. **HIVE (벌집):**
-    - **위치 및 전체 크기:** 경기장 정중앙 (72, 72)에 위치한 49.46 × 38.95 인치의 프레임.
-    - **프레임 AABB 경계:** xMin = 47.27, xMax = 96.73, yMin = 52.525, yMax = 91.475.
-    - **진영별 HIVE 중심 좌표:** Red HIVE 중심은 `(59.25, 72.0)`, Blue HIVE 중심은 `(84.75, 72.0)`.
-    - **CELL 분할 구조:** 각 진영별 HIVE는 2개의 CELL(너비 20.0인치)로 분할된다. Y축을 기준으로 상단의 `OPPOSITE_CELL`(Y < 72)과 하단의 `AUDIENCE_CELL`(Y > 72)로 나뉘며 렌더링 시 시각적으로 명확히 구분한다.
-    - **CELL 투입구 기하 (상향 셀, 바닥 z = 0, `collision.ts`의 `HIVE_RIM_Z` 등 상수):**
-        - 투입구 표면은 밑변이 평평한 오각형: 너비 20 × 높이 7.61 직사각형 위에 밑변 20 · 높이 6.39 이등변 삼각형을 올린 형태 (전체 높이 14 in, 길이는 표면을 따라 잰 값).
+    - **위치 및 전체 크기:** 필드 정중앙 (72, 72)에 놓인 49.46 × 38.95 in 프레임.
+    - **프레임 AABB 경계:** xMin = 47.27, xMax = 96.73, yMin = 52.525, yMax = 91.475.
+    - **진영별 HIVE 중심:** RED `(59.25, 72.0)`, BLUE `(84.75, 72.0)`.
+    - **CELL 분할:** 진영별 HIVE는 너비 20.0 in의 CELL 2개로 나뉜다. 위쪽(y < 72)이 `OPPOSITE_CELL`, 아래쪽(y > 72)이 `AUDIENCE_CELL`이며 화면에서 명확히 구분한다.
+    - **CELL 투입구 기하** (위를 향한 셀 = 상향 셀, 바닥 z = 0, `collision.ts`의 `HIVE_RIM_Z` 등 상수):
+        - 투입구 표면은 밑변이 평평한 오각형이다. 너비 20 × 높이 7.61 직사각형 위에 밑변 20 · 높이 6.39 이등변 삼각형을 올린 형태 (전체 높이 14 in, 길이는 표면을 따라 잰 값).
         - 밑변 = 림(셀의 가장 바깥 끝): z = 53.5 (`HIVE_RIM_Z`), x 범위 = 진영 HIVE 중심 ± 10.
-        - 표면은 림에서 HIVE 중심 방향으로 올라가며 **지면과 60°**(`HIVE_CELL_TILT`)를 이룬다 → 표면이 HIVE 바깥 위를 향하고, 바깥 법선은 수평에서 30° 위.
-        - 표면 거리 s(림 기준)의 점: 수평 이동 s·cos60° (HIVE 중심 방향), 높이 z = 53.5 + s·sin60°.
-        - **조준점**(`hiveCellAimPoint`) = 오각형 면적 중심, 림에서 표면 거리 5.560 in (수평 2.780, 수직 4.815).
-        - 4개 셀은 오각형이 좌우 대칭이므로 x = 72 / y = 72 기준 대칭으로 정확히 옮겨진다:
+        - 표면은 림에서 HIVE 중심 쪽으로 올라가며 **지면과 60°**(`HIVE_CELL_TILT`)를 이룬다. 즉 표면은 HIVE 바깥 위를 향하고, 바깥 법선은 수평에서 30° 위.
+        - 림에서 표면 거리 s인 점: 수평 이동 s·cos60° (HIVE 중심 방향), 높이 z = 53.5 + s·sin60°.
+        - **조준점**(`hiveCellAimPoint`) = 오각형의 면적 중심. 림에서 표면 거리 5.560 in (수평 2.780, 수직 4.815).
+        - 오각형이 좌우 대칭이므로 4개 셀은 x = 72 / y = 72 기준으로 정확히 대칭이다:
 
           | 셀 | 림 x 범위 | 림 y | 어깨 y (s = 7.61, z = 60.09) | 꼭짓점 (x, y) (s = 14, z = 65.62) | 조준점 (x, y) (z = 58.32) | 바깥 법선 |
           |---|---|---|---|---|---|---|
@@ -43,1020 +58,1111 @@
           | RED_AUDIENCE | 49.25~69.25 | 91.26 | 87.455 | (59.25, 84.260) | (59.25, 88.480) | (0, +0.866, 0.5) |
           | BLUE_OPPOSITE | 74.75~94.75 | 52.74 | 56.545 | (84.75, 59.740) | (84.75, 55.520) | (0, −0.866, 0.5) |
           | BLUE_AUDIENCE | 74.75~94.75 | 91.26 | 87.455 | (84.75, 84.260) | (84.75, 88.480) | (0, +0.866, 0.5) |
-        - 엔진은 HIVE 내부 기물(`IN_HIVE`)을 상향 셀 조준점의 바닥 정사영 좌표에 배치한다.
-    - **비행 판정용 HIVE 직육면체 (`HIVE_HEIGHT`):** 실제 HIVE의 복잡한 구조는 무시하고, 밑면 = HIVE 프레임 AABB, 높이 = 상향 셀 오각형 꼭짓점 z(53.5 + 14·sin60° ≈ 65.62 in)인 직육면체로 근사한다. 빗맞은 공이 HIVE에 부딪히는지 넘어가는지 판정(2.6.2항 발사 비행 처리)과, 몬테카를로 명중 판정의 진입 면 조건(2.6.2항 ④: 셀 앞면(셀 폭 안) 또는 셀 위 윗면으로만 진입 허용)에 쓴다.
-2. **FLOWER (솔리드 장애물):**
-    - **크기:** 반지름 2.0인치의 단단한 원형 Bounding Box.
-    - **중심 좌표:** Red 측: (2.0, 96.0), (48.0, 2.0) / Blue 측: (142.0, 48.0), (96.0, 142.0).
-3. **GARDEN (통과 가능 구역, 23 × 2 인치):**
-    - Red: 좌측 하단 (X: 0~23, Y: 142~144) / Blue: 우측 상단 (X: 121~144, Y: 0~2).
-4. **LOADING ZONE (통과 가능 구역, 23 × 11 인치):**
-    - Red: 좌측 중간 (X: 0~11, Y: 24~47) / Blue: 우측 중간 (X: 133~144, Y: 97~120).
+        - HIVE 안의 기물(`IN_HIVE`)은 상향 셀 조준점을 바닥에 정사영한 좌표에 둔다.
+    - **비행 판정용 HIVE 직육면체 (`HIVE_HEIGHT`):** HIVE의 복잡한 구조 대신, 밑면 = HIVE 프레임 AABB, 높이 = 오각형 꼭짓점 z(53.5 + 14·sin60° ≈ 65.62 in)인 직육면체로 근사한다. 빗맞은 공이 HIVE에 부딪히는지 넘어가는지(2.6.2항 발사 비행 처리)와 몬테카를로 명중 판정의 진입 면 조건(2.6.2항 ④)에 쓴다.
+2. **FLOWER (단단한 장애물):**
+    - **크기:** 반지름 2.0 in 원.
+    - **중심 좌표:** RED 쪽 (2.0, 96.0), (48.0, 2.0) / BLUE 쪽 (142.0, 48.0), (96.0, 142.0).
+3. **GARDEN (통과 가능 구역, 23 × 2 in):**
+    - RED: 좌측 하단 (x 0~23, y 142~144) / BLUE: 우측 상단 (x 121~144, y 0~2).
+4. **LOADING ZONE (통과 가능 구역, 23 × 11 in):**
+    - RED: 좌측 중간 (x 0~11, y 24~47) / BLUE: 우측 중간 (x 133~144, y 97~120).
 
-### 2.3 로봇 기본값 및 스폰 위치 (Robot Spawn)
+### 2.3 로봇 기본값과 시작 위치
 
-- **크기:** 가로 18 × 세로 18 인치.
-- **초기 스폰 좌표 (타일 중앙 및 벽면 밀착):**
-    - **Red 진영:** R1은 `(9.0, 36.0)`, R2는 `(9.0, 108.0)`. 헤딩은 `0` (오른쪽 방향).
-    - **Blue 진영:** B1은 `(135.0, 36.0)`, B2는 `(135.0, 108.0)`. 헤딩은 `Math.PI` (왼쪽 방향).
-    - (※ 로봇 시작 자세는 하드웨어 제원(`RobotConfig`)이 아닌 경기 시작 조건(`ScenarioConfig.r1Spawn` / `r2Spawn`)으로 지정하며, 미지정 시 선택된 진영의 위 기본 좌표가 자동 적용됨. 엔진은 이 표를 `DEFAULT_SPAWN_POSES`로 제공하여 UI 기본값으로 사용)
+- **크기 기본값:** 18 × 18 in.
+- **기본 시작 자세** (타일 중앙, 벽에 밀착):
+    - **RED:** R1 `(9.0, 36.0)`, R2 `(9.0, 108.0)`, 헤딩 `0` (오른쪽).
+    - **BLUE:** R1 `(135.0, 36.0)`, R2 `(135.0, 108.0)`, 헤딩 `Math.PI` (왼쪽).
+- 시작 자세는 로봇 제원(`RobotConfig`)이 아니라 경기 시작 조건(`ScenarioConfig.r1Spawn` / `r2Spawn`)으로 지정한다. 지정하지 않으면 진영별 기본값을 쓰며, 엔진은 이 표를 `DEFAULT_SPAWN_POSES`로 제공한다.
 
-### 2.4 득점 기물 초기화 (Game Pieces Setup)
+### 2.4 기물 초기 배치
 
-총 40개의 기물(Pollen 32개, Nectar 8개)을 초기화한다.
+기물은 총 40개(POLLEN 32개, NECTAR 8개)다.
 
-1. **POLLEN (직경 2.8인치, 구형):** 총 32개.
-    - 로봇 적재 (8개): 내 동맹 로봇 2대에 각각 4개씩 적재 (`CONTROLLED`). 로봇별 적재 한도(`maxControlledPieces`)가 4보다 작으면 한도만큼만 적재.
-    - FLOWER 내부 (16개): 4개의 FLOWER에 4개씩 배치 (`IN_FLOWER`).
-    - GARDEN (8개): Red GARDEN 4개, Blue GARDEN 4개 배치 (`IN_GARDEN`).
-2. **NECTAR (직경 3.6인치, 대형 구형/캡슐):** 아군 진영 색상 총 8개 (상대 진영 배제).
-    - 필드에 풀린 NECTAR (3개, `NECTAR_IN_PLAY`): 경기 시작 시 아군 HIVE의 위를 향하고 있는(UP) CELL 내부에 배치 (`IN_HIVE`). 오토 이후에는 HIVE / 로봇 적재 / 바닥 중 어딘가에 있음.
-    - 휴먼 플레이어 스톡 (5개): 필드 밖 대기 (`OUT_OF_BOUNDS`). HIVE 팁 시 1개씩 로딩 존에 스폰되며, 60초 돌입(ENDGAME) 시 잔여 재고 전량 로딩 존 스폰. 오토 중 발생한 팁 보상분은 텔레옵 시작 직전에 로딩 존으로 투입(아래 `autoTipCount`).
-    - **휴먼 플레이어 NECTAR 투입 규칙:** 투입이 결정된 NECTAR는 재고(`nectarStock`)에서 투입 대기(`pendingHumanNectar`)로 옮겨지고, 아군 로딩 존의 빈 슬롯(기존 기물·로봇과 겹치지 않는 자리, 벽쪽 우선)에 정지 상태로 배치된다. 슬롯은 RED 로딩 존 기준으로 만들고 BLUE는 필드 중심 점대칭으로 변환하여 두 진영의 배치가 대칭이다. 로봇이 로딩 존을 막고 있어 빈 슬롯이 없으면 대기하다가 자리가 나는 틱에 즉시 배치된다 (기물을 로봇 몸체 안에 스폰하지 않음).
-3. **텔레옵 시작 조건 및 자율주행(Autonomous) 시나리오 커스터마이징:**
-    - 공식 경기 기본값(Default Setup):
-        * HIVE 상향 셀: RED는 `AUDIENCE_CELL`, BLUE는 `OPPOSITE_CELL`
-        * HIVE 내부 적재: 상향 셀에 NECTAR 3개
+1. **POLLEN (직경 2.8 in 구):** 32개.
+    - 로봇 적재 8개: 로봇 2대에 4개씩 (`CONTROLLED`). 로봇 적재 한도(`maxControlledPieces`)가 4보다 작으면 한도만큼만.
+    - FLOWER 안 16개: FLOWER 4개에 4개씩 (`IN_FLOWER`).
+    - GARDEN 8개: RED GARDEN 4개, BLUE GARDEN 4개 (`IN_GARDEN`).
+2. **NECTAR (직경 3.6 in):** 우리 진영 색 8개 (상대 진영 NECTAR는 없음).
+    - 필드에 풀린 NECTAR 3개(`NECTAR_IN_PLAY`): 기본 배치에서는 우리 HIVE 상향 셀 안(`IN_HIVE`). 오토 이후에는 HIVE / 로봇 적재 / 바닥 중 어딘가에 있다.
+    - 휴먼 플레이어 재고 5개: 필드 밖 대기(`OUT_OF_BOUNDS`). HIVE TIP마다 1개씩 LOADING ZONE에 들어오고, ENDGAME이 시작되면 남은 재고가 모두 들어온다. 오토 중 TIP 보상분은 TELEOP 시작 직전에 들어온다(아래 `autoTipCount`).
+    - **휴먼 플레이어 NECTAR 투입 규칙:** 투입이 정해진 NECTAR는 재고(`nectarStock`)에서 투입 대기(`pendingHumanNectar`)로 옮겨지고, 우리 LOADING ZONE의 빈 슬롯(기존 기물 · 로봇과 겹치지 않는 자리, 벽 쪽 우선)에 정지 상태로 놓인다. 슬롯은 RED LOADING ZONE 기준으로 만들고 BLUE는 필드 중심 점대칭으로 옮겨 두 진영의 배치가 대칭이다. 로봇이 LOADING ZONE을 막아 빈 슬롯이 없으면 대기하다가 자리가 나는 틱에 바로 놓인다 (기물을 로봇 몸체 안에 만들지 않음).
+3. **TELEOP 시작 조건 (오토 결과 시나리오):**
+    - **공식 기본 배치** (`ScenarioConfig`를 주지 않은 경우):
+        * HIVE 상향 셀: RED `AUDIENCE_CELL`, BLUE `OPPOSITE_CELL`
+        * HIVE 안: 상향 셀에 NECTAR 3개
         * 로봇 적재물: R1, R2 각각 POLLEN 4개 (적재 한도가 4 미만이면 한도만큼)
-        * FLOWER: 4개 플라워에 각각 POLLEN 4개씩 적재
-        * GARDEN: 아군/상대 각각 POLLEN 4개
-        * 오토 팁 횟수: 0 (로딩 존 투입 NECTAR 없음)
-        * 바닥 무작위 산포: 없음 (위 배치로 32 / 8개가 모두 소진됨)
-    - 커스텀 시나리오(`ScenarioConfig` 전달 시):
-        * HIVE 상향 셀 방향(`hiveUpwardCell`) 및 내부 기물 수(Pollen/Nectar)를 사용자 정의값으로 덮어씀.
-        * R1, R2의 적재물(`r1Loadout`, `r2Loadout`)을 **순서 있는 기물 종류 목록**으로 지정. 로봇 적재함은 FIFO(0번이 가장 먼저 발사/투입)이며, NECTAR 적재도 가능(오토 중 NECTAR를 흡입한 경우). 미지정 시 적재 한도만큼 POLLEN.
-        * GARDEN 잔여 POLLEN 수(`gardenPiecesCount`: 아군/상대), FLOWER 잔여 POLLEN 수(`flowerPiecesCount`)를 지정 (오토 중 로봇이 건드린 결과 반영).
-        * 오토 중 발생한 HIVE 팁 횟수(`autoTipCount`)를 지정하면 휴먼 플레이어가 텔레옵 시작 직전 그 수만큼 NECTAR를 재고에서 꺼내 로딩 존에 투입 (룰북 규정). 로딩 존 벽쪽 슬롯부터 결정론적으로 배치하며 무작위 산포보다 먼저 수행. 오토 팁 횟수는 POLLINATOR RP 팁 횟수에 합산됨(2.6.5항).
-        * R1, R2의 시작 자세(`r1Spawn`, `r2Spawn`: 위치 x, y 및 헤딩)를 자율주행 종료 위치로 개별 지정 가능. 미지정 시 진영별 기본 스폰(2.3항) 적용.
-        * **바닥 잔여 공은 자동 계산:** 위에서 지정되지 않은 나머지 기물은 모두 오토 중 바닥에 흩어진 공으로 간주하여, 정적 장애물(HIVE AABB, FLOWER 원통, 로봇 스폰 OBB), **양 진영 GARDEN과 로딩 존**, 이미 놓인 기물과 겹치지 않는 안전 데드존 회피 난수 알고리즘으로 필드 바닥(`state: 'ON_FIELD', vx: 0, vy: 0`)에 산포 스폰.
-            - GARDEN 제외: 산포된 공이 GARDEN에 걸쳐 정지하면 `IN_GARDEN`으로 판정되어 시나리오에서 지정한 GARDEN 수량이 바뀌므로 제외. 로딩 존 제외: 휴먼 플레이어 NECTAR 슬롯과 주차 구역을 막지 않도록 제외. (v1은 바닥 공 직접 배치 GUI가 없으므로 이 규칙 유지)
-            - 무작위 시도 200회가 모두 실패하면 HIVE 아래 필드 중앙 하단 기준점에서 3 in 간격으로 링을 넓혀 가며 첫 안전 좌표를 결정론적으로 탐색.
-            - 바닥 POLLEN = 32 − (로봇 적재 POLLEN + FLOWER + HIVE POLLEN + GARDEN)
-            - 바닥 NECTAR = 3(`NECTAR_IN_PLAY`) − (HIVE NECTAR + 로봇 적재 NECTAR). 남는 NECTAR는 휴먼 플레이어 재고로 돌아가지 않음.
-            - 휴먼 플레이어 재고 = 5 − `autoTipCount`
-            - (향후) GUI에서 바닥 잔여 공을 직접 배치하는 기능으로 무작위 산포를 대체 가능하게 확장 예정.
-        * **배치 순서:** 로봇 적재물 → FLOWER → HIVE → GARDEN → 오토 팁 NECTAR(로딩 존) → 바닥 무작위 산포.
-        * **시나리오 검증 (`validateScenario`, GUI 구현 시 필수 적용 메모):** 아래 중 하나라도 위반하면 GUI는 시나리오 설정 확정 버튼을 비활성화하여 입력을 막는다. 엔진은 GUI를 거치지 않은 값에 대비해 같은 규칙으로 잘라서 수용(안전장치)한다.
-            - FLOWER별 POLLEN 수: 0 ~ 4 정수 (오토 중 FLOWER 투입은 룰상 불가하므로 초기값 4를 넘을 수 없음) — `FLOWER_COUNT`
-            - GARDEN별 POLLEN 수: 0 ~ 8 정수 (GARDEN 23in / POLLEN 직경 2.8in 물리 한도) — `GARDEN_COUNT`
-            - HIVE 상향 셀 {NECTAR, POLLEN}이 팁 임계 테이블(2.6.1항)에 도달하지 않아야 함 (도달 시 시작 전에 이미 전복된 불가능 상태), NECTAR ≤ 3 — `HIVE_OVER_THRESHOLD`, `HIVE_COUNT`
-            - 로봇 적재물 길이 ≤ 해당 로봇 적재 한도 — `LOADOUT_OVER_CAPACITY`
-            - `canIntakeNectar = false` 로봇의 적재물에 NECTAR 금지 — `LOADOUT_NECTAR_NOT_ALLOWED`
-            - HIVE NECTAR + 로봇 적재 NECTAR ≤ 3 — `NECTAR_IN_PLAY_EXCEEDED`
-            - 지정 POLLEN 합계(로봇 적재 + FLOWER + HIVE + GARDEN) ≤ 32 — `POLLEN_TOTAL_EXCEEDED`
-            - `autoTipCount`: 0 ~ 5 정수 — `AUTO_TIP_COUNT`
-        * 난수 시드(`rngSeed`)를 지정하면 잔여 공 산포, 슈팅 명중 판정, 빗맞음 방출, HIVE 낙하 분포가 모두 해당 시드로 재현됨. 미지정 시 엔진 기본 시드 사용.
+        * FLOWER: 4개 모두 POLLEN 4개씩
+        * GARDEN: 양 진영 각각 POLLEN 4개
+        * 오토 TIP 횟수: 0 (LOADING ZONE 투입 NECTAR 없음)
+        * 바닥 무작위 산포: 없음 (위 배치로 POLLEN 32 / NECTAR 8개가 모두 소진됨)
+    - **커스텀 시나리오** (`ScenarioConfig`로 덮어쓰는 값):
+        * HIVE 상향 셀 방향(`hiveUpwardCell`)과 안에 든 POLLEN / NECTAR 수.
+        * R1, R2 적재물(`r1Loadout`, `r2Loadout`): **순서 있는 기물 종류 목록**. 적재함은 FIFO(0번이 가장 먼저 발사 / 투입)이며, 오토 중 NECTAR를 흡입했다면 NECTAR도 넣을 수 있다. 지정하지 않으면 적재 한도만큼 POLLEN.
+        * 남은 GARDEN POLLEN 수(`gardenPiecesCount`: 우리 / 상대), 남은 FLOWER POLLEN 수(`flowerPiecesCount`).
+        * 오토 중 HIVE TIP 횟수(`autoTipCount`): 휴먼 플레이어가 TELEOP 시작 직전에 그 수만큼 NECTAR를 재고에서 꺼내 LOADING ZONE에 넣는다 (룰북 규정). 벽 쪽 슬롯부터 결정론적으로 배치하며 무작위 산포보다 먼저 한다. 오토 TIP은 POLLINATOR RP 판정의 TIP 횟수에 합산된다(2.6.5항).
+        * R1, R2 시작 자세(`r1Spawn`, `r2Spawn`: 위치 x, y와 헤딩) = 오토가 끝난 위치. 지정하지 않으면 진영별 기본값(2.3항).
+        * 난수 시드(`rngSeed`): 바닥 산포, 발사 명중 판정, 빗맞음 반사, HIVE 낙하 분포가 모두 이 시드로 재현된다. 지정하지 않으면 엔진 기본 시드.
+    - **바닥에 남은 기물은 자동 계산:** 위에서 지정되지 않은 나머지 기물은 오토 중 바닥에 흩어진 것으로 보고 필드 바닥(`state: 'ON_FIELD'`, 속도 0)에 무작위로 놓는다. HIVE AABB, FLOWER, 로봇 시작 자세, **양 진영 GARDEN과 LOADING ZONE**, 이미 놓인 기물과 겹치지 않는 자리만 쓴다.
+        - GARDEN을 빼는 이유: 산포된 공이 GARDEN에 걸쳐 멈추면 `IN_GARDEN`으로 판정되어 시나리오에서 정한 GARDEN 수가 바뀐다. LOADING ZONE을 빼는 이유: 휴먼 플레이어 NECTAR 슬롯과 주차 구역을 막지 않기 위해.
+        - 무작위 시도 200회가 모두 실패하면 HIVE 아래 필드 중앙 하단 기준점에서 3 in 간격으로 고리를 넓혀 가며 첫 안전 좌표를 결정론적으로 찾는다.
+        - 바닥 POLLEN = 32 − (로봇 적재 POLLEN + FLOWER + HIVE POLLEN + GARDEN)
+        - 바닥 NECTAR = 3(`NECTAR_IN_PLAY`) − (HIVE NECTAR + 로봇 적재 NECTAR). 남는 NECTAR는 휴먼 플레이어 재고로 돌아가지 않는다.
+        - 휴먼 플레이어 재고 = 5 − `autoTipCount`
+        - 바닥 기물을 직접 배치하는 화면은 v2 후보(5.2항).
+    - **배치 순서:** 로봇 적재물 → FLOWER → HIVE → GARDEN → 오토 TIP NECTAR(LOADING ZONE) → 바닥 무작위 산포.
+    - **시나리오 검증 (`validateScenario`):** 아래 중 하나라도 어기면 화면은 시나리오 적용 버튼을 막는다. 엔진은 화면을 거치지 않은 값에 대비해 같은 규칙으로 잘라서 받는다(안전장치).
+        - FLOWER별 POLLEN: 0 ~ 4 정수 (오토 중 FLOWER 투입은 룰상 불가하므로 초기값 4를 넘을 수 없음) — `FLOWER_COUNT`
+        - GARDEN별 POLLEN: 0 ~ 8 정수 (GARDEN 23 in / POLLEN 2.8 in의 물리 한도) — `GARDEN_COUNT`
+        - HIVE 상향 셀 {NECTAR, POLLEN}이 TIP 임계(2.6.1항)에 닿지 않을 것 (닿으면 시작 전에 이미 넘어간 불가능한 상태), NECTAR ≤ 3 — `HIVE_OVER_THRESHOLD`, `HIVE_COUNT`
+        - 로봇 적재물 길이 ≤ 그 로봇의 적재 한도 — `LOADOUT_OVER_CAPACITY`
+        - `canIntakeNectar = false`인 로봇의 적재물에 NECTAR 금지 — `LOADOUT_NECTAR_NOT_ALLOWED`
+        - HIVE NECTAR + 로봇 적재 NECTAR ≤ 3 — `NECTAR_IN_PLAY_EXCEEDED`
+        - 지정한 POLLEN 합계(로봇 적재 + FLOWER + HIVE + GARDEN) ≤ 32 — `POLLEN_TOTAL_EXCEEDED`
+        - `autoTipCount`: 0 ~ 5 정수 — `AUTO_TIP_COUNT`
 
-### 2.5 기물 물리 상수 및 역학 (Physical Constants & Dynamics)
+### 2.5 기물 물리 상수
 
-공의 물리 상수를 기물 타입별로 명확히 분리 정의한다 (`src/core/collision.ts`).
+기물 종류별 물리 상수는 `src/core/collision.ts`에 있다.
 
-- **POLLEN:**
-    - radius: 1.4 in (직경 2.8 in)
-    - mass: 24.95 g (상대 질량비 1.0)
-    - frictionDecel: 65.0 in/s² (EVA 폼 타일 쿨롱 감속도)
-    - restitution: 0.35 (반발 계수 e)
-- **NECTAR:**
-    - radius: 1.8 in (직경 3.6 in)
-    - mass: 41.28 g (상대 질량비 1.65)
-    - frictionDecel: 85.0 in/s² (타일 침하 저항 감속도)
-    - restitution: 0.25 (반발 계수 e)
-- **정지 임계 속도:** `speed < 0.5 in/s` 도달 시 수치 진동 방지를 위해 `vx = 0, vy = 0`으로 강제 스냅.
-- **중력 가속도 (`GRAVITY`):** 표준 중력 9.80665 m/s² 환산 ≈ 386.09 in/s². 발사 비행은 공기 저항과 공 회전을 무시한 진공 포물선으로 계산.
+| 항목 | POLLEN | NECTAR |
+|---|---|---|
+| 반지름 | 1.4 in (직경 2.8) | 1.8 in (직경 3.6) |
+| 질량 | 24.95 g (질량비 1.0) | 41.28 g (질량비 1.65) |
+| 바닥 마찰 감속도 `frictionDecel` | 65.0 in/s² (EVA 폼 타일 쿨롱 감속) | 85.0 in/s² (타일 침하 저항) |
+| 반발 계수 `restitution` | 0.35 | 0.25 |
+
+- **정지 임계 속도:** `speed < 0.5 in/s`가 되면 수치 진동을 막기 위해 속도를 0으로 맞춘다.
+- **중력 가속도 (`GRAVITY`):** 9.80665 m/s² ≈ 386.09 in/s². 발사 비행은 공기 저항과 공 회전을 무시한 진공 포물선으로 계산한다.
 - **착지 속도 유지 비율 (`landingSpeedRetention`, 기물별, 기본 0.3 — 실측 전 임시값):**
-    - 공기 저항을 무시하므로 비행 중 수평 속도는 v0·cosθ로 일정하다. 그러나 실제 공은 바닥(EVA 폼 타일)에 떨어질 때 여러 번 튀면서 에너지를 잃어, 굴러가기 시작하는 수평 속도가 v0·cosθ보다 훨씬 작다. 이 손실을 착지 순간 한 번에 반영하여, 빗맞음 바닥 착지 기물의 초기 속도 = 발사 방향 × v0·cosθ × `landingSpeedRetention`. HIVE에 맞고 반사되어 떨어진 기물도 착지 순간 수평 속도 × 같은 비율로 굴러가기 시작한다 (2.6.2항 충돌 후 낙하, 08-2).
-    - (보정 전 예) 발사각 45°, 거리 60 in, 발사구 높이 12 in이면 v0 ≈ 274 in/s, 수평 194 in/s → 손실 없이 굴리면 POLLEN 마찰 65 in/s²로 약 290 in를 굴러 필드를 가로지름.
-    - **실측 방법:** ① 슈터를 고정하고 바닥을 향해(HIVE를 피해) 기물 종류별로 여러 번(예: 10회 이상) 발사하며 측면에서 고fps 영상 촬영. ② 발사구 → 첫 착지 지점의 수평 거리 ÷ 비행 시간(프레임 수 ÷ fps)으로 착지 직전 수평 속도 v_h 측정 (또는 v0·cosθ 계산값 사용). ③ 첫 착지 지점 → 최종 정지 지점의 거리 L 측정. ④ 착지 후 운동을 마찰 감속도 a(POLLEN 65, NECTAR 85 in/s²)의 등감속 구름으로 보면 굴러가기 시작한 속도 = √(2·a·L)이므로 `landingSpeedRetention = √(2·a·L) / v_h`. ⑤ 반복 측정 평균값을 사용. (마찰 감속도 자체도 실측으로 검증하면 더 정확함: 알려진 속도로 굴린 공의 정지 거리 측정)
+    - 공기 저항이 없으므로 비행 중 수평 속도는 v0·cosθ로 일정하다. 실제 공은 EVA 폼 타일에 떨어지며 여러 번 튀면서 에너지를 잃어, 굴러가기 시작하는 속도가 v0·cosθ보다 훨씬 작다. 이 손실을 착지 순간 한 번에 반영하여, 바닥에 착지한 빗맞음 기물의 초기 속도 = 발사 방향 × v0·cosθ × `landingSpeedRetention`. HIVE에 맞고 떨어진 기물도 착지 순간 수평 속도 × 같은 비율로 굴러가기 시작한다(2.6.2항 충돌 후 낙하).
+    - 예: 발사각 45°, 거리 60 in, 발사구 높이 12 in이면 v0 ≈ 274 in/s, 수평 194 in/s. 손실 없이 굴리면 POLLEN 마찰 65 in/s²로 약 290 in를 굴러 필드를 가로지른다.
+    - **실측 방법:**
+        1. 슈터를 고정하고 HIVE를 피해 바닥을 향해 기물 종류별로 여러 번(예: 10회 이상) 발사하며 옆에서 고fps 영상을 찍는다.
+        2. 발사구 → 첫 착지 지점의 수평 거리 ÷ 비행 시간(프레임 수 ÷ fps)으로 착지 직전 수평 속도 v_h를 잰다 (또는 v0·cosθ 계산값).
+        3. 첫 착지 지점 → 최종 정지 지점의 거리 L을 잰다.
+        4. 착지 후를 마찰 감속도 a(POLLEN 65, NECTAR 85 in/s²)의 등감속 구름으로 보면 굴러가기 시작한 속도 = √(2·a·L)이므로 `landingSpeedRetention = √(2·a·L) / v_h`.
+        5. 반복 측정 평균을 쓴다. (알려진 속도로 굴린 공의 정지 거리를 재서 마찰 감속도 자체도 검증하면 더 정확하다.)
 
-### 2.6 득점 및 구조물 로직 (Scoring Mechanics)
+### 2.6 득점과 구조물 규칙
 
-1. **HIVE (벌집) 팁 및 시차 낙하 로직:**
-    - **초기 상태:** Red는 `AUDIENCE_CELL`이 위(UP)를, Blue는 `OPPOSITE_CELL`이 위(UP)를 향하도록 고정 시작.
-    - **팁 임계 테이블 (`HIVE_TIP_POLLEN_BY_NECTAR`, FLOWER 용량 테이블과 같은 구조):** 상향 셀의 NECTAR 개수별로 팁이 발동하는 POLLEN 개수. 임계 조합 {NECTAR, POLLEN} = {5, 0}, {4, 1}, {3, 3}, {2, 5}, {1, 6}, {0, 8}. 상향 셀 POLLEN ≥ 해당 NECTAR 개수의 임계 POLLEN이면 팁 (NECTAR 5개 이상이면 POLLEN 0개로 즉시 팁). 상향 셀 개수는 NECTAR / POLLEN 별도 집계(`nectarInUpwardCell`, `pollenInUpwardCell`).
-    - **팁 발동 시점:** 명중한 공이 **도착한 틱**(발사 비행 처리, 2.6.2항)에 상향 셀이 임계에 도달하면 그 틱에 즉시 팁 상태(`isTipping = true`, `tipProgressTimer = 0`)로 전환. 팁 진행 중(낙하 대기열 방출 완료 전)에 발사된 공은 명중 확률과 무관하게 **전부 빗맞음**이며, 팁 전에 명중으로 발사됐더라도 도착 시점에 팁 진행 중이거나 상향 셀이 발사 시점과 달라졌으면 조준점에서 셀 앞면 바깥으로 반사되어 떨어진다 (무효 명중, 2.6.2항 충돌 후 낙하).
-    - **TIP 30도 틸트 기반 시차 낙하 (Staggered Drop Queue):**
-        - **기준점(Lip Origin) 산출:**
-            - 기준 X: 아군 진영 중심선 `Lip_X = (alliance === 'RED') ? 59.25 : 84.75`
-            - 기준 Y: Audience 측 전복(+Y 사출) 시 `Lip_Y = 91.475 in` (하단 개구부 립)
-            - 기준 Y: Opposite 측 전복(-Y 사출) 시 `Lip_Y = 52.525 in` (상단 개구부 립)
-            - 사출 방향 계수 `spillDir`: Audience 측 `+1.0`, Opposite 측 `-1.0`
-        - **기물별 몬테카를로 착지 분포:**
-            - **POLLEN:** `targetY = Lip_Y + spillDir * Normal(mean = 24.3, sigma = 8.3) in`, `targetX = Lip_X + Normal(mean = 0, sigma = 5.9) in`, `settleTime = UniformRandom(1.46, 2.10) 초` (평균 1.83초)
-            - **NECTAR:** `targetY = Lip_Y + spillDir * Normal(mean = 20.2, sigma = 7.0) in`, `targetX = Lip_X + Normal(mean = 0, sigma = 5.9) in`, `settleTime = UniformRandom(1.36, 2.08) 초` (평균 1.76초)
-        - **데드존 Re-roll:** 생성된 `(targetX, targetY)`가 필드 밖(공 반지름 마진), HIVE AABB(반지름 마진 포함), 로봇 OBB 내부와 겹칠 경우 최대 50회 Re-roll. 초과 시 안전 오프셋 바닥 좌표 강제 지정.
-        - **스폰 라이프사이클:**
-            - HIVE 임계치 도달 시 20점 획득, `tipCount++`, `isTipping = true`, `tipProgressTimer = 0` 설정, 상향 셀 반전 및 새 상향 셀 개수 0으로 초기화.
-            - 셀 내부의 공들에 대해 각각 목표 좌표와 `settleTime`을 계산하여 `pendingDrops` 큐에 등록.
-            - 50Hz 엔진이 매 틱 `tipProgressTimer += 0.02`를 누적하며, 개별 `settleTime` 도달 시점에 해당 좌표에 정지 상태(`vx=0, vy=0, state='ON_FIELD'`)로 순차 스폰.
-            - 큐의 모든 공이 스폰 완료되면(약 2.1~2.2초 소요) `isTipping = false`로 복귀하고 다음 득점 수용 가능.
-            - 팁 발생 즉시 휴먼 플레이어가 NECTAR 1개를 로딩 존에 투입 (빈 슬롯이 없으면 자리가 날 때까지 대기, 2.4항 투입 규칙).
-2. **HIVE 슈팅 메커니즘 및 탄도 모델:**
-    - **역할 분리:** 엔진은 발사마다 3D 궤적으로 명중을 판정하지 않는다. 설정 확정 시 몬테카를로로 미리 만든 명중률 LUT(오프라인 탄도 모듈 `ballistics.ts`)를 판정 함수(`ShotProbabilityResolver`)로 조회하고, 시드 PRNG 난수 1회로 명중 여부를 정한다. 아래 "몬테카를로 명중 판정"은 **LUT 생성 시에만** 쓰이며 엔진 루프에서는 실행되지 않는다.
-    - **판정 함수는 엔진 필수 인자:** `SimulationEngine(r1Config, r2Config, shotResolver, alliance?, scenario?)`. 실제 경기는 LUT 기반 `createLUTShotResolver`를 주입하고, 테스트는 고정 확률 함수를 주입한다. 로봇 고정 명중률(`shooterAccuracy`)은 폐기했다.
-    - **물리 가정:** 공기 저항·공 회전 무시, 중력 `GRAVITY` ≈ 386.09 in/s² (2.5항).
-    - **발사구 위치:** 높이 `z0 = HIVE_RIM_Z − dz` (림 z = 53.5 고정이므로 `BallisticsConfig.dz`로 역산). 수평 위치는 로봇 중심에서 조준 방향으로 `shooterOffset`만큼 떨어진 점. 터렛 회전축은 차체 중심으로 가정하므로 고정형(정면 조준 시)과 터렛형의 발사구 위치가 같다.
-    - **조준점:** 목표 셀 투입구 오각형의 면적 중심 (2.2항 표, `hiveCellAimPoint`). 조준 오차, v0 역산, 명중 기물 배치의 기준.
-    - **v0 초기값 (닫힌 해):** 발사구 → 조준점 수평 거리 $D$, 높이차 $\Delta z = z_{\text{aim}} - z_0$, 발사각 $\theta$:
+#### 2.6.1 HIVE TIP과 시차 낙하
 
-        $$v_0 = \frac{D}{\cos\theta} \sqrt{\frac{g}{2(D\tan\theta - \Delta z)}}$$
+- **초기 상태:** RED는 `AUDIENCE_CELL`, BLUE는 `OPPOSITE_CELL`이 위(UP)를 향한 채 시작한다 (시나리오로 변경 가능).
+- **TIP 임계 테이블 (`HIVE_TIP_POLLEN_BY_NECTAR`):** 상향 셀의 NECTAR 수별로 TIP이 일어나는 POLLEN 수. 임계 조합 {NECTAR, POLLEN} = {5, 0}, {4, 1}, {3, 3}, {2, 5}, {1, 6}, {0, 8}. 상향 셀 POLLEN ≥ 그 NECTAR 수의 임계 POLLEN이면 TIP (NECTAR 5개 이상이면 POLLEN 0개로 바로 TIP). 상향 셀 개수는 NECTAR / POLLEN을 따로 센다(`nectarInUpwardCell`, `pollenInUpwardCell`).
+- **TIP 시점:** 명중한 공이 **도착한 틱**(2.6.2항 발사 비행 처리)에 상향 셀이 임계에 닿으면 그 틱에 바로 TIP 상태(`isTipping = true`, `tipProgressTimer = 0`)가 된다.
+    - TIP 진행 중(낙하 대기열 방출 완료 전)에 발사된 공은 명중 확률과 무관하게 **모두 빗맞음**이다.
+    - TIP 전에 명중으로 발사됐더라도, 도착 시점에 TIP 진행 중이거나 상향 셀이 발사 시점과 달라졌으면 조준점에서 셀 앞면 바깥으로 튕겨 떨어진다 (무효 명중, 2.6.2항 충돌 후 낙하).
+- **30도 기울기 기반 시차 낙하 (Staggered Drop Queue):**
+    - **기준점(Lip Origin):**
+        - 기준 X: 우리 진영 중심선 `Lip_X = (alliance === 'RED') ? 59.25 : 84.75`
+        - 기준 Y: Audience 쪽으로 넘어갈 때(+y 방향) `Lip_Y = 91.475` (아래쪽 개구부 립), Opposite 쪽으로 넘어갈 때(−y 방향) `Lip_Y = 52.525` (위쪽 개구부 립)
+        - 쏟아지는 방향 계수 `spillDir`: Audience 쪽 `+1.0`, Opposite 쪽 `−1.0`
+    - **기물별 몬테카를로 착지 분포:**
+        - **POLLEN:** `targetY = Lip_Y + spillDir × Normal(24.3, 8.3)`, `targetX = Lip_X + Normal(0, 5.9)`, `settleTime = Uniform(1.46, 2.10)`초 (평균 1.83초)
+        - **NECTAR:** `targetY = Lip_Y + spillDir × Normal(20.2, 7.0)`, `targetX = Lip_X + Normal(0, 5.9)`, `settleTime = Uniform(1.36, 2.08)`초 (평균 1.76초)
+    - **데드존 재추첨:** 뽑은 `(targetX, targetY)`가 필드 밖(공 반지름 여유), HIVE AABB(반지름 여유 포함), 로봇 OBB와 겹치면 최대 50회 다시 뽑는다. 그래도 실패하면 안전한 바닥 좌표를 강제로 정한다.
+    - **진행 순서:**
+        1. 임계에 닿으면 20점 획득, `tipCount++`, `isTipping = true`, `tipProgressTimer = 0`, 상향 셀 반전, 새 상향 셀 개수 0으로 초기화.
+        2. 셀 안의 공마다 목표 좌표와 `settleTime`을 계산해 `pendingDrops` 대기열에 넣는다.
+        3. 매 틱 `tipProgressTimer += 0.02`를 누적하고, 각 공의 `settleTime`이 되면 그 좌표에 정지 상태(`ON_FIELD`, 속도 0)로 차례로 내려놓는다.
+        4. 대기열이 모두 비면(약 2.1~2.2초) `isTipping = false`로 돌아가 다음 득점을 받는다.
+        5. TIP 즉시 휴먼 플레이어가 NECTAR 1개를 LOADING ZONE에 넣는다 (빈 슬롯이 없으면 자리가 날 때까지 대기, 2.4항 투입 규칙).
 
-        ($D\tan\theta > \Delta z$일 때만 해가 존재)
-    - **스윗스팟 (한 점 입력):** 로봇마다 기준 셀 `RED_AUDIENCE`를 가장 잘 넣는 로봇 중심 좌표 **한 점**(`BallisticsConfig.sweetSpot`)만 입력받는다.
-        - 기존 3-Tier(100% / 80% / 60%) 입력은 폐기: 명중 확률은 편차 모델의 몬테카를로가 계산하므로, 사용자가 추정한 80% / 60%로 보정하면 같은 편차를 이중 반영하고 덜 정확해진다. v0 고정 슈터의 명중 구역은 조준점 주변 거리 띠 형태로 넓게 나타나는데, 이는 입력이 아니라 LUT 결과로 드러난다. (실측 명중률은 향후 편차 파라미터 보정에 사용)
-        - **GUI 입력 기준 (09-1):** GUI는 현재 시나리오 진영의 공식 시작 상향 셀(RED → `RED_AUDIENCE`, BLUE → `BLUE_OPPOSITE`)을 기준으로 스윗스팟을 입력 / 표시하고, BLUE는 필드 중심 점대칭 (x, y) ↔ (144 − x, 144 − y)로 변환해 저장한다. 저장값(`sweetSpot`)은 항상 `RED_AUDIENCE` 기준이므로 진영 변경은 LUT를 무효화하지 않는다 (3.8항).
-            - **구현 (09-2):** `sweetSpotBasisCell(alliance)`, `sweetSpotFromBasis(p, alliance)`(진영 기준 → 저장 좌표), `sweetSpotToBasis(p, alliance)`(저장 좌표 → 진영 기준). 두 변환 모두 **진영 기준 좌표에서 격자 중심으로 스냅한 뒤** 점대칭하여 격자 중심을 반환한다 → 격자 경계 위의 점(예: BLUE (84, 10))도 사용자가 화면에서 본 격자가 그대로 LUT / 검증에 쓰인다 (변환 후 스냅하면 경계에서 옆 격자가 선택됨).
-        - **격자 중심 스냅 (`snapSweetSpot`):** 스윗스팟은 그 점을 담는 1 in 격자의 중심(x.5)으로 스냅한 뒤 검증 / v0 탐색한다 (경계 위의 점은 큰 쪽 격자, 예: (60, 135) → (60.5, 135.5)). LUT는 격자 중심에서만 명중률을 계산하므로, 격자 중심 기준으로 v0를 찾아야 스윗스팟 격자의 LUT 값이 탐색 명중률과 일치한다 (근거리 상승 사격은 명중 띠 폭이 격자보다 좁을 수 있음). GUI 격자 클릭 입력은 이미 격자 중심.
-        - 검증 (`validateBallisticsConfig`, GUI 확정 버튼(LUT 생성) 비활성화, 스냅한 스윗스팟 기준, 엄격 적용 — 헤딩은 입력받지 않음. GUI는 조준점을 향해 돌린 로봇 몸체 윤곽과 실패 사유를 미리 보여줌): 조준점을 바라보는 로봇 몸체가 필드 안 — `SWEET_SPOT_OUT_OF_FIELD`, HIVE AABB와 겹치지 않음 — `SWEET_SPOT_IN_HIVE`, 닫힌 해 존재 — `SWEET_SPOT_NO_SOLUTION`, 파라미터 유효(발사각 (0, π/2), 유한값, 편차 ≥ 0, 로봇 크기 > 0) — `PARAM_INVALID`. v0 탐색 후 스윗스팟 명중률(`sweetSpotHitRate`)이 0이면 경고.
-    - **2단계 몬테카를로 (로봇별 · 기물 종류별 독립):**
-        1. **v0 탐색 (`searchLaunchSpeed`):** 스윗스팟에서 닫힌 해 v0를 초기값으로, 닫힌 해 ±20% (1% 간격) → 최고점 ±1% (0.1% 간격) 1차원 탐색하여 몬테카를로 명중률(후보당 20000샘플)이 최대인 v0를 채택. 모든 후보가 같은 시드(공통 난수)를 써서 비교 잡음을 줄이고, 동률이면 닫힌 해(굵은 탐색 최고점)에 가까운 후보 우선. POLLEN / NECTAR 각각 따로 탐색한다 (팀이 기물 종류별로 슈터를 튜닝했다고 가정).
-        2. **LUT 생성 (`generateReferenceLUT`):** 채택한 v0로 144 × 144 격자(1 in) 중심 $(g_x + 0.5, g_y + 0.5)$마다, 로봇이 조준점을 정면 조준했다고 가정한 명중률 $P_{\text{spatial}}$(격자당 2000샘플)를 계산. 조준점을 바라보는 로봇 몸체가 HIVE AABB와 겹치는 격자는 0.
-            - **격자별 독립 난수 구간:** 격자 i는 기준 스트림의 $[i \cdot N \cdot 6,\ (i+1) \cdot N \cdot 6)$ 구간을 쓴다 (N = 격자당 샘플, 샘플 1개 = 난수 6개 `RNG_DRAWS_PER_SAMPLE`). Mulberry32 상태는 고정 증분 수열이라 `createRng(seed, skip)`로 O(1) 점프한다. 구간이 겹치지 않고, 격자 계산 순서 / 건너뛰기 / Web Worker 분할과 무관하게 같은 값이 나온다 (144² × N × 6 < 2³² → N ≤ 약 34,000).
-            - **도달 불가 격자 생략 (`canPossiblyHit`, 기본 켬):** 명중하려면 통과점이 오각형 위에 있어야 하므로, 발사구 → 오각형 지면 투영까지의 수평 거리 범위에서 공 높이가 [림 z, 꼭짓점 z]에 들어올 수 있어야 한다. 속도 / 발사각 편차 ±6σ 상자에서 높이 최댓값·최솟값을 닫힌 형태로 구하고(속도에 단조, tanθ에 오목), 거리를 0.05 in 간격 + 립시츠 여유로 훑어 불가능이 확실한 격자만 0으로 둔다. ±6σ 밖 확률은 샘플당 약 6e-9라 생략해도 결과가 생략하지 않은 경우와 같다 (테스트로 동일성 검증).
-            - 생략 비율은 약 11~16%로 크지 않다: 속도 편차 6σ(±12%)의 공은 포물선 하강 구간으로 필드 대부분의 거리에 닿을 수 있어, 확실히 0인 격자를 증명할 수 있는 범위가 좁다 (방위 편차 부채꼴로 투영을 잘라도 약 1%p 추가라 채택하지 않음). 실제 0이 아닌 격자는 3~20% 수준.
-        - 샘플 편차 (`estimateHitRate`): 속도 $v_0(1 + N(0, \text{v0NoisePercent}))$, 방위 $+N(0, \text{headingNoiseRad})$, 발사각 $+N(0, \text{pitchNoiseRad})$ (기본 0.02 / 0.02 rad / 0.006 rad). 발사구 위치는 명목 조준 방향 기준이고 편차는 공의 방향에만 적용.
-        - 결정론: Mulberry32 시드 PRNG(`createRng`, 엔진과 같은 알고리즘의 독립 스트림). 기준 시드(`RobotLUTOptions.seed`, 기본 `DEFAULT_BALLISTICS_SEED`)에서 기물 종류 × (탐색 / LUT) 용도별 시드를 파생하고, LUT는 그 안에서 격자별 구간을 쓰므로 같은 설정 + 같은 시드 = 같은 LUT.
-        - 준난수(Sobol / Halton) 샘플링은 보류 (얻는 정확도 대비 변경 범위가 큼).
-        - 통합 함수 `generateRobotLUTs(config, robotSize, options)` → `{luts, v0, sweetSpotHitRate, issues}` (로봇 1대분 8장). 검증 실패 시 LUT 전부 0, v0 null (판정 함수가 항상 0).
-    - **몬테카를로 명중 판정 (샘플 1개, LUT 생성 전용):** 아래를 모두 만족하면 명중.
-        - **① 앞면 통과:** 공 중심 궤적이 상향 셀 투입구 평면을 **앞면에서** 통과 (통과 순간 속도 · 바깥 법선 < 0).
-        - **② 줄인 오각형:** 통과점이 오각형을 **기물 반지름만큼 안쪽으로 줄인 영역** 내부 (공 전체가 들어감). 반지름이 기물마다 달라 POLLEN / NECTAR LUT가 따로 필요.
-        - **③ 림 아래 벽 여유:** 통과 전 공 중심이 림 아래 벽(y–z 단면 R = [림 y, HIVE 앞면 y] × (−∞, 림 z], 셀 폭 방향으로 이어짐)과 반지름 이상 떨어져 있음. R을 r만큼 넓힌 영역 = 옆 띠(y ∈ [R − r], z < 림 z) ∪ 윗면 띠(z < 림 z + r) ∪ 윗모서리 원 2개. 띠는 공 높이가 시간에 오목하므로 구간 끝점 검사로 정확하고, 모서리는 경로 곡률 반경(수백 in) ≫ r이라 거리 함수가 단봉이므로 황금분할 탐색으로 정확하다 (촘촘한 샘플링 기준 판정과 0.00%p 일치 확인).
-            - 이전(06-3)의 "림 y를 지날 때 z ≥ 림 z + r" 조건은 공이 비스듬히 모서리를 지날 때의 수직 거리(높이 여유 × cos(진입각))를 무시해 상승 진입을 과대 인정했고, 반대로 네모 모서리 근사는 최대 약 40%p 과소 인정했다.
-        - **④ HIVE 직육면체 진입 면:** 통과 전 공이 직육면체(xy ± r, 높이 `HIVE_HEIGHT` + r)에 처음 들어오는 곳이 (a) 셀 앞면(AUDIENCE y = maxY + r / OPPOSITE y = minY − r, 안쪽으로 이동, 셀 폭 x ∈ [셀 좌측 + r, 셀 우측 − r]) 또는 (b) 셀 위 윗면(z = `HIVE_HEIGHT` + r, 셀 폭 안, 오각형 꼭짓점보다 앞쪽)이어야 한다. HIVE 옆면 / 뒷면 / 셀 옆 프레임 / 셀 폭 밖 앞면으로 들어오면 차단. 진입점과 통과점이 모두 셀 폭 안이면 그 사이 직선 경로도 셀 폭 안이므로 진입점 검사로 충분. 발사구가 이미 박스 안이면 앞면 앞 공간(림 바깥, 셀 폭 안)일 때만 허용.
-            - 이전(06-3)에는 직육면체를 쓰지 않아 HIVE 옆에서 옆면을 뚫고 오는 공이 명중으로 계산됐고(발사각 70°에서 옆쪽 명중 영역), 림 y 기준 조건이 발사구가 림 안쪽 / 바깥쪽인지에 따라 들쭉날쭉해 y = 93 행 줄무늬가 생겼다. ④로 옆쪽 영역과 줄무늬가 함께 사라진다.
-        - 구현 (`isShotInHiveCell`): 투입구 평면까지의 부호 거리 $f(t)$는 오목한 2차식이므로 앞면 → 뒷면 통과는 항상 큰 근 (상승 진입도 앞면 통과면 인정). 줄인 오각형은 볼록 다각형의 각 변(밑변, 좌우 세로 변, 삼각형 빗변 2개)을 r만큼 안으로 옮긴 반평면의 교집합.
-        - **근거리 상승 사격:** 발사구가 낮고 조준점까지 가까우면 공이 아직 올라가는 중에 입구에 도달한다 (도달 기울기 $2\Delta z / D - \tan\theta > 0$). 공이 벽 윗모서리를 비스듬히 지나므로 모서리까지의 수직 거리는 높이 여유 × cos(상승각)이다. 입구 아래쪽 / 가운데를 노린 공은 모서리에 걸리고 위쪽만 들어가므로 명중 띠가 좁다 (예: 발사구 12 in, 발사각 55°, 거리 약 35 in에서는 조준점 명목 궤적도 모서리를 0.97 in 거리로 스쳐 빗맞음). 원거리에서 내려오며 들어가는 사격은 띠가 넓다.
-        - **고각 사격의 두 띠:** 발사각이 크면 로봇이 멀어질수록 입구 통과 높이가 림 → 입구 위쪽 → 림으로 올라갔다 내려와, 조준점 가까운 쪽에 상승 진입 띠, 먼 쪽에 하강 진입 띠(거리에 덜 민감해 더 넓음)가 생긴다. 두 띠 사이는 포물선 꼭대기가 입구 삼각형(좁아지는 부분)에 걸려 약간 낮다.
-    - **LUT 구성 및 4-Cell 대칭 변환:**
-        - 로봇 2대 × 기물 2종 × 4셀 = **16장**, 각 144 × 144 `Float32Array` (1 in 격자, 인덱스 `gy * 144 + gx`). 타입: `HeatmapLUT`, `HeatmapLUTSet`(4셀), `RobotHeatmapLUTs`(기물 종류별).
-        - 격자 / 샘플 수 선택 근거 (06-3 이후 측정): 명중 띠 안 평균 오차는 2 in 격자 + 최근접 조회 2.9~9.4%p(최대 36~44%p), 1 in 격자 + 쌍선형 보간 0.3~1.1%p(최대 3.8~4.9%p)로, 1 in + 보간 + 격자당 2000샘플(표본 오차 약 1%p)에서 격자 오차와 표본 오차가 비슷해진다. v0 탐색 20000샘플은 찾은 v0의 실제 명중률 손실을 0.6%p → 0.07%p로 줄이며 메모리 영향이 없다 (샘플을 저장하지 않음).
-        - 몬테카를로는 기준 셀 `RED_AUDIENCE`에 대해서만 수행 (로봇 × 기물 = 4회)하고, 나머지 3셀은 격자 인덱스 대칭 복사 (셀 기하가 정확히 대칭이므로 오차 없음):
-            - `RED_OPPOSITE`: y = 72 직선 기준 대칭 (x, 144 − y) → $g_y' = 143 - g_y$
-            - `BLUE_AUDIENCE`: x = 72 직선 기준 대칭 (144 − x, y) → $g_x' = 143 - g_x$
-            - `BLUE_OPPOSITE`: (72, 72) 점대칭 (144 − x, 144 − y) → 두 인덱스 모두 반전
-        - **연산량 / 메모리:** 격자당 2000샘플 기준 최대 4 × 20,736 × 2000 ≈ 1.66억 샘플 (도달 불가 격자 생략 전). 구현 측정(Node V8, 단일 스레드, 스윗스팟 (60.5, 134.5), 발사구 14 in): 로봇 1대(8장) 발사각 55° 약 33초, 70° 약 61초 (v0 탐색 포함, 고각일수록 입구 근처까지 가는 샘플이 많아 ③ 판정 비용 증가). 격자별 독립 난수 구간 덕분에 Web Worker로 격자를 나눠도 결과가 같으므로 병렬화로 단축 가능. 메모리는 16 × 20,736 × 4 B ≈ 1.3 MB. 실행 방식(Worker 풀 / 진행 표시 / 비차단 흐름 / 캐시)은 바로 아래 "LUT 생성 실행 / 사용자 경험" 참고. 저장 레시피(Step 10)에는 LUT 대신 탄도 설정 + 시드를 저장해 재생성한다.
-    - **LUT 생성 실행 / 사용자 경험 (설계 확정, 미구현 — Step 9에서 구현):** 로봇 1대 단일 스레드 약 30~60초를 "멈춰서 기다리는 시간"이 아니라 "다른 입력을 하는 동안 진행되는 시간"으로 만든다. 아래 1~4를 모두 적용한다 (저정밀 미리보기는 불채택, 6.4항).
-        1. **Web Worker 풀 병렬 생성:**
-            - **Worker 모듈:** `src/workers/lutWorker.ts` (Vite `new Worker(new URL('./lutWorker.ts', import.meta.url), { type: 'module' })`). `ballistics.ts`의 순수 함수만 import하고 DOM / React 비의존.
-            - **풀 크기:** `max(1, min(navigator.hardwareConcurrency − 1, 8))` (UI 스레드용 코어 1개 남김). 풀은 앱 수명 동안 재사용.
-            - **작업 단위:** (로봇, 기물 종류, 단계). 단계 ① v0 탐색 = 작업 1개 (분할 없음, 약 1~2초) → 단계 ② 기준 셀 LUT = 격자 행 묶음 작업 (기본 4행 = 576격자). 로봇 2대 × 기물 2종의 작업을 한 대기열에 넣고, 유휴 Worker가 다음 작업을 가져가는 동적 분배 (명중 띠가 지나는 행은 ③ 판정 비용이 커서 정적 분할보다 균형이 좋음). 같은 (로봇, 기물)의 ② 작업은 ① 완료 후 v0가 정해져야 대기열에 들어감.
-            - **결정론:** 격자별 독립 난수 구간(2.6.2항 LUT 생성)이므로 어떤 분할 / 순서 / Worker 수로 계산해도 결과가 `generateRobotLUTs` 단일 스레드 결과와 비트 단위로 같다.
-            - **`ballistics.ts` 사전 준비 (Step 9 첫 작업, 09-2 구현 완료):**
-                - `generateReferenceLUTRows(config, robotSize, pieceType, v0, samples, seed, gyStart, gyEnd, options) → Float32Array((gyEnd − gyStart) × 144)`: `generateReferenceLUT`의 행 범위 버전. 격자 인덱스 / 난수 구간 계산은 전체 LUT 기준 그대로.
-                - `generateReferenceLUT`는 `generateReferenceLUTRows(…, 0, 144)`로 재작성하여 코드 중복 제거.
-                - 용도별 시드 파생(`deriveSeed(seed, 2i)` 탐색, `deriveSeed(seed, 2i + 1)` LUT)을 공개 함수(예: `robotLUTSeeds(seed)`)로 노출하여 Worker 작업 계획이 `generateRobotLUTs`와 같은 시드를 쓰게 함.
-                - 테스트: 임의 행 분할(예: 1행 / 7행 / 불균등)로 계산해 합친 LUT === `generateReferenceLUT` 결과, 작업 계획으로 만든 16장 === `generateRobotLUTs` 결과.
-                - **구현 (09-2):** `generateReferenceLUTRows`는 범위를 정수로 내림한 뒤 [0, 144]로 제한하고 `gyEnd < gyStart`면 빈 배열 (반환 행 r = 전체 행 `gyStart + r`). `robotLUTSeeds(seed = DEFAULT_BALLISTICS_SEED) → Record<PieceType, { search, lut }>`(`generateRobotLUTs`도 이 함수를 사용). 리팩터링 전후 `generateRobotLUTs` 결과가 비트 단위로 같음을 확인.
-            - **메시지 규약:** 메인 → Worker `{ kind: 'search' | 'rows', jobId, generation, robotId, pieceType, config, robotSize, samples, seed, gyStart?, gyEnd?, v0? }`, Worker → 메인 `{ kind: 'progress', jobId, cellsDone }` (행 1개마다) / `{ kind: 'result', jobId, generation, v0?, hitRate?, rows? }` / `{ kind: 'error', jobId, message }`. 결과 `Float32Array`는 transferable로 넘겨 복사 비용 0.
-            - **조립:** 메인 스레드가 (로봇, 기물)별 기준 LUT `Float32Array(144 × 144)`에 행 결과를 복사하고, 모든 행이 모이면 `mirrorLUTSet`으로 4셀을 만들어 `RobotHeatmapLUTs` 완성.
-            - **예상 시간:** 8코어 기준 로봇 1대 약 8~10초, 4코어 약 15~20초 (단일 스레드 30~60초 ÷ Worker 수 + 분배 오버헤드). 두 로봇이 동시에 진행되므로 전체 대기도 비슷한 수준. 모바일은 더 느림.
-            - **구현 (09-3, `src/workers/`):**
-                - `lutProtocol.ts`: 메시지 타입 + 순수 작업 처리기 `handleLUTJob(job, post)` (탐색 = `searchLaunchSpeed` 결과 1회, 행 = 행 1개마다 `progress` 후 `result` + transferable). 닫힌 해가 없으면 `v0` 없는 결과, 예외는 `error` 메시지.
-                - `lutWorker.ts`: 처리기 연결만 하는 Worker 진입점. `createLUTWorker.ts`: `new Worker(new URL('./lutWorker.ts', import.meta.url), { type: 'module' })`.
-                - `lutManager.ts` (`LUTManager`, Worker 생성 함수 주입): 풀(`defaultLUTPoolSize`, 코어 수를 모르면 4코어로 가정), **v0 탐색 작업이 행 작업보다 우선**(두 번째 로봇의 v0가 첫 번째 로봇 행 작업 뒤로 밀리지 않음), 행 작업은 요청 순서(FIFO), 조립 후 `mirrorLUTSet`으로 완성. 탐색 / LUT 작업에 보내는 설정은 스윗스팟을 스냅한 설정 (행 계산은 스윗스팟과 무관).
-                - 상태 스냅샷 `getStatus(robotId)`: 상태 / 세대 / 검증 사유 / 오류 / 기물별 탐색 완료 · v0 · 스윗스팟 명중률 / 완료 격자(실행 중 작업의 행 단위 진행 포함) / 조립 중 기준 LUT + 행별 완료 표시(점진 히트맵용) / 결과. `onChange(robotId)`는 변화마다 호출하고 GUI가 rAF로 모은다. `matchLUTs()` = 두 로봇 `READY`일 때만 경기용 LUT.
-                - **재요청 무시:** LUT를 결정하는 입력의 정규화 키 `lutRequestKey`(모델 버전 + 스냅한 스윗스팟 · 편차 기본값을 채운 탄도 설정 + 로봇 길이 / 폭 + 시드 + 샘플 수, 속성 순서 고정 JSON)가 진행 중 / `READY`인 요청과 같으면 아무것도 하지 않는다 (속도 등 무관한 제원 변경으로 다시 `APPLY`해도 재생성 없음). 09-4 캐시 키는 이 문자열의 SHA-256.
-                - **로봇 간 공유 (09-10a):** 다른 로봇이 같은 요청 키로 생성 중 / `READY`면 새로 생성하지 않고 따라간다 (진행 / 상태는 앞선 로봇 것을 보여 주고, 앞선 로봇이 `READY`가 되면 결과를 함께 씀). 앞선 로봇이 취소 / 오류 / 검증 실패 / 설정 변경으로 멈추면 따라가던 로봇이 그때부터 스스로 생성(캐시 조회부터)하고, 결과를 받은 뒤에는 서로 독립이다. 기본 프리셋처럼 R1 = R2면 첫 실행 생성이 한 번으로 줄어든다.
-                - **오류:** Worker `error` 메시지 / `onerror` / 행 결과 길이 불일치 → 그 로봇 `ERROR`(사유 포함) + 대기 작업 제거, 다른 로봇은 계속. 같은 설정을 다시 요청하면 새로 생성.
-                - **실측 (헤드리스 Chromium, 4코어 컨테이너, Worker 3개):** 로봇 2대 × 기물 2종 기본 정밀도(격자당 2000 / 후보당 20000 샘플) 전체 약 9.3초. 개발 서버와 정식 빌드(`lutWorker` 별도 청크) 모두에서 실제 Worker 결과가 `generateRobotLUTs`와 비트 단위로 같음을 확인 (저장소 밖 1회성 점검).
-        2. **진행 상황 표시:**
-            - **v0 결과 선표시:** 단계 ① 완료 즉시 기물 종류별 v0와 스윗스팟 명중률(`sweetSpotHitRate`) 표시. 0이면 경고 ("이 스윗스팟에서는 명중 불가 — 설정 확인"), 생성은 계속 진행.
-            - **진행 막대:** 로봇별 `완료 격자 / 전체 격자` (기물 2종 합산, 전체 = 2 × 20,736). HIVE 겹침 / 도달 불가로 생략되는 격자는 행 처리 시 즉시 완료로 집계. 단계 ① 동안은 "v0 탐색 중" 표시.
-            - **남은 시간:** `경과 시간 × (남은 격자 / 완료 격자)`를 지수 평활해 표시하고, 5% 완료 전에는 표시하지 않음 (초반 추정 불안정).
-            - **점진 히트맵:** 로봇별 미리보기(09-1: 메인 필드의 히트맵 편집 모드, 3.8항)에 진영 기준 셀 LUT(RED = 기준 셀 `RED_AUDIENCE`, BLUE = 점대칭 `BLUE_OPPOSITE`)를 행 묶음이 도착할 때마다 그림 (미계산 행은 회색 빗금, 기물 종류 전환 가능). 사용자가 명중 띠가 드러나는 과정을 직접 보며 설정이 맞는지 판단할 수 있게 함. 필드 윤곽 / HIVE / 조준점 / 스윗스팟을 함께 표시. 보기는 관중석(`AUDIENCE`) 시점 고정 (3.7항).
-            - **갱신 빈도:** 진행 / 히트맵 갱신은 `requestAnimationFrame`으로 모아 최대 약 10 Hz (메시지마다 React 상태를 바꾸지 않음).
-        3. **비차단 작업 흐름:**
-            - **로봇별 상태 머신:** `IDLE`(설정 없음 / 검증 실패) → `QUEUED` → `SEARCHING`(단계 ①) → `GENERATING`(단계 ②, 진행률) → `READY` | `ERROR`. 설정 변경 시 `CANCELLED`를 거쳐 다시 `QUEUED`.
-            - **시작 시점:** 탄도 설정 확정 버튼(로봇 탭 `APPLY`, 검증 `validateBallisticsConfig` 통과 시에만 활성화)을 누를 때. 입력 중 자동 재생성은 하지 않음. **예외 (09-1):** 앱 시작 시 기본 프리셋 / 자동 보관 설정(3.8항)의 LUT는 자동으로 생성한다 (캐시 적중이면 즉시 `READY`).
-            - **무효화 조건:** 해당 로봇의 `BallisticsConfig`, 로봇 `length` / `width`(HIVE 겹침 격자 / 검증에 영향), 기준 시드, 샘플 수가 바뀔 때만. 그 외 `RobotConfig` 변경(속도, 인테이크 등)과 시나리오 변경은 LUT를 무효화하지 않음.
-            - **취소:** (09-3 구현: `request`의 설정 변경 / `cancel(robotId)`, `cancel`은 진행 중일 때만 `CANCELLED`로 멈추고 `READY`는 유지) 로봇별 세대 번호(`generation`)를 올리고, 대기열의 이전 세대 작업을 제거, 실행 중인 작업의 결과 / 진행 메시지는 세대가 다르면 무시. 행 묶음이 작아(수백 ms) Worker 강제 종료는 하지 않음 (종료 시 풀 재생성 비용 발생).
-            - **막는 동작:** 시뮬레이션 시작(및 LUT가 필요한 경기 재생 / 분기 실행)만 두 로봇이 모두 `READY`일 때 활성화하고, 비활성 사유를 표시 ("로봇 2 확률표 생성 중 63%"). 로봇 / 시나리오 / 스윗스팟 편집, 필드 탐색 등 나머지는 모두 계속 가능.
-            - **사용 흐름 예:** 로봇 1 탄도 확정 → 생성 시작 → 그동안 로봇 2 입력 / 확정 → 시나리오 입력 → 대부분 입력이 끝날 즈음 생성 완료.
-        4. **IndexedDB 캐시:**
-            - **캐시 키:** `crypto.subtle.digest('SHA-256')`로 만든 정규화 JSON의 해시 — `{ BALLISTICS_MODEL_VERSION, BallisticsConfig(스윗스팟은 스냅한 좌표, 편차 미지정 값은 기본값으로 채움), robot length / width, seed, samples, searchSamples }`. `skipUnreachable`은 결과가 같으므로 키에서 제외.
-            - **`BALLISTICS_MODEL_VERSION`:** `ballistics.ts`의 정수 상수 (09-2에서 1로 시작). 명중 판정 / LUT 생성 규칙 / 투입구 기하가 바뀌는 커밋마다 올려서 이전 캐시를 자동 무효화 (예: 06-4의 진입 면 / 림 벽 판정 변경은 버전 증가 대상).
-            - **저장 형식:** DB `ftc-tactic-sim`, 저장소 `lutCache`, 레코드 `{ key, modelVersion, createdAt, lastUsedAt, v0: {POLLEN, NECTAR}, sweetSpotHitRate: {POLLEN, NECTAR}, reference: {POLLEN: ArrayBuffer, NECTAR: ArrayBuffer} }`. 기준 셀 LUT만 저장(로봇당 2 × 82,944 B ≈ 166 KB)하고, 불러올 때 `mirrorLUTSet`으로 4셀 복원 (복원 비용 무시 가능).
-            - **정리:** `lastUsedAt` 기준 LRU로 최대 20개(약 3.3 MB) 유지, 초과분은 저장 시 삭제.
-            - **조회 흐름:** 확정 시 캐시 먼저 조회 → 적중하면 즉시 `READY` (Worker 미사용) → 없으면 생성 후 저장.
-            - **저장 레시피(Step 10)와의 관계:** 레시피에는 LUT 대신 탄도 설정 + 시드 + 샘플 수 + `BALLISTICS_MODEL_VERSION`을 저장. 불러올 때 캐시가 있으면 즉시, 없으면 위 생성 흐름을 탐. 레시피의 모델 버전이 현재와 다르면 "재생성한 확률표로 결과가 달라질 수 있음"을 경고. 레시피 형식 / 불러오기 흐름은 3.9항 (10-1).
-            - **실패 허용:** IndexedDB를 쓸 수 없으면(사생활 보호 모드, 용량 초과 등) 캐시 없이 매번 생성하며 기능은 동일.
-            - **구현 (09-4, `src/workers/lutCache.ts`):**
-                - 관리자용 인터페이스 `LUTCache { get(requestKey), put(requestKey, entry) }` (요청 키 원문 = `lutRequestKey`, 내부에서 `lutCacheKey` = SHA-256 16진 64자). 캐시 내용 `LUTCacheEntry` = 기물별 v0 / 스윗스팟 명중률 / 기준 셀 LUT.
-                - 순수 규칙: `entryToRecord`(버퍼 복사, 모델 버전 / 시각 기록), `recordToEntry`(모델 버전 불일치 · 버퍼 길이 ≠ 82,944 B · v0 비유한값 · 명중률 누락 → 미스), `recordsToEvict`(다른 모델 버전 전부 + 현재 버전 최근 사용 순 20개 초과분, 동률은 키 순).
-                - `StoreLUTCache(store)`: 레코드 저장소(`LUTRecordStore { get, put, list, delete }`) 위의 캐시. 적중 시 `lastUsedAt`만 갱신, 같은 키 재저장은 `createdAt` 유지, 저장 후 정리. `openIndexedDBRecordStore()`: DB `ftc-tactic-sim` / 저장소 `lutCache`(keyPath `key`), IndexedDB가 없거나 열기 실패면 `null`.
-                - `createBrowserLUTCache()`: 앱 시작 시 동기로 만들어 관리자에 주입, 첫 사용 때 연다. IndexedDB 또는 `crypto.subtle`(비보안 연결 등)이 없으면 조회는 항상 미스, 저장은 무시.
-                - **관리자 연동 (`LUTManagerOptions.cache`):** 요청 → `QUEUED`에서 캐시 조회 → 적중: Worker 작업 없이 기준 LUT 복원 + 4셀 대칭 복사 → `READY`(`fromCache = true`), 미스 / 조회 실패(비동기 · 동기 예외): v0 탐색부터 생성 → `READY` 직후 저장(저장 실패 무시). 적중 결과는 다시 저장하지 않는다. 조회가 끝났을 때 그 사이 재요청 / 취소 / 정리로 실행이 바뀌었으면 결과를 버린다 (옛 요청의 미스가 작업을 보내지 않음). 캐시를 주입하지 않으면 09-3과 같이 즉시 생성.
-    - **런타임 판정 (`createLUTShotResolver(luts, r1Config, r2Config)`, 06-5 구현 완료):** 엔진 생성자에 주입하는 `ShotProbabilityResolver` (엔진 수정 없음). 엔진은 발사 완료 틱에 `(robotId, pieceType, robot.x, robot.y, robot.heading, alliance, upwardCell)`로 호출하고, 반환 확률과 시드 난수 1회로 명중을 정한다.
-        - **입력:** `luts: MatchHeatmapLUTs` (로봇 슬롯별 `RobotHeatmapLUTs`), `r1Config` / `r2Config`의 `turretType` / `turretRange` / `aimTolerance`. 슈터 설정은 생성 시점에 복사해 고정한다 (이후 원본 객체 변경이 경기 중 판정에 새지 않음 → 결정론).
-        - **$P_{\text{spatial}}$:** `luts[robotId][pieceType][hiveCellKey(alliance, upwardCell)]`를 로봇 중심 좌표에서 **쌍선형 보간**(`sampleLUT`)으로 조회. 둘러싼 격자 중심 4개 값을 거리 비례로 섞고, 필드 가장자리 격자 중심 바깥은 가장자리 값. 셀 키 = `${alliance}_${AUDIENCE | OPPOSITE}`. 팁으로 상향 셀이 바뀌면 다음 발사부터 새 셀의 LUT와 조준점을 쓴다.
-        - **조준 오차:** $\Delta\psi$ = `angleDifference(조준점 방위, heading)` = 조준점 방위 − 헤딩, [-π, π] (`kinematics.ts` 재사용). 조준점 방위는 로봇 중심 → 상향 셀 조준점(투입구 오각형 면적 중심). 부호: + = 로봇 오른쪽 (캔버스 y-down에서 각도가 커지는 방향).
-        - **조준 판정 (`isAimWithinShooterRange`):**
-            - **고정형(`FIXED`):** $|\Delta\psi| \le$ `aimTolerance`(기본 3° ≈ 0.0524 rad, 경계 포함)이면 $P_{\text{final}} = P_{\text{spatial}}$, 아니면 0. 허용 오차가 비유한값 / 음수면 0으로 취급 (정확히 정렬될 때만).
-            - **터렛형(`TURRET`):** `turretRange` $[\alpha, \beta]$를 [-π, π]로 정규화 (`normalizeAngle`은 ±π를 보존하므로 360° 터렛 [-π, π] 유지). $\alpha \le \beta$면 $\alpha \le \Delta\psi \le \beta$, $\alpha > \beta$면 ±π를 가로지르는 구간 ($\Delta\psi \ge \alpha$ 또는 $\Delta\psi \le \beta$, 예: 후방 터렛 [2.5, −2.5]). 범위가 비유한값이면 조준 불가.
-            - 한계: 허용 오차 / 터렛 범위 안이면 조준 오차에 따른 명중률 감소는 반영하지 않는다 (LUT는 정면 조준 가정). 고정형은 허용 오차가 작아(±3°) 영향이 작다.
-        - **안전장치:** LUT 값이 비유한값이면 0, 결과는 [0, 1]로 제한 (엔진도 한 번 더 제한).
-    - **발사 비행 처리 (06-6 구현 완료, 08-2 충돌 후 낙하 개정):**
-        - **목표:** 발사 순간 공이 HIVE로 순간이동하는 부자연스러움을 없애되, 결과(명중 여부)는 LUT 판정을 그대로 따르고, 3D 물리 엔진 없이 닫힌 해로 계산한다.
-        - **범위 분리:** 엔진은 궤도 결과(충돌 / 도착 지점, 충돌 후 낙하 구간, 최종 착지 지점 / 시점 / 속도)를 발사 시점에 계산해 비행 대기열에 기록하고 도착 틱에 반영한다. 이 기록을 보간하는 렌더링은 Step 8 (3.7항).
-        - **08-2 개정 배경:** 06-6은 HIVE / 벽에 공중에서 닿은 공을 그 틱에 바로 바닥에 놓았다(HIVE 반사 방출은 외곽 바닥에 무작위 속도 20~60 in/s). 화면에서 공이 최대 약 66 in 높이에서 1프레임 만에 바닥으로 옮겨지므로, 충돌 후 바닥까지의 낙하를 비행의 일부(반사 포물선)로 계산하도록 바꿨다. 낙하 중에는 `IN_FLIGHT`라 흡입 / 충돌 대상이 아니다 (현실과 일치).
-        - **슈터 탄도 입력:** 엔진 생성자 선택 인자 `SimulationEngine(r1, r2, shotResolver, alliance?, scenario?, shooters?: MatchShooterBallistics)`. 로봇별 `ShooterBallistics {dz, shooterPitch, shooterOffset, v0?: {POLLEN?, NECTAR?}}` — LUT 생성 결과에서 `shooterBallisticsFrom(config, generateRobotLUTs 결과)`로 만든다 (판정 LUT와 같은 발사구 / 발사각 / 탐색 v0). 미지정 시 기본 자동 슈터 `DEFAULT_SHOOTER_BALLISTICS`(발사구 14 in, 발사각 60°, 오프셋 0, v0는 발사마다 조준점 닫힌 해). 생성 시점에 복사해 고정.
-        - **결과 선확정 / 난수:** 발사 완료 틱에 판정 함수 확률과 시드 PRNG 난수로 명중을 확정한다. 난수는 발사마다 **항상 3회**(명중 판정, 반사 세기 산포 `bounceRestitutionRoll`, 반사 방향 산포 `bounceAngleRoll`) 소비하고 도착 시점에는 쓰지 않는다 (무효 명중의 반사도 발사 시점에 뽑아 둔 값 사용) → 결과와 무관하게 RNG 시퀀스 일정, 결정론 유지. 팁 진행 중 발사는 발사 시점에 빗맞음.
-        - **명목 궤적 (`planShotFlight`, 편차 없는 포물선, 발사 1회당 상수 시간):**
-            - 발사 방향 (`shotLaunchHeading`): 고정형 = 로봇 헤딩, 터렛형 = 조준점 방위 (터렛 범위 밖이면 가까운 한계각으로 제한).
-            - 발사구 = 로봇 중심 + 발사 방향 × `shooterOffset`, 높이 53.5 − dz. 발사각이 (0, π/2) 밖이면 기본값.
-            - v0 우선순위: 탄도 설정의 기물별 v0 → 조준점 닫힌 해 → (해가 없으면) 평지 사거리 = 조준점 거리인 속도 $\sqrt{g D / \sin 2\theta}$.
-        - **도착 규칙:**
-            - **명중:** 궤적과 무관하게 조준점에 도착 (LUT 결과 우선). 비행 시간 $T = D / (v_0\cos\theta)$ (D = 발사구 → 조준점 수평 거리).
-            - **빗맞음 + HIVE 충돌 (`intersectHiveBox`):** HIVE 직육면체를 기물 반지름만큼 확장(xy 경계 ± r, 높이 `HIVE_HEIGHT` + r, 공 표면 접촉 기준)하고, 지면 직선이 확장 AABB 안에 있는 구간(착지 전까지)에서 공 중심 높이가 확장 높이 이하가 되는 첫 지점이 있으면 (진입 순간 이미 낮으면 옆면 `SIDE`, 위로 들어와 구간 안에서 내려오면 윗면 `TOP`) 그 접촉점에서 아래 **충돌 후 낙하** 규칙으로 반사해 바닥까지 떨어진다.
-            - **빗맞음 + HIVE를 넘어가거나 닿지 않음:** 공 중심 높이가 기물 반지름이 되는 시점의 수평 거리 R 지점에 착지. 착지 후 발사 방향 수평 속도 = $v_0\cos\theta$ × `landingSpeedRetention`(2.5항)을 가진 `ON_FIELD` 기물로 전환되고, 이후는 기존 물리가 처리. 지면 직선이 착지 전에 필드 벽(반지름 여유)에 닿으면 **벽 접촉점(공중)에서 수평 이동을 멈추고 수직으로 낙하**해 벽 앞 바닥에 속도 0으로 착지한다.
-            - 고정형 슈터는 조준 이탈 시 확률 0이고 직선도 조준점을 비껴가므로 판정과 연출이 일치한다.
-        - **충돌 후 낙하 (`planHiveBounce` / `planFallToFloor` / `planVoidedHitBounce`, 08-2):** 충돌 순간 상태(위치, 속도: 수평 $v_0\cos\theta$ 발사 방향, 수직 $v_0\sin\theta - g t$)에서 반사한 뒤 중력 포물선으로 바닥(공 중심 z = r)까지 떨어진다. 모두 닫힌 해이며 구간 목록(`FlightSegment`)으로 기록한다.
-            - **반발 계수:** 기물별 `restitution`(POLLEN 0.35 / NECTAR 0.25, 2.5항) × 반사 세기 산포 (1 + 0.2 · (2 · `bounceRestitutionRoll` − 1)), 즉 0.8~1.2배 (`HIVE_BOUNCE_RESTITUTION_SPREAD`).
-            - **옆면 (`SIDE`):** 접촉 면(확장 AABB에서 가장 가까운 면, 모서리 동률이면 속도가 더 깊이 파고드는 면)의 수평 바깥 법선 n으로, 파고드는 법선 성분만 $v_n \to -e\,v_n$ (접선 / 수직 성분 유지). 이어서 수평 속도를 반사 방향 산포 ±15°(`HIVE_BOUNCE_ANGLE_SPREAD`, `bounceAngleRoll`)만큼 회전하고, 바깥 법선 성분이 `HIVE_BOUNCE_MIN_SPEED`(20 in/s)보다 작으면 법선 방향으로 보충한다 (스치듯 맞아도 반드시 HIVE에서 멀어짐). 그 뒤 바닥까지 포물선.
-            - **윗면 (`TOP`) 반복 튐:** 추상화 직육면체의 윗면(z = `HIVE_HEIGHT` + r)에 떨어진 공은 수직 속도만 $v_z \to e\,|v_z|$로 뒤집고 수평 속도는 유지한다 (첫 튐에서 ±15° 산포 회전). 다시 윗면 높이로 내려오기 전(체공 $2 v_z / g$)에 확장 AABB를 벗어나면 그 포물선 그대로 바닥까지 떨어지고 (수평 직선 + 볼록 박스이므로 다시 부딪히지 않음), 아니면 윗면에 다시 떨어져 튄다. 최대 `HIVE_TOP_MAX_BOUNCES`(3)회 튀고도 윗면 위면, 수평 속도 방향(정지 상태면 가장 가까운 면 바깥)으로 속도 max(수평 속도, 20 in/s)로 윗면을 굴러(`ROLL` 구간, 높이 유지) 가장자리에서 수직 속도 0으로 떨어진다. 실제 HIVE 윗부분은 평판이 아니므로 "윗면에 맞으면 낮게 튀며 진행 방향으로 넘어간다"를 근사한 것이며, HIVE 위에 걸려 멈추는 경우는 모델링하지 않는다.
-            - **무효 명중:** 명중으로 발사됐지만 도착 시점에 전복 중이거나 상향 셀이 바뀐 공은 조준점에서 그 셀 쪽 HIVE 앞면의 수평 바깥 법선(AUDIENCE +y / OPPOSITE −y)으로 옆면 규칙과 같이 반사해 떨어진다. 도착 속도의 수평 방향은 발사구 → 조준점 (렌더러 명목 구간과 같은 방향). 결과는 `MISS_HIVE`로 바뀌고 착지 틱이 늦춰진다.
-            - **벽:** 모든 낙하 포물선에서 지면 직선이 착지 전에 필드 벽(반지름 여유)에 닿으면 그 지점에서 수평 이동을 멈추고 수직 낙하한다 (착지 속도 0). 즉 **높이 무한 · 반발 계수 0인 벽**을 가정한다. 실제 경기에서는 벽보다 높이 날아간 공이 필드 밖으로 나가기도 하지만 이는 전술이 아닌 실수이므로 구현하지 않는다. 필드 테스트에서 어색하면 반발 계수 > 0인 벽 반사로 바꾼다 (구조 동일).
-            - **착지:** 착지 속도 = 착지 순간 수평 속도 × `landingSpeedRetention` (벽 정지 시 0). 안전장치로 착지점을 필드 안 / HIVE 확장 AABB 밖으로 제한한다 (발사구가 HIVE에 걸친 비정상 입력에서만 작동).
-        - **비행 대기열 (`FieldState.pendingShots: PendingShot[]`, 발사 순서):** `{pieceId, pieceType, robotId, result('HIT' | 'MISS_HIVE' | 'MISS_FLOOR'), targetCell(발사 시점 상향 셀), launchTick, arriveTick, contactTime, fromX/Y/Z, toX/Y/Z, heading, v0, pitch, segments: FlightSegment[], landX/Y, landingVx/Vy, bounceRestitutionRoll, bounceAngleRoll}` (4장). 발사 시 기물 상태를 `IN_FLIGHT`로 바꾸고 좌표는 발사구 지면 투영, 속도 0.
-            - 명목 구간: 발사구(`from`) → `to`(명중 = 조준점, HIVE 충돌 = 첫 접촉점, 벽 = 벽 접촉점, 바닥 = 착지점), 끝 시각 `contactTime`(발사 후 초). 충돌 후 구간 `segments`는 시간순, 각 구간 `{kind: 'BALLISTIC' | 'ROLL', t0, t1, x, y, z, vx, vy, vz}`(발사 후 초, 구간 시작 상태). 마지막 구간 끝 = 착지점 `landX/Y`. 빈 배열이면 명목 구간 끝이 착지점(또는 명중).
-            - 도착 틱: 명중 = 발사 틱 + max(1, round(`contactTime` / dt)) (조준점 도착, 유효성 판정), 그 외 = 발사 틱 + max(1, round(최종 착지 시각 / dt)).
-            - 파이프라인 Step 5-2(HIVE 시차 낙하 다음)에서 도착 틱이 된 발사를 발사 순서대로 처리: 명중은 **도착 시점에 전복 중이 아니고 상향 셀이 발사 시점과 같을 때만** HIVE 적재 + 팁 판정 (같은 틱에 두 발이 도착하면 앞 발의 팁이 뒤 발을 무효화), 무효면 조준점에서 반사 낙하 구간을 붙이고 `MISS_HIVE`로 바꿔 착지 틱(현재 틱 이후)까지 비행 유지. 그 외는 착지점 / 착지 속도로 `ON_FIELD`.
-            - 비행 중(낙하 포함) 기물은 로봇 / 기물 / FLOWER 위를 지나므로 충돌하지 않는다 (물리 / 충돌은 `ON_FIELD`만 대상). 착지 지점이 로봇이나 기물과 겹치면 다음 틱 충돌 처리로 밀려남.
-            - 경기 종료(6000틱)까지 도착하지 못한 비행은 득점에 반영하지 않는다 (기물은 `IN_FLIGHT`로 남음).
-            - 타임라인 스냅샷은 대기열 배열 / 항목 / 구간 목록을 복제해 기록 보호.
-        - **렌더링 (Step 8, 3.7항 확정):** 렌더러는 명목 구간을 출발점 → `to` 선형 보간 + 명목 포물선 높이에 끝점을 맞추는 선형 보정으로, 충돌 후 구간은 기록된 포물선 / 굴러감을 그대로 계산해 기물 크기 / 그림자 오프셋으로 연출한다. 필요한 정보가 모두 프레임에 있으므로 스크러빙 / 분기 재생에서도 동일하게 재현된다.
-        - **탄도 계산 함수 (`ballistics.ts`, 06-2 구현 완료):** 궤적은 `Trajectory {x, y, z, heading, v0, pitch}`(발사구 위치 + 수평 방향)로 표현하고, 수평 거리 d의 높이 $z(d) = z_0 + d\tan\theta - g d^2 / (2 v_0^2 \cos^2\theta)$, 시간 $t(d) = d / (v_0\cos\theta)$로 조회한다.
-            - 발사구 / 조준: `launchHeight`(53.5 − dz), `launchPoint`(조준 방향 `shooterOffset`), `bearingTo`.
-            - 닫힌 해: `solveLaunchSpeed(D, Δz, θ)`(해 없으면 null), `solveAimLaunchSpeed`(로봇 위치 → 조준점), `sweetSpotLaunchSpeed`(스윗스팟 → `RED_AUDIENCE` 조준점, 06-3 v0 탐색 초기값 / 스윗스팟 닫힌 해 검증), `createAimTrajectory`.
-            - 궤적 조회: `heightAtDistance`, `timeAtDistance`, `pointAtDistance`, `descendingDistanceAtHeight`(하강하며 높이에 도달하는 큰 근), `landingDistance` / `landingPoint`(공 중심 높이 = 반지름, 필드 경계 무시 — 벽 처리는 06-6 엔진).
-            - HIVE 교차: `intersectHiveBox(traj, pieceRadius)` → `{x, y, z, distance, time, face}` 또는 null(넘어감 / 못 미침 / 비껴감).
-        - **변경 범위 (Step 6 완료):** `types.ts`(기물 상태 `IN_FLIGHT`, `PendingShot`, `FieldState.pendingShots`, `ShooterBallistics`), `ballistics.ts`(v0 역산 / 탐색, 몬테카를로 LUT, 대칭 변환, `createLUTShotResolver`, 사거리 · 비행 시간 · HIVE 직육면체 교차, `planShotFlight` / `shotLaunchHeading` / `shooterBallisticsFrom`), 엔진(발사 / 도착 분리, 기존 빗맞음 즉시 방출 대체).
-3. **FLOWER (꽃) 기물 조작 및 하단 추출 메커니즘:**
-    - **슬롯 구조 및 유효 득점 볼륨(Scoring Volume) 분리:**
-        - FLOWER는 수직 원통 구조물로, 하단 출구 밖으로 빠져나와 경기장 바닥 타일에 직접 맞닿아 있는 최하단 기물은 공식 룰상 득점 인정 영역 밖으로 판정됨.
-        - **slot[0] (지면 접촉 슬롯 / 바닥 베이스):**
-            - 하단 출구 아래 바닥에 맞닿아 있는 슬롯.
-            - **경기 종료 득점 계산에서 완전 배제 (0점)**.
-            - 로봇이 하단 인테이크로 추출을 시도할 때 가장 먼저 회수되는 대상.
-            - FLOWER는 솔리드 장애물(반지름 2.0 in)이므로 필드 바닥에서 공을 밀어 넣을 수 없으며, 상단에서 투입된 NECTAR(3.6 in)는 하단 배출구(2.8 in)를 통과할 수 없으므로 `slot[0]`에는 오직 POLLEN만 위치할 수 있음.
-        - **slot[1 .. N] (원통 내부 유효 스코어링 볼륨):**
-            - 하단 턱에 걸려 지면으로 내려가지 못한 기물 및 그 위로 차례대로 수직 적재된 유효 기물 슬롯.
-            - 경기 종료 시점의 정상 득점 인정 대상.
-    - **경기 종료 득점 집계 (2 v 0 환경 단순화):**
-        - 상대 진영 기물이 배제된 2 v 0 환경이므로, 경기 종료(남은 시간 0초, Tick 6000) 시점에 유효 스코어링 볼륨(`slot[1 .. N]`) 내에 아군 NECTAR가 1개 이상 존재하면 소유권과 하단 보너스가 동시에 100% 성립:
-            - **소유권 득점:** 유효 스코어링 볼륨(`slot[1 .. N]`) 내 기물 전체 개수 × 2점.
-            - **하단 보너스:** 추가 5점 일괄 가산.
-        - 유효 스코어링 볼륨 내 NECTAR가 0개인 경우 해당 FLOWER 득점은 0점.
-    - **하단 추출(deQ) 및 중력 침하(Settling) FSM:**
-        - **추출 조건:** FLOWER 원통(반지름 2.0 in)의 바닥 정사영 원이 로봇의 인테이크 구역(`intakeZones`, 3.3항) 중 하나와 겹침 + `actionState === 'INTAKING'` + 로봇 적재 공간 여유(`controlledPieces.length < 적재 한도`, 적재 한도 = min(`maxControlledPieces`, 4)). 인테이크 구역이 없는 면으로는 추출할 수 없음. 여러 FLOWER가 동시에 걸리면 차체에 가장 가까운 FLOWER를 우선.
-        - **deQ 실행:** `slot[0]`에 POLLEN이 존재하고 접촉 유지 시간(`intakeContactTimer`)이 최소 추출 쿨다운에 도달하면 `slot[0]` 기물을 로봇으로 회수 적재하고 `intakeContactTimer = 0` 리셋.
-        - **연속 추출 중력 쿨다운:** 1회 추출 후 다음 기물 추출까지의 대기 시간은 `max(robotConfig.intakeDelay / 1000, 0.12초)`로 클램핑하여 중력에 의한 기물 낙하 한계 시간을 보장.
-        - **NECTAR 하단 블로킹 (Jamming):** `slot[0]`이 비었을 때 상위 기물의 침하 판정:
-            - 바로 위(`slot[1]`)가 POLLEN인 경우: `slot[1]` 기물이 `slot[0]`으로 낙하 안착하며 상위 기물들도 순차 1칸씩 하강.
-            - 바로 위(`slot[1]`)가 NECTAR인 경우: NECTAR(3.6 in)는 하단 배출구(2.8 in)보다 커서 하단 턱에 걸림. NECTAR는 `slot[1]`에 영구 정지 고정되고 `slot[0]`은 빈 상태(`null`)로 유지됨.
-            - `slot[0]`이 비어있는 상태에서는 추가 하단 deQ가 영구 차단됨 (물리적 잼 발생).
-    - **상단 투입 (Drop):**
-        - 투입 대상: 로봇 OBB 외곽과 FLOWER 원통 간 최단 거리 1.0 in 이내인 FLOWER 중 가장 가까운 것 (버전 1에서는 투입 방향 무관). 대상이 없으면 투입 불가 및 상태 복귀.
-        - (확장 예정) 투입 방향 제한이 필요해지면 인테이크 구역과 같은 `BumperZone` 구조의 투입 구역(`flowerDropZones`)으로 대상 판정만 교체.
-        - NECTAR는 잔여 60초 이하(ENDGAME) 시점에만 투입 가능.
-        - **FLOWER 용량 테이블 (`FLOWER_MAX_POLLEN_BY_NECTAR`, `FLOWER_MAX_NECTAR_CAPACITY = 6`):** 바닥(`slot[0]` 포함)부터 높이 21.5 in 원통에 최대로 채울 수 있는 조합 {POLLEN, NECTAR} = {9, 0}, {8, 1}, {6, 2}, {5, 3}, {3, 4}, {2, 5}, {1, 6}. 투입 후 원통 내 전체 개수(`slot[0]` 포함)가 해당 NECTAR 개수의 최대 POLLEN 이하이고 NECTAR ≤ 6이어야 투입 가능.
-            - **`slot[0]` 불변식:** `slot[0]`에는 NECTAR가 올 수 없다 (초기 배치는 POLLEN만, 하단 추출 후 NECTAR는 `slot[1]`에 걸림, 빈 원통에 투입된 NECTAR는 `[null, NECTAR]`). 따라서 NECTAR가 있는 FLOWER의 `slot[0]`은 항상 POLLEN이거나 POLLEN으로 계산하는 빈칸(아래 잼 처리)이며 계산상 POLLEN ≥ 1이다. 기하 계산상의 {0, 7} 조합은 `slot[0]`이 NECTAR여야 하므로 도달 불가능하여 테이블에서 제외했다.
-            - 산출 기준: 원통 내 지그재그 적층 + 최상단 기물이 일부라도 원통 내부에 걸치면 인정. 사용자 계산값이며 실측이 가능해지면 실측값으로 교체 예정.
-            - **NECTAR 잼 상태 처리 (단순화):** `slot[0]`이 비고 `slot[1]`에 NECTAR가 걸린 잼 상태(하단 추출 후 잼, 또는 빈 원통에 NECTAR 투입)에서는 빈 `slot[0]`을 **POLLEN 1개로 계산**하여 같은 테이블을 적용한다. 출구 턱 높이가 POLLEN 직경(2.8 in)과 같아, 턱에 걸린 NECTAR는 `slot[0]` POLLEN 위에 놓인 경우와 같은 높이에서 적층이 시작되기 때문이다. 턱(링) 위 받침과 공 위 받침에 따른 지그재그 적층의 미세한 차이는 **단순화를 위해 의도적으로 무시**한다 (별도 잼 전용 테이블 없음). 이 가상 POLLEN은 용량 판정에만 쓰이며 득점(`slot[1..N]` 개수)에는 포함되지 않는다.
-        - 투입은 로봇 적재함 맨 앞 기물(FIFO, `controlledPieces.shift()`)을 FLOWER 최상단 슬롯에 추가 (`pieces.push(piece)`). 투입 가능 여부 = ① 도달 거리 내 FLOWER, ② NECTAR는 ENDGAME에만, ③ FLOWER 용량 테이블 (엔진 `findDropTarget`).
-        - **리프트 FSM (07-1 확정, 07-2 구현 완료 — 이전 "요청 1회 → 준비 → 자동 투입" 흐름을 대체):** 리프트를 올리고(준비) → 올린 채 대기 → 투입 → 내리는 단계를 분리하여, 드라이버가 리프트를 올린 뒤 투입 시점을 고르고 실수로 올린 리프트를 다시 내릴 수 있게 한다.
-            - **상태 (모두 Stationary Lock, 3.4항):** `FLOWER_SETUP`(올리는 중) → `FLOWER_READY`(올린 채 대기, 타이머 없음) ⇄ `FLOWER_DROPPING`(투입 중) → `FLOWER_LOWERING`(내리는 중) → `IDLE`.
-            - **리프트 유지 요청** = 행동 요청이 `FLOWER_SETUP` 또는 `FLOWER_DROPPING`. 그 외 요청(`IDLE` / `INTAKING` / `SHOOTING`)은 리프트 상태에서 "내림" 요청으로 해석한다.
-            - **`IDLE` / `INTAKING`에서:**
-                - `FLOWER_SETUP` 요청: 투입 가능(①②③)할 때만 수락 → `FLOWER_SETUP` 진입 (`stateTimer = flowerSetupDelay`, 제동 후 정지 시점부터 차감). 불가능하면 거부 (리프트를 올리지 않음, 기존 요청 거부 규칙과 동일하게 `IDLE` / `INTAKING`).
-                - `FLOWER_DROPPING` 요청: **무효** (리프트가 올라가 있지 않으면 투입 불가, 거부).
-            - **`FLOWER_SETUP`(올리는 중):** 유지 요청이면 계속 올리고, 타이머 완료 시 `FLOWER_READY`. 내림 요청이면 즉시 `FLOWER_LOWERING`으로 전환하며 내리는 시간 = **지금까지 올린 시간**(`flowerSetupDelay − 남은 stateTimer`, 올림 시간 = 내림 시간). 아직 제동 중이라 올린 시간이 0이면 곧바로 `IDLE`.
-            - **`FLOWER_READY`(대기):** `FLOWER_DROPPING` 요청 + 투입 가능 → `FLOWER_DROPPING` (`stateTimer = flowerDropDelay`). 투입 불가면 요청 무시하고 대기 유지. `FLOWER_SETUP` 요청이면 대기 유지. 내림 요청이면 `FLOWER_LOWERING` (`stateTimer = flowerSetupDelay`). 적재함이 비어도 자동으로 내리지 않는다 (내림 요청까지 대기).
-            - **`FLOWER_DROPPING`(투입 중):** 진행 중에는 모든 요청을 무시한다 (내림 요청 포함, 커밋). 완료 시 투입 조건을 재검사해 가능하면 투입, 불가능하면 기물을 그대로 둔다. 이어서 요청이 `FLOWER_DROPPING`이고 다음 기물이 투입 가능하면 연속 투입(`stateTimer = flowerDropDelay`), 그 외에는 `FLOWER_READY`로 복귀 (리프트는 올린 채 유지).
-            - **`FLOWER_LOWERING`(내리는 중):** 진행 중 모든 요청 무시 (커밋), 완료 시 `IDLE`.
-            - 리프트 상태에서는 HIVE 슈팅 / 흡입 요청이 받아들여지지 않는다 (리프트를 내린 뒤 `IDLE`에서 다시 요청). 입력 계층은 리프트 상태 동안 트리거 입력을 요청에 반영하지 않는다 (3.6항).
-4. **GARDEN & PARK (경기 종료 판정):**
-    - 경기 진행 중에는 실시간 점수로 가산하지 않음.
-    - 경기 종료 틱(Tick 6000, 남은 시간 0초) 시점에 필드 상태를 검사하여 일괄 가산:
-        - **GARDEN:** 기물을 -z 방향에서 바닥(xy 평면)에 수직 정사영한 원(기물 반지름)이 아군 GARDEN AABB와 일부라도 겹친 상태로 완전히 정지(`speed === 0, state === 'IN_GARDEN'`)해 있는 기물 개당 1점 가산. 중심점이 구역 밖이어도 걸쳐 있으면 인정하며, 경계에 접하기만 한 경우(겹침 깊이 0)는 불인정. (판정: `collision.ts`의 `testCircleVsAABB`)
-        - **PARK:** 아군 LOADING ZONE AABB 구역과 차체(OBB) 일부라도 겹친 상태로 정지한 로봇당 5점 가산 (FTC 룰상 부분 진입도 주차로 인정).
-5. **랭킹 포인트 (RP):** SWARM (주차 10점) / POLLINATOR 1 (팁 4회) / POLLINATOR 2 (팁 7회). POLLINATOR 팁 횟수는 **오토 팁(`autoTipCount`) + 텔레옵 팁(`tipCount`) 합산**으로 판정한다. 점수(`totalScore`)는 텔레옵 시뮬레이션 구간의 팁(회당 20점)만 반영하며 오토 팁 점수는 포함하지 않는다.
+#### 2.6.2 HIVE 슈팅과 탄도 모델
 
-## 3. 핵심 아키텍처 원칙 (Architecture Principles)
+**역할 분리.** 엔진은 발사마다 3D 궤적으로 명중을 판정하지 않는다. 로봇 설정을 적용할 때 몬테카를로로 명중 확률표(LUT)를 미리 만들고(`ballistics.ts`), 경기 중에는 판정 함수(`ShotProbabilityResolver`)가 LUT를 조회한 확률과 시드 난수 1회로 명중을 정한다. 아래 "몬테카를로 명중 판정"은 **LUT를 만들 때만** 쓰이며 엔진 루프에서는 실행되지 않는다.
 
-1. **상태와 렌더링의 완벽한 분리:** React는 UI만 담당. 시뮬레이션 상태 루프(50Hz)와 Canvas 2D 렌더링은 순수 TypeScript 로직으로 분리.
-2. **50Hz Fixed Tick Loop:** `dt = 0.02` 고정 연산. 매 틱 스냅샷을 `TimelineFrame` 객체로 `Array`에 저장.
-    - **기록 보호:** 엔진은 타임라인을 `timeline` getter / `getFrame()` / `step()` 반환값으로 **읽기 전용(`DeepReadonly<TimelineFrame>`)**으로만 공개하여 UI가 기록을 수정하지 못하게 한다. `reset()` 시 타임라인 배열이 새로 교체되므로 UI는 배열 참조를 보관하지 말고 매번 `engine.timeline` / `getFrame()`으로 읽는다.
-    - **실시간 확정 득점과 경기 종료 득점의 분리:**
-        - 경기 진행 중(Tick 0 ~ 5999) `TimelineFrame.totalScore`에는 공식 룰상 즉시 확정되는 **HIVE Tip 점수(회당 20점)**만 실시간 반영.
-        - 미확정 요소(FLOWER 소유권/보너스, GARDEN 안치, PARK 주차)의 실시간 예측치를 타임라인 점수에 혼합하지 않음.
-        - 경기 종료 틱(Tick 6000) 도달 시점에 HIVE 점수 + FLOWER 최종 점수 + GARDEN 점수 + PARK 점수를 일괄 합산하여 최종 점수를 확정 기록.
-        - **득점 내역 기록 (08-1 확정, 08-3 구현 완료):** 종료 프레임에는 항목별 점수와 인정 근거(득점 FLOWER, 인정 GARDEN 기물 id, 주차 로봇)를 `TimelineFrame.scoreBreakdown`에 함께 기록하고, 그 외 프레임은 `null`이다. 항목 합 = `totalScore`. 렌더러의 경기 종료 강조(3.7항)와 Step 9 스코어보드가 이 기록만 읽으며 득점 규칙을 다시 계산하지 않는다 (규칙의 단일 출처 = 엔진).
-3. **충돌 엔진 역학 모델 (`src/core/collision.ts`):**
-    - **로봇-환경 충돌:** 벽면 경계, HIVE AABB, 4개 FLOWER Circle에 대해 SAT 침투 보정(MTV). 벽을 파고드는 법선 속도는 0으로 차단하되, 접선 속도는 보존하여 미끄러짐 구현.
-    - **로봇-로봇 충돌 (비탄성 슬라이딩):**
-        - 법선 부호 규약: `mtvNormal`은 `testOBBvsOBB(r1, r2)`가 반환하는 단위 법선으로, r1을 r2 밖으로 밀어내는 방향(r2 → r1)이다. `MTV = mtvNormal * depth`.
-        - 상호 위치 분할 보정: `r1`은 `+0.5 * MTV`, `r2`는 `-0.5 * MTV` 이동 (두 로봇이 서로 반대 방향으로 절반씩 분리).
-        - 법선 상대 속도 상쇄: `vRel = v1 - v2`, `vn = dot(vRel, mtvNormal)` 계산 시 `vn < 0`(접근 중)이면: `r1.vx -= 0.5 * vn * mtvNormal.x`, `r1.vy -= 0.5 * vn * mtvNormal.y`, `r2.vx += 0.5 * vn * mtvNormal.x`, `r2.vy += 0.5 * vn * mtvNormal.y` (접선 속도는 100% 보존하여 차체 비비기 주행 허용).
-    - **가상 Intake Zone 판정 메커니즘 (`RobotConfig.intakeZones: BumperZone[]`):**
-        - **구역 정의 (`BumperZone`):** 로봇 범퍼 변 하나에 붙는 로봇 기준 직사각형. 개수 제한 없음(한 변에 여러 조각 가능, 구역 간 겹침 허용), 빈 배열이면 흡입 불가 로봇.
-            - `side`: 붙는 변 (`FRONT` / `BACK` / `LEFT` / `RIGHT`, 로봇 기준 앞뒤좌우).
-            - `offset`: 구역 중심점의 변 중점 기준 이동 거리(inch). 중심점은 항상 변 위에 있으며 `|offset| ≤ 변 길이 / 2`로 제한.
-            - **offset 부호 규약:** `FRONT` / `BACK` 변은 **로봇 오른쪽**이 +, `LEFT` / `RIGHT` 변은 **로봇 앞쪽**이 +.
-            - `width`: 변과 평행한 방향 길이(inch, > 0). 변 길이보다 길어도 됨(모서리 밖 돌출 허용).
-            - `depth`: 변에서 차체 바깥 수직 방향으로 뻗는 깊이(inch, > 0).
-            - 엔진은 로봇의 현재 위치/헤딩으로 각 구역을 필드 좌표 OBB로 변환(`getBumperZoneOBB`)하여 판정. 로봇 OBB 축은 `axes[0]` = 로봇 앞쪽, `axes[1]` = 로봇 오른쪽 (캔버스 y-down 좌표계).
-        - **판정 기준 (z축 정사영):** GARDEN 판정(2.6.4항)과 동일하게, 기물을 -z 방향에서 바닥(xy 평면)에 수직 정사영한 원(기물 반지름 포함)이 인테이크 구역 중 하나와 일부라도 겹치면 유효. 공 중심이 구역 밖이어도 걸치면 인정하며, 경계에 접하기만 한 경우(겹침 깊이 0)는 불인정. FLOWER 하단 추출도 FLOWER 원통 정사영 원과 인테이크 구역의 겹침으로 동일하게 판정.
-        - **프리셋 (`createIntakeZonePreset`):** `FRONT` / `ANY`는 별도 타입이 아니라 `BumperZone[]` 배열을 생성하는 편의 함수로 제공하며, 프리셋 기본 depth는 1.0 in.
-            - `FRONT`: `FRONT` 변 전체 폭(`width` = 로봇 너비) 구역 1개.
-            - `ANY`: 4면 구역 4개, 각 `width` = 해당 변 길이 + 2 × depth. 네 귀퉁이까지 덮어 차체를 사방으로 depth만큼 확장한 영역과 동일.
-            - 프리셋 생성 후 로봇 크기가 바뀌면 프리셋을 다시 생성해야 함(설정에는 숫자 배열만 저장).
-        - **Kinematic Pusher 흡착 트랩:** `actionState === 'INTAKING'` 가동 중 유효 Intake Zone에 걸친 공은 범퍼 밖으로 튕겨내는 반발 계수(restitution)를 0으로 감쇠하여 해당 범퍼 면에 안정적으로 머물도록 처리.
-        - **흡입 조건 판정:** Intake Zone 접촉 유지 시간(`intakeContactTimer`)이 `intakeDelay` 이상 지속되고 로봇 적재 공간(`controlledPieces.length < 적재 한도`)이 있을 때 `CONTROLLED` 상태로 전환하여 적재함 맨 뒤에 추가 (FIFO).
-    - **공 vs 정적 장애물 충돌:**
-        - 위치 보정: 고정 장애물이므로 공 위치에만 100% MTV 가산.
-        - 속도 반사: 공이 장애물로 파고드는 법선 속도 `vn = dot(v_ball, normal) < 0`일 때: `v_ball -= (1 + e) * vn * normal` (e는 기물별 restitution 적용).
-    - **공 vs 로봇 충돌 (Kinematic Pusher):**
-        - 로봇은 무한 질량으로 간주되어 감속되지 않음. 공에만 100% MTV 가산.
-        - 접촉점 유효 선속도 (회전 성분 포함): 접촉점 오프셋 `dx = ball.x - robot.x`, `dy = ball.y - robot.y`에 대해`vEff.x = robot.vx - robot.omega * dy`, `vEff.y = robot.vy + robot.omega * dx`
-        - 충격량 속도 전달: `mtvNormal`은 로봇 → 공 방향. `vRel = v_ball - vEff`, `vn = dot(vRel, mtvNormal) < 0`일 때: `v_ball -= (1 + e) * vn * mtvNormal` 적용 (달리는 로봇 범퍼에 맞은 공이 전방으로 튕겨 굴러감).
-    - **끼인 공 역보정 (Pinned Piece, Step 4-2):**
-        - 문제: 로봇은 공에 대해 무한 질량이라 공을 그대로 밀지만, 공이 벽/HIVE/FLOWER/다른 로봇에 막혀 더 밀려날 곳이 없으면 공-벽 보정이 마지막에 공을 되돌려 공이 로봇 몸체 안에 묻힌다 (특히 로봇 면이 벽과 평행할 때).
-        - 해결: 공 충돌 완화 후에도 로봇과 겹친(겹침 깊이 > 0.01 in) 공을 로봇 입장의 장애물로 간주하여 로봇을 MTV만큼 되밀고, 공 쪽으로 파고드는 법선 속도만 0으로 차단한다 (접선 속도 보존 → 공을 누른 채 옆으로 미끄러질 수 있고, 공은 모서리를 돌아 빠져나감). 되밀린 로봇은 환경 충돌을 재보정한다.
-        - 공이 로봇 하나에만 닿은 경우(정적 장애물과의 끼임): 그 로봇이 겹침을 전부 양보하여 공에 막혀 정지.
-        - 공이 두 로봇 사이에 끼인 경우: 가장 깊이 겹친 로봇이 절반 양보를 시도하고, 양보하지 못한 만큼(벽에 막힘 등)은 공이 다른 로봇 쪽으로 밀려나 그 로봇이 양보한다. 마주 오는 두 로봇은 대칭으로 정지하며, 벽에 붙은 로봇 쪽으로 공을 밀어넣으면 밀고 들어온 로봇이 정지한다.
-        - 인테이크 면으로 끼운 경우에도 동일하게 정지하며, 공이 구역에 닿아 있으므로 `intakeDelay` 경과 후 흡입된다.
-    - **공 vs 공 충돌 (Circle vs Circle PBD):**
-        - 중심 거리 `d < (rA + rB)`인 경우 겹침 깊이 `depth = (rA + rB) - d`.
-        - 질량비 분할 위치 밀어내기: `pieceA`는 `-depth * (massB / (massA + massB)) * normal` 이동 `pieceB`는 `+depth * (massA / (massA + massB)) * normal` 이동
-4. **틱당 물리 파이프라인 실행 순서:**
-    - **Step 1: 로봇 기구학 갱신 (`kinematics.ts`) 및 FSM 주행 제어 이원화**
-        - **`INTAKING` (주행 중 흡입 허용):** 외부 주행 입력(`vx, vy, omega`)을 차단하지 않고 정상 주행 적분. 주행하며 공을 빨아들이는 동작 허용.
-        - **`SHOOTING`, `FLOWER_SETUP`, `FLOWER_DROPPING` (Stationary Lock 감속 제동, 리프트 상태 `FLOWER_READY` / `FLOWER_LOWERING` 포함 — 2.6.3항):**
-            - 즉각적인 위치 고정이 아닌, 목표 속도를 `(0, 0, 0)`으로 강제하여 Slew Rate Limiter 기반 감속 주행 유도.
-            - 차체 실제 속도가 완전 정지 임계치(`speed < 0.5 in/s` 및 `|omega| < 0.05 rad/s`)에 도달하기 전까지는 감속 제동 상태(`isBraking = true`)로 대기하며 액션 타이머를 차감하지 않음.
-            - 완전 정지 도달 시 비로소 `isBraking = false`로 전환하고 `stateTimer -= dt` 차감 시작.
-    - Step 2: 로봇-환경 및 로봇-로봇 충돌 해결 (위치/속도 보정)
-    - Step 3: 필드 위 공(`ON_FIELD`) 마찰 감속 및 위치 적분 (`stepPieceDynamics`)
-    - Step 4: 공 충돌 완화 루프 (공 vs 환경/로봇/공 충돌 해결, 2회 반복)
-    - Step 4-2: 끼인 공 역보정 (`resolvePinnedPieces`): 완화 후에도 로봇과 겹친 공에 막힌 로봇을 되밀어 정지
-    - Step 5: HIVE `tipProgressTimer += dt` 누적 및 `settleTime` 도달 공 순차 `ON_FIELD` 방출
-    - Step 5-2: 발사 비행 도착 (`stepShotArrivals`): 도착 틱이 된 발사를 발사 순서대로 명중 적재 / 무효 명중 반사 낙하 연장 / 최종 착지 (2.6.2항)
-5. **Slew Rate Limiter:** RoadRunner / Pedro Pathing 오도메트리 제원 기반 속도 선형 보간.
-6. **입력 계층 및 실시간 루프 (Step 7, 07-1 확정):** 엔진 바깥의 순수 TS 계층이 장치 입력을 틱별 `RobotDriveInput`으로 만들어 엔진에 넣는다. 엔진 입력 인터페이스(`step(r1Input, r2Input)`, `inputProvider`)는 그대로 쓴다.
-    - **모듈 구성 (`src/input/`):**
-        - `inputConfig.ts`: 키 매핑 / 데드존 / 임계값 / 장치 배정 / 루프 상수를 한곳에 모은 설정 파일 (`collision.ts` 실측 상수처럼 값만 바꿔 조정). 매핑 편집 GUI는 두지 않는다.
-        - 순수 변환(축 처리, 행동 요청 결정, 탭 래치, 양자화), 입력 로그 / 입력 출처, 실시간 루프 컨트롤러: DOM 비의존, 시계 / 스케줄러 / 원시 입력을 주입받아 Node(Vitest)에서 가짜 시간으로 테스트.
-        - 브라우저 어댑터(Gamepad 폴링, 키보드 이벤트, `requestAnimationFrame`, 포커스 / 가시성 이벤트): 원시 입력 수집과 콜백 연결만 하는 얇은 층. 구현 `src/input/browserInput.ts`(07-6): `BrowserInputAdapter`(브라우저 환경 객체 주입 가능, `attach(onPause)` / `detach`, 루프의 `poll()`에서 배정 슬롯 게임패드 폴링 + 눌린 키 재샘플, `gamepadStatus()` 슬롯별 연결 / 표준 매핑 — Step 9 연결 표시용), `createAnimationFrameScheduler`, `createBrowserRealtimeLoop(engine, inputs, hooks)` → `{loop, adapter, dispose}`. 포커스 소실 / 탭 숨김 시 어댑터가 눌린 키 집합을 비운 뒤 일시정지를 요청한다 (키를 뗀 이벤트 유실 대비). 사용자 일시정지 / 재개에서는 키 집합을 유지해 누르고 있는 키가 다음 폴링에서 복원된다.
-    - **키 매핑 (`inputConfig.ts` 기본값, W3C Gamepad 표준 배열 `mapping === 'standard'` 기준, 인덱스는 0부터):**
+- **판정 함수는 엔진 필수 인자:** `SimulationEngine(r1Config, r2Config, shotResolver, alliance?, scenario?, shooters?)`. 실제 경기는 LUT 기반 `createLUTShotResolver`를, 테스트는 고정 확률 함수를 넣는다.
+- **물리 가정:** 공기 저항 · 공 회전 무시, 중력 `GRAVITY` ≈ 386.09 in/s² (2.5항).
+- **발사구 위치:** 높이 `z0 = HIVE_RIM_Z − dz` (림 z = 53.5가 고정이므로 `BallisticsConfig.dz`로 역산). 수평 위치는 로봇 중심에서 조준 방향으로 `shooterOffset`만큼 떨어진 점. 터렛 회전축은 차체 중심으로 가정하므로 고정형(정면 조준 시)과 터렛형의 발사구 위치가 같다.
+- **조준점:** 목표 셀 투입구 오각형의 면적 중심 (2.2항 표, `hiveCellAimPoint`). 조준 오차, v0 역산, 명중 기물 배치의 기준이다.
+- **v0 닫힌 해:** 발사구 → 조준점 수평 거리 $D$, 높이차 $\Delta z = z_{\text{aim}} - z_0$, 발사각 $\theta$일 때
 
-      | 기능 | 게임패드 | 키보드 (`KeyboardEvent.code`) | 입력 방식 |
-      |---|---|---|---|
-      | 전후 평행이동 | 좌스틱 Y `axes[1]` (위 = −1이므로 부호 반전) | `KeyW` 전진 / `KeyS` 후진 | 아날로그 / ±1 |
-      | 좌우 평행이동 | 좌스틱 X `axes[0]` (오른쪽 = +) | `KeyD` 오른쪽 / `KeyA` 왼쪽 | 아날로그 / ±1 |
-      | 회전 | 우스틱 X `axes[2]` (오른쪽 = + = 시계 방향 = 헤딩 증가) | `ArrowRight` + / `ArrowLeft` − | 아날로그 / ±1 |
-      | (미사용) | 우스틱 Y `axes[3]` | — | — |
-      | `INTAKING` | LT `buttons[6]` (`value ≥ 0.5`) | `KeyM` | 누르는 동안 유지 |
-      | `SHOOTING` | RT `buttons[7]` (`value ≥ 0.5`) | `Comma` | 누르는 동안 유지 |
-      | 리프트 올림 / 내림 (`FLOWER_SETUP`) | A `buttons[0]` | `Period` | 누를 때마다 토글 |
-      | `FLOWER_DROPPING` | B `buttons[1]` | `Slash` | 누르는 동안 유지 |
+    $$v_0 = \frac{D}{\cos\theta} \sqrt{\frac{g}{2(D\tan\theta - \Delta z)}}$$
 
-        - 키보드는 물리 키 위치(`event.code`)로 읽어 한/영 입력 상태·자판 배열과 무관하게 동작. 매핑된 키는 `preventDefault`(방향키 스크롤, Firefox `/` 빠른 찾기 방지), 입력 폼(`input` / `textarea` / `select` / `contenteditable`)에 포커스가 있으면 무시, 자동 반복(`event.repeat`)은 눌림 에지로 세지 않음.
-        - 트리거 임계값(`TRIGGER_THRESHOLD = 0.5`), 그 외 버튼은 `pressed`. 비표준 매핑 패드도 같은 인덱스를 적용 (연결 표시에서 경고, Step 9).
-    - **장치 → 로봇 배정 (`inputConfig.ts` 고정값):** 게임패드 슬롯 0 → R1, 게임패드 슬롯 1 → R2, 키보드 → R2.
-        - 게임패드 슬롯 = `navigator.getGamepads()` 배열 인덱스 (연결 순서, 브라우저 정책상 페이지에서 버튼을 한 번 눌러야 노출).
-        - 키보드는 개발자 디버그용 비공개 입력 (사용자 안내 없음, 사용자에게는 게임패드 조작만 안내). `KEYBOARD_ENABLED` 플래그로 정식 배포 시 비활성화 가능.
-        - **(09-1 변경)** 키보드 주행은 정식 기능으로 유지하되 SETTINGS 탭의 런타임 토글(기본 켬)로 끌 수 있다 (`KEYBOARD_ENABLED` 상수는 토글 기본값 역할). 끄면 주행 키만 무시하고, 일시정지 / 스크러빙 단축키(Space, ← / →, Shift + ← / →)는 상태별로 키를 공유해 항상 동작한다 (3.8항).
-        - 한 로봇에 장치가 여럿 배정되면(R2 = 패드 1 + 키보드) 합성: 축은 채널별로 절댓값이 큰 값, 유지형 버튼은 OR, 토글 눌림 에지는 OR.
-    - **축 처리 (틱마다, 최신 샘플 사용):**
-        - 좌스틱 원형 데드존 `DEADZONE_LEFT = 0.08`: 크기 m < 0.08이면 0, 아니면 크기를 (min(m, 1) − 0.08) / (1 − 0.08)로 재조정 (방향 유지, 크기 ≤ 1). 우스틱 X 축 데드존 `DEADZONE_RIGHT_X = 0.08` (같은 재조정).
-        - 키보드: 전진 f = W − S, 오른쪽 s = D − A, 동시 입력 시 크기 1로 정규화 (대각선 0.707), 회전 r = Right − Left. 느린 이동 키는 두지 않음.
-        - 드라이버 기준 전진 f(스틱 위 = +), 오른쪽 s → 필드 좌표 정규화 속도 (ux, uy):
-            - **필드 기준 `FIELD` (기본):** 드라이버는 아군 벽에서 필드 안쪽을 바라본다 — RED는 x = 0 벽에서 +x 방향, BLUE는 x = 144 벽에서 −x 방향. RED: ux = f, uy = s / BLUE: ux = −f, uy = −s (캔버스 y-down에서 +x를 보는 드라이버의 오른쪽이 +y).
-            - **로봇 기준 `ROBOT` (옵션):** 직전 프레임(현재 틱 상태)의 헤딩 h 기준. ux = f·cos h − s·sin h, uy = f·sin h + s·cos h (앞 = (cos h, sin h), 오른쪽 = (−sin h, cos h)).
-            - 조작 모드(`DriveMode = 'FIELD' | 'ROBOT'`)는 로봇별 드라이버 입력 설정 (로봇 제원 `RobotConfig` / 시나리오가 아님). 로그에는 변환이 끝난 필드 좌표 값을 기록하므로 모드는 리플레이에 영향 없음.
-        - 회전: 정규화 각속도 uω = r (두 모드 공통, + = 오른쪽 회전).
-    - **행동 요청 결정 (틱마다, 로봇별 `ActionRequest` 1개):** 직전 프레임의 로봇 `actionState`와 이번 틱 버튼(탭 래치 적용)으로 결정한다. 리프트 토글 값은 입력 계층에 따로 저장하지 않고 **매 틱 엔진 상태에서 유도**하므로, 엔진이 요청을 거부 / 무효 판정하면 토글도 자동으로 그 상태를 따른다 (어긋날 수 없음).
-        - 리프트 의도 기본값 = 직전 상태가 `FLOWER_SETUP` / `FLOWER_READY` / `FLOWER_DROPPING`이면 켜짐, 그 외 꺼짐.
-        - A 눌림 에지: 직전 상태가 `IDLE` / `INTAKING`이면 켜짐(올림 요청), `FLOWER_SETUP` / `FLOWER_READY`면 꺼짐(내림 요청), `SHOOTING` / `FLOWER_DROPPING` / `FLOWER_LOWERING`이면 무효 (투입 중 내림 불가).
-        - **직전 상태가 리프트 상태(`FLOWER_SETUP` / `FLOWER_READY` / `FLOWER_DROPPING`):** RT / LT는 반영하지 않음. 의도 켜짐 → B면 `FLOWER_DROPPING`, 아니면 `FLOWER_SETUP` / 의도 꺼짐 → `IDLE`(내림 요청).
-        - **그 외 상태:** 우선순위 **`SHOOTING`(RT) > `FLOWER_DROPPING`(B) > `FLOWER_SETUP`(A 켜짐) > `INTAKING`(LT) > `IDLE`**. 리프트가 올라가 있지 않으면 B는 무효이므로 실제 선택은 RT → A → LT 순. 같은 틱에 RT와 A가 함께 들어오면 `SHOOTING`이 선택되고 A는 버려진다.
-        - 우선순위 근거: 계속 쥐는 LT를 최하위로 두어 흡입 중에도 RT / A가 먹히게 하고(발사 후 LT를 쥐고 있으면 다시 흡입), 리프트 상태에서는 B가 A 토글보다 앞서야 투입이 가능. 엔진은 틱당 요청 1개만 받으므로 상위 요청이 거부되면 하위 요청도 그 틱에는 수행되지 않음 (예: 빈 적재함에서 LT + RT → RT를 쥐는 동안 흡입 정지).
-        - `ActionRequest = 'IDLE' | 'INTAKING' | 'SHOOTING' | 'FLOWER_SETUP' | 'FLOWER_DROPPING'` (`FLOWER_READY` / `FLOWER_LOWERING`은 엔진 상태이며 요청 값이 아님).
-    - **짧은 탭 래치:** 게임패드는 `requestAnimationFrame`마다 폴링하고 키보드는 이벤트로 받아 원시 입력 누적기에 모은다. 틱을 소비할 때:
-        - 유지형 버튼(LT / RT / B / m / , / /): 눌림 = 현재 눌림 OR 직전 틱 소비 이후 눌림 에지 1회 이상. 20 ms 안에 눌렀다 뗀 입력도 최소 1틱 요청으로 반영된다 (RT 탭 = 1발, B 탭 = 1개 투입 — 해당 동작은 진입 후 커밋되므로).
-        - 토글(A / .): 직전 틱 소비 이후 눌림 에지가 1회 이상이면 토글 1회.
-        - 한 프레임에서 여러 틱을 소비하면 누적된 에지는 첫 틱에만 적용하고 이후 틱은 현재 레벨을 쓴다. 축은 소비 시점의 최신 샘플.
-        - 게임패드는 폴링 간격(약 16.7 ms)보다 짧은 탭은 API 한계로 감지되지 않을 수 있음.
-    - **양자화 (입력 수신 시점, 8비트):**
-        - 로봇별 틱당 4바이트: `[qx, qy, qω]` int8 ∈ [−127, 127] + `[action]` (0 `IDLE`, 1 `INTAKING`, 2 `SHOOTING`, 3 `FLOWER_SETUP`, 4 `FLOWER_DROPPING`).
-        - q = sign(u) · floor(|u| · 127 + 0.5), [−127, 127]로 제한 (u = 위 축 처리 결과 ux / uy / uω, 부호 대칭 반올림).
-        - 엔진 입력 = 복호화 값: `targetVx = qx / 127 × maxSpeed`, `targetVy = qy / 127 × maxSpeed`, `targetOmega = qω / 127 × maxTurnRate`. **실시간 입력도 부호화 → 복호화를 거쳐 엔진에 들어가므로** 로그 재생 결과가 비트 단위로 같다.
-        - 근거: 재현성은 해상도와 무관(엔진이 쓴 값 = 로그 값)하고 해상도는 조작감만 좌우한다. 1단계 = maxSpeed 60 in/s 기준 0.47 in/s(정지 임계 0.5 in/s 미만), 회전 4 rad/s 기준 0.03 rad/s, 풀스틱 방향 분해능 약 0.45°. 일반 패드는 8비트 원본이 많고 16비트 패드도 1% 이하는 잡음 / 데드존(8%) 범위. 크기: 로봇 2대 × 6000틱 × 4 B = 48 KB (원본, 저장 시 연속 중복 압축 — 형식은 3.9항 저장 레시피). int16은 크기 2배에 체감 이득 없음.
-        - 메모리: 로봇별 `Int8Array(6000 × 4)` = 24 KB 미리 할당. 참고로 풀매치 타임라인은 힙 약 46 MB(07-1 측정)로 입력 로그는 그 0.1% 수준 — 메모리 관리의 초점은 타임라인(Step 10 분기, 3.9항 메모리 근거).
-    - **입력 로그 / 로봇별 입력 출처 / 녹화 덧입히기:**
-        - 로그는 로봇별 채널 `{ data: Int8Array(6000 × 4), length }` (`src/input/inputLog.ts`의 `InputLogChannel`). 인덱스 t = 틱 t → t + 1 스텝에 쓰인 입력 (`DriveInputProvider`의 tick 규약과 동일). 틱 t에 쓰면 t 이후 기록은 폐기되고, 기록 끝보다 뒤에 쓰면 사이 틱은 중립(0, 0, 0, `IDLE`)으로 채운다 (예: 1회차 `NONE`이던 로봇을 중간 틱부터 `LIVE`로 기록).
-        - 로봇별 입력 출처 `InputSource = 'LIVE' | 'REPLAY' | 'NONE'`:
-            - `LIVE`: 장치 입력 → 축 처리 / 요청 결정 → 부호화 → 로그 t에 기록 → 복호화 → 엔진.
-            - `REPLAY`: 로그 t 복호화 → 엔진. 기록 길이를 넘은 틱은 `NONE`과 같음.
-            - `NONE`: 0 입력 + `IDLE` (기록하지 않음).
-        - **녹화 덧입히기:** 1회차 R1 `LIVE` / R2 `NONE`으로 R1 입력 기록 → 원하는 틱으로 되감기(`scrubTo`) → 2회차 R1 `REPLAY` / R2 `LIVE`로 한 경기장에서 두 로봇을 따로 조종한 결과를 만든다.
-        - 되감은 틱 k에서 이어 진행하면 엔진은 k 이후 프레임을 폐기(기존 분기 규칙)하고, `LIVE` 로봇의 로그도 k 이후를 폐기한 뒤 이어서 기록한다. `REPLAY` 로봇의 로그는 유지.
-            - **(10-1 변경)** 분기는 기존 기록을 지우지 않고 새 가지를 만든다 — 위 폐기 규칙은 **새 가지의 프레임 / 녹화 로그 사본에만** 적용되고 원래 가지는 그대로 남는다 (3.9항 분기 트리).
-        - `REPLAY`는 위치가 아니라 **조작 명령**을 재생한다. 2회차에 다른 로봇과 부딪히거나 기물을 먼저 가져가면 1회차와 궤적 / 결과가 달라질 수 있으며, 이는 결정론을 유지한 정상 동작이다. 리프트 요청도 기록된 요청을 그대로 보내고 수락 여부는 엔진이 다시 판정한다.
-        - 두 로봇이 모두 `REPLAY` / `NONE`이면 실시간 루프 없이 `inputProvider` + `runFullMatch()`로 즉시 재계산할 수 있다. 입력 허브 `MatchInputs`(로봇별 로그 / 출처 / 조작 모드)의 재생 공급 함수 `createReplayProvider()`는 만든 시점의 출처를 복사해 고정하고, `LIVE` 로봇도 기록된 로그를 읽기 전용으로 재생하며(방금 실시간으로 진행한 경기를 바로 재계산), `NONE`은 로그가 있어도 중립 입력이다. 실시간 진행은 `MatchInputs.step(engine, liveControls)`(틱 결정 → 기록 → 복호화 → `engine.step`).
-        - 로그는 같은 로봇 설정 / 시나리오 / 시드 / 탄도 설정 / 엔진 버전을 전제로 한다 (저장 레시피, 3.9항).
-        - **적용 입력 기록 (10-1 추가):** 녹화 로그와 별개로 틱마다 엔진에 실제로 들어간 입력(`NONE` = 중립 포함)을 로봇별로 기록한다. 레시피 저장 / 재현은 이 기록만 쓴다 (녹화 덧입히기 중 `REPLAY` → `NONE` 전환처럼 녹화 로그만으로는 재현되지 않는 경우 때문, 3.9항).
-    - **실시간 루프 (`requestAnimationFrame` + 20 ms 고정 스텝 누산기):**
-        - 프레임마다 누산 시간 += 경과 시간, 20 ms마다 1틱 소비 (입력 결정 → `engine.step`).
-        - **따라잡기 상한 `MAX_CATCHUP_TICKS = 5`:** 한 프레임에 최대 5틱(100 ms)만 소비하고, 그러고도 1틱 이상 밀려 있으면 밀린 누산 시간을 버린다 (1틱 미만 나머지는 다음 프레임으로 이월). 순간 끊김 시 게임 시간이 잠깐 느려질 뿐, 입력이 틱별로 기록되므로 결정론 유지.
-        - **구현 (`src/input/realtimeLoop.ts`, `src/input/liveControls.ts`, 07-5):** `RealtimeLoop(engine, inputs: MatchInputs, controls: LiveControlSource, scheduler: FrameScheduler, hooks)`. 프레임 스케줄러(`request` / `cancel`, 브라우저는 `requestAnimationFrame`)를 주입받아 가짜 시간으로 테스트한다. 상태 `READY` → `RUNNING` ⇄ `PAUSED` → `ENDED`, 일시정지 사유 `USER` / `HIDDEN` / `BLUR` / `GAMEPAD_DISCONNECTED`, 훅 `onFrame(소비 틱 수)`(렌더링 연결, Step 8) / `onStateChange`.
-            - 루프가 `requestAnimationFrame`을 단독으로 소유하고, 프레임 시작 시 입력 공급의 `poll()`(게임패드 폴링 / 키 상태 재샘플, 07-6 어댑터)을 1회 호출한 뒤 틱을 소비한다 (폴링과 틱 소비의 순서 보장).
-            - 입력 수집기 `LiveControlCollector`: 배정된 장치별 탭 래치(`sampleGamepad(slot, pad | null)` / `sampleKeyboard(codes)`), 틱마다 로봇별 합성(`consumeTick`), `reset`. 배정되지 않은 게임패드 슬롯은 무시, 연결 해제(`null`)는 중립.
-        - **자동 일시정지:** 탭 숨김(`visibilitychange` → hidden), 창 포커스 소실(`blur`), 경기 중 배정된 게임패드 연결 해제(`gamepaddisconnected`). 탭이 숨겨지면 브라우저가 `requestAnimationFrame` 호출을 멈추고 게임패드 / 키 입력도 전달되지 않으므로(키를 뗀 이벤트 유실 → 키가 눌린 채 남음), 그대로 두면 복귀 시 밀린 시간 동안 마지막 입력이 유지된 채 한꺼번에 시뮬레이션된다.
-        - 일시정지 시: 루프 정지, 누산 시간 0, 원시 입력 누적기(키 상태 / 탭 래치 에지) 초기화. 엔진은 마지막으로 완료한 틱에 멈춰 있다.
-        - 재개: 사용자의 명시적 조작으로만 재개(Step 7에서는 `resume()` API, Step 9 GUI는 스크러버 줄 `RESUME` / `BRANCH` 버튼과 Space — 3.8항). 일시정지된 틱(일시정지 중 되감았으면 되감은 틱)에서 그대로 이어가며 재개 첫 프레임은 경과 시간 0으로 시작. 시작 / 재개 시에도 입력 누적기를 비워 일시정지 중 누른 탭은 재개 후 발동하지 않으며, 누르고 있는 입력은 다음 프레임 폴링에서 다시 샘플되어 이어진다.
-        - **(09-7a 변경)** 경기 종료(`ENDED`) 뒤에도 엔진을 종료 전 틱으로 되감았으면(`scrubTo`, 분기) `resume()`으로 그 틱부터 다시 진행한다. 엔진이 6000틱이면 종전대로 무시.
-        - 경기 종료(6000틱) 시 루프 자동 정지.
-        - **새로고침 / 탭 닫힘 / 크래시 등 외부 개입으로 페이지 상태가 사라지면 그 경기는 폐기한다** (v1은 자동 저장 / 복구 없음, 6.4항).
-7. **렌더러 및 화면 연결 (Step 8, 08-1 확정):**
-    - **모듈 구성 / 원칙:**
-        - `src/renderer/`는 React 비의존 순수 TS. 좌표 계산(보기 변환, 비행 / 낙하 보간, 게이지 배치, 가득 참 판정, 적재물 배치)은 DOM 없는 순수 함수로 분리해 Vitest로 테스트하고, 그리기 함수는 `CanvasRenderingContext2D`만 쓴다.
-        - 렌더러 입력 = 장면 1개: `{ frame: DeepReadonly<TimelineFrame>, r1Config, r2Config, view, options, shotResolver? }`. `RobotState`에는 로봇 크기 / 인테이크 구역이 없으므로 제원(`RobotConfig`)을 따로 받는다. 렌더러는 프레임을 읽기만 하고 엔진을 호출하거나 수정하지 않는다.
-        - **(09-6b 변경)** 장면 입력에서 `shotResolver`를 뺐다: 캔버스가 명중 확률 글자를 그리지 않으므로 렌더러는 판정 함수를 호출하지 않는다. 명중 확률 계산 함수 `hitProbabilities`(`renderOptions.ts`)는 그대로 두고 좌측 HTML 득점 패널(09-6d)이 호출한다.
-        - 그림은 (프레임, 제원, 보기, 옵션)만의 함수다 → 스크러빙 / 재생 / 분기에서 같은 틱은 같은 그림. 벽시계 시간을 쓰는 것은 보기 전환 애니메이션뿐이다.
-    - **캔버스 레이아웃 (논리 좌표, 1 in = 5 px 유지):**
-        - **필드 뷰포트:** 필드 144 in + 사방 여백 8 in = 160 in 정사각형(800 px). 여백에는 FLOWER 게이지 / NECTAR 재고 게이지 / 라벨이 들어간다. 보기 회전은 이 뷰포트 안에서 필드 중심 (72, 72) 기준으로만 적용한다.
-        - **좌우 정보 패널:** 필드 뷰포트 좌우에 각 40 in(200 px), 왼쪽 R1 / 오른쪽 R2. 표시 옵션의 글자 정보(실시간 명중 확률)를 둔다. 회전하지 않는다.
-        - 전체 논리 캔버스 1200 × 800 px. 화면에서는 CSS로 컨테이너 폭에 맞춰 비율을 유지하며 확대 / 축소하고, 내부 버퍼는 `devicePixelRatio`만큼 키운다.
-        - **(09-1 변경)** Step 9 GUI에서는 좌우 정보 패널을 삭제하고 캔버스 = 필드 뷰포트(논리 800 × 800 px)만 남긴다. 명중 확률 글자는 좌측 HTML 득점 패널로 옮기며(계산 규칙 동일), 장면 크기 / 중심 상수와 좌표 변환은 이에 맞게 수정한다 (3.8항). 아래 08-4 ~ 08-7 구현 기록의 1200 × 800 / 좌우 패널은 변경 전 기준이다.
-        - **구현 (09-6b):** `SCENE_WIDTH_PX = SCENE_HEIGHT_PX = VIEWPORT_PX = 800`, `VIEWPORT_CENTER_PX = (400, 400)`, `SIDE_PANEL_PX` 삭제. 개발 하네스 캔버스도 800 × 800(CSS 1 : 1).
-        - **좌표 변환 함수:** 필드 inch ↔ 논리 px ↔ 화면(CSS) px 양방향. 역변환은 Step 9 클릭 입력(스윗스팟 격자, 시작 자세 드래그)에 쓴다.
-    - **보기 방향 (`AUDIENCE` / `DRIVER`):**
-        - `AUDIENCE`: 좌표 그대로 (Y = 144 관중석이 화면 아래). **경기 시작 전 화면**(시나리오 / 로봇 / 탄도 설정, 스윗스팟 입력, LUT 생성 점진 히트맵, 2.6.2항)은 항상 이 시점이다.
-        - `DRIVER`: 선택 진영 드라이버 시점, 아군 벽이 화면 아래. RED는 필드 중심 기준 −90°(화면 반시계, 필드 +x → 화면 위, +y → 화면 오른쪽), BLUE는 +90°(필드 −x → 화면 위, −y → 화면 오른쪽). 회전만 쓰고 뒤집지 않으므로, `FIELD` 조작(3.6항)에서 스틱 위 = 화면 위, 스틱 오른쪽 = 화면 오른쪽이 된다.
-        - 경기 중 기본값은 `DRIVER`이고, 공통 설정으로 `AUDIENCE`로 바꿀 수 있다 (바꿀 때도 아래 애니메이션). **(09-1)** 기본 보기 방향은 SETTINGS 탭에서 정하고, 경기 중 전환은 스크러버 줄 `VIEW` 토글로 언제나 가능하다 (3.8항).
-        - **전환 애니메이션:** 경기 시작(시작 버튼) 시 `AUDIENCE` → `DRIVER`를 700 ms easeInOutCubic으로 회전한다. 회전 각 θ 동안 회전된 정사각형이 뷰포트를 벗어나지 않도록 배율 1 / (|cos θ| + |sin θ|)로 줄인다 (45°에서 약 0.71). 실시간 루프는 **애니메이션이 끝난 뒤** `start()`한다 (회전 중 조종 방지). 경기 준비 화면으로 돌아가면(리셋) 반대로 회전한다. 일시정지 / 재개 / 스크러빙은 보기를 바꾸지 않는다. 애니메이션은 화면 연출일 뿐 엔진 / 기록과 무관하다.
-        - 글자, 배지, 시계 방향 윤곽 애니메이션의 시작점(12시), 비행 공 높이 오프셋은 보기 회전을 상쇄해 항상 **화면 기준**으로 그린다 (글자는 똑바로, 높이는 화면 위쪽).
-    - **그리기 순서 / 캐시 / 갱신:**
-        1. 정적 도형 레이어(배경, 타일, 벽, GARDEN / 로딩 존 / HIVE 프레임 · 셀 바탕 / FLOWER 원통, 게이지 틀): 필드 좌표로 오프스크린 캔버스(뷰포트 크기, 진영 × `devicePixelRatio`별)에 한 번 그려 캐시하고 매 프레임 보기 변환으로 복사한다. 글자는 캐시에 넣지 않는다 (회전 시 똑바로 그리기 위해).
-        2. 구조물 라벨 (화면 공간, 똑바로 — 기물 / 로봇 아래에 깔림)
-        3. HIVE 셀 상태, FLOWER / 재고 게이지 내용
-        4. 바닥 기물(`ON_FIELD`, `IN_GARDEN`), HIVE 시차 낙하 중인 기물
-        5. 로봇 (인테이크 구역, 몸체, 헤딩 화살표, 적재물 받침)
-        6. 비행 공 (그림자 → 공)
-        7. 로봇 번호, 배지, 경기 종료 강조, 좌우 패널 글자
-        - **구조물 라벨 배치 (08-4):** 라벨마다 구조물 가장자리 기준점과 바깥 방향(GARDEN: 필드 안쪽, HIVE: OPPOSITE 쪽 변 바깥, FLOWER: 필드 중심 쪽)을 두고, 화면에서 그 방향으로 글자 상자 반폭 / 반높이의 법선 성분 + 3 px만큼 밀어 놓는다 (`labelCenter`). 보기가 회전해 구조물이 화면에서 세로가 되어도 글자가 구조물 위에 겹치지 않는다. 로딩 존 라벨("LOADING")은 구역 중심.
-        - **(09-6b 변경)** 구조물 이름표(GARDEN / HIVE / FLOWER n / LOADING ZONE)는 그리지 않는다 (사용자가 필드 구성을 알고 있음). 캔버스 글자는 HIVE 셀 알약, 로봇 번호, 행동 배지뿐이다.
-        - 갱신: 루프 `RUNNING` 중에는 `onFrame` 훅마다 최신 틱 프레임(`engine.getFrame(engine.currentTick)`)을 그린다. 일시정지 / 스크러빙 / 옵션 변경 / 보기 애니메이션 중에는 요청이 있을 때 `requestAnimationFrame`으로 모아 한 번 그린다.
-        - **프레임 간 보간 없음:** 최신 틱 프레임만 그린다. 주사율이 50의 배수가 아니면(60 / 144 Hz) 같은 틱이 불규칙하게 두 번 보이는 미세한 끊김이 있을 수 있다 (6.4항).
-    - **정적 구조 스타일:** 2v0에서 쓰이지 않는 상대 진영 전용 구조물 — 상대 HIVE 셀 2개, 상대 로딩 존, 상대 NECTAR 재고 틀 — 은 채도를 크게 뺀(거의 무채색) 색으로 그려 한눈에 "사용 불가"로 보이게 한다. 상대 HIVE 셀에는 상향 방향 / 개수 / 임계 라벨을 그리지 않는다. (상대 GARDEN은 그 안의 POLLEN이 실제 기물이므로 정상 스타일 유지.)
-        - **(09-6b 변경)** 채도를 완전히 뺀 공통 회색 대신 진영별 비활성 색을 쓴다 (진영은 알아보되 한눈에 비활성): 바탕 = 진영 색 8% 투명, HIVE 셀 = 진영 색 12% + 밝은 회색(222), 테두리 = 진영 색 35% + 회색(170). 상대 GARDEN에도 적용 (08-4 ~ 09-6b에서 누락됐던 부분).
-    - **로봇:**
-        - 몸체 OBB: 진영 색 채움, 앞쪽 변을 굵게 + 헤딩 화살표, 번호 라벨 "1" / "2" (똑바로).
-        - 인테이크 구역(`getBumperZoneOBB`): 평소 옅은 반투명, `INTAKING` 상태에서 진하게.
-        - 적재물: 몸체 안에 FIFO 순서대로 원 최대 4개 (종류별 색, 크기 통일, 로봇 앞쪽부터 0번, 차체와 함께 회전). 0번(다음에 나갈 기물)은 굵은 진한 테두리로 강조.
-        - **몸체 안 배치 (08-4, `robotLayout.ts`):** 앞에서부터 헤딩 화살표(0.45L ~ 0.32L) → 적재물 받침(0.29L ~ −0.21L, 4칸, 원 반지름 = min(1.2 in, 칸 간격 × 0.42)) → 번호 라벨(−0.34L). 모두 몸체 길이 L의 비율이라 로봇 크기와 무관하게 겹치지 않는다. 받침은 밝은 반투명 바탕이라 몸체와 같은 진영색인 NECTAR도 구분되며, 적재 한도(`min(maxControlledPieces, 4)`)만큼 빈 칸 윤곽을 그려 남은 적재 공간을 보여준다.
-        - **행동 상태 배지:** `SHOOTING` / `FLOWER_SETUP` / `FLOWER_READY` / `FLOWER_DROPPING` / `FLOWER_LOWERING`에서 로봇 외접원 바깥 화면 위쪽에 똑바로 그린다. `IDLE` / `INTAKING`은 배지 없음 (흡입은 인테이크 구역 강조로 표시). `isBraking` 중에는 배지를 50% 불투명도로 그려 "정지 대기(타이머 미차감)"를 나타낸다.
-        - **(09-6b 변경)** `INTAKING`에도 배지(`intaking`)를 표시한다 (인테이크 구역 강조와 함께). 배지는 로봇 중심과 같은 화면 x, 화면에서 회전된 몸체의 가장 위 꼭짓점 바로 위(2 px)에 붙여 회전과 무관하게 몸체와 겹치지 않으면서 가장 가깝게 둔다 (`badgeCenter`, 이전: 외접원 바깥). 필드 위 물체가 아닌 표시임을 알리도록 불투명도 85%, 제동 중은 그 절반. **(09-7 전 변경)** 흰 원판 배지가 뒤의 기물 / 로봇 / 격자를 가리지 않도록 불투명도 60%(제동 중 30%)로 낮춤 (`BADGE_OPACITY`).
-        - **배지 이미지 자산 (사용자 제공 예정):** `src/assets/badges/{key}.svg`(또는 `.png`), key = `shooting`, `lift-up`(`FLOWER_SETUP`), `lift-ready`(`FLOWER_READY`), `lift-drop`(`FLOWER_DROPPING`), `lift-down`(`FLOWER_LOWERING`). 정사각형, 투명 배경, 필드 표시 크기 약 6 in(30 논리 px)에서 식별 가능해야 한다. 자산이 없으면 글자 배지(둥근 사각형 + 짧은 글자)로 대신 그리므로 렌더러 구현은 자산 제공 시점과 무관하다.
-        - **배지 자산 확정 (09-7 전):** 6종 모두 SVG로 들어감 (`intaking`, `shooting`, `lift-up`, `lift-ready`, `lift-drop`, `lift-down`). 사용자 시안(투명 배경 선화)은 실제 표시 크기(1366 화면 약 21 px)에서 세부가 뭉개지고 어두운 여백 위에서 보이지 않아, 같은 아이디어를 단순화해 다시 그렸다 (사용자 승인).
-            - 공통 틀: `viewBox 0 0 24 24`, `width = height = 256`, 흰 원판(r 11) + 짙은 테두리 `#111827` 1.6 → 밝은 필드와 어두운 여백 모두에서 보임. 그림 선 `#111827` 굵기 2~2.4, 둥근 끝.
-            - 강조색 보라 `#7C3AED` 하나만 사용 (필드에서 뜻이 있는 진영 빨강 / 파랑, POLLEN 노랑, 인테이크 초록, 강조 주황, FLOWER 분홍과 겹치지 않음). 기물 / 리프트처럼 움직이는 부분에 칠한다.
-            - 모양: `intaking` 양쪽에서 가운데로 모이는 화살표 + 가운데 기물 점, `shooting` 왼쪽 아래 → 오른쪽 위 화살표 + 날아가는 기물 + 오른쪽 위 과녁, `lift-up` ▲ + 아래 막대, `lift-ready` 위 막대 + 일시정지 두 줄, `lift-drop` 기물이 바구니로 떨어짐, `lift-down` 위 막대 + ▼.
-            - 불투명도는 렌더러가 입힌다: 평소 60%, 제동 중 30% (85%에서 낮춤 — 뒤의 POLLEN / 로봇 모서리가 비쳐 보이면서 21 px에서도 식별).
-            - 이미지로 그리므로 고정 색만 (`currentColor` / `<text>` / 외부 참조 금지). 테스트 `robotLayout.test.ts` C가 키마다 자산 1개 + 정사각 viewBox + `width = height` + 고정 색 / 글자 없음을 검사한다.
-        - (09-6b) 자산 키에 `intaking` 추가 (글자 대체 `INTAKE`). 권장 형식 SVG (PNG는 투명 배경 정사각형 256 px 이상), 표시 크기 6 in 정사각형.
-    - **기물 상태별 표시:**
+    ($D\tan\theta > \Delta z$일 때만 해가 있다)
 
-      | 상태 | 엔진 좌표 | 표시 |
-      |---|---|---|
-      | `ON_FIELD` | 실제 위치 | 좌표에 원 (실제 반지름, POLLEN 노랑 / NECTAR 아군 진영 색) |
-      | `IN_GARDEN` | 실제 위치 | `ON_FIELD`와 같은 원 + 테두리로 구분 |
-      | `IN_HIVE` | 셀 조준점 바닥 투영 (모두 한 점) | 개별로 그리지 않고 HIVE 셀 도형의 개수로 표시. 단 시차 낙하 대기열(`pendingDrops`)의 기물은 낙하 연출로 그림 (엔진은 방출 전까지 `IN_HIVE`로 둠) |
-      | `IN_FLOWER` | FLOWER 중심 | FLOWER 게이지로만 |
-      | `CONTROLLED` | 로봇 중심 | 로봇 적재물 표시로만 |
-      | `IN_FLIGHT` | 발사구 바닥 투영 | 비행 대기열 보간으로만 |
-      | `OUT_OF_BOUNDS` | 필드 밖 | NECTAR 재고 게이지로만 (POLLEN은 해당 없음) |
+##### 스윗스팟 (한 점 입력)
 
-    - **HIVE:**
-        - 아군 셀: 현행 표시 유지 (상향 셀 강조, `N{NECTAR} P{POLLEN}/{임계}` 라벨). `isTipping` 중에는 전복된 셀(= 현재 상향 셀의 반대편, 전복 중 추가 전복은 불가)에 "TIPPING" 표시.
-        - **그리는 방식 (08-5):** 셀 바탕 / 테두리(상향 셀 진영색 + 노란 강조, 전복된 셀 주황 점선)는 필드 공간, 셀 안 내용은 화면 공간에서 똑바로 — 셀의 화면 경계 상자 안에 위에서부터 NECTAR 줄 / "▲ N{n} P{p}/{임계}" 알약 글자 / POLLEN 줄 (전복된 셀은 "TIPPING" 알약). 기물 줄을 필드 공간에 두면 드라이버 시점에서 세로줄이 되어 글자와 겹치므로 화면 공간으로 옮겼다.
-        - **(09-6b 변경)** "TIPPING" 알약은 그리지 않는다. 전복된 셀은 주황 점선 테두리만으로 표시한다.
-        - 상대 셀: 위 정적 구조 스타일.
-        - **시차 낙하 연출:** `pendingDrops`의 각 항목에 진행률 u = clamp(`tipProgressTimer` / `settleTime`, 0, 1). 위치 = 전복된 셀의 립 기준점(Lip_X, Lip_Y, 2.6.1항) → (`targetX`, `targetY`) 선형 보간. 불투명도 = 0.25 + 0.75·u. 윤곽선은 화면 12시 방향에서 시계 방향으로 u × 360°까지 호로 그린다 (u = 1에서 완전한 원 = 착지). 방출되어 `ON_FIELD`가 된 기물은 일반 표시. 필요한 값이 모두 프레임에 있으므로 스크러빙에서도 같다.
-    - **FLOWER 게이지 (필드 밖 직사각형, 기존 측면 단면 원통 게이지 폐기):**
-        - FLOWER 4개는 필드 변을 2:1로 내분하는 점에 있고 필드 중심 기준 90° 회전 대칭이다: R(x, y) = (144 − y, x)를 반복 적용하면 (96, 142) → (2, 96) → (48, 2) → (142, 48).
-        - 기준 게이지(관중석 벽 FLOWER (96, 142)): 필드 바깥 x ∈ [96, 120], y ∈ [144.6, 147.8] (벽과 0.6 in 간격, 두께 3.2 in, 양 끝 둥글게). FLOWER 쪽 끝(x = 96)이 bottom(`slot[0]`)이고, 필드 둘레를 따라 화면 기준 반시계 방향 끝(x = 120)이 top.
-        - 나머지 3개는 R로 회전 복제: 왼쪽 벽 (2, 96) → x ∈ [−3.8, −0.6], y ∈ [96, 120], bottom y = 96 / 위쪽 벽 (48, 2) → x ∈ [24, 48], y ∈ [−3.8, −0.6], bottom x = 48 / 오른쪽 벽 (142, 48) → x ∈ [144.6, 147.8], y ∈ [24, 48], bottom y = 48.
-        - **칸:** 길이 24 in를 9칸(칸당 약 2.667 in)으로 나눈다 (9 = 용량 테이블 최대 총 개수). 칸 k = `pieces[k]`. 기물은 종류별 색의 같은 크기 원(지름 2.2 in, 실제 크기 무시).
-        - `slot[0]`이 `null`(NECTAR 잼)이면 칸 0을 검정으로 막는다. 칸 0과 칸 1 사이에 출구 턱 구분선을 그린다 (칸 0은 득점 제외).
-        - **가득 참 표시:** 현재 조합 {POLLEN, NECTAR}(잼 상태의 빈 `slot[0]`은 POLLEN 1개로 계산, 2.6.3항)가 용량 테이블의 최대 조합(POLLEN = `FLOWER_MAX_POLLEN_BY_NECTAR[NECTAR]`)이면 `pieces.length`번 ~ 8번 칸에 X 표시를 그린다. 테이블이 NECTAR 개수에 대해 엄격히 감소하므로 최대 조합이 아니면 POLLEN 1개를 더 넣을 수 있어 "가득 참 ⇔ 최대 조합"이 성립한다 (예: {1, 6}은 7칸 + X 2칸, {9, 0}은 X 없음). 엔드게임 NECTAR 제한처럼 시점에 따라 달라지는 투입 조건은 반영하지 않는다.
-        - "FLOWER n" 라벨은 필드 안쪽 현행 위치 유지 (똑바로).
-        - **구현 (08-5, `gaugeLayout.ts`):** 게이지 틀(둥근 직사각형, 빈 칸 윤곽 9개, 칸 0 / 1 사이 출구 턱 점선)은 정적 레이어, 칸 내용은 매 프레임. "가득 참"은 엔진 용량 판정 `canFlowerAccept`를 재사용해 POLLEN / NECTAR 둘 다 넣을 수 없을 때로 판정한다 (위 "가득 참 ⇔ 최대 조합"과 동치, 용량 규칙의 단일 출처 = 엔진).
-    - **NECTAR 재고 게이지 (휴먼 플레이어, 룰북 Figure 10-2 ALLIANCE AREA):**
-        - 각 진영 벽 바깥 y = 72 중심. RED: x ∈ [−3.8, −0.6], y ∈ [65.33, 78.67] (5칸, 칸당 약 2.667 in, FLOWER 게이지와 같은 두께 / 간격 / 원 크기). BLUE: 필드 중심 점대칭 x ∈ [144.6, 147.8], 같은 y 범위.
-        - 칸 채우는 순서: 아군 로딩 존에 가까운 끝부터 (RED는 y가 작은 쪽, BLUE는 y가 큰 쪽 — 점대칭). 앞에서부터 `pendingHumanNectar`개 = **투입 대기**(반투명 + 점선 테두리), 이어서 `nectarStock`개 = **재고**(정상 색), 나머지는 빈 칸 (이미 필드로 투입된 수 = 5 − 대기 − 재고).
-        - 두 값의 차이: `nectarStock`은 휴먼 플레이어가 아직 투입을 결정하지 않은 재고이고, `pendingHumanNectar`는 투입이 결정됐지만(팁 / 엔드게임 / 오토 팁) 로딩 존 빈 슬롯이 없어(로봇이 막고 있음 등) 기다리는 수다 (2.4항). 예: 엔드게임 진입 시 로봇이 로딩 존에 서 있으면 재고 3 → 0, 대기 3이 되고 자리가 나는 대로 대기가 줄어든다.
-        - 상대 진영 재고 틀은 정적 구조 스타일(채도 제거), 내용 없음.
-        - **(09-6b 변경)** 재고 게이지 틀은 칸 5개 양 끝에 칸 하나 길이(`STOCK_GAUGE_END_PAD`)만큼 여유를 둔다 (칸 위치 / 간격은 그대로). 상대 재고 틀은 진영별 비활성 색.
-    - **비행 공 (`pendingShots`):**
-        - 경과 시간 t = (tick − `launchTick`) · dt (발사 후 초). t < `contactTime`이면 명목 구간, 그 뒤는 충돌 후 구간(`segments`)에서 t를 담는 구간 (08-2).
-        - **명목 구간:** 진행률 s = clamp(t / `contactTime`, 0, 1). 수평 위치 = (`fromX`, `fromY`) → (`toX`, `toY`) 선형 보간.
-        - **명목 구간 높이 (명목 포물선 + 선형 보정):** 명목 궤적 `Trajectory {fromX, fromY, fromZ, heading, v0, pitch}`의 `heightAtDistance`(`ballistics.ts` 재사용)로 z_nom(d)를 구하고, D = from → to 수평 거리일 때 z(s) = z_nom(s·D) + s·(`toZ` − z_nom(D)). s = 0에서 발사구, s = 1에서 `to`(조준점 / HIVE 접촉점 / 벽 접촉점 / 바닥 착지점)와 정확히 일치한다 (명중의 탐색 v0 / 고정형 조준 오차로 명목 포물선이 조준점을 비껴가도 끝점이 맞음).
-        - **충돌 후 구간:** 기록된 구간을 그대로 계산한다 (`flightSegmentPoint`: `BALLISTIC` 중력 포물선, `ROLL` 높이 유지). 선형 근사나 투명도 연출 없이 실제 공으로 그리며, 구간이 명목 구간 끝 / 서로 / 착지점과 연속이므로 공중 → 바닥 점프가 없다.
-        - **높이 연출:** 바닥 위치 (x, y)에 반투명 그림자(기물 반지름), 공은 화면 위쪽으로 0.3·z in 띄운 위치에 반지름 × (1 + z / 100)으로 그린다.
-        - 결과(`HIT` / `MISS_*`)는 도착 전까지 구분하지 않는다 (같은 색). 도착 틱 프레임에서는 기물이 이미 결과 상태(`IN_HIVE` / `ON_FIELD`)로 그려진다.
-        - **구현 (08-6, `flightView.ts`):** `shotElapsed`(프레임 틱 → 발사 후 초), `shotPositionAt`(위 두 구간 규칙, 충돌 후 구간이 없으면 명목 구간 끝에서 고정, 포물선이 정의되지 않는 비정상 궤적은 높이를 발사구 → to 선형), `shotTrail`(틱 간격 표본), `airborneDisplay`. 비행 대기열의 모든 발사를 그린다 (연속 발사로 여러 발이 동시에 날 수 있음).
-    - **경기 종료 강조:** 프레임에 `scoreBreakdown`이 있을 때(Tick 6000 프레임)만 득점 인정 GARDEN 기물 테두리, 주차 인정 로봇 외곽, 득점 FLOWER 게이지 테두리 + 점수 글자를 강조한다. **경기 중 예측 표시(로딩 존 / GARDEN 걸침 등)는 하지 않는다** (3.2항 실시간 / 확정 분리).
-        - **구현 (08-5):** 강조색 주황. GARDEN 기물은 반지름 + 0.8 in 고리, 주차 로봇은 몸체보다 사방 1.5 in 큰 외곽선, 득점 FLOWER는 게이지 테두리 + "+{점수}" 알약. 점수 알약은 게이지 쪽 여백(8 in)이 좁아 잘리므로 필드 안쪽 "FLOWER n" 라벨 바로 바깥에 둔다.
-        - **(09-6b 변경)** 경기 종료 강조를 다음으로 바꾼다 (점수 알약 `+{점수}` 삭제 — 결과 팝업이 항목별 점수를 보여 줌):
-            - GARDEN: 경기 중 `IN_GARDEN` 기물은 초록 테두리(유지). 경기 종료 프레임에서 득점 인정된 기물은 초록 대신 주황 테두리 (겹쳐 그리지 않음).
-            - FLOWER 소유권 득점: 필드의 FLOWER 원을 분홍 대신 진영 공식 색으로 (게이지 테두리 강조 삭제). FLOWER는 평소 중립이라 진영색 테두리를 두지 않는다.
-            - 하단 보너스: 게이지에서 유효 스코어링 볼륨(`slot[1 .. N]`)의 **가장 아래 NECTAR 하나**에만 주황 테두리 (`bottomBonusSlot`). 2v0 단순화 규칙상 소유권과 하단 보너스는 항상 함께 성립하므로 득점 FLOWER는 두 표시를 모두 받는다.
-            - 주차: 로봇 외곽 주황선 (그대로).
-    - **표시 옵션 (`RenderOptions`):** 사용자에게 공개하는 **공통 환경설정**(로봇별 설정 아님), 기본값 모두 꺼짐. Step 9 SETTINGS 탭에서 켜고 끄며, Step 8 개발 하네스에서는 간이 체크박스로 조작한다. **(09-1)** 변경은 경기 전 또는 일시정지 중(config 창을 열 수 있을 때)에만 가능하다 (3.8항).
-        - `aimGuide` 조준선: 고정형은 헤딩 방향 선 + ±`aimTolerance` 부채꼴, 터렛형은 `turretRange` 부채꼴 + 발사 방향 선(`shotLaunchHeading`, 범위 밖이면 한계각).
-        - `intakeProgress` 흡입 접촉 진행: `intakeTargetPieceId` 기물 둘레에 `intakeContactTimer` / 필요 시간 호. 대상이 바닥 기물이면 그 기물 둘레(필요 시간 `intakeDelay`), FLOWER `slot[0]`이면 FLOWER 원통 둘레(필요 시간 max(`intakeDelay`, 0.12 s)). 필요 시간이 0이면 그리지 않는다.
-        - `hitProbability` 실시간 명중 확률: 좌우 패널에 글자로 로봇별 POLLEN / NECTAR 확률 (적재함 0번 종류 강조, 적재 없음 표시). 렌더 시점에 장면의 `shotResolver`(엔진에 주입된 판정 함수)를 현재 프레임의 로봇 자세 / 진영 / 상향 셀로 호출한다. 옵션이 꺼져 있으면 호출하지 않으며, 켜져 있어도 틱이 아니라 **그리는 프레임마다** 4회(로봇 2 × 기물 2)다. 엔진은 여전히 발사 시에만 판정 함수를 호출하므로 결정론과 무관하다. 비용 실측(Node V8, LUT 판정 함수, 360° 터렛 최악 조건): 약 0.5 µs/회 → 프레임당 약 2 µs, 144 Hz에서도 초당 약 0.3 ms (CPU 0.03%) 수준으로 무시 가능.
-        - `flightTrail` 비행 잔상: 발사구 → 현재 위치까지 위 높이 보간 곡선을 점선으로.
-        - `flightResult` 비행 결과 색: 비행 중 공을 결과별 색(`HIT` / `MISS_HIVE` / `MISS_FLOOR`)으로 구분 (기본은 도착 전까지 숨김).
-        - **구현 (08-6, `renderOptions.ts` + `sceneRenderer.ts`):** 장면 입력에 `options`(미지정 = `DEFAULT_RENDER_OPTIONS`, 모두 꺼짐)와 `shotResolver`(선택)를 추가.
-            - `aimGuide`: 반지름 24 in 부채꼴 + 로봇 중심에서 발사 방향으로 조준점 거리만큼 점선. 터렛 범위 해석은 엔진 조준 판정과 같다 — 각 끝을 [-π, π]로 정규화하므로 360°는 `[-π, π]`뿐이고 `[0, 2π]`는 `[0, 0]`(폭 0)이다.
-            - `intakeProgress`: 대상 둘레 + 0.6 in 반지름, 화면 12시부터 시계 방향 호, 진행률 [0, 1] 제한.
-            - `hitProbability`: 왼쪽 패널 "R1 명중 확률" / 오른쪽 "R2 명중 확률", POLLEN / NECTAR 백분율, 적재함 0번 종류는 "▶"와 큰 글자, 적재 없음 표시, 판정 함수 미주입 시 "판정 함수 없음". 값은 엔진과 같이 [0, 1] 제한 / 비유한값 0.
-            - (09-6b) 캔버스 좌우 패널이 삭제되어 이 글자는 좌측 HTML 득점 패널로 옮긴다 (09-6d). 그 사이 하네스에서는 표시하지 않는다.
-            - (09-6d) 좌측 패널 로봇 이름 아래에 `POLLEN` / `NECTAR` 정수 % (적재함 0번 종류 줄은 밝게, 다른 줄은 흐리게, 기물 색 점). 옵션이 꺼져 있으면 줄 자체가 없다.
-            - `flightTrail`: 발사구부터 현재까지 공 표시 위치(높이 오프셋 포함)를 점선으로. `flightResult`: 공 테두리를 `HIT` 초록 / `MISS_HIVE` 주황 / `MISS_FLOOR` 회색으로.
-            - 그리기 위치: 조준선은 로봇 아래, 흡입 진행은 로봇 위, 잔상 / 결과 색은 비행 공과 함께, 명중 확률은 뷰포트 밖 좌우 패널 (회전 없음).
-    - **개발 하네스 (Step 8, 사용자 비공개):**
-        - 개발 서버(`import.meta.env.DEV`)에서만 `App`이 하네스를 띄우고, 정식 빌드는 Step 9 GUI 전까지 현행 정적 필드(관중석 시점)를 보여준다. Step 9 GUI(3.8항)가 들어오면 정식 빌드 / 개발 서버 모두 GUI를 띄우고 하네스는 Step 9 마지막 하위 Step에서 삭제한다.
-        - 구성: 하네스 파일의 고정 기본 `RobotConfig` 2개, 기본 시나리오(진영 RED / BLUE 선택), **간이 판정 함수**(`isAimWithinShooterRange` 통과 시 0.6, 아니면 0 — LUT 생성 없음), 기본 슈터 탄도, `MatchInputs`(R1 / R2 `LIVE`), `createBrowserRealtimeLoop`. **엔진 / 입력 계층 / 실시간 루프 / 렌더러는 정식 코드를 그대로 쓰고, 판정 함수와 설정값만 다르다.**
-        - 조작: 시작(회전 애니메이션 후 루프 시작) / 일시정지 / 재개 / 리셋, 보기 전환, 표시 옵션 체크박스, 틱 / 남은 시간 / 점수 임시 글자. Step 9 GUI가 들어오면 대체된다.
-        - **구현 (08-7, `src/dev/`):**
-            - `devSetup.ts`: 고정 제원 `DEV_ROBOT_CONFIGS`(18 in, 앞면 흡입, 고정형 ±3°), 간이 판정 함수 `createDevResolver`(조준 가능 0.6 / 아니면 0), `createDevEngine(진영)`.
-            - `harnessController.ts` (React 비의존, 시계 / 프레임 스케줄러 / 브라우저 환경 주입): 단계 `SETUP`(관중석, 진영 선택) → 시작 → `ROTATING_IN`(보기 회전, 루프 `READY` 유지) → 회전 완료 프레임에 `loop.start()` → `MATCH` → 리셋 → 새 엔진(0틱) + `ROTATING_OUT`(관중석으로 회전) → `SETUP`. 진영은 `SETUP`에서만 바꿀 수 있다. 입력은 `MatchInputs`(R1 / R2 `LIVE`) + `createBrowserRealtimeLoop`(게임패드 0 → R1, 게임패드 1 + 키보드 → R2).
-            - **(09-6c 변경)** `harnessController.ts`는 삭제하고, 같은 흐름을 일반화한 `src/app/appController.ts`(`AppController`)에 하네스 고정 설정(`devSetup.ts` `createDevSetup(진영)`)을 주입해 쓴다. 진영 선택 = `setSetup(createDevSetup(진영))`. 흐름 테스트도 `src/app/__tests__/appController.test.ts`로 옮겼다.
-            - 다시 그리기: 루프 `RUNNING` 중에는 `onFrame`마다, 그 외에는 요청을 rAF 1회로 모아서 (옵션 여러 번 변경 = 1회), 보기 애니메이션 중에는 끝날 때까지 매 프레임. 상태 알림(React 표시)은 진행 중 최대 약 10 Hz, 단계 / 루프 상태 변화는 즉시.
-            - `DevHarness.tsx`: 버튼 / 라디오 / 체크박스 / 상태 글자(단계, 루프 상태와 일시정지 사유, 틱, 남은 시간, 점수, 게임패드 슬롯 연결)와 키보드 안내(개발용). 캔버스는 논리 1200 × 800을 CSS 폭 100% · 비율 3:2로 확대 / 축소, 버퍼는 `devicePixelRatio` 배.
-            - `App.tsx`: `import.meta.env.DEV`일 때만 `lazy(import('./dev/DevHarness'))`. 정식 빌드 번들에 하네스 코드가 없음을 확인 (빌드 결과물 문자열 검사 + 미리보기에서 정적 필드만 표시).
-            - 경기 보기를 관중석으로 두고 시작하면 회전 없이 700 ms 전환 시간 뒤 시작한다 (같은 흐름 유지).
-            - **(09-6d 변경)** 새 GUI(메인 화면)가 정식 빌드와 개발 서버 모두의 기본 화면이 되고, 하네스는 개발 서버에서 주소에 `?harness`가 있을 때만 뜬다 (정식 빌드는 `?harness`를 무시). 고정 설정 본체는 정식 코드 `src/app/defaultSetup.ts`(`DEFAULT_ROBOT_CONFIGS` — 이름 `R1` / `R2`, `createSimpleResolver`, `createDefaultSetup(진영)`)로 옮기고 `devSetup.ts`는 이를 다시 내보낸다. 정적 필드 화면(`FieldCanvas.tsx`, `renderField` / `drawHive` 등 720 × 720 옛 그리기 함수)은 삭제.
-    - **테스트:** 순수 계산 함수는 Vitest — 보기 변환(RED / BLUE 회전 방향, 역변환 왕복, 애니메이션 배율), 비행 보간(s = 0 발사구, s = 1 도착점 일치, 보정항), 낙하 보간(립 → 착지, 불투명도 / 호 진행), FLOWER 게이지(4개 회전 대칭 좌표, 칸 위치, 가득 참 판정 — 테이블 7조합 + 잼), 재고 게이지 칸 배정, 적재물 배치. 그리기 결과는 각 단계 끝에 저장소 밖 1회성 헤드리스 Chromium 점검(07-6 방식)으로 확인하고, Playwright는 저장소에 넣지 않는다.
+- 로봇마다 기준 셀 `RED_AUDIENCE`를 가장 잘 넣는 로봇 중심 좌표 **한 점**(`BallisticsConfig.sweetSpot`)만 받는다.
+    - 여러 단계의 명중률(예: 100% / 80% / 60% 구역)을 입력받지 않는 이유: 명중 확률은 편차 모델의 몬테카를로가 계산하므로, 사용자가 추정한 구역으로 보정하면 같은 편차를 이중으로 반영하고 덜 정확해진다. v0 고정 슈터의 명중 구역이 조준점 주변 거리 띠 모양으로 넓게 나타나는 것은 입력이 아니라 LUT 결과로 드러난다. (실측 명중률은 향후 편차 파라미터 보정에 쓴다, 5.2항)
+- **화면 입력 기준:** 화면은 현재 시나리오 진영의 공식 시작 상향 셀(RED → `RED_AUDIENCE`, BLUE → `BLUE_OPPOSITE`)을 기준으로 스윗스팟을 입력 / 표시하고, BLUE는 필드 중심 점대칭 (x, y) ↔ (144 − x, 144 − y)로 바꿔 저장한다. 저장값은 항상 `RED_AUDIENCE` 기준이므로 진영을 바꿔도 LUT가 무효화되지 않는다 (3.8항).
+    - 변환 함수: `sweetSpotBasisCell(alliance)`, `sweetSpotFromBasis(p, alliance)`(진영 기준 → 저장 좌표), `sweetSpotToBasis(p, alliance)`(저장 좌표 → 진영 기준). 두 변환 모두 **진영 기준 좌표에서 격자 중심으로 스냅한 뒤** 점대칭한다. 그래서 격자 경계 위의 점(예: BLUE (84, 10))도 사용자가 화면에서 본 격자가 그대로 LUT / 검증에 쓰인다 (변환 후 스냅하면 경계에서 옆 격자가 선택됨).
+- **격자 중심 스냅 (`snapSweetSpot`):** 스윗스팟은 그 점을 담는 1 in 격자의 중심(x.5)으로 스냅한 뒤 검증 / v0 탐색한다 (경계 위의 점은 큰 쪽 격자, 예: (60, 135) → (60.5, 135.5)). LUT는 격자 중심에서만 명중률을 계산하므로, 격자 중심에서 v0를 찾아야 스윗스팟 격자의 LUT 값이 탐색 명중률과 일치한다 (근거리 상승 사격은 명중 띠가 격자보다 좁을 수 있음). 화면의 격자 클릭 입력은 이미 격자 중심이다.
+- **검증 (`validateBallisticsConfig`):** 스냅한 스윗스팟 기준으로 엄격히 적용하며, 통과하지 못하면 로봇 탭 적용(LUT 생성) 버튼을 막는다. 헤딩은 입력받지 않고, 화면은 조준점을 향해 돌린 로봇 몸체 윤곽과 실패 사유를 미리 보여 준다.
+    - 조준점을 바라보는 로봇 몸체가 필드 안 — `SWEET_SPOT_OUT_OF_FIELD`
+    - HIVE AABB와 겹치지 않음 — `SWEET_SPOT_IN_HIVE`
+    - 닫힌 해 존재 — `SWEET_SPOT_NO_SOLUTION`
+    - 파라미터 유효 (발사각 (0, π/2), 유한값, 편차 ≥ 0, 로봇 크기 > 0) — `PARAM_INVALID`
+    - v0 탐색 뒤 스윗스팟 명중률(`sweetSpotHitRate`)이 0이면 경고한다.
 
-8. **웹 GUI (Step 9, 09-1 확정):** 엔진 / 입력 계층 / 실시간 루프 / 렌더러 / LUT Worker를 한 화면으로 묶는 정식 사용자 화면. 세부 배치(폼 필드 배열, 컨트롤 모양, 색 척도 등)는 각 하위 Step 시작 시 확정하고, 여기서는 구조 / 흐름 / 규칙만 정한다.
-    - **기본 원칙:**
-        - **대상 환경:** 데스크톱 / 노트북 브라우저 전용. 모바일 최적화 없음 (태블릿 가로 화면은 동작하면 좋으나 보장하지 않음).
-        - **화면 크기:** 최소 1366 × 768 (브라우저 창 안쪽 가용 영역 약 1366 × 650 기준으로 설계), 최대 3840 × 2160. UI 치수(글자 / 패널 폭 / 버튼)는 기준 단위 `--u = min(100vw / 1366, 100vh / 650)`에 비례해 4K에서도 1366 화면과 같은 비율로 보인다. 최소 크기보다 작으면 더 줄이지 않고 스크롤. 캔버스는 기존대로 `devicePixelRatio`만큼 버퍼를 키운다.
-        - **앱 표시 이름:** `FTC TacticSim`.
-        - **문구 사전 구현 (09-6a, `src/ui/i18n.ts`):** `t(lang, key, params?)`, 영어 사전 키 기준 + 한국어 사전은 타입으로 모든 키를 강제, 런타임에 없는 언어 / 키는 영어 → 키 문자열로 대체, 자리표시자 `{name}`. 한국어는 짧은 명사형. 엔진 검증 오류 코드(`issue.*`) / LUT 상태(`lut.*`) / 일시정지 사유(`pause.*`)마다 문구를 두고 GUI는 엔진 메시지 대신 코드로 문구를 찾는다. 문구는 화면을 만드는 하위 Step마다 추가한다.
-        - **타이머 (09-6a 확정, `formatMatchTime`):** 10초 초과는 `M:SS`, 10초 이하는 `0:SS.s`, 두 구간 모두 올림이라 표시가 건너뛰지 않는다 (2:00 → 1:59 … 0:11 → 0:10.0 → 0:09.9 … 0:00.1 → 종료 0:00.0). 틱 × 0.02의 부동소수점 오차는 1e-6초로 흡수. `ENDGAME`(남은 60초 이하, 엔진 전환 틱과 같음)부터 글자색 변경.
-        - **언어:** 기본 영어, 한국어 토글(SETTINGS 탭). 모든 화면 문구(캔버스 글자 포함)는 문구 사전 `t(key)`를 거친다. 게임 용어는 언어와 무관하게 **원어 대문자**: `POLLEN`, `NECTAR`, `HIVE`, `CELL`, `FLOWER`, `GARDEN`, `LOADING ZONE`, `TIP`, `PARK`, `ENDGAME`, `TELEOP`, `SWARM`, `POLLINATOR`, `RP`, `RED`, `BLUE`, `ALLIANCE`.
-        - **진영 공식 색 (UI + 렌더러 공통):** RED `rgb(223, 0, 27)` = `#DF001B`, BLUE `rgb(15, 83, 167)` = `#0F53A7`. 그 외 색은 구현하며 정하고 사용자 검토로 수정.
-        - **테마 (09-6b 확정):** 필드 바닥은 밝은 회색 타일(기물 / 로봇 구분이 가장 잘 됨), 필드 둘레(게이지 여백)와 주변 UI / 팝업은 어두운 계열(`#15171C`, 결과창 시안과 같은 톤).
-        - **진영 색 적용 (09-6b 확정, `canvasRenderer.ts` `ALLIANCE_COLORS`):** 공식 RGB에서 계산 — 기본(로봇 몸체 / 진영 NECTAR / 상향 셀) RED `#DF001B` · BLUE `#0F53A7`, 15% 어둡게(테두리 / 라벨 글자) `#BE0017` · `#0D478E`, 흰색과 7 : 3(하향 셀) `#F5B3BB` · `#B7CBE5`, 25% 투명(GARDEN / 로딩 존 바탕). 상대 진영 전용 구조물은 진영별 비활성 색(3.7항 정적 구조 스타일 09-6b 변경). FLOWER는 중립이라 분홍 바탕 + 중립 테두리(진영색 테두리 없음). POLLEN 노랑 / HIVE 틀 회색 / 인테이크 초록 / 비행 결과색 / 강조 주황은 유지. 로봇 몸체 윤곽선 2.25 px (1.5 px에서 1.5배).
-        - **캔버스 글자 (09-6b 확정):** 로봇 행동 배지의 글자 대체 문구(`SHOOT`, `LIFT ▲` 등, 이미지 자산 전 임시)는 영어로 고정 (언어 토글 대상 아님). 구조물 이름표 / `TIPPING` / 경기 종료 점수 알약은 그리지 않고, 캔버스 글자는 HIVE 셀 알약(`▲ N{n} P{p}/{임계}`) / 로봇 번호 / 행동 배지뿐이다. 캔버스에는 한국어 문자열을 그리지 않는다 (한국어 화면 글자는 문구 사전 → HTML).
-        - **React 역할:** 컨트롤 UI / 스크러버 / 스코어보드 / 설정 폼만. 엔진 / 실시간 루프 / 렌더러 / LUT Worker는 React 밖 순수 TS 앱 컨트롤러가 소유하고, React는 약 10 Hz 상태 알림을 구독한다 (08-7 하네스 컨트롤러 방식 확장).
-        - **앱 컨트롤러 구현 (09-6c, `src/app/appController.ts`):** `AppController({ ctx, setup, dpr?, env?, scheduler?, now?, onStatus?, statusIntervalMs? })`.
-            - 경기 설정 `MatchSetup { r1Config, r2Config, shotResolver, scenario, shooters? }`(진영 = `scenario.allianceColor`)을 주입받아 엔진을 만든다. `setSetup(setup)`은 경기 전(`SETUP`)에만 받아들여 새 0틱 엔진을 만들고(경기 중 false), 리셋은 현재 설정으로 0틱 새 엔진. 09-6d까지는 하네스 고정 설정, 09-8 이후 config 창의 적용된 설정이 들어온다.
-            - 흐름 / 다시 그리기 / 상태 알림(진행 중 최대 약 10 Hz, 단계 · 루프 상태 변화는 즉시)은 08-7 하네스와 동일: `SETUP → ROTATING_IN(회전 중 루프 대기) → MATCH → 리셋 → ROTATING_OUT → SETUP`, 시작 / 일시정지 / 재개 / 리셋 / 보기 전환 / 표시 옵션. 분기 / 재생 / 결과 등 3.8항 전체 흐름은 09-7에서 확장한다 (아래 "경기 흐름 구현 (09-7a)"). 입력 출처는 당분간 R1 / R2 모두 `LIVE` (기본 출처 규칙은 09-8).
-            - 상태 `AppStatus`: 단계, 진영, 경기 보기, 보기 각도, 루프 상태 / 일시정지 사유, 틱, 남은 시간, 확정 점수, 텔레옵 / 오토 TIP 횟수, RP, 게임패드 슬롯 상태, 명중 확률(표시 옵션 `hitProbability`가 켜져 있을 때만 `hitProbabilities` — 상태를 만들 때마다 판정 함수 4회, 꺼져 있으면 `null`이고 호출 없음). 좌측 득점 패널(09-6d)이 이 값만 읽는다.
-        - **개발 하네스 대체:** Step 9 GUI가 정식 빌드와 개발 서버 모두의 화면이 된다. 하네스(`src/dev/`)는 Step 9 마지막 하위 Step에서 삭제. **(09-6d)** 그 사이 하네스는 개발 서버 `?harness`로만 연다.
-        - **글꼴 (09-6d 확정):** `'Apple SD Gothic Neo', 'Pretendard Variable', Pretendard, system-ui, sans-serif` (`src/renderer/fonts.ts` `FONT_FAMILY` 한 곳에서 정의 — `main.tsx`가 HTML 루트에, `canvasFont(크기, 굵기)`가 캔버스 글자에 사용). macOS는 설치된 Apple SD 산돌고딕 Neo, 그 외는 Pretendard(OFL, npm `pretendard`, 사용 글자만 나눠 받는 dynamic subset 웹폰트). 굵기는 세미볼드 600 / 볼드 700 / 엑스트라볼드 800만 쓴다. 웹폰트가 늦게 도착하면 캔버스를 한 번 다시 그린다 (`document.fonts.ready` → `AppController.redraw()`).
-        - **파비콘 (09-7 전 확정):** `public/favicon.svg` = lucide Gamepad2 선(흰색)을 어두운 둥근 사각형(`#15171C`)에 넣고 두 버튼을 진영 빨강 `#DF001B` / 파랑 계열로 칠함. 밝은 / 어두운 탭 모두에서 16 px 식별 가능.
-        - **아이콘 (09-6d 임시 확정 → 09-7 전 확정: TIP 아이콘 포함 그대로 사용):** `lucide-react`(ISC) 선 아이콘, `currentColor`. TIP 옆 HIVE 아이콘만 자체 제작(`HiveIcon.tsx`, 같은 24 × 24 / 선 굵기 2 규격). 사용자가 바꾸고 싶은 아이콘은 같은 규격(24 × 24 viewBox, `currentColor`) SVG로 제공하면 교체한다. 역할 대응: `START` Play / `PAUSE` Pause / `RESUME` Gamepad2 / `BRANCH` GitBranch / 1초 이동 Rewind · FastForward / 1틱 이동 ChevronLeft · ChevronRight / 재생 CirclePlay / `VIEW` SwitchCamera / `NEW` RotateCcw / `RESULT` Trophy / 로봇 Bot / 시나리오 Flag(진영색 채움) / 게임패드 Gamepad2 / 펼치기 PanelRightOpen / 준비 CircleCheck / 경고 TriangleAlert.
-        - **화면 뼈대 구현 (09-6d, `src/components/MainScreen.tsx` / `LeftPanel.tsx` / `ConfigRail.tsx` / `ScrubberBar.tsx` / `MainScreen.css`, 순수 규칙 `src/ui/mainScreenModel.ts`):**
-            - 배치: CSS 그리드 `좌측 패널 | 필드 | config 띠` + 아래 줄 전체 스크러버. 치수(기준 1366 × 650, 260u / 72u / 56u, 간격 12u)는 `LAYOUT_U` / `layoutCssVars()`가 루트 CSS 변수로 넘기고, CSS가 `--u = max(1px, min(100vw / 기준 폭, 100vh / 기준 높이))`로 곱한다. 1366 × 650 기준 필드 약 558 px, 3840 × 2160 약 1900 px.
-            - 필드: `fieldCanvasSize(영역 폭, 높이, dpr)` → CSS 크기 = 짧은 변 내림, 버퍼 = CSS × dpr 반올림, 렌더 배율 = 버퍼 / 800. `ResizeObserver` + 창 `resize`(dpr만 바뀐 경우)마다 `AppController.setRenderScale(배율)`, 버퍼가 바뀌었으면 `redraw()`. 컨트롤러 생성 시 첫 배율을 넘긴다.
-            - 테마: 배경 `#15171C`, 상자 `#1D2027` + 테두리 `#2C313B`, 보조 글자 `#9CA3AF`, 강조 / `ENDGAME` 타이머 주황 `#F59E0B`, 준비 초록 `#22C55E`. 진영 점수 상자 = 진영 기본색 바탕 + 15% 어두운 테두리 + 흰 글자 (`ALLIANCE_COLORS`와 같은 값).
-            - 좌측 패널: 타이머(`formatMatchTime`, 경기 전은 항상 기본색 / 경기 시작 후 남은 60초 이하 주황), 진영 점수(`AppStatus.score`), `TIP` = HIVE 아이콘 + `{오토 + 텔레옵} / {목표}`(`tipDisplay`: 4 → 7, 7 이상이면 초록 체크), 로봇 이름(`robotLabel`: 팀 번호가 있으면 `#번호`, 없으면 `R1` / `R2` — 팀 번호 입력은 09-9) + 명중 확률(표시 옵션 켜짐일 때).
-            - 스크러버 줄 (09-6d는 기존 동작만): 주 버튼(`mainButton`: 경기 전 `START` / 회전 중 비활성 / 진행 `PAUSE` / 일시정지 `RESUME` / 경기 종료 비활성), `VIEW`(드라이버 ↔ 관중석, 언제나), `NEW`(경기 전 제외, 확인창 없이 리셋 — 확인창은 09-7). 1초 / 1틱 이동, 타임라인 끌기, 재생, 배속(1× 선택 표시), `RESULT`는 자리만 두고 비활성. 타임라인 막대는 현재 틱 위치 + 기록 구간 + 10초 눈금 13개(`ENDGAME` 시작 눈금만 주황). 버튼은 누른 뒤 포커스를 풀어 Space / Enter가 버튼을 다시 누르지 않게 한다 (단축키는 09-7).
-            - 접힌 config 띠 (표시만): R1 / R2 로봇 + 초록 체크, 시나리오 진영색 깃발 + 체크(09-6d 고정 설정은 간이 판정 함수라 LUT가 없고 항상 적용 상태), 게임패드 연결 수 + 비표준 매핑 경고(`gamepadSummary`, 마우스 올리면 슬롯별 패드 이름 / 배정 로봇), 펼치기 버튼 비활성(09-8). 준비 신호 / 진행률 링 / 빨간 느낌표는 09-8 ~ 09-10.
-            - 경기 설정은 config 창 전까지 `createDefaultSetup('RED')`, 언어는 SETTINGS 탭(09-8) 전까지 주소 `?lang=ko`.
-            - 브라우저 탭 제목 `FTC TacticSim`.
-    - **화면 구성:** 화면은 **메인 화면 하나**다. 경기 / 일시정지 / 복기가 모두 같은 화면이고, 설정은 우측 config 창, 경기 결과는 팝업이다. 별도 복기 창은 두지 않는다.
+##### 2단계 몬테카를로 (로봇별 · 기물 종류별 독립)
 
-        ```
-        ┌──────────────┬──────────────────────────────────────────┬──────┐
-        │  1:57 (타이머) │               [경고 토스트]                  │ R1 ◔ │
-        ├──────────────┤                                          │ R2 ✓ │
-        │  RED  20     │                                          │  ⚑ ✓ │
-        │  (진영 점수)    │           필드 뷰포트 (정사각형)              │  🎮 1 │
-        ├──────────────┤                                          │      │
-        │ HIVE TIP 1/4 │                                          │      │
-        ├──────────────┤                                          │      │
-        │ R1 #19049    │                                          │      │
-        │ R2 #24909    │                                          │      │
-        │ (명중 확률)     │                                          │  ≡   │
-        ├──────────────┴──────────────────────────────────────────┴──────┤
-        │ [주 버튼] [⏮][◀] ━━━━━━━●━━━━━━━ [▶][⏭] [▶ 재생] 0.25 0.5 1 2× [VIEW] [NEW] [RESULT] │
-        └────────────────────────────────────────────────────────────────┘
-          좌측 패널 ≈ 260u    필드 = 가용 높이 − 스크러버 줄 (≈ 590u)     접힌 config ≈ 72u (펼침 ≈ 480u, 필드 영역을 밀어냄)
-        ```
+1. **v0 탐색 (`searchLaunchSpeed`):** 스윗스팟의 닫힌 해 v0를 초기값으로, 닫힌 해 ±20%(1% 간격) → 최고점 ±1%(0.1% 간격)를 1차원 탐색하여 몬테카를로 명중률(후보당 20000샘플)이 가장 높은 v0를 고른다. 모든 후보가 같은 시드(공통 난수)를 써서 비교 잡음을 줄이고, 동률이면 닫힌 해(굵은 탐색 최고점)에 가까운 후보를 고른다. POLLEN / NECTAR를 따로 탐색한다 (팀이 기물 종류별로 슈터를 튜닝했다고 가정).
+2. **LUT 생성 (`generateReferenceLUT`):** 고른 v0로 144 × 144 격자(1 in) 중심 $(g_x + 0.5, g_y + 0.5)$마다, 로봇이 조준점을 정면 조준했다고 가정한 명중률 $P_{\text{spatial}}$(격자당 2000샘플)을 계산한다. 조준점을 바라보는 로봇 몸체가 HIVE AABB와 겹치는 격자는 0.
+    - **격자별 독립 난수 구간:** 격자 i는 기준 스트림의 $[i \cdot N \cdot 6,\ (i+1) \cdot N \cdot 6)$ 구간을 쓴다 (N = 격자당 샘플, 샘플 1개 = 난수 6개 `RNG_DRAWS_PER_SAMPLE`). Mulberry32 상태는 고정 증분 수열이라 `createRng(seed, skip)`로 O(1) 점프한다. 구간이 겹치지 않으므로 격자 계산 순서 / 건너뛰기 / Web Worker 분할과 무관하게 같은 값이 나온다 (144² × N × 6 < 2³² → N ≤ 약 34,000).
+    - **도달 불가 격자 생략 (`canPossiblyHit`, 기본 켬):** 명중하려면 통과점이 오각형 위에 있어야 하므로, 발사구 → 오각형 지면 투영까지의 수평 거리 범위에서 공 높이가 [림 z, 꼭짓점 z]에 들어올 수 있어야 한다. 속도 / 발사각 편차 ±6σ 상자에서 높이의 최댓값 · 최솟값을 닫힌 형태로 구하고(속도에 단조, tanθ에 오목), 거리를 0.05 in 간격 + 립시츠 여유로 훑어 불가능이 확실한 격자만 0으로 둔다. ±6σ 밖 확률은 샘플당 약 6e-9라 생략해도 결과가 같다 (테스트로 동일성 검증).
+    - 생략 비율은 약 11~16%로 크지 않다. 속도 편차 6σ(±12%)의 공은 포물선 하강 구간으로 필드 대부분의 거리에 닿을 수 있어 확실히 0인 격자를 증명할 수 있는 범위가 좁기 때문이다 (방위 편차 부채꼴로 투영을 잘라도 약 1%p 추가라 쓰지 않음). 실제로 0이 아닌 격자는 3~20% 수준.
 
-        - 1366 폭 기준 config를 펼쳐도 260 + 590 + 480 ≈ 1330u로 필드가 줄지 않는다. 폭이 부족한 화면에서는 필드가 줄어든다.
-        - **좌측 패널 (득점 현황, HTML):**
-            - 타이머: 남은 시간 `M:SS`. `ENDGAME`(남은 60초 이하)부터 글자색 변경.
-            - 진영 점수: 진영 공식 색 바탕 + 진영 이름 + 현재 `totalScore`. 경기 중에는 엔진 규칙대로 확정 점수(텔레옵 `TIP` × 20)만 올라가고 `FLOWER` / `GARDEN` / `PARK`는 종료 시 합산 (3.2항 실시간 확정 원칙 그대로).
-            - `TIP` 횟수: HIVE 아이콘 + `{오토 팁 + 텔레옵 팁} / {다음 RP 목표}`. 목표는 4(`POLLINATOR 1`) → 달성 후 7(`POLLINATOR 2`) → 7 달성 후 `n / 7` + 달성 표시. 점수에는 오토 팁을 넣지 않는다 (2.6.5항 그대로).
-            - 로봇: R1 / R2 팀 번호(+ 이름). 표시 옵션 `hitProbability`가 켜져 있으면 그 아래에 로봇별 `POLLEN` / `NECTAR` 명중 확률 (기존 캔버스 좌우 패널 내용을 이동, 계산 규칙은 3.7항 그대로).
-            - 주차(P) 표시는 두지 않는다 (경기 중 확정 불가).
-        - **필드 영역 (캔버스):** 필드 뷰포트만 그린다 (3.7항 캔버스 레이아웃).
-            - **경고 토스트 (중앙 상단, 빨간색, 짧게 표시 후 사라짐):** 로봇이 리프트 상태(`FLOWER_SETUP` / `FLOWER_READY` / `FLOWER_DROPPING` / `FLOWER_LOWERING`)인데 그 로봇의 주행 입력(스틱 / 키)이 0이 아니면 경고 표시 (영어 "`LOWER LIFT (A) TO MOVE`", 한국어 "A로 리프트를 내려야 이동 가능", 문구 사전 `toast.lowerLift`). 같은 로봇은 약 2초에 한 번만. 리프트 상태 자체(올리는 중 / 올림 대기 / 투입 중 / 내리는 중)는 로봇 행동 상태 배지로 표시한다 (3.7항). 이 둘로 2.6.3항의 "리프트를 내려야 이동 가능" 안내 요구를 충족한다.
-            - **자동 일시정지 배너:** 자동 일시정지 사유(창 포커스 소실 / 탭 숨김 / 게임패드 연결 해제)는 일시정지 동안 유지되는 배너로 표시.
-            - **편집 모드 오버레이:** 경기 전에만 (아래 "필드 편집 모드").
-        - **스크러버 줄 (필드 아래):**
+- **샘플 편차 (`estimateHitRate`):** 속도 $v_0(1 + N(0, \text{v0NoisePercent}))$, 방위 $+N(0, \text{headingNoiseRad})$, 발사각 $+N(0, \text{pitchNoiseRad})$ (기본 0.02 / 0.02 rad / 0.006 rad). 발사구 위치는 명목 조준 방향 기준이고 편차는 공의 방향에만 적용한다.
+- **결정론:** Mulberry32 시드 PRNG(`createRng`, 엔진과 같은 알고리즘의 독립 스트림). 기준 시드(`RobotLUTOptions.seed`, 기본 `DEFAULT_BALLISTICS_SEED`)에서 기물 종류 × 용도(탐색 / LUT)별 시드를 파생하고(`robotLUTSeeds`), LUT는 그 안에서 격자별 구간을 쓰므로 같은 설정 + 같은 시드 = 같은 LUT.
+- 준난수(Sobol / Halton) 샘플링은 쓰지 않는다 (얻는 정확도에 비해 변경 범위가 큼).
+- **통합 함수:** `generateRobotLUTs(config, robotSize, options)` → `{luts, v0, sweetSpotHitRate, issues}` (로봇 1대분 8장). 검증에 실패하면 LUT 전부 0, v0 null (판정 함수가 항상 0).
 
-            | 요소 | 동작 |
-            |---|---|
-            | 주 버튼 | 상태에 따라 하나: `START`(경기 전) / `PAUSE`(진행 중) / **`RESUME`**(게임패드 아이콘, 일시정지 + 보는 틱 = 마지막 기록 틱 + 경기 미종료) / **`BRANCH`**(갈라지는 화살표 아이콘, 일시정지 + 보는 틱 < 마지막 기록 틱) |
-            | 재생 `▶` / `⏸` | 기록된 프레임을 배속으로 보기만 함 (기록 불변). 마지막 기록 틱에서 자동 정지 |
-            | 한 틱 `◀` / `▶`, 1초(50틱) `⏮` / `⏭` | 빨리감기 모양 버튼, 일시정지 / 복기 중에만 |
-            | 타임라인 막대 | 0 ~ 6000틱 눈금, 기록된 구간 안에서만 이동, 끌어서 이동 |
-            | 배속 | 0.25 / 0.5 / 1 / 2× (재생에만 적용, 조종은 항상 1×) |
-            | `VIEW` | 드라이버 / 관중석 시점 토글 (언제나 가능, 3.7항 전환 애니메이션) |
-            | `NEW` | 설정 유지 새 경기 (확인창 → 관중석으로 회전 → `SETUP`, 시드 유지) |
-            | `RESULT` | 경기 종료 후 결과 팝업 다시 열기 |
-            | 가지 (10-1 추가) | 현재 가지 이름 + 가지 목록(전환 / 이름 바꾸기 / 삭제), 타임라인 분기 표식 (3.9항 분기 트리) |
+##### 몬테카를로 명중 판정 (샘플 1개, LUT 생성 전용)
 
-        - **분기 확인창:** "이 시점(`M:SS`) 이후 기록 {N.N}초가 삭제됩니다. 여기서부터 다시 조종할까요?" → 확인 시 엔진 `scrubTo(보는 틱)` 후 루프 재개. 기록 폐기는 3.6항 규칙 그대로 (`LIVE` 로봇 로그도 그 틱 이후 폐기, `REPLAY` 로그 유지). 분기 트리 보존은 Step 10.
-            - **(10-1 변경)** Step 10부터 분기는 새 가지를 만들고 기존 기록을 보존한다. 문구 "{M:SS}에서 새 가지를 만들어 다시 조종할까요? 지금 가지({이름})의 기록은 그대로 남습니다.", 가지 8개가 가득 차면 안내창 (3.9항 분기 트리).
-    - **우측 config 창:**
-        - **접힌 상태 (세로 아이콘 띠):**
+아래를 모두 만족하면 명중이다.
 
-            | 아이콘 | 상태 표시 |
-            |---|---|
-            | R1 / R2 로봇 | 초록 체크 = 준비 완료(LUT `READY` + 적용 안 된 수정 없음) / 진행률 링 = LUT `QUEUED` · `SEARCHING` · `GENERATING` (마우스 올리면 "63% · 약 7초 남음") / 빨간 느낌표 = 설정 미완료 · 검증 실패 · 적용 안 된 수정 · `ERROR` |
-            | 시나리오 깃발 | 진영색 깃발 + 체크 = 유효 · 적용됨 / 빨간 느낌표 = 무효 또는 적용 안 된 수정 |
-            | 게임패드 | 연결된 패드 수, 비표준 매핑 경고. 마우스 올리면 슬롯별 패드 이름 / 배정 로봇 |
-            | 펼치기 | 아래 "열 수 있는 시점"에서만 활성 |
+- **① 앞면 통과:** 공 중심 궤적이 상향 셀 투입구 평면을 **앞면에서** 통과한다 (통과 순간 속도 · 바깥 법선 < 0).
+- **② 줄인 오각형:** 통과점이 오각형을 **기물 반지름만큼 안쪽으로 줄인 영역** 안에 있다 (공 전체가 들어감). 반지름이 기물마다 달라 POLLEN / NECTAR LUT가 따로 필요하다.
+- **③ 림 아래 벽 여유:** 통과 전 공 중심이 림 아래 벽(y–z 단면 R = [림 y, HIVE 앞면 y] × (−∞, 림 z], 셀 폭 방향으로 이어짐)과 반지름 이상 떨어져 있다. R을 r만큼 넓힌 영역 = 옆 띠(y ∈ [R − r], z < 림 z) ∪ 윗면 띠(z < 림 z + r) ∪ 윗모서리 원 2개. 공 높이가 시간에 대해 오목하므로 띠는 구간 끝점 검사로 정확하고, 모서리는 경로 곡률 반경(수백 in) ≫ r이라 거리 함수가 단봉이므로 황금분할 탐색으로 정확하다 (촘촘한 샘플링 기준 판정과 0.00%p 일치). 공이 모서리를 비스듬히 지날 때의 수직 거리(높이 여유 × cos(진입각))까지 반영하므로 상승 진입을 과대 · 과소 인정하지 않는다.
+- **④ HIVE 직육면체 진입 면:** 통과 전 공이 직육면체(xy ± r, 높이 `HIVE_HEIGHT` + r)에 처음 들어오는 곳이 (a) 셀 앞면(AUDIENCE y = maxY + r / OPPOSITE y = minY − r, 안쪽으로 이동, 셀 폭 x ∈ [셀 좌측 + r, 셀 우측 − r]) 또는 (b) 셀 위 윗면(z = `HIVE_HEIGHT` + r, 셀 폭 안, 오각형 꼭짓점보다 앞쪽)이어야 한다.
+    - HIVE 옆면 / 뒷면 / 셀 옆 프레임 / 셀 폭 밖 앞면으로 들어오면 차단한다 (HIVE 옆에서 옆면을 뚫고 오는 공을 명중으로 세지 않음).
+    - 진입점과 통과점이 모두 셀 폭 안이면 그 사이 직선 경로도 셀 폭 안이므로 진입점 검사로 충분하다. 발사구가 이미 박스 안이면 앞면 앞 공간(림 바깥, 셀 폭 안)일 때만 허용한다.
+- **구현 (`isShotInHiveCell`):** 투입구 평면까지의 부호 거리 $f(t)$는 오목한 2차식이므로 앞면 → 뒷면 통과는 항상 큰 근이다 (상승 진입도 앞면 통과면 인정). 줄인 오각형은 볼록 다각형의 각 변(밑변, 좌우 세로 변, 삼각형 빗변 2개)을 r만큼 안으로 옮긴 반평면의 교집합.
+- **근거리 상승 사격:** 발사구가 낮고 조준점까지 가까우면 공이 아직 올라가는 중에 입구에 닿는다 (도달 기울기 $2\Delta z / D - \tan\theta > 0$). 공이 벽 윗모서리를 비스듬히 지나므로, 입구 아래쪽 / 가운데를 노린 공은 모서리에 걸리고 위쪽만 들어가 명중 띠가 좁다 (예: 발사구 12 in, 발사각 55°, 거리 약 35 in에서는 조준점 명목 궤적도 모서리를 0.97 in 거리로 스쳐 빗맞음). 멀리서 내려오며 들어가는 사격은 띠가 넓다.
+- **고각 사격의 두 띠:** 발사각이 크면 로봇이 멀어질수록 입구 통과 높이가 림 → 입구 위쪽 → 림으로 올라갔다 내려와, 조준점 가까운 쪽에 상승 진입 띠, 먼 쪽에 하강 진입 띠(거리에 덜 민감해 더 넓음)가 생긴다. 두 띠 사이는 포물선 꼭대기가 입구 삼각형(좁아지는 부분)에 걸려 약간 낮다.
 
-        - 경기 전 `START`를 눌렀는데 준비가 안 됐으면 config 창이 펼쳐지며 첫 문제 탭(R1 → R2 → 시나리오 순)으로 이동하고, 문제 입력칸으로 스크롤 + 강조한다. 설정은 모두 끝났고 LUT 생성만 남았으면 "R2 LUT 생성 중 63%" 안내만 한다.
-        - **펼친 상태 = 탭 4개:** `R1` / `R2`(로봇 제원) / `SCENARIO` / `SETTINGS`(환경 및 조작).
-        - **초안 / 적용:** 각 탭은 편집 중 값(초안)과 적용된 값을 따로 가진다. 탭 하단 `APPLY`는 초안이 유효하고 적용된 값과 다를 때만 활성. 검증 실패 입력칸은 빨간 테두리 + 빨간 설명 글자(구글 폼 방식). 적용 안 된 수정이 있으면 해당 아이콘이 빨간 느낌표가 되고 `START`를 막는다 (옛 값으로 조용히 시작하지 않도록).
-        - **되돌리기:** 탭별 `RESET TAB`(해당 탭 초안을 공식 기본값 / 기본 프리셋으로), SETTINGS 탭의 `RESET ALL`(모든 설정을 기본값으로). 되돌리기는 초안에만 적용되고 `APPLY`로 확정.
-        - **열 수 있는 시점 / 편집 가능 범위:**
+##### LUT 구성과 4셀 대칭
 
-            | 앱 상태 | config 펼치기 | R1 / R2 / SCENARIO 탭 | SETTINGS 탭 |
-            |---|---|---|---|
-            | `SETUP` (경기 전) | 가능 | 편집 가능 | 전부 편집 가능 |
-            | 회전 애니메이션 / 진행 중 / 재생 중 | **불가** (펼쳐져 있었으면 자동으로 접힘) | — | — |
-            | 일시정지 (경기 중 또는 복기) | 가능 | **읽기 전용** (경기가 존재하는 동안 잠금) | 표시 옵션 / 입력 출처 / 조작 모드 / 키보드 토글 / 언어 / 단위 / 기본 보기 편집 가능, `RESET ALL` 불가 |
+- 로봇 2대 × 기물 2종 × 4셀 = **16장**, 각 144 × 144 `Float32Array` (1 in 격자, 인덱스 `gy * 144 + gx`). 타입: `HeatmapLUT`, `HeatmapLUTSet`(4셀), `RobotHeatmapLUTs`(기물 종류별).
+- **격자 / 샘플 수 근거:** 명중 띠 안 평균 오차는 2 in 격자 + 최근접 조회 2.9~9.4%p(최대 36~44%p), 1 in 격자 + 쌍선형 보간 0.3~1.1%p(최대 3.8~4.9%p)였다. 1 in + 보간 + 격자당 2000샘플(표본 오차 약 1%p)에서 격자 오차와 표본 오차가 비슷해진다. v0 탐색 20000샘플은 찾은 v0의 실제 명중률 손실을 0.6%p → 0.07%p로 줄이며 메모리 영향이 없다 (샘플을 저장하지 않음).
+- 몬테카를로는 기준 셀 `RED_AUDIENCE`에서만 돌리고(로봇 × 기물 = 4회), 나머지 3셀은 격자 인덱스를 대칭 복사한다 (`mirrorLUTSet`, 셀 기하가 정확히 대칭이므로 오차 없음):
+    - `RED_OPPOSITE`: y = 72 기준 대칭 (x, 144 − y) → $g_y' = 143 - g_y$
+    - `BLUE_AUDIENCE`: x = 72 기준 대칭 (144 − x, y) → $g_x' = 143 - g_x$
+    - `BLUE_OPPOSITE`: (72, 72) 점대칭 (144 − x, 144 − y) → 두 인덱스 모두 반전
+- **연산량 / 메모리:** 격자당 2000샘플 기준 최대 4 × 20,736 × 2000 ≈ 1.66억 샘플 (도달 불가 격자 생략 전). 단일 스레드(Node V8, 스윗스팟 (60.5, 134.5), 발사구 14 in)로 로봇 1대(8장)에 발사각 55° 약 33초, 70° 약 61초가 걸린다 (고각일수록 입구 근처까지 가는 샘플이 많아 ③ 판정 비용 증가). 메모리는 16 × 20,736 × 4 B ≈ 1.3 MB. 저장 레시피(3.9항)는 LUT 대신 탄도 설정 + 시드를 저장해 다시 만든다.
 
-        - 표시 옵션은 경기 전 또는 일시정지 중에만 바꿀 수 있다 (보기 방향 `VIEW`는 예외로 언제나 가능). `RESUME` / `BRANCH` / 재생을 누르면 config 창은 자동으로 접힌다.
-        - **09-8 확정 (사용자 결정):** ① 09-8a(창 틀 / 탭 / 초안 · 적용 / 아이콘 띠 / `START` 막기) + 09-8b(SETTINGS 내용 / 입력 출처 · 조작 모드 연결 / 자동 보관)로 분할 ② SETTINGS 탭은 바꾸는 즉시 적용(`APPLY` 없음), `APPLY`는 R1 / R2 / SCENARIO에만. `RESET ALL`은 확인창 → SETTINGS 즉시 기본값 + R1 / R2 / SCENARIO는 초안만 기본값(각 탭 `APPLY` 필요) ③ 경기 전 입력 출처는 `AUTO`(기본 규칙, 예상 결과 표시) / `LIVE` / `NONE`, `REPLAY`는 일시정지 중 그 로봇 입력 기록이 있을 때만 ④ `VIEW`는 현재 경기에서만 임시, 새 경기(`START` / `NEW`)는 SETTINGS 기본 보기 방향(기본값 `DRIVER`, 3.7항)으로 시작.
-        - **09-8 기본안 (사용자 승인):** 펼친 창 약 480u(필드를 밀어냄, 0.2초 전환), 위쪽 탭 4개 + 닫기, Esc로 닫기. 펼칠 수 없는 상태가 되면 자동으로 접힘. 경기가 있는 동안 R1 / R2 / SCENARIO는 입력칸을 흐리게 하고 "경기 중 잠금" 안내. 탭을 옮기거나 창을 닫아도 초안 유지(아이콘 빨간 느낌표 + `START` 막기). 막힌 `START` → 첫 문제 탭으로 펼침. `RESET ALL`은 확인창, 경기 전만. 게임패드 구역 읽기 전용. 입력 출처 / 조작 모드는 다음 `START` / `RESUME` / `BRANCH`부터(조작 모드 기본 `FIELD`). 언어는 SETTINGS 저장값(주소 `?lang` 폐기). 자동 보관 키 `ftc-tactic-sim/settings` + 버전, 없음 / 버전 다름 / 손상 → 기본값. 키보드 토글을 꺼도 단축키는 동작.
-        - **구현 (09-8a):**
-            - 순수 규칙 `src/ui/configDraft.ts`: `ConfigDrafts { applied, draft }`(탭 `robot1` / `robot2` / `scenario`의 `RobotConfig` / `ScenarioConfig`, 편집 / 적용 시 깊은 복사), `editDraft` / `applyTab`(`canApply` = 적용 값과 다름 + 초안 검증 통과일 때만) / `resetTabDraft`(초안만 기본값) / `canResetTab`(초안 ≠ 기본값), `isDirty`(깊은 비교, undefined 속성 = 없음), `tabIssues`(로봇 탭 = 제원 폼 전까지 없음, 시나리오 탭 = `validateScenario` + `validateRobotPlacement`를 로봇 초안과 함께), `tabStatus` = `INVALID` > `DIRTY` > `OK`, `firstBlockingTab`(R1 → R2 → SCENARIO), `configCanOpen`(경기 전 또는 경기 중 진행 · 재생 · 종료 강조 · 결과 팝업이 아닐 때), `draftTabsLocked`(경기 전이 아니면 잠금).
-            - 기본값 `DEFAULT_DRAFT_VALUES`(고정 제원 R1 / R2 + RED 기본 시나리오, `src/app/defaultSetup.ts`), 적용 값 → `buildMatchSetup(r1, r2, scenario)`(간이 판정 함수) → `AppController.setSetup`(경기 전에만).
-            - 화면: 접힌 띠(`ConfigRail`)의 로봇 / 시나리오 아이콘 = 탭 상태(초록 체크 / 빨간 느낌표 + 마우스 올리면 사유), 아이콘을 누르면 그 탭으로 펼침(게임패드 아이콘 → SETTINGS), 펼치기 버튼. 펼친 창(`ConfigPanel`): 탭 4개(문제 탭에 빨간 점) + 닫기, `START` 막힘 안내(빨간 띠), 잠금 안내, 탭 내용 자리(09-8b / 09-9 / 09-11), 하단 "적용 안 된 수정" + `RESET TAB` / `APPLY`(SETTINGS 탭은 하단 없음). 루트 CSS 변수 `--rail` = 72 ↔ 480(`layoutCssVars(configOpen)`), 그리드 열 전환 0.2초. 상태 알림에서 `configCanOpen`이 거짓이면 창을 접는다(Space 재개 포함).
-            - 1366 × 650 / 1600 × 650에서는 펼쳐도 필드 558 px 그대로(높이 제한), 3840 × 2160처럼 폭이 부족한 화면은 1901 → 1625 px로 줄어든다 (3.8항 화면 구성 그대로).
-    - **앱 상태 흐름:**
+##### LUT 생성 실행과 사용자 경험
 
-        ```
-        SETUP ──START(모두 준비)──▶ ROTATING_IN ──(700 ms)──▶ RUNNING ◀──────RESUME──────┐
-          ▲                                                   │                        │
-          │                                   PAUSE / Space / 자동 일시정지                │
-          │                                                   ▼                        │
-          │                                                PAUSED ──(보는 틱 = 마지막 기록 틱)
-          │                                                 │  ▲
-          │                                          재생 ▶  │  │ 재생 끝 / ⏸
-          │                                                 ▼  │
-          │                                               PLAYBACK
-          │
-          │    RUNNING ──(6000틱)──▶ ENDED_HIGHLIGHT(5초) ──▶ RESULT(팝업) ──REVIEW──▶ REVIEW
-          │                          (클릭 / Space로 건너뛰기)              (= 경기 종료 후 PAUSED, 재생 가능, RESUME 없음)
-          │
-          └── ROTATING_OUT ◀── NEW(확인창) ── 경기 시작 이후 모든 상태
-              (관중석 회전, 같은 설정 · 같은 시드로 0틱 새 엔진)
+로봇 1대 단일 스레드 약 30~60초를 "멈춰서 기다리는 시간"이 아니라 "다른 입력을 하는 동안 진행되는 시간"으로 만든다. 아래 1~4를 모두 적용한다 (저정밀 미리보기는 쓰지 않음, 5.3항).
 
-        PAUSED / REVIEW ──BRANCH(보는 틱 < 마지막 기록 틱, 확인창)──▶ RUNNING  (새 가지, 기존 기록 보존 — 3.9항)
-        ```
+1. **Web Worker 풀 병렬 생성 (`src/workers/`):**
+    - **모듈:** `lutWorker.ts`(작업 처리기만 연결하는 Worker 진입점, `ballistics.ts`의 순수 함수만 import, DOM / React 비의존), `createLUTWorker.ts`(`new Worker(new URL('./lutWorker.ts', import.meta.url), { type: 'module' })`), `lutProtocol.ts`(메시지 타입 + 순수 작업 처리기 `handleLUTJob(job, post)`), `lutManager.ts`(`LUTManager`, Worker 생성 함수를 주입받음).
+    - **풀 크기 (`defaultLUTPoolSize`):** `max(1, min(navigator.hardwareConcurrency − 1, 8))` (UI 스레드용 코어 1개를 남김, 코어 수를 모르면 4코어로 가정). 풀은 앱 수명 동안 재사용한다.
+    - **작업 단위:** (로봇, 기물 종류, 단계). 단계 ① v0 탐색 = 작업 1개 (나누지 않음, 약 1~2초) → 단계 ② 기준 셀 LUT = 격자 행 묶음 작업 (기본 4행 = 576격자). 로봇 2대 × 기물 2종의 작업을 한 대기열에 넣고 쉬는 Worker가 다음 작업을 가져가는 동적 분배다 (명중 띠가 지나는 행은 ③ 판정 비용이 커서 정적 분할보다 균형이 좋음). 같은 (로봇, 기물)의 ② 작업은 ①이 끝나 v0가 정해져야 대기열에 들어간다.
+    - **대기열 순서:** v0 탐색 작업이 행 작업보다 우선한다 (두 번째 로봇의 v0가 첫 번째 로봇 행 작업 뒤로 밀리지 않음). 행 작업은 요청 순서(FIFO). 탐색 / LUT 작업에 보내는 설정은 스윗스팟을 스냅한 설정이다 (행 계산은 스윗스팟과 무관).
+    - **행 단위 함수:** `generateReferenceLUTRows(config, robotSize, pieceType, v0, samples, seed, gyStart, gyEnd, options) → Float32Array((gyEnd − gyStart) × 144)`. 격자 인덱스 / 난수 구간은 전체 LUT 기준 그대로이며, 범위는 정수로 내림한 뒤 [0, 144]로 제한하고 `gyEnd < gyStart`면 빈 배열이다. `generateReferenceLUT`는 `generateReferenceLUTRows(…, 0, 144)`와 같다. 시드 파생 `robotLUTSeeds(seed = DEFAULT_BALLISTICS_SEED) → Record<PieceType, { search, lut }>`를 공개해 Worker 작업 계획이 `generateRobotLUTs`와 같은 시드를 쓴다.
+    - **결정론:** 격자별 독립 난수 구간이므로 어떤 분할 / 순서 / Worker 수로 계산해도 결과가 `generateRobotLUTs` 단일 스레드 결과와 비트 단위로 같다 (임의 행 분할 · 작업 계획 동일성 테스트).
+    - **메시지 규약:** 메인 → Worker `{ kind: 'search' | 'rows', jobId, generation, robotId, pieceType, config, robotSize, samples, seed, gyStart?, gyEnd?, v0? }`, Worker → 메인 `{ kind: 'progress', jobId, cellsDone }`(행 1개마다) / `{ kind: 'result', jobId, generation, v0?, hitRate?, rows? }` / `{ kind: 'error', jobId, message }`. 결과 `Float32Array`는 transferable로 넘겨 복사 비용이 없다. 닫힌 해가 없으면 `v0` 없는 결과, 예외는 `error` 메시지.
+    - **조립:** 메인 스레드가 (로봇, 기물)별 기준 LUT `Float32Array(144 × 144)`에 행 결과를 복사하고, 모든 행이 모이면 `mirrorLUTSet`으로 4셀을 만들어 `RobotHeatmapLUTs`를 완성한다.
+    - **상태 스냅샷 `getStatus(robotId)`:** 상태 / 세대 / 검증 사유 / 오류 / 기물별 탐색 완료 · v0 · 스윗스팟 명중률 / 완료 격자(실행 중 작업의 행 단위 진행 포함) / 조립 중 기준 LUT + 행별 완료 표시(점진 히트맵용) / 결과. `onChange(robotId)`는 변화마다 호출되고 화면이 `requestAnimationFrame`으로 모은다. `matchLUTs()`는 두 로봇이 모두 `READY`일 때만 경기용 LUT를 준다.
+    - **같은 요청 무시:** LUT를 결정하는 입력의 정규화 키 `lutRequestKey`(모델 버전 + 스냅한 스윗스팟 · 편차 기본값을 채운 탄도 설정 + 로봇 길이 / 폭 + 시드 + 샘플 수, 속성 순서를 고정한 JSON)가 진행 중이거나 `READY`인 요청과 같으면 아무것도 하지 않는다 (속도 등 무관한 제원만 바꿔 다시 `APPLY`해도 재생성 없음). 캐시 키는 이 문자열의 SHA-256이다.
+    - **로봇 간 공유:** 다른 로봇이 같은 요청 키로 생성 중이거나 `READY`면 새로 만들지 않고 따라간다 (진행 / 상태는 앞선 로봇 것을 보여 주고, 앞선 로봇이 `READY`가 되면 결과를 함께 씀). 앞선 로봇이 취소 / 오류 / 검증 실패 / 설정 변경으로 멈추면 따라가던 로봇이 그때부터 스스로 생성하고(캐시 조회부터), 결과를 받은 뒤에는 서로 독립이다. 기본 프리셋처럼 R1 = R2면 첫 생성이 한 번으로 줄어든다.
+    - **오류:** Worker `error` 메시지 / `onerror` / 행 결과 길이 불일치 → 그 로봇만 `ERROR`(사유 포함) + 대기 작업 제거, 다른 로봇은 계속한다. 같은 설정을 다시 요청하면 새로 생성한다.
+    - **실측:** 헤드리스 Chromium, 4코어 컨테이너, Worker 3개에서 로봇 2대 × 기물 2종 기본 정밀도(격자당 2000 / 후보당 20000샘플) 전체 약 9.3초. 8코어 기준 로봇 1대 약 8~10초, 4코어 약 15~20초로 예상한다 (모바일은 더 느림). 개발 서버와 정식 빌드 모두에서 실제 Worker 결과가 `generateRobotLUTs`와 비트 단위로 같음을 확인했다.
+2. **진행 상황 표시:**
+    - **v0 먼저 표시:** 단계 ①이 끝나면 바로 기물 종류별 v0와 스윗스팟 명중률(`sweetSpotHitRate`)을 보여 준다. 0이면 경고("이 스윗스팟에서는 명중 불가 — 설정 확인")하되 생성은 계속한다.
+    - **진행 막대:** 로봇별 `완료 격자 / 전체 격자` (기물 2종 합산, 전체 = 2 × 20,736). HIVE 겹침 / 도달 불가로 생략되는 격자는 행 처리 때 바로 완료로 센다. 단계 ① 동안은 "v0 탐색 중"으로 표시.
+    - **남은 시간:** `경과 시간 × (남은 격자 / 완료 격자)`를 지수 평활해 표시하고, 5% 완료 전에는 표시하지 않는다 (초반 추정 불안정).
+    - **점진 히트맵:** 메인 필드의 히트맵 편집 모드(3.8항)에 진영 기준 셀 LUT(RED = `RED_AUDIENCE`, BLUE = 점대칭 `BLUE_OPPOSITE`)를 행 묶음이 도착할 때마다 그린다 (미계산 행은 회색 빗금, 기물 종류 전환 가능). 사용자가 명중 띠가 드러나는 과정을 보며 설정이 맞는지 판단할 수 있다. 필드 윤곽 / HIVE / 조준점 / 스윗스팟을 함께 표시하고, 보기는 관중석 시점으로 고정한다 (3.7항).
+    - **갱신 빈도:** 진행 / 히트맵 갱신은 `requestAnimationFrame`으로 모아 최대 약 10 Hz (메시지마다 React 상태를 바꾸지 않음).
+3. **막지 않는 작업 흐름:**
+    - **로봇별 상태 머신:** `IDLE`(설정 없음 / 검증 실패) → `QUEUED` → `SEARCHING`(단계 ①) → `GENERATING`(단계 ②, 진행률) → `READY` | `ERROR`. 설정이 바뀌면 `CANCELLED`를 거쳐 다시 `QUEUED`.
+    - **시작 시점:** 로봇 탭 `APPLY`(검증 `validateBallisticsConfig` 통과 시에만 활성) 때. 입력 중 자동 재생성은 하지 않는다. 단, 앱을 시작할 때 기본 프리셋 / 자동 보관 설정(3.8항)의 LUT는 자동으로 만든다 (캐시에 있으면 바로 `READY`).
+    - **무효화 조건:** 그 로봇의 `BallisticsConfig`, 로봇 `length` / `width`(HIVE 겹침 격자 / 검증에 영향), 기준 시드, 샘플 수가 바뀔 때만. 그 밖의 `RobotConfig` 변경(속도, 인테이크 등)과 시나리오 변경은 LUT를 무효화하지 않는다.
+    - **취소:** 설정 변경으로 다시 요청하거나 `cancel(robotId)`를 부르면 로봇별 세대 번호(`generation`)를 올리고 대기열의 이전 세대 작업을 지우며, 실행 중인 작업의 결과 / 진행 메시지는 세대가 다르면 무시한다. `cancel`은 진행 중일 때만 `CANCELLED`로 멈추고 `READY`는 유지한다. 행 묶음이 작아(수백 ms) Worker를 강제 종료하지 않는다 (종료하면 풀 재생성 비용이 생김).
+    - **막는 동작:** 경기 시작(과 LUT가 필요한 경기 불러오기)만 두 로봇이 모두 `READY`일 때 가능하고, 막힌 이유를 보여 준다 ("로봇 2 확률표 생성 중 63%"). 로봇 / 시나리오 / 스윗스팟 편집, 필드 보기 등 나머지는 모두 계속할 수 있다.
+    - **사용 흐름 예:** 로봇 1 적용 → 생성 시작 → 그동안 로봇 2 입력 / 적용 → 시나리오 입력 → 대부분 입력이 끝날 즈음 생성 완료.
+4. **IndexedDB 캐시 (`src/workers/lutCache.ts`):**
+    - **캐시 키:** 정규화 JSON의 SHA-256 해시(`crypto.subtle.digest`, 16진 64자) — `{ BALLISTICS_MODEL_VERSION, BallisticsConfig(스윗스팟은 스냅한 좌표, 편차 미지정 값은 기본값으로 채움), robot length / width, seed, samples, searchSamples }`. `skipUnreachable`은 결과가 같으므로 키에서 뺀다.
+    - **`BALLISTICS_MODEL_VERSION`:** `ballistics.ts`의 정수 상수(현재 1). 명중 판정 / LUT 생성 규칙 / 투입구 기하가 바뀌는 커밋마다 올려서 이전 캐시를 자동으로 무효화한다.
+    - **저장 형식:** DB `ftc-tactic-sim`, 저장소 `lutCache`(keyPath `key`), 레코드 `{ key, modelVersion, createdAt, lastUsedAt, v0: {POLLEN, NECTAR}, sweetSpotHitRate: {POLLEN, NECTAR}, reference: {POLLEN: ArrayBuffer, NECTAR: ArrayBuffer} }`. 기준 셀 LUT만 저장하고(로봇당 2 × 82,944 B ≈ 166 KB), 불러올 때 `mirrorLUTSet`으로 4셀을 복원한다.
+    - **정리:** 다른 모델 버전 레코드는 모두 지우고, 현재 버전은 `lastUsedAt` 기준 최근 20개(약 3.3 MB)만 남긴다 (동률은 키 순). 저장할 때 정리한다.
+    - **조회 흐름:** 요청 → `QUEUED`에서 캐시 조회 → 적중하면 Worker 작업 없이 기준 LUT 복원 + 4셀 대칭 복사 → `READY`(`fromCache = true`). 미스 / 조회 실패(비동기 · 동기 예외)면 v0 탐색부터 생성 → `READY` 직후 저장(저장 실패는 무시). 적중 결과는 다시 저장하지 않고, 적중하면 `lastUsedAt`만 갱신한다. 조회가 끝났을 때 그 사이 재요청 / 취소로 실행이 바뀌었으면 결과를 버린다.
+    - **레코드 검증:** 모델 버전 불일치 · 버퍼 길이 ≠ 82,944 B · v0 비유한값 · 명중률 누락이면 미스로 처리한다.
+    - **실패 허용:** IndexedDB나 `crypto.subtle`(비보안 연결 등)을 쓸 수 없으면(사생활 보호 모드, 용량 초과 등) 캐시 없이 매번 생성하며 기능은 같다. `createBrowserLUTCache()`는 앱 시작 때 동기로 만들어 관리자에 넣고, 처음 쓸 때 DB를 연다.
+    - **저장 레시피와의 관계:** 레시피에는 LUT 대신 탄도 설정 + 시드 + 샘플 수 + `BALLISTICS_MODEL_VERSION`을 저장한다. 불러올 때 캐시가 있으면 바로, 없으면 위 생성 흐름을 탄다. 모델 버전이 다르면 "다시 만든 확률표로 결과가 달라질 수 있음"을 경고한다 (3.9항).
 
-        - **보는 틱(view tick)과 엔진 머리(head)를 구분한다.** 일시정지 중 스크러빙 / 재생 / 틱 이동은 보는 틱만 바꾸고 `engine.getFrame(보는 틱)`을 그린다. 보는 틱은 기록된 범위(0 ~ 마지막 기록 틱) 안에서 앞뒤로 자유롭게 움직인다. 엔진 상태를 되돌리는 `scrubTo`는 분기할 때만 호출한다.
-        - **기록을 바꾸는 동작은 재개 / 분기뿐이다.** 재개는 마지막 기록 틱에서만 가능하고, 되감은 틱에서 이어 조종하려면 반드시 분기(확인창)를 거친다. 재생은 기록을 바꾸지 않으므로 제한이 없다.
-        - 경기 종료 후에는 `RESUME`이 없고, 종료 전 틱으로 되감으면 `BRANCH`는 가능하다 (종료 경기의 90초 지점부터 다시 조종 등).
-        - `NEW`는 설정과 시드를 유지한다. 시드는 SCENARIO 탭 `REROLL`로만 바뀐다.
-        - 입력 출처 / 조작 모드 변경은 경기 전 또는 일시정지 중에만 가능하고, 다음 시작 / `RESUME` / `BRANCH`부터 적용.
-        - **09-7 확정 (사용자 결정):** ① 마지막 기록 틱에서 재생을 누르면(경기 종료 후 Space 포함) 처음(0틱)부터 재생 ② 재생 중 주 버튼은 보는 틱 기준 `RESUME` / `BRANCH`, 누르면 재생을 멈추고 그 동작(`BRANCH`는 확인창) ③ 진행 중 `NEW`는 먼저 일시정지 후 확인창, 취소하면 일시정지 상태로 남음 ④ 경기 종료: 종료 강조를 보인 채 5초 대기(필드 클릭 / Space로 건너뜀) → 결과 팝업(점수 집계표) → `REVIEW`로 복기, `RESULT`로 다시 열기. 결과 팝업 기본형은 09-7a에 두고 세부 디자인은 09-12에서 확정.
-        - **09-7 기본안 (사용자 승인):** 좌측 패널 / 필드는 보는 틱 기준. 확인창은 필드 위 중앙 어두운 모달 + 뒤 흐림(Enter 확인 / Esc 취소, 열린 동안 단축키 무시). 경고 토스트는 필드 위쪽 중앙 빨강 바탕 흰 글자 약 1.5초 + 흐려지며 사라짐, 같은 로봇 2초에 한 번, 로봇 이름 접두(`R2 · LOWER LIFT (A) TO MOVE`). 자동 일시정지 배너는 창 포커스 소실 / 탭 숨김 / 게임패드 해제로 멈췄을 때만 필드 위쪽 중앙 어두운 띠 + 주황 테두리(사유 + "Space / RESUME으로 재개"), 재개 · 분기 · 재생 시작 시 사라짐 (사용자 일시정지는 배너 없음). 타임라인 막대는 클릭 / 끌기로 보는 틱 이동(기록 밖은 마지막 기록 틱에 붙음, 끄는 동안 재생 멈춤, 동그라미 위 시간 표시). 1틱 / 1초 버튼은 길게 누르면 0.4초 뒤부터 반복(키보드 방향키는 키 자동 반복). 재생 중 창 포커스를 잃어도 재생 계속(자동 일시정지는 조종 중에만). 재생은 마지막 기록 틱에서 멈춤. 배속은 재생에만, 새 경기에서도 유지.
-        - **경기 흐름 구현 (09-7a, `AppController`):**
-            - 보는 틱 `viewTick`(진행 중에는 엔진 현재 틱을 따라감, 멈추면 멈춘 틱) / 머리 `headTick`(진행 중 = 현재 틱, 그 외 = 기록 마지막 프레임). 그리기와 상태 값(타이머 / 점수 / TIP / 명중 확률)은 보는 틱 프레임. 보는 틱 이동 / 재생은 엔진을 건드리지 않는다.
-            - 조작: `setViewTick` / `stepView`(기록 구간 [0, 머리]로 제한, 재생 멈춤), `play`(머리면 0틱부터) / `stopPlayback` / `togglePlayback` / `setPlaybackSpeed`(0.25 / 0.5 / 1 / 2×, 벽시계 × 배속 × 50틱/초, 머리에 닿으면 멈춤), `resume`(일시정지 + 보는 틱 = 머리 + 미종료), `branch`(보는 틱 < 머리: `scrubTo` + `LIVE` 로봇 입력 로그를 그 틱 이후 폐기 + 재개, 이후 프레임은 첫 틱 진행 때 엔진이 폐기), `reset`(`NEW`), `skipHighlight` / `closeResult` / `openResult`, `setShortcutsEnabled`(확인창 / 팝업 동안 끔).
-            - 종료 단계 `endStage`: 루프 `ENDED` → `HIGHLIGHT`(`END_HIGHLIGHT_MS` = 5000, 대기 중 프레임마다 시간 확인) → `RESULT` → `REVIEW`. 종료 강조 / 결과 팝업 중에는 보는 틱 이동 / 재생 / 재개 / 분기 불가. 종료 후 분기하면 `NONE`으로 돌아가고 다시 6000틱이면 다시 `HIGHLIGHT`.
-            - 상태 추가: `headTick`, `matchEnded`, `canScrub`, `canResume`, `canBranch`, `playing`, `playbackSpeed`, `endStage`, `result`(종료 프레임의 총점 / `scoreBreakdown` / RP / 오토 + 텔레옵 TIP — 보는 틱과 무관). `tick` 이하 프레임 값은 보는 틱 기준.
-            - 단축키(컨트롤러가 창 `keydown` 직접 처리, 주행 키는 입력 어댑터): Space = 경기 중 [종료 강조 → 건너뛰기, 결과 팝업 → 무시, 진행 → 일시정지, 재생 → 멈춤, 재개 가능 → 재개, 그 외 → 재생] (분기하지 않음, 자동 반복 무시, 텍스트 입력칸 제외 항상 기본 동작 막음). ← / →(Shift = 50틱)는 보는 틱을 움직일 수 있을 때만(진행 중에는 R2 회전), 키 자동 반복 = 연속 이동.
-            - 화면(09-7a): 주 버튼 `mainButton` = `START` / 회전 중 비활성 / `PAUSE` / `BRANCH`(`GitBranch`, 주황) / `RESUME` / 비활성(종료 강조 · 결과 중, 종료 틱은 `BRANCH` 비활성). 1초 / 1틱 버튼(길게 누르면 반복), 재생 버튼(`CirclePlay` ↔ `CirclePause`), 배속, `NEW`(회전 중 비활성), `RESULT`(복기 중만). 타임라인은 보는 틱 동그라미 + 기록 구간 채움(끌기는 09-7b). 확인창은 09-7b 전까지 브라우저 기본 `confirm`(문구 `confirm.branch` = `branchConfirmParams`: 보는 틱 경기 시계 + 삭제될 기록 초 소수 1자리). 결과 팝업 기본형 `ResultPopup.tsx`: 뒤 흐림, 앱 이름 / `TELEOP MATCH COMPLETED` / 진영, 총점, `HIVE` / `FLOWER` / `GARDEN` / `PARK` 점수, `RP` 카드 3개(달성 초록 체크) + TIP 횟수, `RESTART`(= `NEW`, 확인창) / `REVIEW`. 종료 강조 중 필드 클릭 = 건너뛰기.
-        - **확인창 / 알림 / 타임라인 구현 (09-7b):**
-            - 확인창 `ConfirmDialog.tsx`: 화면 전체 흐림(결과 팝업 위에서도 열림, `RESTART`) + 필드 영역 중앙 상자. 문구 + `취소 Esc` / 동작 이름 버튼(`BRANCH` · `NEW`, 주황) `Enter`. 창 `keydown`을 캡처 단계에서 받아 Enter = 확인, Esc = 취소, Space는 막음(초점 버튼을 누르지 않음). 열린 동안 컨트롤러 단축키 꺼짐(`setShortcutsEnabled`). `BRANCH`는 재생을 멈추고 그 틱으로 확인, `NEW`는 먼저 일시정지.
-            - 경고 토스트: 컨트롤러가 틱마다(이번 프레임에 진행한 틱 전부) 그 틱 시작 상태가 리프트 4상태이고 `LIVE` 입력 기록의 주행 축(qx, qy, qω, 양자화 · 데드존 뒤)이 0이 아니면 `onToast({ robot })`. 같은 로봇은 `LIFT_TOAST_COOLDOWN_MS` = 2000 (벽시계)에 한 번. 화면(`FieldNotices.tsx`)은 필드 위쪽 중앙 빨강(`#DC2626`) 알약 + 경고 아이콘 + `R2 · LOWER LIFT (A) TO MOVE`, 1.5초 뒤 0.3초 동안 흐려지며 사라짐, 같은 로봇 토스트는 새 것으로 교체.
-            - 자동 일시정지 배너: 상태 `autoPauseReason`(루프가 `USER` 외 사유로 멈추면 설정, 진행 재개 · 분기 · 재생 시작 · `NEW`에서 해제, 보는 틱 이동은 유지). 필드 위쪽 중앙 어두운 띠 + 주황 테두리 + 경고 아이콘, 사유(`pause.*`) + `pause.resumeHint`.
-            - 타임라인: 보는 틱을 움직일 수 있을 때 막대 클릭 / 끌기(포인터 캡처) → `timelineTickAt`(막대 비율 × 6000 반올림) → `setViewTick`(기록 밖은 마지막 기록 틱, 재생 멈춤). 끄는 동안 동그라미 위에 경기 시계(`M:SS`) 표시, 올리면 동그라미 1.2배. 조작 불가 상태가 되면 끌기 무효.
-    - **로봇 제원 탭 (R1 / R2):**
+##### 경기 중 명중 판정 (`createLUTShotResolver`)
 
-        | 구역 | 항목 |
-        |---|---|
-        | 식별 | 팀 번호(GUI 전용, 엔진 미전달), 로봇 이름(`name`) |
-        | 하드웨어 | 가로 / 세로, 최고 속도, 최고 각속도, 최대 선형 가속도, 최대 각가속도, 최대 적재 수 |
-        | 인테이크 | `intakeZones` 편집기(면 / offset / width / depth, `FRONT` / `ANY` 프리셋, 로봇 기준 앞이 위인 미리보기), 흡입 딜레이, `NECTAR` 흡입 가능 |
-        | 슈터 | 형식(`FIXED` / `TURRET`), 터렛 범위 또는 허용 조준 오차, 발사 딜레이, 발사구 지상고, 발사각, 발사구 오프셋, [고급 설정, 기본 접힘] 편차 3종 |
-        | `FLOWER` 리프트 | 리프트 준비 시간, 투입 간격 |
-        | 스윗스팟 → LUT | 스윗스팟 좌표 + 기준 셀 라벨 + `SET ON FIELD`(편집 모드), LUT 상태 / 기물별 v0 · 스윗스팟 명중률(0이면 경고) / 진행 막대 / 남은 시간, `SHOW HEATMAP`(히트맵 편집 모드) |
-        | 편의 | `COPY TO R2`(R1 탭) / `COPY TO R1`(R2 탭): 팀 번호 / 이름을 뺀 전 항목을 상대 탭 초안으로 복사 |
+엔진 생성자에 넣는 `ShotProbabilityResolver`. 엔진은 발사 완료 틱에 `(robotId, pieceType, robot.x, robot.y, robot.heading, alliance, upwardCell)`로 호출하고, 받은 확률과 시드 난수 1회로 명중을 정한다.
 
-        - 팀 번호 / 이름은 GUI 프로필(`RobotProfile { teamNumber, teamName, config: RobotConfig, ballistics: ProfileBallistics }`, 09-9b)에 두고 `RobotConfig` 타입은 수정하지 않는다. `ProfileBallistics`는 `dz` / 발사각 / 오프셋 + 편차 3종이며, 사출 속도 v0 / 스윗스팟은 09-10에서 LUT와 함께 붙인다.
-        - **09-9 확정 (사용자 결정):** ① 09-9a(프로필 / 입력칸 규칙 / 식별 · 하드웨어 · 인테이크 딜레이 · 슈터 형식 · 리프트 / COPY / 저장 형식 / 좌측 패널 팀 표시) + 09-9b(인테이크 구역 편집기 + 슈터 탄도 입력칸)로 분할 ② '로봇 이름' 대신 **팀명**(GUI 전용 `teamName`, 사용자가 보기에 '팀명'이어야 납득됨) — `RobotConfig.name`은 엔진용 R1 / R2 그대로 ③ 슈터 탄도(발사구 지상고 / 발사각 / 오프셋 / 편차 3종)는 09-9b에서 폼 + 엔진 비행 연결, 스윗스팟 / LUT는 09-10 ④ 터렛 범위는 왼쪽 / 오른쪽 한계 두 칸 + `±90°` / `360°` 프리셋 ⑤ 좌측 패널은 팀 번호가 있으면 `#번호`(크게) + 팀명(작게), 없으면 R1 / R2 + 팀명. config 탭 이름 / 결과 팝업 / 캔버스 로봇 번호는 R1 / R2 그대로.
-        - **입력 허용 범위 (09-9 확정):** 가로 / 세로 6 ~ 18 in, 최고 속도 1 ~ 200 in/s, 최대 가속도 1 ~ 2000 in/s², 최고 각속도 0.1 ~ 30 rad/s, 최대 각가속도 0.1 ~ 300 rad/s², 최대 적재 수 정수 1 ~ 4, 흡입 · 발사 딜레이 / 리프트 준비 시간 / 투입 간격 정수 0 ~ 5000 ms, 허용 조준 오차 0.1 ~ 45°, 터렛 한계 −180 ~ 180°(터렛이면 왼쪽 ≠ 오른쪽), 팀 번호 비움 또는 숫자 1 ~ 5자리, 팀명 24자까지.
-        - **구현 (09-9a):**
-            - 순수 규칙 `src/ui/robotForm.ts`: `RobotProfile { teamNumber, teamName, config }`(탄도는 09-9b에서 추가), `NUMBER_FIELDS`(칸별 물리량 종류 / 엔진 단위 범위 / 정수), `parseNumberField`(입력 단위에서 한 번 변환 → 범위 / 정수 검사, 빈 칸 · 숫자 아님 = 입력 필요), `formatField`, `checkText`, `readNumber` / `writeNumber`(터렛 한계 = `turretRange[0]` / `[1]`), `robotProfileIssues`(모든 칸 범위 + 터렛 폭 0 + 형식), `TURRET_PRESETS`, `copyRobotProfile`(팀 번호 / 팀명 / 슬롯 id / 엔진 이름은 대상 유지, 깊은 복사).
-            - 초안 규칙(`configDraft.ts`): 로봇 탭 값 = 프로필, 틀린 입력 글자 `fieldText`(탭별 칸 → 글자, 남아 있는 동안 INVALID · 적용 불가, 탭 이동 / 창 닫기에도 유지, `RESET TAB` · 복사 대상에서 지움), 로봇 탭 검증 = `robotProfileIssues`, 시나리오 검증은 프로필의 `config`로, `copyRobotTab` / `canCopyRobotTab`(원본이 틀리면 불가).
-            - 입력칸(`FormControls.tsx`): 숫자 칸은 단위 표시 + 칠 때마다 검사 → 올바르면 그 칸 값만 엔진 단위로 초안에 반영(고친 칸만 변환), 틀리면 글자 보관 + 빨간 테두리 + 빨간 설명("6.00 – 18.00 in 사이", "정수만 입력", "숫자를 입력"). 초점이 있는 동안은 친 글자 그대로, 초점을 잃거나 Enter면 표시 형식. SETTINGS와 공용인 구역 제목 / 버튼 묶음 / 토글도 이 파일로 옮김.
-            - 로봇 탭(`RobotTab.tsx`): 팀(팀 번호 / 팀명) · 하드웨어 7칸 · 인테이크(딜레이, NECTAR 흡입 토글, 흡입 구역 요약 — 0개면 "흡입 불가" 경고, 편집기는 09-9b) · 슈터(형식 `FIXED` 허용 조준 오차 / `TURRET` 왼쪽 · 오른쪽 한계 + 안내 + 프리셋, 터렛으로 바꿀 때 폭 0이면 ±90°로 시작, 숨는 칸의 틀린 글자는 지움, 발사 딜레이) · FLOWER 리프트 2칸 · `COPY TO R2` / `COPY TO R1`(상대 탭에 적용 안 된 수정이 있으면 확인창, 복사 후 "R2 초안에 복사함 — R2 탭에서 적용" 안내). 경기가 있는 동안 모든 칸 비활성. 고치기 시작하면 `START` 막힘 안내를 지움.
-            - 저장(`settings.ts`): 적용한 프로필을 저장하고, 복원 시 `mergeWithDefaults`로 기본 프로필 모양에 맞춤(없는 항목 = 기본값으로 채움 → 이후 항목이 늘어도 저장한 로봇 유지, 종류가 다르면 버림) + `robotProfileIssues` 통과 + 슬롯 id 강제. 09-8b 형식(프로필 없이 `RobotConfig`)은 기본 프로필이 된다.
-            - 좌측 패널: `#번호` + 작은 팀명.
-        - **09-9b 확정 (사용자 결정):** ① 흡입 구역은 구역별 한 줄(면 버튼 묶음 앞 / 뒤 / 왼쪽 / 오른쪽 + 위치 / 폭 / 깊이 + 삭제), `구역 추가` = 앞 · 위치 0 · 폭 = 변 길이 · 깊이 1 in ② 프리셋 `FRONT` / `ANY`는 현재 로봇 크기로 구역 전체를 바꾼다(이후 크기를 바꿔도 구역은 따라가지 않음 — 위치가 변 밖이면 오류로 알림) ③ 구역 0개 허용(경고만) ④ 편차 3종은 기본 접힌 "고급 설정"에 두고 LUT(09-10)에서만 쓴다고 안내 ⑤ 발사구 지상고 / 발사각 / 오프셋은 경기 비행 처리에 바로 연결, v0는 09-10까지 엔진 기본 계산 ⑥ 저장한 로봇은 없는 `ballistics`를 기본값으로 채워 유지 ⑦ `COPY TO`는 구역 · 탄도까지 복사 ⑧ 미리보기는 로봇 탭 맨 위 (Q2 (a)).
-        - **입력 허용 범위 (09-9b 확정):** 발사구 지상고 1 ~ 50 in(엔진 `dz = 53.5 − 지상고` = 3.5 ~ 52.5, 기본 14 in → 39.5), 발사각 5 ~ 85°(기본 60°), 발사구 오프셋 −18 ~ 18 in(+ = 앞, 기본 0), 속도 편차 0 ~ 20 %(기본 2 %), 방위각 / 피치 편차 0 ~ 10°(기본 0.02 / 0.006 rad), 구역 위치 ± 변 길이 / 2(앞 / 뒤 = 가로, 좌 / 우 = 세로), 구역 폭 ~~0.5~~ **3.6** ~ 36 in(09-9c 수정: 가장 큰 기물 NECTAR 직경 — 기물보다 좁은 입구는 흡입 불가), 깊이 0.25 ~ 12 in, 구역 수 0 ~ 8.
-        - **구현 (09-9b):**
-            - 순수 규칙(`robotForm.ts`): `ProfileBallistics` / `DEFAULT_PROFILE_BALLISTICS`(엔진 `DEFAULT_SHOOTER_BALLISTICS` / `DEFAULT_*_NOISE`에서), 숫자 칸 6개 추가(발사구 지상고는 화면 값 = 53.5 − `dz`인 전용 종류, 범위 표시는 화면 값 기준 작은 쪽 → 큰 쪽 `displayRange`, 속도 편차는 %), 구역 칸 규칙(`zoneFieldSpec` — 위치 범위는 면과 로봇 크기에 따라, `zoneFieldKey` = `zone.번호.칸`, `newIntakeZone`, `writeZone`, `MAX_INTAKE_ZONES` = 8), `robotProfileIssues`에 구역 수 / 구역별 면 · 칸 검사 추가, `copyRobotProfile`에 탄도 복사, 미리보기 기하(`previewZoneRect` — 엔진 `getBumperZoneOBB`와 같은 배치 · 위치 제한, `previewAimSector` — 고정형 ± 허용 오차 / 터렛 왼쪽 → 오른쪽, 뒤로 도는 범위는 끝에 2π).
-            - 로봇 탭: 맨 위 미리보기(`RobotPreview.tsx`, SVG — 몸체 + 앞 변 굵은 선 + 앞 화살표, 흡입 구역 초록, 조준 범위 주황 부채꼴(360°면 원), 발사구 흰 점 = 오프셋 위치, 범례 · "위에서 본 모습 (앞 = 위)"), 인테이크 구역 편집기(구역 카드: 면 버튼 묶음 + 위치 / 폭 / 깊이 + 삭제, `구역 추가`(8개면 비활성), 프리셋 `FRONT` / `ANY`, 위치 방향 안내, 0개면 경고). 면을 바꾸면 그 구역 위치의 틀린 글자를 지우고 범위를 다시 검사(값이 새 범위 밖이면 빨간 설명 — 입력칸 `checkValue`), 추가 / 삭제 / 프리셋은 번호가 밀리므로 구역 칸의 틀린 글자를 모두 지움. 슈터 구역에 발사구 지상고 / 발사각 / 오프셋 / 발사 딜레이 + 접힌 "고급 설정: 발사 편차"(안내 + 3칸).
-            - 엔진 연결(`defaultSetup.ts`): `buildMatchSetup`에 슈터 탄도(`dz` / 발사각 / 오프셋) → `MatchSetup.shooters`, `setupFromDrafts`(적용 값 → 경기 설정)로 메인 화면이 경기를 만든다. 경기 중 발사 궤적 시작 높이 = 발사구 지상고.
-            - 저장: 기본 프로필에 `ballistics`가 들어가 `mergeWithDefaults`가 09-9a 형식 저장값의 탄도를 기본값으로 채움.
-        - **09-10 확정 (사용자 결정):** ① 09-10a(스윗스팟 입력 + LUT 생성 연결 / 진행 표시 / `START` 막기 / LUT 판정 교체 / 기본 스윗스팟 / 앱 시작 자동 생성) + 09-10b(필드 편집 모드 `SET ON FIELD` / `SHOW HEATMAP`)로 분할 ② 기본 스윗스팟 = 후보 비교로 C (59.5, 131.5) (위 기본 프리셋) ③ 첫 실행 등 LUT가 준비될 때까지 `START`를 막고 기다린다 (간이 판정으로 먼저 시작하지 않음) ④ 스윗스팟 명중률 0 %는 경고만 (적용 / `START` 허용), 검증 실패(필드 밖 / `HIVE` / 해 없음)는 빨간 오류로 `APPLY` 막음 ⑤ LUT 생성 오류 = 로봇 아이콘 빨간 느낌표 + 로봇 탭 오류 문구와 `RETRY`, 준비될 때까지 `START` 막음 ⑥ 스윗스팟 X / Y 칸은 슈터 구역 아래 "스윗스팟 → 명중 확률표" 구역, 진영 기준 표시 + 기준 CELL 라벨, 입력은 1 in 격자 중심으로 맞춤 ⑦ (09-10b) 두 편집 모드 모두 필드를 인게임 바닥색 회색(`#d9d9d9`, 217)으로 칠하고 그 위에 히트맵. 히트맵 색은 진영별 파스텔 척도 — RED `#F8FAFC → #FFF0F2 → #FFE4E6 → #FECDD3 → #FDA4AF → #FB7185 → #F43F5E`, BLUE `#F8FAFC → #F0F9FF → #E0F2FE → #BAE6FD → #7DD3FC → #38BDF8 → #0284C7` (시나리오 진영 색). 0 % 쪽 가장 낮은 값은 필드 바닥색과 맞추고, 중간에 부자연스러운 색이 끼면 자연스럽게 이어지도록 조정한다 (사용자: 진영별로 다른 색의 예쁜 파스텔 그라데이션이면 됨, 정밀 척도 불필요).
-        - **구현 (09-10a):**
-            - 프로필(`robotForm.ts`): `ProfileBallistics.sweetSpot`(기준 셀 `RED_AUDIENCE` 좌표) + `DEFAULT_SWEET_SPOT`, `readSweetSpot` / `writeSweetSpot`(진영 기준 ↔ 보관 좌표, `sweetSpotFromBasis`로 격자 중심 스냅 + BLUE 점대칭, 다른 축 유지), `SWEET_SPOT_SPEC`(좌표 0 ~ 144 in), `profileBallisticsConfig`, `robotProfileIssues`에 스윗스팟 칸 범위 + (다른 칸이 모두 올바를 때) `validateBallisticsConfig`의 `SWEET_SPOT_*` 사유 추가, `COPY TO`는 스윗스팟도 깊은 복사. 저장된 09-9b 형식 프로필은 `mergeWithDefaults`가 기본 스윗스팟으로 채움.
-            - 관리자(`lutManager.ts`): 로봇 간 공유(2.6.2항 "로봇 간 공유").
-            - 연결(`src/app/lutTracker.ts`, React 비의존): 적용한 두 프로필로 요청(앱 시작 = 자동 보관 / 기본 프리셋, 로봇 탭 `APPLY`), 관리자의 잦은 진행 알림을 100 ms로 모으고 단계 변화는 바로 알림, 로봇별 생성 시작 시각 보관, `results()`(두 로봇 `READY`일 때), `retry`. 브라우저 Worker / IndexedDB 캐시는 `MainScreen`이 주입.
-            - 경기 설정(`defaultSetup.ts`): `setupFromDrafts(values, luts)` — LUT 결과가 있으면 판정 함수 = `createLUTShotResolver`, 엔진 `shooters`에 기물별 사출 속도(`v0`, 못 찾은 기물은 엔진 기본 계산). 두 로봇 결과가 바뀔 때마다 경기 전 설정을 교체(`setSetup`), 결과가 없으면 간이 판정(`START`가 막힌 동안의 자리 채움).
-            - 화면 규칙(`src/ui/lutView.ts`): 단계(`READY` / 진행 / 오류 / 없음), 진행률, 남은 시간(생성 시작 후 처리 속도로 추정, 진행 2 % · 0.5초 이후부터), 상태 한 줄("생성 중 63% · 약 7초 남음", "준비 완료 (저장된 결과)"), `lutInputsChanged`(탄도 / 스윗스팟 / 로봇 크기), `startBlocker`(R1 탭 → R1 LUT → R2 탭 → R2 LUT → SCENARIO, 사유 문구 `config.status.LUT_*`).
-            - 로봇 탭: "스윗스팟 → 명중 확률표" 구역 — 기준 CELL 라벨, X / Y 칸, 검증 사유(빨간 글자), 안내, 명중 확률표 상태 상자(`LutStatus.tsx`: 적용한 설정 기준 상태 한 줄 + 진행 막대 + 기물별 발사 속도 · 스윗스팟 명중률, 0 %면 경고, 오류면 `RETRY`, 초안의 LUT 입력이 다르면 "적용하면 새로 만듦").
-            - 접힌 config 띠: 로봇 아이콘 = 탭 문제가 먼저(빨간 느낌표), 탭이 올바르면 `READY` 초록 체크 / 생성 중 진행률 링(주황, 마우스 올리면 상태 한 줄) / 오류 빨간 느낌표.
-            - 측정 (헤드리스 Chromium, 4코어 → Worker 3개, 기본 프리셋): 첫 실행 약 13 ~ 18초(R1 = R2 공유로 한 번 생성, 개발 서버 / 빌드 모두), 새로고침 = 캐시 적중 약 0.5 ~ 0.9초, 한 로봇만 다른 설정으로 `APPLY` 시 약 13초. 남은 시간 추정은 가운데 행(명중 띠 근처)이 무거워 중간에 조금 늘었다 줄어든다.
-        - **09-10b 확정 (사용자 결정):** ① 필드 편집 모드를 09-10b(편집 모드 공통 틀 + 히트맵 모드 `SHOW HEATMAP` + 색 척도) / 09-10c(스윗스팟 모드 `SET ON FIELD`)로 나눈다 ② 히트맵은 **적용한 설정**의 명중 확률표(생성 중이면 조립 중 버퍼)를 보여 주고, 초안의 LUT 입력이 적용 값과 다르면 안내 띠에 "적용하면 새로 만듦"을 함께 표시한다 ③ `src/tmp_shots.ts`(09-6b 후속 때 들어간 1회성 스크린샷 스크립트, 어디서도 import하지 않음)는 09-12 개발 하네스 삭제 때 함께 지운다.
-        - **구현 (09-10b):**
-            - 표시 규칙(`src/renderer/heatmapView.ts`, 순수 함수): 색 척도 `heatmapStops` = 0 %는 바닥색 `#d9d9d9`, 이후 진영 팔레트의 **넷째 색부터 끝까지**를 (0, 1]에 고르게 (RED `#FECDD3 → #FDA4AF → #FB7185 → #F43F5E`, BLUE `#BAE6FD → #7DD3FC → #38BDF8 → #0284C7`), sRGB 선형 보간. 합성 명중 띠로 바닥 다음을 팔레트 둘째 / 셋째 / 넷째 색부터 시작하는 세 안을 비교해, 앞쪽의 흰색에 가까운 색이 회색 바닥보다 밝아 흰 테두리처럼 떠 보이는 문제가 없는 넷째부터로 정했다 (09-10 확정 ⑦ "자연스럽게 이어지도록 조정"). 픽셀 `heatmapPixels`(화면 격자 = 진영 기준 필드 좌표, BLUE는 기준 LUT를 점대칭 = `mirrorLUTSet`의 `BLUE_OPPOSITE`, 미계산 행 = 바닥색), `pendingRowRanges`(빗금을 그릴 화면 행 구간, BLUE는 뒤집힘), `heatmapBasis`(기준 셀 키 / HIVE 칸 / 조준점), 범례 `heatmapGradientCss`.
-            - 편집 장면(`src/renderer/editSceneRenderer.ts`, `renderEditScene`): 경기 장면 대신 둘레 배경 → 바닥 회색 → 히트맵(144 × 144 이미지를 필드 크기로 확대, 확대 보간 = 런타임 쌍선형 조회 `sampleLUT`와 같은 모양) → 미계산 행 사선 빗금 → 타일 / 벽(`drawFieldLines`, `canvasRenderer.ts`의 `drawFieldBackground`에서 분리) → HIVE(기준 셀은 진영색 + 노란 테두리) → 스윗스팟 → 조준점 점선, 조준점(흰 원 + 십자), 스윗스팟(흰 원 + 굵은 테두리 + 가운데 점). 로봇 / 기물 / 게이지는 그리지 않는다.
-            - 컨트롤러(`appController.ts`): `setEditScene(scene | null)` — 경기 전(SETUP)에만 받아 경기 장면 대신 그림, 같은 객체면 무시하고 새 객체면 다시 그림, `start()`에서 해제 (경기 중에 받은 장면은 무시).
-            - 추적기(`lutTracker.ts`): `heatmap(robotId, piece)` = 관리자 상태의 조립 중 기준 LUT + 행별 완료 표시 (따라가는 로봇은 앞선 로봇 것). 재생성하면 버퍼가 바뀌므로 장면을 만들 때마다 다시 받는다.
-            - 편집 규칙(`src/ui/fieldEdit.ts`): `toggleHeatmapEdit`(같은 로봇 히트맵이 열려 있으면 닫기, 아니면 그 로봇으로 열기, 기본 `POLLEN`), `fieldEditStays`(SETUP + config 창 펼침 + 편집을 연 로봇 탭), `heatmapEditScene`(적용한 스윗스팟을 진영 기준 좌표로).
-            - 화면: 로봇 탭 "스윗스팟 → 명중 확률표" 구역에 `SHOW HIT MAP` / `HIDE HIT MAP`(한국어 "필드에서 확률표 보기" / "확률표 닫기", 열려 있으면 주황 강조, 경기 중 비활성). 안내 띠 `FieldEditBanner.tsx`: 모드 이름(`HIT MAP · R1`) + 기물 종류 버튼 묶음(`POLLEN` / `NECTAR`) + `DONE`, 범례(0 % → 100 % 진영 척도) + 기준 CELL, 생성 상태 한 줄(준비 전) · 적용 대기 안내 · 설명 · "Esc to close". 히트맵 모드는 편집하는 값이 없어 `DONE`만 두고 Esc = 닫기 (`CANCEL`은 09-10c 스윗스팟 모드부터). 띠는 명중 띠를 가리지 않게 RED는 필드 위쪽, BLUE(기준 `BLUE_OPPOSITE`, 명중 띠가 필드 위쪽)는 필드 아래쪽.
-            - 끝나는 경우: `DONE`, Esc(캡처 단계라 config 창의 Esc 닫기보다 먼저 받음 — 창은 그대로), 다른 탭으로 이동, config 창 닫기, `START`(편집을 취소하고 시작 절차), 경기 전이 아니게 됨. 생성 중에는 약 10 Hz 진행 알림마다 장면을 새로 만들어 계산된 행이 채워진다.
-            - 참고: 행 작업은 두 기물 중 v0 탐색이 먼저 끝난 기물부터 대기열에 들어가므로(2.6.2항), 생성 중 보고 있는 기물의 행이 나중에 채워질 수 있다 (기물 버튼으로 전환해 보면 됨).
-        - **09-10c 확정 (사용자 결정):** ① `DONE` = 그 로봇 탭 `APPLY`까지 (명중 확률표 생성 시작). 탭에 틀린 칸이 있어 적용할 수 없으면 초안에만 남기고 안내, 바뀐 것이 없으면 닫기만 ② 클릭 후에도 모드 유지 (여러 번 찍어 바꿔 봄), `CANCEL` / Esc = 모드에 들어오기 전 값으로 되돌리고 닫기 ③ 검증에 실패하는 칸(몸체가 필드 밖 / `HIVE`와 겹침 / 해 없음)도 찍히고 빨간 오류 (숫자 칸에 틀린 값을 넣을 때와 같음, `APPLY` 막힘). 마우스를 올린 상태에서 사유를 미리 보여 줌 ④ 반투명 히트맵은 명세대로 적용한 설정의 확률표 + "적용한 스윗스팟 기준 — 완료하면 적용해 새로 만듦" 안내 (스윗스팟을 옮기면 v0가 바뀌어 명중 띠 모양도 달라지므로), 기물 전환 버튼은 히트맵 모드와 같이 둠.
-        - **구현 (09-10c):**
-            - 편집 규칙(`src/ui/fieldEdit.ts`): `openSweetSpotEdit`(들어올 때의 초안 스윗스팟 + 스윗스팟 칸의 틀린 글자를 기억, 같은 로봇이면 그대로, 기물 종류는 이어받음), `fieldGridCell`(필드 좌표 → 1 in 격자 중심, 필드 밖 = null), `placeSweetSpot`(진영 기준 칸 → 두 축 `writeSweetSpot`, BLUE는 점대칭 보관), `sweetSpotIssueCodes` / `sweetSpotCandidateIssues`(로봇 탭과 같은 규칙 — 다른 칸이 모두 올바를 때만 `SWEET_SPOT_*`), `clickSweetSpot`(초안 스윗스팟 + 스윗스팟 칸 틀린 글자 지움), `cancelSweetSpotEdit`(스윗스팟과 그 칸 글자만 되돌림, 모드 중 바꾼 다른 칸은 유지), `sweetSpotDoneAction`(`APPLY` / `KEEP_DRAFT` / `CLOSE`), `sweetSpotEditScene`.
-            - 장면(`editSceneRenderer.ts`, `SWEET_SPOT`): 바닥 위 적용한 확률표 반투명(50 %, 계산된 행만, 빗금 없음) → 타일 / 벽 / `HIVE` → 확률표를 만든 적용 스윗스팟(초안과 다를 때 점선 빈 고리) → 마우스를 올린 1 in 칸(찍기 가능 초록 / 불가 빨강) + 그 자리에서 조준점을 향해 돌린 몸체 점선 윤곽 → 초안 스윗스팟 몸체 윤곽(앞 변 굵게, 틀리면 빨강) → 조준 점선 / 조준점 / 스윗스팟 표시. 몸체 = `aimingRobotOBB`(`ballistics.ts`에서 공개, 스윗스팟 검증과 같은 함수), 크기는 초안 로봇 크기.
-            - 화면: 로봇 탭 스윗스팟 칸 아래 `SET ON FIELD`(한국어 "필드에서 찍기", 모드 중에는 "필드에서 찍는 중" 강조 · 비활성). 안내 띠: `SWEET SPOT · R1` + `CANCEL` / `DONE · APPLY`, 기물 버튼 묶음 + 범례 + 기준 CELL, 초안 스윗스팟 좌표 + 빨간 사유, 반투명 확률표 안내(초안 LUT 입력이 적용 값과 다를 때) · 생성 상태 · 설명 · "Esc to cancel" (기물 버튼은 띠 폭이 좁아지지 않게 범례 줄로 옮김 — 히트맵 모드도 같음). 필드는 십자 커서, 마우스를 올린 칸 위 말풍선(진영 기준 좌표 + 찍으면 생기는 사유, 틀리면 빨간 테두리).
-            - 입력(`MainScreen.tsx`): 포인터 위치 → 캔버스 CSS 좌표 → `cssToCanvas` → `canvasToField`(보기 = 상태의 `viewAngle`) → `fieldGridCell`. 칸이 바뀔 때만 상태를 갱신하고, 클릭은 마지막 포인터 이동의 칸(즉시 갱신되는 ref)을 찍는다 — 클릭 좌표는 정수로 반올림되어 칸 경계에서 다른 칸이 될 수 있고, 이동 직후 클릭은 상태가 아직 다시 그려지기 전일 수 있음 (헤드리스 점검에서 발견). 안내 띠 위에서는 칸 강조 없음.
-            - 끝나는 경우: `DONE · APPLY`, `CANCEL` / Esc / `START`(되돌린 초안으로 시작 검사), 다른 탭 / 창 닫기 / 히트맵 모드로 전환(찍은 초안은 그대로 — 숫자 칸 입력과 같음).
-        - LUT 시드 / 샘플 수는 고정값(`DEFAULT_BALLISTICS_SEED`, 격자당 2000 / v0 후보당 20000)이며 화면에 표시하지 않는다.
-        - **단위 (화면 ↔ 엔진 변환은 GUI가 수행, 엔진에는 항상 명세 단위 = inch 기반):**
+- **입력:** `luts: MatchHeatmapLUTs`(로봇 슬롯별 `RobotHeatmapLUTs`), `r1Config` / `r2Config`의 `turretType` / `turretRange` / `aimTolerance`. 슈터 설정은 만들 때 복사해 고정한다 (이후 원본 객체를 바꿔도 경기 중 판정에 새지 않음 → 결정론).
+- **$P_{\text{spatial}}$:** `luts[robotId][pieceType][hiveCellKey(alliance, upwardCell)]`를 로봇 중심 좌표에서 **쌍선형 보간**(`sampleLUT`)으로 조회한다. 둘러싼 격자 중심 4개 값을 거리 비례로 섞고, 필드 가장자리 격자 중심 바깥은 가장자리 값. 셀 키 = `${alliance}_${AUDIENCE | OPPOSITE}`. TIP으로 상향 셀이 바뀌면 다음 발사부터 새 셀의 LUT와 조준점을 쓴다.
+- **조준 오차:** $\Delta\psi$ = `angleDifference(조준점 방위, heading)` = 조준점 방위 − 헤딩, [−π, π]. 조준점 방위는 로봇 중심 → 상향 셀 조준점. 부호: + = 로봇 오른쪽 (캔버스 y-down에서 각도가 커지는 방향).
+- **조준 판정 (`isAimWithinShooterRange`):**
+    - **고정형(`FIXED`):** $|\Delta\psi| \le$ `aimTolerance`(기본 3° ≈ 0.0524 rad, 경계 포함)이면 $P_{\text{final}} = P_{\text{spatial}}$, 아니면 0. 허용 오차가 비유한값 / 음수면 0으로 본다 (정확히 정렬될 때만).
+    - **터렛형(`TURRET`):** `turretRange` $[\alpha, \beta]$를 [−π, π]로 정규화한다 (`normalizeAngle`은 ±π를 보존하므로 360° 터렛 [−π, π] 유지). $\alpha \le \beta$면 $\alpha \le \Delta\psi \le \beta$, $\alpha > \beta$면 ±π를 가로지르는 구간 ($\Delta\psi \ge \alpha$ 또는 $\Delta\psi \le \beta$, 예: 후방 터렛 [2.5, −2.5]). 범위가 비유한값이면 조준 불가.
+    - 한계: 허용 오차 / 터렛 범위 안이면 조준 오차에 따른 명중률 감소는 반영하지 않는다 (LUT는 정면 조준 가정). 고정형은 허용 오차가 작아(±3°) 영향이 작다.
+- **안전장치:** LUT 값이 비유한값이면 0, 결과는 [0, 1]로 제한 (엔진도 한 번 더 제한).
 
-            | 항목 | 화면 단위 | 엔진 단위 |
-            |---|---|---|
-            | 길이 (가로 / 세로 / 인테이크 구역 / 오프셋 / 발사구 지상고 / 좌표) | in (토글 시 cm) | in |
-            | 속도 / 가속도 | in/s, in/s² (토글 시 cm/s, cm/s²) | in/s, in/s² |
-            | 최고 각속도 / 최대 각가속도 | **rad/s, rad/s²** (RoadRunner / Pedro Pathing 튜닝값과 같은 단위) | rad/s, rad/s² |
-            | 터렛 범위 / 허용 조준 오차 / 발사각 / 방위 · 피치 편차 / 시작 헤딩 | ° (도) | rad |
-            | 딜레이 / 준비 시간 / 투입 간격 | ms | ms |
-            | 속도 편차 | % | 비율 (0.02 = 2%) |
+##### 발사 비행 처리
 
-            - **발사구 지상고 h**(바닥에서 잰 높이)를 받아 `dz = HIVE_RIM_Z − h = 53.5 − h`로 변환.
-            - in / cm 토글은 SETTINGS 탭 공통 설정. **내부 값은 항상 inch로 보관**하고 표시할 때만 변환한다 (토글을 반복해도 반올림 누적 없음). 입력값은 입력한 단위에서 inch로 한 번만 변환.
-            - 시작 헤딩 표시 규약: 0° = 필드 +x(관중석 시점 오른쪽), 양수 = 관중석 시점 시계 방향 (캔버스 y-down, 엔진과 같은 부호).
-            - **표시 소수 자리 (09-6a 확정):** 길이 계열(길이 / 발사구 지상고 / 속도 / 가속도) 2자리, 좌표 1자리, ° 1자리, rad/s · rad/s² 2자리, ms 정수, % 1자리. 시작 헤딩 표시 범위 (−180°, 180°].
-            - **구현 (09-6a, `src/ui/units.ts`):** 물리량 종류(`QuantityKind`: length / coordinate / launchHeight / speed / accel / angle / heading / angularRate / angularAccel / timeMs / percent)별 `toDisplay` / `fromDisplay` / `unitLabel` / `formatQuantity`, `parseNumberInput`(공백, 소수점 `.` · `,`, 부호, 지수 허용, 그 외 null). 길이 계열 입력은 변환 결과를 **1e-6 in 격자로 반올림**해, cm로 표시된 값을 그대로 다시 입력해도 원래 inch 값과 정확히 같다 (예: 45.72 cm → 18 in, 로봇 크기가 바뀐 것으로 보여 LUT를 다시 만드는 일 방지). 단, 표시 반올림으로 정보가 줄어드는 값(0.25 in = 0.635 cm → "0.64")은 표시값을 다시 넣으면 바뀌므로 **폼은 사용자가 실제로 고친 칸만 변환해 저장한다** (09-9 폼 구현 규칙).
-        - **기본 프리셋:** R1 / R2 모두 개발 하네스 제원(`DEV_ROBOT_CONFIGS`: 18 in, 앞면 흡입, 고정형 ±3°) + **기본 탄도 설정 + 기본 스윗스팟** (값은 탄도 사전 준비 하위 Step 이후 LUT 결과를 보고 명중 띠가 드러나는 위치로 정함). **09-10a 확정:** 기본 스윗스팟 = 기준 셀 `RED_AUDIENCE` (59.5, 131.5) — 후보 11곳 비교(기본 로봇, 발사구 14 in, 60°)에서 입구 정면 약 43 in, 스윗스팟 명중률 POLLEN 99.0 % / NECTAR 97.9 %, 50 % 이상 구역이 가장 넓은 후보 C. 발사각 60°에서는 조준점 수평 거리 25.6 in 이하(`D·tanθ ≤ Δz`)에 해가 없다.
-        - **스윗스팟 진영 기준 입력:** 사용자는 **현재 시나리오 진영(SCENARIO 탭 초안 값)의 공식 시작 상향 셀**(RED → `RED_AUDIENCE`, BLUE → `BLUE_OPPOSITE`)을 기준으로 스윗스팟을 찍는다. 스윗스팟 입력칸 옆에 기준 셀 라벨(예: "기준: `BLUE_OPPOSITE`")을 표시한다.
-            - 저장은 기존대로 기준 셀 `RED_AUDIENCE` 좌표(`BallisticsConfig.sweetSpot`). BLUE는 입력 / 표시 때 필드 중심 점대칭 (x, y) ↔ (144 − x, 144 − y)로 변환한다 (`mirrorLUTSet`의 `BLUE_OPPOSITE` = 가로 · 세로 모두 뒤집기와 같은 변환, 격자 중심 x.5는 x.5로 옮겨짐).
-            - 진영을 먼저 정할 필요는 없다 (진영은 항상 값이 있음, 기본 `RED`). 나중에 진영을 바꿔도 저장값은 그대로이므로 LUT는 무효화되지 않고, 같은 스윗스팟이 새 진영 기준으로 대칭 이동해 보일 뿐이다. 시나리오에서 상향 셀을 바꿔도 표시 기준 셀은 바뀌지 않는다.
-            - 히트맵 미리보기도 같은 기준으로 표시한다 (BLUE는 기준 LUT를 점대칭 복사한 `BLUE_OPPOSITE` 장).
-    - **시나리오 탭:**
+- **목표:** 발사 순간 공이 HIVE로 순간이동하는 부자연스러움을 없애되, 결과(명중 여부)는 LUT 판정을 그대로 따르고, 3D 물리 엔진 없이 닫힌 해로 계산한다.
+- **범위 분리:** 엔진은 궤도 결과(충돌 / 도착 지점, 충돌 후 낙하 구간, 최종 착지 지점 / 시점 / 속도)를 발사 시점에 계산해 비행 대기열에 기록하고 도착 틱에 반영한다. 이 기록을 보간해 그리는 것은 렌더러다 (3.7항).
+- **충돌 후 낙하도 비행의 일부:** HIVE / 벽에 공중에서 닿은 공은 그 자리에서 바닥으로 옮기지 않고 반사 포물선으로 바닥까지 떨어뜨린다 (최대 약 66 in 높이에서 한 프레임 만에 바닥으로 옮겨지는 부자연스러움 방지). 낙하 중에는 `IN_FLIGHT`라 흡입 / 충돌 대상이 아니다 (현실과 일치).
+- **슈터 탄도 입력:** 엔진 생성자 선택 인자 `shooters?: MatchShooterBallistics`. 로봇별 `ShooterBallistics {dz, shooterPitch, shooterOffset, v0?: {POLLEN?, NECTAR?}}`는 LUT 생성 결과에서 `shooterBallisticsFrom(config, generateRobotLUTs 결과)`로 만든다 (판정 LUT와 같은 발사구 / 발사각 / 탐색 v0). 지정하지 않으면 기본 자동 슈터 `DEFAULT_SHOOTER_BALLISTICS`(발사구 14 in, 발사각 60°, 오프셋 0, v0는 발사마다 조준점 닫힌 해). 만들 때 복사해 고정한다.
+- **결과 선확정 / 난수:** 발사 완료 틱에 판정 함수 확률과 시드 PRNG 난수로 명중을 확정한다. 난수는 발사마다 **항상 3회**(명중 판정, 반사 세기 산포 `bounceRestitutionRoll`, 반사 방향 산포 `bounceAngleRoll`) 쓰고 도착 시점에는 쓰지 않는다 (무효 명중의 반사도 발사 때 뽑아 둔 값을 씀). 그래서 결과와 무관하게 난수 순서가 일정해 결정론이 유지된다. TIP 진행 중 발사는 발사 시점에 빗맞음.
+- **명목 궤적 (`planShotFlight`, 편차 없는 포물선, 발사 1회당 상수 시간):**
+    - 발사 방향 (`shotLaunchHeading`): 고정형 = 로봇 헤딩, 터렛형 = 조준점 방위 (터렛 범위 밖이면 가까운 한계각으로 제한).
+    - 발사구 = 로봇 중심 + 발사 방향 × `shooterOffset`, 높이 53.5 − dz. 발사각이 (0, π/2) 밖이면 기본값.
+    - v0 우선순위: 탄도 설정의 기물별 v0 → 조준점 닫힌 해 → (해가 없으면) 평지 사거리 = 조준점 거리인 속도 $\sqrt{g D / \sin 2\theta}$.
+- **도착 규칙:**
+    - **명중:** 궤적과 무관하게 조준점에 도착한다 (LUT 결과 우선). 비행 시간 $T = D / (v_0\cos\theta)$ (D = 발사구 → 조준점 수평 거리).
+    - **빗맞음 + HIVE 충돌 (`intersectHiveBox`):** HIVE 직육면체를 기물 반지름만큼 넓히고(xy 경계 ± r, 높이 `HIVE_HEIGHT` + r, 공 표면 접촉 기준), 지면 직선이 넓힌 AABB 안에 있는 구간(착지 전까지)에서 공 중심 높이가 넓힌 높이 이하가 되는 첫 지점을 찾는다. 들어오는 순간 이미 낮으면 옆면 `SIDE`, 위로 들어와 구간 안에서 내려오면 윗면 `TOP`. 그 접촉점에서 아래 **충돌 후 낙하** 규칙으로 튕겨 바닥까지 떨어진다.
+    - **빗맞음 + HIVE를 넘어가거나 닿지 않음:** 공 중심 높이가 기물 반지름이 되는 수평 거리 R 지점에 착지한다. 착지 후 발사 방향 수평 속도 = $v_0\cos\theta$ × `landingSpeedRetention`(2.5항)인 `ON_FIELD` 기물이 되고, 이후는 바닥 물리가 처리한다. 지면 직선이 착지 전에 필드 벽(반지름 여유)에 닿으면 **벽 접촉점(공중)에서 수평 이동을 멈추고 수직으로 떨어져** 벽 앞 바닥에 속도 0으로 착지한다.
+    - 고정형 슈터는 조준을 벗어나면 확률 0이고 직선도 조준점을 비껴가므로 판정과 연출이 일치한다.
+- **충돌 후 낙하 (`planHiveBounce` / `planFallToFloor` / `planVoidedHitBounce`):** 충돌 순간 상태(위치, 속도: 수평 $v_0\cos\theta$ 발사 방향, 수직 $v_0\sin\theta - g t$)에서 반사한 뒤 중력 포물선으로 바닥(공 중심 z = r)까지 떨어진다. 모두 닫힌 해이며 구간 목록(`FlightSegment`)으로 기록한다.
+    - **반발 계수:** 기물별 `restitution`(POLLEN 0.35 / NECTAR 0.25, 2.5항) × 반사 세기 산포 (1 + 0.2 · (2 · `bounceRestitutionRoll` − 1)), 즉 0.8~1.2배 (`HIVE_BOUNCE_RESTITUTION_SPREAD`).
+    - **옆면 (`SIDE`):** 접촉 면(넓힌 AABB에서 가장 가까운 면, 모서리 동률이면 속도가 더 깊이 파고드는 면)의 수평 바깥 법선 n으로 파고드는 법선 성분만 $v_n \to -e\,v_n$ (접선 / 수직 성분 유지). 이어서 수평 속도를 반사 방향 산포 ±15°(`HIVE_BOUNCE_ANGLE_SPREAD`, `bounceAngleRoll`)만큼 돌리고, 바깥 법선 성분이 `HIVE_BOUNCE_MIN_SPEED`(20 in/s)보다 작으면 법선 방향으로 보충한다 (스치듯 맞아도 반드시 HIVE에서 멀어짐). 그 뒤 바닥까지 포물선.
+    - **윗면 (`TOP`) 반복 튐:** 직육면체 윗면(z = `HIVE_HEIGHT` + r)에 떨어진 공은 수직 속도만 $v_z \to e\,|v_z|$로 뒤집고 수평 속도는 유지한다 (첫 튐에서 ±15° 산포 회전). 다시 윗면 높이로 내려오기 전(체공 $2 v_z / g$)에 넓힌 AABB를 벗어나면 그 포물선 그대로 바닥까지 떨어지고 (수평 직선 + 볼록 박스라 다시 부딪히지 않음), 아니면 윗면에 다시 떨어져 튄다. 최대 `HIVE_TOP_MAX_BOUNCES`(3)회 튀고도 윗면 위라면 수평 속도 방향(멈춰 있으면 가장 가까운 면 바깥)으로 max(수평 속도, 20 in/s)로 윗면을 굴러(`ROLL` 구간, 높이 유지) 가장자리에서 수직 속도 0으로 떨어진다. 실제 HIVE 윗부분은 평판이 아니므로 "윗면에 맞으면 낮게 튀며 진행 방향으로 넘어간다"를 근사한 것이며, HIVE 위에 걸려 멈추는 경우는 모델링하지 않는다.
+    - **무효 명중:** 명중으로 발사됐지만 도착 시점에 TIP 진행 중이거나 상향 셀이 바뀐 공은 조준점에서 그 셀 쪽 HIVE 앞면의 수평 바깥 법선(AUDIENCE +y / OPPOSITE −y)으로 옆면 규칙과 같이 튕겨 떨어진다. 도착 속도의 수평 방향은 발사구 → 조준점 (렌더러 명목 구간과 같은 방향). 결과는 `MISS_HIVE`로 바뀌고 착지 틱이 늦춰진다.
+    - **벽:** 모든 낙하 포물선에서 지면 직선이 착지 전에 필드 벽(반지름 여유)에 닿으면 그 지점에서 수평 이동을 멈추고 수직으로 떨어진다 (착지 속도 0). 즉 **높이 무한 · 반발 계수 0인 벽**을 가정한다. 실제로는 벽보다 높이 날아간 공이 필드 밖으로 나가기도 하지만 이는 전술이 아닌 실수이므로 구현하지 않는다 (벽 반사는 v2 후보, 5.2항).
+    - **착지:** 착지 속도 = 착지 순간 수평 속도 × `landingSpeedRetention` (벽에서 멈췄으면 0). 안전장치로 착지점을 필드 안 / 넓힌 HIVE AABB 밖으로 제한한다 (발사구가 HIVE에 걸친 비정상 입력에서만 작동).
+- **비행 대기열 (`FieldState.pendingShots: PendingShot[]`, 발사 순서):** `{pieceId, pieceType, robotId, result('HIT' | 'MISS_HIVE' | 'MISS_FLOOR'), targetCell(발사 시점 상향 셀), launchTick, arriveTick, contactTime, fromX/Y/Z, toX/Y/Z, heading, v0, pitch, segments: FlightSegment[], landX/Y, landingVx/Vy, bounceRestitutionRoll, bounceAngleRoll}` (4장). 발사하면 기물 상태를 `IN_FLIGHT`로 바꾸고 좌표는 발사구 지면 투영, 속도 0.
+    - 명목 구간: 발사구(`from`) → `to`(명중 = 조준점, HIVE 충돌 = 첫 접촉점, 벽 = 벽 접촉점, 바닥 = 착지점), 끝 시각 `contactTime`(발사 후 초). 충돌 후 구간 `segments`는 시간순이며 각 구간 `{kind: 'BALLISTIC' | 'ROLL', t0, t1, x, y, z, vx, vy, vz}`(발사 후 초, 구간 시작 상태). 마지막 구간 끝 = 착지점 `landX/Y`. 빈 배열이면 명목 구간 끝이 착지점(또는 명중).
+    - 도착 틱: 명중 = 발사 틱 + max(1, round(`contactTime` / dt)) (조준점 도착, 유효성 판정), 그 외 = 발사 틱 + max(1, round(최종 착지 시각 / dt)).
+    - 틱 처리 순서 5-2(HIVE 시차 낙하 다음, 3.4항)에서 도착 틱이 된 발사를 발사 순서대로 처리한다. 명중은 **도착 시점에 TIP 진행 중이 아니고 상향 셀이 발사 시점과 같을 때만** HIVE에 쌓이고 TIP 판정을 한다 (같은 틱에 두 발이 도착하면 앞 발의 TIP이 뒤 발을 무효화). 무효면 조준점에서 반사 낙하 구간을 붙이고 `MISS_HIVE`로 바꿔 착지 틱(현재 틱 이후)까지 비행을 유지한다. 그 외는 착지점 / 착지 속도로 `ON_FIELD`.
+    - 비행 중(낙하 포함) 기물은 로봇 / 기물 / FLOWER 위를 지나므로 충돌하지 않는다 (물리 / 충돌은 `ON_FIELD`만 대상). 착지 지점이 로봇이나 기물과 겹치면 다음 틱 충돌 처리로 밀려난다.
+    - 경기 종료(6000틱)까지 도착하지 못한 비행은 득점에 반영하지 않는다 (기물은 `IN_FLIGHT`로 남음).
+    - 타임라인 스냅샷은 대기열 배열 / 항목 / 구간 목록을 복제해 기록을 보호한다.
+- **렌더링:** 렌더러는 명목 구간을 출발점 → `to` 선형 보간 + 명목 포물선 높이에 끝점을 맞추는 선형 보정으로, 충돌 후 구간은 기록된 포물선 / 굴러감을 그대로 계산해 기물 크기 / 그림자 오프셋으로 그린다 (3.7항). 필요한 정보가 모두 프레임에 있으므로 스크러빙 / 분기 재생에서도 똑같이 재현된다.
+- **탄도 계산 함수 (`ballistics.ts`):** 궤적은 `Trajectory {x, y, z, heading, v0, pitch}`(발사구 위치 + 수평 방향)로 표현하고, 수평 거리 d의 높이 $z(d) = z_0 + d\tan\theta - g d^2 / (2 v_0^2 \cos^2\theta)$, 시간 $t(d) = d / (v_0\cos\theta)$로 조회한다.
+    - 발사구 / 조준: `launchHeight`(53.5 − dz), `launchPoint`(조준 방향 `shooterOffset`), `bearingTo`.
+    - 닫힌 해: `solveLaunchSpeed(D, Δz, θ)`(해가 없으면 null), `solveAimLaunchSpeed`(로봇 위치 → 조준점), `sweetSpotLaunchSpeed`(스윗스팟 → `RED_AUDIENCE` 조준점, v0 탐색 초기값 / 검증), `createAimTrajectory`.
+    - 궤적 조회: `heightAtDistance`, `timeAtDistance`, `pointAtDistance`, `descendingDistanceAtHeight`(내려오며 그 높이에 닿는 큰 근), `landingDistance` / `landingPoint`(공 중심 높이 = 반지름, 필드 경계 무시 — 벽 처리는 엔진).
+    - HIVE 교차: `intersectHiveBox(traj, pieceRadius)` → `{x, y, z, distance, time, face}` 또는 null(넘어감 / 못 미침 / 비껴감).
 
-        | 항목 | 입력 |
-        |---|---|
-        | 진영 | `RED` / `BLUE` |
-        | `HIVE` 초기 상태 | 상향 셀(`AUDIENCE` / `OPPOSITE`), 상향 셀 `POLLEN` / `NECTAR` 수 |
-        | 로봇 적재물 | R1 / R2 순서 있는 목록(FIFO, 0번이 먼저 나감), 칸별 `POLLEN` / `NECTAR` / 빈 칸 |
-        | 잔여 기물 | `FLOWER` 4개 각 `POLLEN` 수, `GARDEN` 아군 / 상대 `POLLEN` 수 |
-        | 오토 팁 | `autoTipCount` 조절기 (0 ~ 5) |
-        | 시작 자세 | R1 / R2 x, y, 헤딩 숫자 입력 + `EDIT ON FIELD`(편집 모드: 드래그 + 회전 핸들, 스냅 없음) |
-        | 시드 | 현재 경기 시드 표시(읽기 전용) + `REROLL` 버튼 (경기 전에만) |
-        | 유효 배지 | 유효 = 초록 배지. 무효 = 빨간 배지 + 오류 목록, 해당 입력칸 빨간 표시, `APPLY` 비활성 |
+#### 2.6.3 FLOWER 기물 조작과 하단 추출
 
-        - 검증 = `validateScenario()`(2.4항) + `validateRobotPlacement()`(아래). 둘 중 하나라도 오류가 있으면 적용할 수 없다.
-        - 바닥 잔여 공은 기존대로 자동 계산 + 무작위 산포 (직접 배치 GUI는 v1 이후).
-        - **09-11 확정 (사용자 결정):** ① 09-11a(시나리오 탭 폼 + 시작 자세 숫자 칸 + 시드 `REROLL` + 유효 배지) / 09-11b(시작 자세 편집 모드 `EDIT ON FIELD`)로 분할 ② 시드 `REROLL`은 초안 / 적용을 거치지 않고 바로 적용(경기 전 설정 교체 → 바닥 산포가 바로 바뀜) + 자동 보관 (새로고침해도 같은 시드). `RESET TAB`도 시드는 유지 ③ 진영을 바꾸면 직접 지정한 시작 자세는 **좌우 대칭**(x → 144 − x, 헤딩 → 180° − 헤딩 — RED R1 기본 (9, 36, 0°) ↔ BLUE B1 기본 (135, 36, 180°)이 정확히 맞음) ④ (09-11b) 시작 자세 편집 모드의 필드 = 구조물 + `GARDEN` 기물 + 두 로봇 (바닥 산포 공은 숨김 — 로봇 자리를 피해 다시 뿌려지므로 끌 때마다 공이 튀는 것 방지). `DONE`은 09-10c와 같이 SCENARIO 탭 `APPLY`까지.
-        - **구현 (09-11a):**
-            - 폼 규칙(`src/ui/scenarioForm.ts`, 순수): 초안은 엔진 `ScenarioConfig` 그대로, `readScenario`가 지정하지 않은 항목을 엔진 기본값으로 풀어 보여 주고(진영별 상향 셀 / 기본 스폰, 적재 한도만큼 `POLLEN`, `DEFAULT_RNG_SEED`) 고칠 때만 그 항목을 명시 값으로 쓴다 → 기본 시나리오 `{ allianceColor: 'RED' }`와 09-8b 이후 저장값 호환 유지. `setAlliance`(지정한 시작 자세 좌우 대칭 `mirrorPose`, 지정한 상향 셀은 반대 셀 — RED 기본 `AUDIENCE` ↔ BLUE 기본 `OPPOSITE`, 나머지는 새 진영 기본값), `setUpwardCell` / `setHivePieces` / `setFlowerCount` / `setGardenCount` / `setAutoTipCount`, 적재 칸 `nextSlotPiece`(클릭 순환 `POLLEN` → `NECTAR`(흡입 가능 로봇만) → 빈 칸) / `setLoadoutSlot`(빈 칸은 목록에서 빠져 뒤로 모임 — FIFO 목록), `setSpawnAxis`(지정 안 했으면 기본 스폰에서 시작) / `resetSpawn`(지정 해제), `newSeed`(부호 없는 32비트, 지금과 다르게) / `rerollSeed`(적용 값 + 초안 시드만), `COUNT_LIMITS` / `SPAWN_FIELD_SPECS`(좌표 0 ~ 144 in, 헤딩 −180 ~ 180°), `scenarioFormIssues`(`tabIssues`와 같은 문제에 로봇 / 빨간 칸 묶음을 붙임 — 적재물 문제는 로봇별로 다시 판정, 배치 문제는 엔진 로봇 목록, `FLOWER_COUNT`는 하나로 모아 틀린 FLOWER만), `floorSummary`(바닥 산포 / 휴먼 플레이어 재고 참고 표시).
-            - 엔진: `DEFAULT_FLOWER_PIECES` / `DEFAULT_GARDEN_PIECES` / `DEFAULT_HIVE_NECTAR` 공개만 (동작 변화 없음).
-            - 초안 규칙(`configDraft.ts`): `RESET TAB` / `canResetTab`의 되돌릴 값 = 기본값 + 지금 시나리오 시드.
-            - 화면(`ScenarioTab.tsx`): 맨 위 유효 배지(초록 / 빨강 + 문제 수, 틀린 입력 글자 포함) + 문제 목록(로봇 문제는 "R2 · …"), 진영 버튼 묶음(바꾸면 시작 자세 칸의 틀린 글자 지움), `HIVE`(상향 셀 + `POLLEN` / `NECTAR` 개수 조절기 + "NECTAR n개면 CELL이 POLLEN m개에서 TIP" 안내), 로봇 적재물(로봇별 칸 = 기물 색 원, 번호 표시, 적재 한도를 넘는 칸은 빨간 테두리), 잔여 기물(FLOWER 4개 / 아군 · 상대 GARDEN 개수 조절기 + 바닥 산포 요약), 오토 TIP 개수 조절기, 시작 자세(로봇별 카드: X / Y / 헤딩 숫자 칸 + "ALLIANCE 기본" 표시 + `DEFAULT`), 난수 시드(적용 값 표시 + `REROLL`). 검증에 걸린 묶음은 빨간 테두리. 개수는 개수 조절기(`Stepper`, `FormControls.tsx`)라 범위 밖 입력이 없고, 여러 칸이 얽힌 문제만 빨갛게 표시. 경기가 있는 동안 모두 비활성.
-            - 연결(`MainScreen.tsx`): 시나리오 초안 편집(틀린 글자 규칙은 로봇 탭과 같음), `REROLL` = `rerollSeed` → 경기 전 설정 교체(`setSetup`) → 자동 보관.
-        - **구현 (09-11b, 시작 자세 편집 모드 `EDIT ON FIELD`):**
-            - 기하(`src/renderer/spawnEditLayout.ts`, 순수): 회전 핸들 = 앞 변 가운데에서 앞으로 `HANDLE_GAP` 7 in 떨어진 원(반지름 2.2 in, 막대로 연결), `bodyContains`(헤딩으로 돌린 직사각형), `spawnHitTest`(핸들 우선 — 다른 로봇 몸체 위여도 돌릴 수 있게, 나중에 그린 R2 우선, 잡기 여유 1 in). 렌더러와 입력이 같은 계산.
-            - 규칙(`src/ui/fieldEdit.ts`): `SpawnFieldEdit`(들어올 때 진영 / 지정 자세 / 시작 자세 칸 틀린 글자 기억), `editTab`(편집 모드를 연 탭 — 시작 자세 = SCENARIO), `openSpawnEdit`, `dragSpawnPose`(몸체 = 누른 점 대비 이동량, 좌표 칸 범위 0 ~ 144 제한 / 핸들 = 중심 → 포인터 방향, 스냅 없이 표시 자리수 0.1 in · 0.1°로만 반올림 — 칸에 보이는 값 = 보관 값), `placeSpawn`(그 로봇 자세 + 그 로봇 칸 글자 지움, 겹쳐도 놓임), `cancelSpawnEdit`(시작 자세 / 칸 글자만 되돌림, 지정 안 했던 자세는 지정 해제, 모드 중 진영을 바꿨으면 들어오기 전 자세를 좌우 대칭), `cancelFieldEdit`(모드별 되돌리기 공통), `editDoneAction`(스윗스팟 / 시작 자세 공통: `APPLY` / `KEEP_DRAFT` / `CLOSE`), `spawnRobots` / `spawnEditScene`(초안 진영 / 자세 / 제원, `validateRobotPlacement`에 걸린 로봇, GARDEN 기물 = 엔진 `gardenPiecePositions` — 공개만, 동작 변화 없음). `setSpawnPose`(`scenarioForm.ts`), `scenarioIssueText`(탭 / 안내 띠 공용 문구).
-            - 장면(`editSceneRenderer.ts`, `SPAWN`): 경기 바닥(타일 / GARDEN / 로딩 존 / HIVE / FLOWER, 진영 기준 비활성 스타일) + GARDEN 기물 + 두 로봇(흡입 구역 / 진영색 몸체 / 앞 변 / 헤딩 화살표 / 번호 / 핸들). 배치 문제 로봇은 흰 사선 빗금 + 빨간 테두리 (RED 로봇에 빨간 덧칠은 보이지 않아 빗금으로), 마우스를 올린 몸체는 주황 점선, 잡은 핸들은 주황. 끄는 로봇을 위에 그림. 바닥 산포 공은 없음 (09-11 확정 ④).
-            - 화면: 시나리오 탭 시작 자세 구역에 `EDIT ON FIELD`(한국어 "필드에서 편집", 모드 중 "필드에서 편집 중" 강조 · 비활성). 안내 띠 `SpawnEditBanner`: `START POSE` + `CANCEL` / `DONE · APPLY`, 배치 문제 사유(빨강), "로봇을 끌어 옮기기 · 동그란 핸들을 끌어 돌리기" + Esc. 로봇 위 좌표 / 헤딩 글자(`SpawnPoseTag`, 문제면 빨간 테두리)는 캔버스와 같은 크기 / 위치의 글자 층(`field-overlay`, 창 크기 맞춤에서 캔버스와 함께 크기 지정)에 장면 비율(%)로 배치 — 렌더 중 DOM을 읽지 않음. 글자 가로 기준점을 위치 비율만큼 옮겨 벽에 붙은 로봇의 글자가 잘리지 않게. 커서: 몸체 위 `move`, 핸들 위 `grab`, 끄는 중 `grabbing`, 끄는 동안 터치 스크롤 없음.
-            - 입력(`MainScreen.tsx`): 누르기 = `spawnHitTest` → 포인터 캡처 + 시작 자세 / 누른 점 기억, 이동 = `dragSpawnPose` → `placeSpawn`(칸이 실시간으로 따라옴), 놓기 = 캡처 해제. `DONE · APPLY` = SCENARIO 탭 적용(적용할 수 없으면 "시작 자세는 초안에만 남김" 안내), `CANCEL` / Esc / `START` = `cancelFieldEdit`, 다른 탭 / 창 닫기 = 끌어 놓은 초안은 그대로.    - **SETTINGS 탭 (환경 및 조작):**
+- **슬롯 구조와 유효 득점 볼륨:** FLOWER는 수직 원통이다. 아래 출구 밖으로 빠져나와 바닥 타일에 닿아 있는 맨 아래 기물은 공식 룰상 득점 인정 영역 밖이다.
+    - **`slot[0]` (바닥 접촉 슬롯):**
+        - 아래 출구 밑 바닥에 닿아 있는 슬롯. **경기 종료 득점에서 완전히 빠진다 (0점).**
+        - 로봇이 하단으로 추출할 때 가장 먼저 회수되는 대상.
+        - FLOWER는 단단한 장애물(반지름 2.0 in)이라 바닥에서 공을 밀어 넣을 수 없고, 위에서 넣은 NECTAR(3.6 in)는 아래 배출구(2.8 in)를 지나지 못하므로 `slot[0]`에는 POLLEN만 올 수 있다.
+    - **`slot[1 .. N]` (원통 안 유효 득점 볼륨):** 아래 턱에 걸려 바닥으로 내려가지 못한 기물과 그 위로 차례로 쌓인 기물. 경기 종료 시 득점 대상이다.
+- **경기 종료 득점 (2 v 0 단순화):** 상대 기물이 없으므로, 경기 종료(6000틱) 시점에 `slot[1 .. N]` 안에 우리 NECTAR가 1개 이상 있으면 소유권과 하단 보너스가 모두 성립한다.
+    - **소유권:** `slot[1 .. N]` 안 기물 전체 개수 × 2점.
+    - **하단 보너스:** 5점.
+    - `slot[1 .. N]`에 NECTAR가 없으면 그 FLOWER는 0점.
+- **하단 추출(deQ)과 중력 침하:**
+    - **추출 조건:** FLOWER 원통(반지름 2.0 in)의 바닥 정사영 원이 로봇 인테이크 구역(`intakeZones`, 3.3항) 중 하나와 겹침 + `actionState === 'INTAKING'` + 적재 공간 여유(`controlledPieces.length < 적재 한도`, 적재 한도 = min(`maxControlledPieces`, 4)). 인테이크 구역이 없는 면으로는 추출할 수 없다. 여러 FLOWER가 동시에 걸리면 차체에 가장 가까운 것을 우선한다.
+    - **추출:** `slot[0]`에 POLLEN이 있고 접촉 유지 시간(`intakeContactTimer`)이 최소 추출 쿨다운에 닿으면 `slot[0]` 기물을 로봇에 적재하고 `intakeContactTimer = 0`.
+    - **연속 추출 쿨다운:** 다음 기물까지 `max(robotConfig.intakeDelay / 1000, 0.12초)`를 기다린다 (중력으로 기물이 내려오는 최소 시간).
+    - **NECTAR 하단 막힘 (잼):** `slot[0]`이 비었을 때
+        - 바로 위(`slot[1]`)가 POLLEN이면 그 기물이 `slot[0]`으로 내려오고 위 기물들도 한 칸씩 내려온다.
+        - 바로 위가 NECTAR면 NECTAR(3.6 in)가 아래 배출구(2.8 in)보다 커서 턱에 걸린다. NECTAR는 `slot[1]`에 영구 고정되고 `slot[0]`은 빈칸(`null`)으로 남으며, 이후 하단 추출은 영구히 막힌다.
+- **위에서 넣기 (Drop):**
+    - 대상: 로봇 OBB 외곽과 FLOWER 원통의 최단 거리가 1.0 in 이내인 FLOWER 중 가장 가까운 것 (v1은 투입 방향 무관, 방향 구역은 v2 후보 5.2항). 대상이 없으면 넣을 수 없다.
+    - NECTAR는 ENDGAME(남은 60초 이하)에만 넣을 수 있다.
+    - **FLOWER 용량 테이블 (`FLOWER_MAX_POLLEN_BY_NECTAR`, `FLOWER_MAX_NECTAR_CAPACITY = 6`):** 바닥(`slot[0]` 포함)부터 높이 21.5 in 원통에 최대로 채울 수 있는 조합 {POLLEN, NECTAR} = {9, 0}, {8, 1}, {6, 2}, {5, 3}, {3, 4}, {2, 5}, {1, 6}. 넣은 뒤 원통 안 전체 POLLEN 수(`slot[0]` 포함)가 그 NECTAR 수의 최대 POLLEN 이하이고 NECTAR ≤ 6이어야 한다.
+        - 산출 기준: 원통 안 지그재그 적층 + 맨 위 기물이 일부라도 원통 안에 걸치면 인정. 사용자 계산값이며 실측이 가능해지면 바꾼다 (5.2항).
+        - **`slot[0]` 불변식:** `slot[0]`에는 NECTAR가 올 수 없다 (초기 배치는 POLLEN만, 하단 추출 후 NECTAR는 `slot[1]`에 걸림, 빈 원통에 넣은 NECTAR는 `[null, NECTAR]`). 그래서 NECTAR가 있는 FLOWER의 `slot[0]`은 항상 POLLEN이거나 POLLEN으로 세는 빈칸(아래 잼 처리)이며 계산상 POLLEN ≥ 1이다. 기하 계산상의 {0, 7} 조합은 `slot[0]`이 NECTAR여야 하므로 도달할 수 없어 테이블에서 뺐다.
+        - **잼 상태 용량 (단순화):** `slot[0]`이 비고 `slot[1]`에 NECTAR가 걸린 잼 상태(하단 추출 후 잼, 또는 빈 원통에 NECTAR 투입)에서는 빈 `slot[0]`을 **POLLEN 1개로 세어** 같은 테이블을 쓴다. 출구 턱 높이가 POLLEN 직경(2.8 in)과 같아, 턱에 걸린 NECTAR는 `slot[0]` POLLEN 위에 놓인 경우와 같은 높이에서 쌓이기 시작하기 때문이다. 턱 위 받침과 공 위 받침에 따른 미세한 적층 차이는 **의도적으로 무시**한다. 이 가상 POLLEN은 용량 판정에만 쓰이고 득점(`slot[1..N]` 개수)에는 들어가지 않는다.
+    - 투입은 적재함 맨 앞 기물(FIFO, `controlledPieces.shift()`)을 FLOWER 맨 위 슬롯에 추가한다 (`pieces.push(piece)`). 투입 가능 여부 = ① 도달 거리 안 FLOWER, ② NECTAR는 ENDGAME에만, ③ 용량 테이블 (엔진 `findDropTarget`).
+- **리프트 FSM:** 리프트를 올리고(준비) → 올린 채 대기 → 투입 → 내리는 단계를 나눠, 드라이버가 리프트를 올린 뒤 투입 시점을 고르고 실수로 올린 리프트를 다시 내릴 수 있게 한다.
+    - **상태 (모두 Stationary Lock, 3.4항):** `FLOWER_SETUP`(올리는 중) → `FLOWER_READY`(올린 채 대기, 타이머 없음) ⇄ `FLOWER_DROPPING`(투입 중) → `FLOWER_LOWERING`(내리는 중) → `IDLE`.
+    - **리프트 유지 요청** = 행동 요청이 `FLOWER_SETUP` 또는 `FLOWER_DROPPING`. 그 밖의 요청(`IDLE` / `INTAKING` / `SHOOTING`)은 리프트 상태에서 "내림" 요청으로 본다.
+    - **`IDLE` / `INTAKING`에서:**
+        - `FLOWER_SETUP` 요청: 투입 가능(①②③)할 때만 받아 `FLOWER_SETUP`에 들어간다 (`stateTimer = flowerSetupDelay`, 제동 후 정지 시점부터 차감). 불가능하면 거부한다 (리프트를 올리지 않음, 상태는 `IDLE` / `INTAKING`).
+        - `FLOWER_DROPPING` 요청: **무효** (리프트가 올라가 있지 않으면 투입 불가).
+    - **`FLOWER_SETUP`(올리는 중):** 유지 요청이면 계속 올리고 타이머가 끝나면 `FLOWER_READY`. 내림 요청이면 바로 `FLOWER_LOWERING`으로 바뀌며 내리는 시간 = **지금까지 올린 시간**(`flowerSetupDelay − 남은 stateTimer`). 아직 제동 중이라 올린 시간이 0이면 곧바로 `IDLE`.
+    - **`FLOWER_READY`(대기):** `FLOWER_DROPPING` 요청 + 투입 가능 → `FLOWER_DROPPING`(`stateTimer = flowerDropDelay`). 투입이 불가능하면 요청을 무시하고 대기한다. `FLOWER_SETUP` 요청이면 대기 유지. 내림 요청이면 `FLOWER_LOWERING`(`stateTimer = flowerSetupDelay`). 적재함이 비어도 자동으로 내리지 않는다 (내림 요청까지 대기).
+    - **`FLOWER_DROPPING`(투입 중):** 진행 중에는 모든 요청을 무시한다 (내림 요청 포함). 끝나면 투입 조건을 다시 확인해 가능하면 넣고, 불가능하면 기물을 그대로 둔다. 이어서 요청이 `FLOWER_DROPPING`이고 다음 기물을 넣을 수 있으면 연속 투입(`stateTimer = flowerDropDelay`), 아니면 `FLOWER_READY`로 돌아간다 (리프트는 올린 채).
+    - **`FLOWER_LOWERING`(내리는 중):** 진행 중 모든 요청 무시, 끝나면 `IDLE`.
+    - 리프트 상태에서는 HIVE 슈팅 / 흡입 요청을 받지 않는다 (리프트를 내린 뒤 `IDLE`에서 다시 요청). 입력 계층도 리프트 상태 동안 트리거 입력을 요청에 반영하지 않는다 (3.6항).
 
-        | 구역 | 항목 | 변경 가능 시점 |
-        |---|---|---|
-        | 게임패드 | 슬롯별 패드 이름 / 배정 로봇 / 비표준 매핑 경고 / "버튼을 한 번 눌러 연결" 안내 (읽기 전용, 매핑 편집 없음) | — |
-        | 입력 | 로봇별 입력 출처(`LIVE` / `REPLAY` / `NONE`), 로봇별 조작 모드(`FIELD` / `ROBOT`), 키보드 주행 켜기 / 끄기 (기본 켬) | 경기 전 / 일시정지 |
-        | 표시 옵션 | 3.7항 5종 (조준선, 흡입 진행, 명중 확률, 비행 잔상, 비행 결과 색) | 경기 전 / 일시정지 |
-        | 화면 | 언어(English / 한국어), 길이 단위(in / cm), 기본 보기 방향(`DRIVER` / `AUDIENCE`) | 경기 전 / 일시정지 |
-        | 초기화 | `RESET ALL` | 경기 전만 |
-        | 프리셋 관리 `PRESETS` (10-1 확정) | `R1` / `R2` / `SCENARIO` / `ALL` 줄별 `EXPORT` / `IMPORT` + `MATCH` 줄 `IMPORT` (3.9항) | `EXPORT` 언제나 / `IMPORT` 경기 전만 |
+#### 2.6.4 GARDEN과 PARK (경기 종료 판정)
 
-        - **기본 입력 출처:** 경기 시작 시 R1 = 슬롯 0 패드 연결 시 `LIVE`, 아니면 `NONE` / R2 = 슬롯 1 패드 연결 **또는 키보드 켜짐**이면 `LIVE`, 아니면 `NONE` (패드 없이 키보드로 R2를 몰 수 있고, 키보드를 끄면 패드 1개일 때 R2 = `NONE`). 이후 일시정지 중 변경 가능.
-        - **설정 자동 보관 (`localStorage`):** 마지막으로 적용한 로봇 프로필 / 시나리오와 UI 환경설정(언어, 단위, 기본 보기, 표시 옵션, 키보드 토글)을 보관해 새로고침 후 복원한다. 경기 기록은 보관하지 않는다 (3.6항, 새로고침 시 경기 폐기 유지). 저장소를 쓸 수 없으면 기본값으로 시작. JSON 내보내기 / 불러오기는 Step 10 (3.9항 프리셋 · 경기 파일).
-        - **09-8b 확정 (사용자 결정):** ① 로봇별 조작 모드도 보관 (입력 출처는 보관하지 않고 앱을 켤 때마다 `AUTO`) ② 일시정지 중 입력 출처 선택지는 `LIVE` / `REPLAY` / `NONE`(시작 때 풀린 값이 선택된 상태, `REPLAY`는 그 로봇 입력 기록이 있을 때만) + 녹화 덧입히기 안내 ③ 입력 구역 아래 키보드 조작표 ④ 경기 전 `VIEW` 비활성 (시작 시점은 기본 보기 방향으로만). 기본 보기 방향의 기본값은 `DRIVER` 유지 — 새 경기도 경기 전에는 관중석, 시작하면 진영 드라이버 시점으로 회전.
-        - **구현 (09-8b):**
-            - 입력 출처 규칙 `src/app/inputPlan.ts`: `autoSource`(그 로봇에 배정된 패드 슬롯 중 연결된 것 / 켜진 키보드가 있으면 `LIVE`, 아니면 `NONE`), `resolveSource`, `sourceChoiceAllowed`(경기 전 `AUTO` / `LIVE` / `NONE`, 경기 중 `LIVE` / `NONE` / 기록 있으면 `REPLAY`).
-            - `AppController`: `setSourceChoice`(경기 전 선택 / 경기 중 선택을 따로 보관, 진행 중 거부), `setDriveMode`, `setKeyboardEnabled`, `setDefaultView`, 생성 인자 `input` / `defaultView` / `options`. `START`에서 경기 전 선택을 시작 순간의 게임패드 상태로 풀어 적용하고, `RESUME` / `BRANCH`에서 경기 중 선택 · 조작 모드 · 키보드를 입력 허브 / 어댑터에 적용(분기는 적용 후 `LIVE` 로봇 로그만 폐기 → `REPLAY` 로봇은 기록 유지 = 녹화 덧입히기). `REPLAY`인데 기록이 없으면 `NONE`. 새 경기(앱 시작 / `NEW` / 경기 전 설정 교체)마다 경기 중 보기 = 기본 보기 방향, 경기 전 `setMatchView`는 무시. 상태 `input`: 선택 / `AUTO` 예상 / 적용 중 출처 / 기록 유무 / 조작 모드(선택 · 적용 중) / 키보드(선택 · 적용 중).
-            - 입력 계층: `LiveControlCollector.setKeyboardEnabled` / `BrowserInputAdapter.setKeyboardEnabled`(런타임 토글, 끄면 눌린 키를 비우고 주행 키를 가로채지 않음, 다시 켜도 끄기 전 눌린 키는 되살아나지 않음), `isKeyboardEnabled`.
-            - 설정 `src/ui/settings.ts`: `UiSettings`(언어 / 길이 단위 / 기본 보기 / 표시 옵션 / 키보드 / 조작 모드), `DEFAULT_SETTINGS`, 저장 키 `ftc-tactic-sim/settings` + `SETTINGS_VERSION` = 1, `parseStoredConfig`(없음 · JSON 손상 · 버전 다름 → 전부 기본값, 항목별 형식 오류 → 그 항목만 기본값), 적용 값 복원은 기본 로봇과 같은 모양(숫자는 유한값) + 진영 유효 + 시나리오 · 배치 검증 통과일 때만(`sanitizeApplied`, `sameShape`), `loadStoredConfig` / `saveStoredConfig`(저장소 없음 / 오류 허용), `keyCodeLabel`.
-            - 화면: `SettingsTab.tsx` — 게임패드(슬롯 → 로봇, 패드 이름 / "버튼을 한 번 눌러 연결", 비표준 경고), 입력(로봇별 출처 버튼 묶음 + `AUTO` 옆 "지금: …", 조작 모드 필드 기준 / 로봇 기준, 키보드 토글, "다음 시작 / 재개 / 분기부터 적용" + 선택과 적용 중 값이 다르면 "적용 대기", 경기 중 녹화 덧입히기 안내, 접는 키보드 조작표), 표시 옵션 토글 5개(이름 + 한 줄 설명), 화면(언어 / 길이 단위 / 기본 보기 + 안내), 초기화(`RESET ALL`, 경기 전만). 바꾸는 즉시 컨트롤러에 반영 + 저장. `RESET ALL`은 확인창 → SETTINGS 즉시 기본값 + R1 / R2 / SCENARIO 초안만 기본값. `APPLY` 시 적용 값도 저장. 언어는 저장값(주소 `?lang` 폐기), 문서 `lang` 속성 동기화. 스크러버 줄 `VIEW`는 경기 전 비활성.
-        - **키보드 단축키 (상태별 키 공유):** 주행 키는 루프 `RUNNING`에서만, 스크러빙 단축키는 일시정지 / 복기 중에만 쓰이므로 같은 키를 겹쳐 쓴다. 키보드 주행을 꺼도 단축키는 항상 동작.
+- 경기 중에는 실시간 점수에 넣지 않는다.
+- 경기 종료 틱(6000틱)에 필드 상태를 검사해 한꺼번에 더한다.
+    - **GARDEN:** 기물을 바닥(xy 평면)에 수직 정사영한 원(기물 반지름)이 우리 GARDEN AABB와 일부라도 겹친 채 완전히 멈춰(`speed === 0`, `state === 'IN_GARDEN'`) 있으면 개당 1점. 중심점이 구역 밖이어도 걸쳐 있으면 인정하고, 경계에 접하기만 한 경우(겹침 깊이 0)는 인정하지 않는다 (`collision.ts`의 `testCircleVsAABB`).
+    - **PARK:** 우리 LOADING ZONE AABB와 차체(OBB)가 일부라도 겹친 채 멈춘 로봇당 5점 (FTC 룰상 부분 진입도 주차로 인정).
 
-            | 키 | 진행 중 (`RUNNING`) | 일시정지 / 복기 | 재생 중 |
-            |---|---|---|---|
-            | Space | 일시정지 | 보는 틱 = 마지막 기록 틱이고 경기 미종료면 `RESUME`, 그 외에는 재생 시작 (**Space는 분기하지 않음**) | 재생 멈춤 |
-            | ← / → | R2 회전 (3.6항) | ∓1틱 | 재생 멈추고 ∓1틱 |
-            | Shift + ← / → | — | ∓1초 (50틱) | 재생 멈추고 ∓1초 |
-            | 그 외 주행 키 (W / A / S / D, M, `,` `.` `/`) | R2 주행 / 행동 (3.6항) | 무시 | 무시 |
+#### 2.6.5 랭킹 포인트 (RP)
 
-            - 일시정지 중 누른 방향키가 재개 후 주행으로 새지 않는 것은 3.6항 규칙(시작 / 재개 시 입력 누적기 초기화)으로 보장된다.
-            - 텍스트 입력칸에 초점이 있으면 단축키를 무시한다. Space는 브라우저 기본 동작(스크롤 / 버튼 누름)을 막는다. 게임패드에는 일시정지 / 재개를 매핑하지 않는다.
-    - **필드 편집 모드 (경기 전 `SETUP`에서만, 관중석 시점):** config 창의 편집 버튼을 누르면 메인 필드가 그 편집 모드로 바뀐다. 필드 위쪽에 안내 띠(모드 이름, `DONE` / `CANCEL`, Esc = 취소)를 띄우고, config 창에는 같은 값의 숫자 입력칸이 함께 보인다. 한 번에 한 모드만. 편집 중 `START`를 누르면 편집을 취소하고 시작 절차로.
+- SWARM: 주차 점수 10점 / POLLINATOR 1: TIP 4회 / POLLINATOR 2: TIP 7회.
+- POLLINATOR TIP 횟수는 **오토 TIP(`autoTipCount`) + TELEOP TIP(`tipCount`) 합산**으로 판정한다.
+- 점수(`totalScore`)에는 TELEOP 구간의 TIP(회당 20점)만 들어가고 오토 TIP 점수는 들어가지 않는다.
 
-        | 모드 | 조작 | 표시 |
-        |---|---|---|
-        | 스윗스팟 (`SWEET_SPOT`) | 클릭 = 그 격자 중심으로 스윗스팟 초안 설정 | 마우스를 올린 격자 강조 + 좌표, 조준점을 향해 돌린 로봇 몸체 윤곽, 검증 실패 사유(`validateBallisticsConfig`, 2.6.2항), 기준 셀 조준점, (LUT가 있으면) 히트맵 반투명 |
-        | 시작 자세 (`SPAWN`) | 로봇 몸체 드래그 = 위치, 회전 핸들 드래그 = 헤딩 | 두 로봇 + 배치 검증 결과(겹친 로봇 빨간색 + 사유), 좌표 / 헤딩 글자 |
-        | 히트맵 (`HEATMAP`) | 기물 종류 전환 | 진영 기준 셀 LUT (명중률 색 척도, 미계산 행 회색 빗금), 필드 윤곽 / `HIVE` / 조준점 / 스윗스팟. 생성 중이면 행 묶음 도착마다 갱신 (최대 약 10 Hz, 2.6.2항 점진 히트맵) |
+## 3. 구조와 동작
 
-        - 클릭 / 드래그 좌표는 3.7항 역변환(`cssToCanvas` → `canvasToField`)을 쓴다.
-        - 구현 단계: 09-10b 공통 틀(안내 띠 / 끝나는 경우 / 컨트롤러 `setEditScene`) + `HEATMAP`, 09-10c `SWEET_SPOT`, 09-11b `SPAWN`. 세부는 로봇 제원 탭 "구현 (09-10b)" / "구현 (09-10c)", 시나리오 탭 "구현 (09-11b)".
-        - 편집 화면을 config 창 안에 따로 두지 않는 이유: 1366 × 768에서 config 창 폭(약 480u)의 캔버스는 1 in 격자가 약 2.5 px라 클릭이 불가능하고, 경기 전 메인 필드는 비어 있으며 보기도 같은 관중석 시점이다.
-    - **시작 자세 배치 검증 (`validateRobotPlacement(scenario, r1Config, r2Config) → PlacementIssue[]`):** `collision.ts`의 OBB / SAT를 재사용하는 순수 함수. 시작 자세 미지정 로봇은 진영별 기본 스폰(2.3항)으로 검사.
+### 3.1 상태와 렌더링의 분리
 
-        | 코드 | 조건 |
-        |---|---|
-        | `PLACEMENT_OUT_OF_FIELD` | 로봇 OBB가 필드 [0, 144]² 밖으로 나감 |
-        | `PLACEMENT_IN_HIVE` | OBB가 `HIVE` AABB와 겹침 |
-        | `PLACEMENT_IN_FLOWER` | OBB가 `FLOWER` 원(반지름 2 in)과 겹침 |
-        | `PLACEMENT_ROBOT_OVERLAP` | R1 / R2 OBB끼리 겹침 |
-        | `PLACEMENT_PIECE_OVERLAP` | OBB가 시나리오로 결정되는 고정 배치 기물(`GARDEN` 기물)과 겹침 |
+React는 화면 UI(컨트롤, 스크러버, 스코어보드)만 맡는다. 50 Hz 시뮬레이션 루프와 캔버스 2D 렌더링은 React 밖의 순수 TypeScript로 동작한다.
 
-        - **닿음은 허용, 파고듦만 오류** (침투 깊이 > 1e-6 in). 기본 스폰은 벽에 붙어 있으므로 통과해야 한다.
-        - 바닥 무작위 산포 기물과 오토 팁 `NECTAR` 로딩 존 슬롯은 이미 로봇을 피해 배치되므로 검사 대상이 아니다.
-        - **`reset()` 사전 보정 (엔진 안전장치):** GUI를 거치지 않은 겹친 시작 자세에 대비해, 0번 프레임 기록 전에 로봇 – 환경 / 로봇 – 로봇 겹침을 기존 충돌 보정으로 해소한다 (시간 진행 없음, 결정론 유지). `validateScenario`의 "잘라서 수용"과 같은 역할. 반복 횟수 / 순서는 구현 하위 Step에서 정한다.
-        - **구현 (09-5, `simulationEngine.ts`):**
-            - `validateRobotPlacement(scenario, r1Config, r2Config) → PlacementIssue[]`(`{ code, robots, message }`, `robots` = 문제 로봇 id, 로봇끼리 겹침은 두 로봇), `PLACEMENT_TOLERANCE = 1e-6`. 필드 경계 = `testOBBvsFieldBounds`, HIVE = `testOBBvsAABB`, FLOWER = `testOBBvsCircle`(메시지에 FLOWER 번호), 로봇끼리 = `testOBBvsOBB`, GARDEN 기물 = `testOBBvsCircle`. 시작 자세는 엔진과 같은 `resolveSpawnPose`(비유한값 → 기본 스폰), 로봇별 크기 사용.
-            - GARDEN 기물 좌표는 `reset()`과 검증이 같은 함수(`gardenPiecePositions`)를 쓴다 (시나리오 아군 / 상대 수량, 0 ~ 8 제한).
-            - 사전 보정은 **로봇 생성 직후 · 기물 배치 전**에 한다 → 바닥 산포가 보정된 로봇 자리를 피한다. 로봇 – 환경 / 로봇 – 로봇 겹침(검증과 같은 판정, 기물 제외)이 있는 동안 틱마다 쓰는 로봇 충돌 해결(`resolveRobotCollisions`)을 최대 50회 반복한다 (한 로봇이 장애물에 막히면 로봇끼리 겹침이 반복마다 절반씩 줄어들므로 최대 겹침 18 in도 허용 오차 안으로 수렴). 겹침이 없으면 아무것도 바꾸지 않으므로 기존 시나리오의 프레임은 비트 단위로 그대로다 (이전 커밋 엔진과 비교 확인).
-            - GARDEN 기물과의 겹침은 사전 보정 대상이 아니다 (로봇은 그대로, 다음 틱 기물 충돌 처리에서 기물이 밀림 — 6.4항 1프레임 겹침과 같은 성격). GUI는 검증으로 막는다.
-    - **경기 종료와 결과 팝업:** 6000틱 도달 → 루프 정지 → **5초 동안 필드 경기 종료 강조만**(3.7항) → 뒷배경 블러 + **큰 결과 팝업**. 클릭 / Space로 5초 대기를 건너뛸 수 있다.
-        - **종료 연출 (09-7c, 사용자 확정 — 소리 없이 화면만):** 종료 순간을 알아채기 어렵다는 사용자 피드백으로 추가. 모두 캔버스 밖 HTML 층(엔진 / 렌더러 불변).
-            - E. 마지막 10초 예고: 경기가 시작된 뒤 남은 10초 이하(`FINAL_COUNTDOWN_SEC`, 소수 1자리 표시 구간과 같음)면 타이머 빨강, 진행 중에는 초가 바뀔 때마다 0.42초 맥박(1.12배 → 1배).
-            - A. 종료 순간 흰빛: 6000틱 도달 순간 필드 영역에 흰빛 0.35초.
-            - C. 종료 배너: 종료 강조 5초 동안 필드 위쪽 중앙 `MATCH COMPLETE` / "경기 종료"(주황, 튀어나오듯 등장) + 5초 동안 줄어드는 진행바 + "클릭 / Space로 결과 바로 보기". 배너는 클릭을 필드로 통과시켜 필드 클릭 건너뛰기가 그대로 동작.
-            - D. 점수 집계: 좌측 점수 상자가 종료 직전 점수(텔레옵 TIP × 20)에서 최종 점수로 1.5초 카운트업(easeOutCubic, 정수) + 종료 시 더해진 항목 칩(`+4 GARDEN` 등, 0점 제외, FLOWER → GARDEN → PARK, 0.35초 간격). 칩은 캔버스가 아니라 좌측 패널 (캔버스 점수 알약 삭제 결정 유지).
-            - 트리거: 컨트롤러 상태 `endSeq`(이 경기에서 실제로 6000틱에 도달한 횟수 — 분기 후 재종료마다 +1, 재생 / 스크러빙으로 종료 틱을 보는 것은 불변, `NEW`에서 0). 연출 요소는 `endStage = HIGHLIGHT` 동안만 그리며 `endSeq`를 key로 새로 마운트해 매 종료마다 처음부터 재생. `prefers-reduced-motion`이면 움직임 없이 최종 상태만.
-            - 구현: `EndOverlay.tsx`(흰빛 / 배너 / 진행바, `--end-ms` = `END_HIGHLIGHT_MS`), `LeftPanel.tsx`(`timer-pulse`, `ScoreTally`), 순수 규칙 `mainScreenModel.ts`(`timerIsFinalCountdown`, `endScoreTally`, `tallyValue`, `END_TALLY_MS`, `END_CHIP_STAGGER_MS`), 문구 `end.banner` / `end.skipHint`.
-        - 팝업 구성(사용자 제공 시안 기준, 세부는 해당 하위 Step에서 사용자와 확정): 헤더(`FTC TacticSim` / `TELEOP MATCH COMPLETED` / 진영), 로봇(팀 번호 + 이름), 총점, 항목별 득점(`HIVE` / `FLOWER` / `GARDEN` / `PARK`, `scoreBreakdown`만 읽음, 3.2항), `RP` 카드(`SWARM` / `POLLINATOR 1` / `POLLINATOR 2`, 팁 횟수는 오토 포함), 동작 `REVIEW`(팝업 닫고 복기) / `RESTART`(= `NEW`). 로그 / JSON 내보내기는 Step 10. **(10-1 확정)** `EXPORT MATCH`(경기 레시피 `.json`) / `EXPORT SUMMARY`(요약 `.txt`) 버튼 추가, 가지가 2개 이상이면 헤더 가지 이름 + `BRANCHES` 비교 줄 (3.9항).
-        - **09-12 확정 (사용자 결정, 시안 없이 09-7a 기본형 기반):** ① 항목별 점수 + 한 줄 근거 — `HIVE` "TELEOP TIP n × 20"(오토 TIP이 있으면 "오토 TIP n회는 RP에만"), `FLOWER` 소유한 FLOWER별 "FLOWER k: 기물 × 2 (+ 하단 보너스 5)"(없으면 "소유한 FLOWER 없음"), `GARDEN` "POLLEN n × 1", `PARK` "R1 · R2 주차 × 5"(없으면 "주차한 로봇 없음") ② RP 카드 = 이름 + 조건과 지금 값 (`SWARM` "PARK 5 / 10", `POLLINATOR 1` "TIP 5 / 4", `POLLINATOR 2` "TIP 5 / 7", TIP은 오토 포함), 달성은 초록 체크 ③ 헤더 아래 두 로봇 칩 — 진영색 `R1` / `R2` 표시 + 팀 번호(`#번호`, 있을 때) + 팀명 (좌측 패널과 같은 규칙).
-        - **구현 (09-12):** 표시 규칙 `src/ui/resultModel.ts`(`resultRows` / `rpCards`, 순수), `MatchResult`에 `autoTips` / `teleopTips` 추가(`appController.ts`), `ResultPopup.tsx`(로봇 칩 / 근거 줄 / RP 진행, 팝업 폭 460u), 팀 = 적용한 로봇 프로필. 헤더의 "TIP n" 한 줄은 RP 카드 진행으로 옮겨 삭제(`result.tips` 문구 삭제). 개발 하네스(`src/dev/`, `App.tsx`의 `?harness`, 하네스 전용 `App.css`)와 1회성 스크립트 `src/tmp_shots.ts` 삭제 — 앱 진입점은 메인 화면만.
-    - **LUT 생성 흐름 연결 (2.6.2항 보완):** 생성 시작 = 로봇 탭 `APPLY`에서 LUT 무효화 조건이 바뀌었을 때 + 앱 시작 시 기본 프리셋 / 자동 보관 설정 (캐시 적중이면 즉시 `READY`). 진행 표시 위치 = 접힌 config 띠의 로봇 아이콘 진행률 링 + 로봇 탭(진행 막대, 남은 시간, v0 / 스윗스팟 명중률) + 히트맵 편집 모드. `START` 비활성 사유는 config 창 / 아이콘으로 안내.
-9. **분기 타임라인 및 경기 저장 / 공유 (Step 10, 10-1 확정):** 분기해도 이전 기록을 가지로 보존하고, 끝난 경기를 파일(레시피)로 내보내 같은 결과를 다시 불러오며, 로봇 / 시나리오 설정을 프리셋 파일로 주고받는다. 모두 React 밖 순수 TS(직렬화 / 검증 / 트리 규칙)를 먼저 만들고 화면은 그 위에 얹는다.
-    - **범위 (10-1 확정):** v1 저장 위치는 **파일 다운로드 / 파일 선택 불러오기만** (브라우저 안 경기 목록 / 프리셋 목록 없음, `localStorage` 자동 보관은 기존 그대로). 경기 자동 저장 / 복구, 복기 중 동선 표시는 Step 10 밖(6.4항). 파일에는 UI 환경설정(언어 / 단위 / 기본 보기 / 표시 옵션 / 키보드 토글 / 조작 모드)을 넣지 않는다 (받는 사람의 환경을 따름).
-    - **적용 입력 기록 (10-1 확정, 3.6항 입력 로그 보완):**
-        - 문제: 기존 입력 로그(녹화 로그)는 `LIVE` 로봇만 기록하고 `REPLAY`의 재료로 쓰인다. 녹화 덧입히기 중 `REPLAY` 로봇을 일시정지에서 `NONE`으로 바꿔 재개하면 로그 뒷부분은 남은 채 엔진에는 중립 입력이 들어가므로, 녹화 로그만으로는 그 경기를 재현할 수 없다.
-        - 결정: 입력 허브 `MatchInputs`에 로봇별 **적용 입력 기록**(`applied`, `InputLogChannel`과 같은 틱당 4 B 형식)을 추가한다. 틱마다 엔진 `step`에 실제로 들어간 입력의 부호화 값을 출처와 무관하게 기록한다 (`LIVE` = 방금 기록한 값, `REPLAY` = 읽은 값(기록 끝을 넘으면 중립), `NONE` = 중립 `[0, 0, 0, IDLE]`). 길이 = 그 가지의 머리 틱.
-        - 녹화 로그(`logs`)의 규칙(`LIVE`만 기록, 분기 시 `LIVE`만 자름, `REPLAY` 재료)은 바꾸지 않는다. 적용 입력 기록은 재현 / 저장 전용이며 `REPLAY`의 재료가 아니다.
-        - 레시피 재현은 적용 입력 기록만 재생한다 (두 로봇 모두 "기록 그대로" 공급, 출처 개념 없음). 조작 모드는 부호화 전에 이미 필드 좌표로 변환되므로 저장하지 않는다 (3.6항, 10-1 확인).
-        - 메모리: 로봇별 `Int8Array(6000 × 4)` = 24 KB, 가지마다 녹화 로그 2 + 적용 기록 2 = 96 KB (프레임 대비 무시 가능).
-    - **버전 상수 (10-3에서 추가):**
-        - `ENGINE_VERSION` (`simulationEngine.ts`, 1부터): 같은 시나리오 / 시드 / 입력에 대해 프레임 결과가 달라지는 커밋마다 +1 (엔진 규칙, 충돌 / 동역학 상수, 시나리오 초기화, 난수 사용 순서, 프레임 형식). 누락 방지: 고정 입력 경기의 체크포인트 체크섬을 회귀 테스트 기대값으로 박아 두고, 값이 바뀌면 테스트가 실패하므로 그 커밋에서 버전을 올리고 기대값을 갱신한다.
-        - `RECIPE_VERSION` (레시피 파일 구조, 1부터), `PRESET_VERSION` (프리셋 파일 구조, 1부터). 탄도 쪽은 기존 `BALLISTICS_MODEL_VERSION`(2.6.2항)을 그대로 쓴다.
-    - **상태 체크섬:**
-        - `frameChecksum(frame)` = `JSON.stringify(frame)`의 UTF-16 코드 단위에 대한 **FNV-1a 32비트** 해시, 8자리 소문자 16진수. JS 숫자 → 문자열은 왕복 정확(최단 표기)이라 부동소수 비트 차이를 잡고, 키 순서는 엔진의 프레임 복제 순서로 고정된다. 목적은 위변조 방지가 아니라 **불일치 검출**(다른 브라우저 / 다른 엔진 버전, 6.4항 교차 브라우저 결정론).
-        - 체크포인트: 0, 50, 100, …, 6000틱(1초 간격, 121개). 불러온 경기를 재계산해 비교하고, 처음 어긋난 체크포인트로 "어디서부터 달라졌는지"(직전 일치 체크포인트 ~ 첫 불일치 체크포인트)를 알려 준다.
-    - **저장 레시피 (경기 파일, `.json`, 약 수 KB ~ 최대 약 100 KB):**
+### 3.2 50 Hz 고정 틱과 타임라인
 
-        ```
-        {
-          "format": "ftc-tactic-sim/match",
-          "recipeVersion": 1,
-          "engineVersion": 1,
-          "ballisticsModelVersion": 1,
-          "createdAt": "2026-09-30T14:32:05+09:00",
-          "setup": { "robot1": RobotProfile, "robot2": RobotProfile, "scenario": ScenarioConfig },
-          "lut": { "seed": 12194135, "samples": 2000, "searchSamples": 20000 },
-          "inputs": { "ticks": 6000, "robot1": "<Base64>", "robot2": "<Base64>" },
-          "checksums": { "interval": 50, "values": ["1a2b3c4d", ...] },
-          "branch": { "name": "Branch 3" },
-          "result": { "totalScore": 87, "rp": { "swarm": false, "pollinator1": true, "pollinator2": false } }
-        }
-        ```
+- `dt = 0.02` 고정 연산. 매 틱 스냅샷을 `TimelineFrame`으로 배열에 저장한다.
+- **기록 보호:** 엔진은 타임라인을 `timeline` getter / `getFrame()` / `step()` 반환값으로 **읽기 전용(`DeepReadonly<TimelineFrame>`)**으로만 공개해 UI가 기록을 고치지 못하게 한다. `reset()`이나 가지 전환(3.9항) 때 타임라인 배열이 통째로 바뀌므로, UI는 배열 참조를 보관하지 말고 매번 `engine.timeline` / `getFrame()`으로 읽는다.
+- **실시간 확정 득점과 경기 종료 득점의 분리:**
+    - 경기 중(0 ~ 5999틱) `TimelineFrame.totalScore`에는 공식 룰상 바로 확정되는 **HIVE TIP 점수(회당 20점)**만 반영한다.
+    - 확정되지 않은 요소(FLOWER 소유권 / 보너스, GARDEN, PARK)의 예측치는 타임라인 점수에 섞지 않는다.
+    - 경기 종료 틱(6000틱)에 HIVE + FLOWER + GARDEN + PARK 점수를 한꺼번에 더해 최종 점수를 기록한다.
+    - **득점 내역:** 종료 프레임에는 항목별 점수와 인정 근거(득점 FLOWER, 인정 GARDEN 기물 id, 주차 로봇)를 `TimelineFrame.scoreBreakdown`에 함께 기록하고, 그 외 프레임은 `null`이다. 항목 합 = `totalScore`. 렌더러의 경기 종료 강조(3.7항)와 결과 팝업(3.8항)은 이 기록만 읽고 득점 규칙을 다시 계산하지 않는다 (규칙의 단일 출처 = 엔진).
 
-        - `setup`: 경기에 쓴 **적용된 값** 그대로 — 로봇 프로필(팀 번호 / 팀명 / 제원 / 탄도 설정 = 스윗스팟 · 발사구 · 발사각 · 편차, 3.8항 `RobotProfile`)과 시나리오. 시나리오 `rngSeed`가 비어 있으면 엔진 기본 시드를 채워 넣어 파일만으로 완결되게 한다.
-        - `lut`: LUT 기준 시드 / 격자당 샘플 수 / v0 탐색 샘플 수 (현재 앱 상수 `DEFAULT_BALLISTICS_SEED` / `DEFAULT_LUT_SAMPLES` / `DEFAULT_V0_SEARCH_SAMPLES`). LUT 자체는 저장하지 않는다 (2.6.2항 "저장 레시피와의 관계": 불러올 때 캐시 적중이면 즉시, 아니면 생성).
-        - `inputs`: 로봇별 적용 입력 기록 0 ~ 5999틱을 **연속 중복 압축(RLE)** 후 Base64. 한 묶음 = `[반복 틱 수 uint16 LE (1 ~ 6000)][qx][qy][qω][action]` 6 B, 묶음들의 반복 틱 수 합 = 6000. 최악(매 틱 다름) 로봇당 36 KB → Base64 48 KB.
-        - `checksums`: 위 체크포인트 121개.
-        - `branch` / `result`: 사람이 파일을 알아보기 위한 정보. 불러오기 판정에는 쓰지 않는다 (가지 이름은 불러온 경기의 원본 가지 이름으로만 쓴다).
-        - **v1 저장 대상 = 경기 종료(6000틱)에 도달한 현재 가지 하나** (결과 팝업에서 내보냄). 미종료 가지 / 트리 전체 저장은 하지 않는다. 가지의 조상 구간 입력을 이어 붙인 0 ~ 5999틱 전체가 한 파일이다.
-        - **구현 (10-3):**
-            - 적용 입력 기록 (`src/input/inputLog.ts`): `MatchInputs.applied`(로봇별 `InputLogChannel`), `resolve` / `step`이 틱마다 기록 — `LIVE` = 방금 기록한 값, `REPLAY` = 읽은 녹화 로그 값, `NONE` / 녹화 끝 너머 = `NEUTRAL_RECORD` `[0, 0, 0, 0]`. 녹화 로그 재생 공급 함수(`createReplayProvider`)는 기록하지 않는다. 되감은 틱에서 진행하면 채널 규칙대로 그 뒤가 폐기되고, 컨트롤러 `branch()`도 두 로봇 모두 명시적으로 자른다. 기록 재생 공급 함수 `createInputRecordProvider(records)`(출처 없이 기록 그대로 복호화, 기록 끝 너머 = 중립).
-            - 엔진 버전 `ENGINE_VERSION = 1` (`simulationEngine.ts`) + 올림 누락 방지 테스트 `src/core/__tests__/engineVersion.test.ts`(자체 제원 · 시나리오 · 시드 · 틱 함수 입력으로 흡입 / 발사 / HIVE 팁 3회 / 리프트 전 단계 / GARDEN 득점이 나오는 경기, 기대값 = 버전 + 종료 체크섬 + 체크포인트 121개를 이은 해시).
-            - 체크섬 `src/core/checksum.ts`: `fnv1a32` / `frameChecksum` / `timelineCheckpoints`(기록된 체크포인트까지) / `compareCheckpoints`(처음 어긋난 번호 + 직전 일치 틱 · 첫 불일치 틱, 개수가 다르면 짧은 쪽 끝 다음에서 어긋남).
-            - 레시피 `src/app/matchRecipe.ts`: `RECIPE_VERSION = 1`, `CURRENT_LUT_SETTINGS`(LUT 관리자 기본값), `encodeInputRecord` / `decodeInputRecord`(RLE + Base64, 묶음 반복 수 1 ~ 65535, 해독 거부: Base64 / 묶음 길이 / 반복 0 / 합 ≠ 6000 / q = −128 / 행동 코드 밖), `appliedInputRecords(inputs)`, `buildMatchRecipe`(종료 전 / 입력 부족이면 `RangeError`, 시드 채움, 결과 = 종료 프레임 점수 · RP) / `serializeMatchRecipe`(로봇 데이터는 프리셋과 같은 형식, 슬롯 id 없음) / `isoLocal`, `parseMatchRecipe(text, defaults)` → 레시피 + 경고 또는 거부 코드, `recipeWarnings`, `verifyRecipe`.
-            - 거부 코드: `NOT_JSON` / `PRESET_FILE`(프리셋 파일을 넣음) / `NOT_RECIPE` / `RECIPE_VERSION` / `INVALID_FIELD`(`field` = `engineVersion` · `ballisticsModelVersion` · `setup.robot1` · `setup.robot2` · `setup.scenario` · `lut`) / `INVALID_INPUTS`(`ticks` · `robot1` · `robot2`) / `INVALID_CHECKSUMS` / `INVALID_SETUP`(`issues` = 탭 검증 문제 코드). 로봇 / 시나리오의 엄격 해석 = 프리셋 정리 함수가 아무것도 바꾸지 않아야 통과 (없는 항목 · 형식 틀림 · 틀린 팀 글자는 모두 값이 달라져 거부). 시나리오는 진영 + 시드 필수. 파일의 모르는 항목은 무시하고, 알아보기 정보(`createdAt` / `branch` / `result`)는 틀려도 빈 값으로 받는다.
-    - **경기 불러오기 (`IMPORT MATCH`, SETTINGS 탭 `PRESETS` 구역, 경기 전(`SETUP`)에만):**
-        - ① 파일 선택 → 해석 / 검증. **거부**(해당 줄 아래 빨간 글자로 사유, 아무것도 바꾸지 않음): JSON 아님 / `format` 다름 / `recipeVersion` 다름 / 필수 항목 누락 · 형식 틀림 / 설정 검증 실패(로봇 폼 규칙, `validateScenario`, `validateRobotPlacement`) / 입력 해독 실패(Base64 · RLE 오류, 합 ≠ 6000, `action` 0 ~ 4 밖) / 체크포인트 수 ≠ 121. 재현이 목적이므로 프리셋과 달리 **없는 항목을 기본값으로 채우지 않는다**.
-        - ② 확인창: "R1 / R2 / SCENARIO 설정을 파일 값으로 바꾸고 경기를 불러올까요?" + 해당될 때만 경고 줄 — 엔진 버전 다름 / 탄도 모델 버전 다름("재생성한 확률표로 결과가 달라질 수 있음", 2.6.2항) / `lut` 값이 현재 앱 상수와 다름. 경고가 있어도 진행 가능 (현재 앱의 엔진 / 탄도 모델 / LUT 상수로 재계산하고 결과 차이는 체크섬으로 드러남).
-        - ③ 확인 → R1 / R2 / SCENARIO의 **적용 값과 초안을 파일 값으로** 바꾸고(적용 안 된 수정은 버려짐, 자동 보관 갱신) LUT를 준비한다 (기존 생성 흐름 / 진행 표시). 준비 중에는 `PRESETS` 구역에 "경기 불러오는 중 · LUT 63%" + `CANCEL`(불러오기만 취소, 바뀐 설정은 그대로 경기 전 화면).
-        - ④ LUT `READY` → 적용 입력 기록으로 전체 재계산(`runFullMatch`, 약 1.5초 — 10-1 측정) → 체크포인트 비교 → 경기 화면: 불러온 경기가 새 트리의 원본 가지(이름 = 파일 `branch.name`)가 되고, 기본 보기 방향으로 회전 후 **복기 상태**(보는 틱 0, 루프 `ENDED`, `RESUME` 없음). 종료 연출 / 결과 팝업은 띄우지 않고(`endSeq` = 0) `RESULT`로 연다.
-        - ⑤ 두 로봇의 입력 출처는 `REPLAY`(녹화 로그 = 불러온 적용 입력 기록)로 두어, 되감아 `BRANCH`하면 녹화 덧입히기로 이어 조종할 수 있다 (일시정지 중 출처 변경 규칙은 3.8항 그대로).
-        - ⑥ 체크섬 불일치 → 필드 위 경고 배너(자동 일시정지 배너와 같은 모양, 닫기 가능): "파일 기록과 결과가 다릅니다 · {M:SS} ~ {M:SS} 사이부터" (+ 버전이 달랐으면 그 사유). 경기는 그대로 복기 / 분기 가능.
-    - **경기 내보내기 (결과 팝업, 10-1 확정 — 레시피와 요약을 모두 제공, 버튼 분리):**
-        - 결과 팝업 동작 줄 = `REVIEW` / `RESTART` + **`EXPORT MATCH`**(레시피 `.json`, lucide `Download`) / **`EXPORT SUMMARY`**(요약 `.txt`, lucide `FileText`). 한국어 "경기 내보내기" / "요약 내보내기". 불러오기는 `IMPORT MATCH` / "경기 불러오기". 프리셋 구역도 같은 동사(`EXPORT` / `IMPORT`, "내보내기" / "불러오기")로 통일한다.
-        - 대상 = 결과 팝업이 보여 주는 현재 가지. 내보내기는 기록을 바꾸지 않고 팝업을 닫지 않는다.
-        - **요약 텍스트** (UTF-8, 줄바꿈 `\n`, 현재 화면 언어, 결과 팝업과 같은 순수 규칙 `resultRows` / `rpCards` 재사용):
+### 3.3 충돌과 기물 동역학 (`src/core/collision.ts`)
 
-          ```
-          FTC TacticSim · TELEOP MATCH COMPLETED
-          2026-09-30 14:32 · RED · Branch 3
-          R1 #12345 Bumblebots · R2 Hive Mind
-          TOTAL SCORE 38
-          HIVE    20  TELEOP TIP 1 × 20 · auto TIP 5 counts for RP only
-          FLOWER   9  FLOWER 2: 2 × 2 + bottom bonus 5
-          GARDEN   4  POLLEN 4 × 1
-          PARK     5  R1 parked × 5
-          RP  SWARM PARK 5 / 10 · POLLINATOR 1 ✓ TIP 5 / 4 · POLLINATOR 2 TIP 5 / 7
-          SEED 12194135 · ENGINE v1 · BALLISTICS v1
-          ```
+- **로봇-환경 충돌:** 벽, HIVE AABB, FLOWER 원 4개에 대해 SAT 침투 보정(MTV). 벽을 파고드는 법선 속도는 0으로 막고 접선 속도는 보존해 미끄러지게 한다.
+- **로봇-로봇 충돌 (비탄성 슬라이딩):**
+    - 법선 부호: `mtvNormal`은 `testOBBvsOBB(r1, r2)`가 반환하는 단위 법선으로 r1을 r2 밖으로 밀어내는 방향(r2 → r1)이다. `MTV = mtvNormal * depth`.
+    - 위치 보정: `r1`은 `+0.5 * MTV`, `r2`는 `-0.5 * MTV`만큼 움직여 절반씩 떨어진다.
+    - 법선 상대 속도 상쇄: `vRel = v1 - v2`, `vn = dot(vRel, mtvNormal)`이 음수(접근 중)이면 `r1.v -= 0.5 * vn * mtvNormal`, `r2.v += 0.5 * vn * mtvNormal`. 접선 속도는 그대로 두어 차체를 비비며 주행할 수 있다.
+- **인테이크 구역 (`RobotConfig.intakeZones: BumperZone[]`):**
+    - **구역 정의 (`BumperZone`):** 로봇 범퍼 변 하나에 붙는 로봇 기준 직사각형. 개수 제한 없음(한 변에 여러 조각 가능, 겹침 허용), 빈 배열이면 흡입할 수 없는 로봇.
+        - `side`: 붙는 변 (`FRONT` / `BACK` / `LEFT` / `RIGHT`, 로봇 기준).
+        - `offset`: 구역 중심의 변 중점 기준 이동 거리(in). 중심은 항상 변 위에 있고 `|offset| ≤ 변 길이 / 2`. **부호:** `FRONT` / `BACK` 변은 **로봇 오른쪽**이 +, `LEFT` / `RIGHT` 변은 **로봇 앞쪽**이 +.
+        - `width`: 변과 평행한 길이(in, > 0). 변보다 길어도 된다(모서리 밖 돌출 허용).
+        - `depth`: 변에서 차체 바깥으로 뻗는 깊이(in, > 0).
+        - 엔진은 로봇의 현재 위치 / 헤딩으로 각 구역을 필드 좌표 OBB로 바꿔(`getBumperZoneOBB`) 판정한다. 로봇 OBB 축은 `axes[0]` = 로봇 앞쪽, `axes[1]` = 로봇 오른쪽 (캔버스 y-down).
+    - **판정 (바닥 정사영):** GARDEN 판정(2.6.4항)처럼, 기물을 바닥에 수직 정사영한 원(기물 반지름 포함)이 인테이크 구역 중 하나와 일부라도 겹치면 유효하다. 공 중심이 구역 밖이어도 걸치면 인정하고, 경계에 접하기만 한 경우(겹침 깊이 0)는 인정하지 않는다. FLOWER 하단 추출도 FLOWER 원통 정사영 원과 인테이크 구역의 겹침으로 판정한다.
+    - **프리셋 (`createIntakeZonePreset`):** `FRONT` / `ANY`는 별도 타입이 아니라 `BumperZone[]`을 만드는 편의 함수이며, 기본 depth는 1.0 in.
+        - `FRONT`: `FRONT` 변 전체 폭(`width` = 로봇 너비) 구역 1개.
+        - `ANY`: 4면 구역 4개, 각 `width` = 그 변 길이 + 2 × depth. 네 귀퉁이까지 덮어 차체를 사방으로 depth만큼 넓힌 영역과 같다.
+        - 설정에는 숫자 배열만 저장되므로, 프리셋을 만든 뒤 로봇 크기가 바뀌면 프리셋을 다시 만들어야 한다.
+    - **흡착 (Kinematic Pusher 트랩):** `INTAKING` 중 유효 구역에 걸친 공은 반발 계수를 0으로 줄여 범퍼 면에 안정적으로 머물게 한다.
+    - **흡입 조건:** 구역 접촉 유지 시간(`intakeContactTimer`)이 `intakeDelay` 이상이고 적재 공간(`controlledPieces.length < 적재 한도`)이 있으면 `CONTROLLED`로 바꿔 적재함 맨 뒤에 넣는다 (FIFO).
+- **공 vs 정적 장애물:**
+    - 위치 보정: 장애물이 고정이므로 공에만 MTV를 100% 적용한다.
+    - 속도 반사: 파고드는 법선 속도 `vn = dot(v_ball, normal) < 0`이면 `v_ball -= (1 + e) * vn * normal` (e = 기물별 반발 계수).
+- **공 vs 로봇 (Kinematic Pusher):**
+    - 로봇은 무한 질량으로 보고 감속하지 않는다. 공에만 MTV를 100% 적용한다.
+    - 접촉점 유효 속도(회전 포함): 오프셋 `dx = ball.x - robot.x`, `dy = ball.y - robot.y`에 대해 `vEff.x = robot.vx - robot.omega * dy`, `vEff.y = robot.vy + robot.omega * dx`.
+    - 충격량: `mtvNormal`은 로봇 → 공 방향. `vRel = v_ball - vEff`, `vn = dot(vRel, mtvNormal) < 0`이면 `v_ball -= (1 + e) * vn * mtvNormal` (달리는 로봇 범퍼에 맞은 공이 앞으로 튕겨 굴러감).
+- **끼인 공 역보정 (`resolvePinnedPieces`):**
+    - 문제: 로봇은 공을 그대로 밀지만, 공이 벽 / HIVE / FLOWER / 다른 로봇에 막혀 더 밀려날 곳이 없으면 공-벽 보정이 마지막에 공을 되돌려 공이 로봇 몸체 안에 묻힌다 (특히 로봇 면이 벽과 평행할 때).
+    - 해결: 공 충돌 완화 뒤에도 로봇과 겹친(깊이 > 0.01 in) 공을 로봇 입장의 장애물로 보고 로봇을 MTV만큼 되밀며, 공 쪽으로 파고드는 법선 속도만 0으로 막는다. 접선 속도는 보존되므로 공을 누른 채 옆으로 미끄러질 수 있고 공은 모서리를 돌아 빠져나간다. 되밀린 로봇은 환경 충돌을 다시 보정한다.
+    - 공이 로봇 하나에만 닿은 경우(정적 장애물과의 끼임): 그 로봇이 겹침을 전부 양보해 공에 막혀 멈춘다.
+    - 공이 두 로봇 사이에 끼인 경우: 가장 깊이 겹친 로봇이 절반 양보를 시도하고, 양보하지 못한 만큼(벽에 막힘 등)은 공이 다른 로봇 쪽으로 밀려나 그 로봇이 양보한다. 마주 오는 두 로봇은 대칭으로 멈추고, 벽에 붙은 로봇 쪽으로 공을 밀어 넣으면 밀고 들어온 로봇이 멈춘다.
+    - 인테이크 면으로 끼운 경우도 똑같이 멈추며, 공이 구역에 닿아 있으므로 `intakeDelay` 뒤에 흡입된다.
+- **공 vs 공 (원 vs 원 PBD):**
+    - 중심 거리 `d < rA + rB`이면 겹침 깊이 `depth = rA + rB − d`.
+    - 질량비로 나눠 밀어낸다: `pieceA`는 `−depth × massB / (massA + massB) × normal`, `pieceB`는 `+depth × massA / (massA + massB) × normal`.
 
-        - **구현 (10-4):**
-            - 컨트롤러 (`appController.ts`): `loadMatch(setup, records, branchName)` — 경기 전에만, 새 엔진 + `MatchInputs.loadRecords`(녹화 로그 · 적용 입력 기록 모두) + 기록 재생 공급 함수로 `runFullMatch`, 두 로봇 출처 `REPLAY`, 기본 보기로 회전 → 회전 뒤 루프 `start()`가 곧바로 `ENDED` → 종료 연출 없이 `REVIEW`(보는 틱 0, `endSeq` 불변). 반환 = 재계산 타임라인. `recipeSource()` = 적용 입력 기록이 6000틱 모두 있으면(= 종료 도달) 입력 + 타임라인 + 가지 이름. 상태에 `branchName`(불러온 파일의 가지 이름, 새 경기 = `null`).
-            - 화면 규칙 `src/ui/matchFile.ts`: 거부 사유 문구(`matchImportErrorMessage`, 파일 선택 오류 `TOO_LARGE` / `READ_FAILED` 포함), 확인창(`matchImportConfirmMessage` = 설정 교체 안내 + `⚠` 경고 줄, 확인창 글자 `white-space: pre-line`), 준비 진행(`matchImportProgress` = 두 로봇 명중 확률표 진행률 평균 내림, 준비 완료 = 100%), 불일치 배너(`mismatchBanner`, 구간은 경기 타이머 표시), 파일 이름(`matchFileName` / `summaryFileName`), 요약(`matchSummaryText`). 결과 팝업 근거 문구를 순수 규칙 `resultBasisText`(`resultModel.ts`)로 옮겨 요약과 공유.
-            - 화면 (`MainScreen.tsx`): SETTINGS `PRESETS`의 `MATCH` / "경기" 줄(설명 "경기 내보내기로 저장한 파일", `IMPORT`, 경기 중 비활성). 불러오기 = 파일 선택 → 해석 → 확인창(확인 = `IMPORT`) → 적용 값 · 초안 교체(자동 보관) + 명중 확률표 요청 → 두 로봇 결과가 있으면 바로, 없으면 준비 알림에서 → "재계산 중"을 한 번 그린 뒤 `loadMatch` → 체크포인트 비교 → 불일치면 배너(닫기, 경기 전 화면에서 사라짐). 준비 중에는 줄에 "경기 불러오는 중 · 명중 확률표 N%"(오류면 빨강 "로봇 탭에서 다시 시도하거나 취소") + `CANCEL`. 결과 팝업: 동작 줄 위에 `EXPORT MATCH` / `EXPORT SUMMARY` 줄(460u 폭에 네 버튼이 한 줄로 들어가지 않아 분리), 레시피 설정 = 적용 값(경기 중 잠금), 원본 가지 이름 = `Main`.
-            - **10-4 세부 결정:** ① 불러오기 준비 중 `APPLY` / `REROLL` / `RESET ALL` / 프리셋 불러오기는 불러오기를 취소(설정이 파일과 달라지므로), `CANCEL`도 이미 바뀐 설정은 그대로 ② 명중 확률표 생성 오류는 불러오기를 대기 상태로 두고 로봇 탭 다시 시도 / 취소를 안내 ③ 요약의 가지 이름은 있을 때만(불러온 경기), 파일 이름의 `_b{번호}`와 원본 가지 표시 이름은 분기 트리(10-5 / 10-6)에서.
+### 3.4 틱당 처리 순서
 
-    - **분기 트리 (10-1 확정):**
-        - **보존:** `BRANCH`는 기존 기록을 지우지 않고 **새 가지**를 만든다. 가지 = `{ id, 번호, 이름, 부모 가지, 분기 틱 T, 타임라인, 녹화 로그 사본, 적용 입력 기록, 종료 도달 여부 }`. 원본 가지 이름 `Main` / "원본", 새 가지 `Branch {n}` / "가지 {n}"(경기 안에서 번호 재사용 없음). 이름 바꾸기 1 ~ 24자(앞뒤 공백 제거, 비우면 자동 이름).
-        - **프레임 공유:** 새 가지의 0 ~ T틱 프레임은 부모 가지의 프레임 객체를 **참조로 공유**하고(프레임은 불변 `DeepReadonly`), T + 1틱부터만 새로 만든다. 엔진은 기록 저장소(프레임 배열 + 틱별 난수 상태)를 타임라인 객체로 꺼내 교체할 수 있게 한다 — 분기 = 현재 타임라인의 0 ~ T 참조로 새 타임라인을 만들어 교체 후 `scrubTo(T)`, 가지 전환 = 그 가지 타임라인으로 교체. 한 가지 안에서 프레임을 자르는 일은 없어진다 (재개는 머리에서만, 되감은 틱에서는 항상 새 가지).
-        - **입력:** 새 가지는 부모의 녹화 로그를 복사해 시작하고 3.6항 분기 규칙을 **새 가지의 사본에만** 적용한다 (`LIVE` 로봇은 T 이후 폐기, `REPLAY`는 유지 = 녹화 덧입히기). 적용 입력 기록은 0 ~ T를 복사.
-        - **상한 `MAX_BRANCHES = 8`** (원본 포함). 가득 찬 상태의 `BRANCH` → 안내창 "가지가 8개로 가득 찼습니다. 가지 목록에서 가지를 삭제한 뒤 분기하세요." (확인 버튼 하나, 분기 안 함).
-        - **메모리 근거 (10-1 측정, Node V8, 기본 설정 + 계속 움직이는 입력):** 끝까지 진행한 가지 하나(6001프레임) 힙 약 38 MB (07-1 측정 46 MB와 같은 규모), 전체 재계산 1.2 ~ 1.5초, 같은 입력 두 번의 종료 프레임 동일. 가지 메모리는 (6000 − T) / 6000 × 약 46 MB에 비례하므로 최악(8개 모두 0틱 근처 분기) 약 370 MB. 데스크톱 Chrome 탭당 JS 힙 상한(약 4 GB, `performance.memory.jsHeapSizeLimit`) 안이라 v1은 **모든 가지의 프레임을 메모리에 유지**한다. 10-5에서 헤드리스 Chromium으로 8개 가지 힙을 측정해 기록하고, 문제가 되면 "현재 가지 외 프레임 해제 + 선택 시 적용 입력 기록으로 재계산(≤ 1.5초)"으로 바꾼다 (6.4항). **(10-5 실측)** 헤드리스 Chromium(1366 × 768, 기본 설정, 가짜 시계)에서 경기 초반에서 갈라 끝까지 진행한 가지를 하나씩 늘리며 가비지 수집 후 JS 힙: 경기 전 16.1 MB → 가지 1개 38.8 → 2개 60.8 → … → 8개 187.9 MB (가지당 약 21 MB, Node 측정보다 작음). 탭 힙 상한 4096 MB의 약 5%라 전 가지 유지로 확정.
-        - **분기 확인창 (문구 변경):** "{M:SS}에서 새 가지를 만들어 다시 조종할까요? 지금 가지({이름})의 기록은 그대로 남습니다."
-        - **가지 선택 (스크러버 줄, 10-1 확정 = 권장안):** 경기가 있는 동안 스크러버 줄에 가지 버튼(lucide `GitFork` + 현재 가지 이름). 누르면 위로 펼치는 가지 목록: 깊이만큼 들여쓴 생성 순서 목록, 줄마다 이름 / 분기 시각 `M:SS`(원본은 "—") / 상태(종료 = 총점, 미종료 = 머리 시각 `M:SS`) / 현재 가지 표시 / 이름 바꾸기(연필) / 삭제(휴지통, 원본 제외). 타임라인 막대에는 현재 가지와 그 조상의 분기점에 작은 세로 표식(마우스 올리면 "Branch 3 · from Main at 1:23").
-        - **가지 전환:** 일시정지 / 복기 중에만 (진행 · 재생 · 회전 · 종료 강조 · 결과 팝업 · 확인창 중 불가, 목록 버튼 비활성). 보는 틱은 유지하고 그 가지 머리를 넘으면 머리로. 전환한 가지가 미종료면 일시정지(보는 틱 = 머리일 때 `RESUME`), 종료면 복기. 전환은 기록을 바꾸지 않으므로 확인창 없음, 종료 연출 없음(`endSeq` 불변 — 새로 6000틱에 도달할 때만 +1).
-        - **가지 삭제:** 확인창 "{이름}을(를) 삭제할까요?" (아래 가지가 있으면 "{이름}과(와) 그 아래 가지 {n}개를 삭제할까요?") → 그 가지와 모든 하위 가지 삭제. 현재 가지가 삭제되면 삭제된 가지의 부모로 전환. 원본은 삭제 불가.
-        - **`NEW`:** 트리 전체를 버린다. 가지가 2개 이상이면 확인창에 "가지 {n}개를 모두 버리고"를 넣는다.
-        - **결과 팝업:** 가지가 2개 이상이면 헤더에 현재 가지 이름. 종료된 가지가 2개 이상이면 하단에 `BRANCHES` 비교 줄(종료된 가지별 이름 + 총점, 현재 가지 강조, 최고 점수 표시, v1은 눌러도 전환하지 않음).
-        - **구현 (10-5):**
-            - 엔진 (`simulationEngine.ts`): `EngineTimeline { frames, rngStates }`, `currentTimeline`(설치된 타임라인 핸들), `forkTimeline(tick)`(0 ~ tick 프레임 / 난수 상태를 참조로 복사한 새 배열을 설치 + 되감기 — 원래 배열은 그대로라 부모 가지 보존), `adoptTimeline(t)`(설치 + 그 머리로 복원). 같은 입력의 결과는 바뀌지 않으므로 `ENGINE_VERSION` 유지.
-            - 트리 규칙 `src/app/branchTree.ts`(순수, 가지 자료는 제네릭): `MAX_BRANCHES = 8`, `createBranchTree`(원본 = id / 번호 1, 이름 선택), `forkBranch`(가득 차면 null, 새 가지가 지금 가지), `switchBranch`, `setBranchData`, `renameBranch` / `normalizeName`(앞뒤 공백 제거, 24자, 빈 이름 = 자동), `descendantIds`, `branchDepth`, `removeBranch`(하위 포함, 원본 / 없는 가지 = null, 지금 가지가 지워지면 지운 가지의 부모), `fileBranchName`(파일용 영어 자동 이름 `Main` / `Branch n`). 번호는 경기 안에서 재사용하지 않고, id는 남은 가지 중 최대 + 1.
-            - 입력 (`inputLog.ts`): `InputLogChannel.copyFrom`, `MatchInputs.snapshot()` / `restore()`(녹화 로그 + 적용 입력 기록 사본 `BranchInputs`). 입력 허브는 지금 가지의 작업본이고, 떠나는 가지(분기 / 전환)는 사본을 보관한다.
-            - 컨트롤러 (`appController.ts`): `branch()` → 가득 찼으면 false(분기 안 함), 아니면 지금 가지에 타임라인 + 입력 사본 보관 → `forkTimeline` → 새 가지에만 3.6항 분기 규칙 → 재개. `switchBranch(id)`(일시정지 / 복기 중, 재생 멈춤, 보는 틱을 머리 이하로, 종료 가지 = `REVIEW` / 미종료 = `NONE`, `endSeq` 불변), `deleteBranch(id)`(지금 가지가 지워지면 먼저 부모로 전환), `renameBranch(id, name)`(경기 중 언제나). 재개 조건에서 "루프 일시정지"를 빼고 "진행 중 아님 + 보는 틱 = 머리 + 미종료"로 (종료 가지에서 미종료 가지로 전환하면 루프가 `ENDED`여도 엔진이 6000틱 전이면 재개 가능). 상태 `branches`(번호 / 이름 / 부모 / 분기 틱 / 깊이 / 머리 / 종료 / 종료 점수), `currentBranchId`, `canFork`, `branchName` = 지금 가지의 사용자 이름. `NEW` / 불러오기 = 새 트리(불러온 경기는 파일 가지 이름의 원본), 내보내기 가지 이름 = `fileBranchName(지금 가지)`.
-            - 화면은 10-6: 그때까지 `BRANCH` 확인창은 옛 문구("이후 기록 삭제")이고, 가득 찬 상태의 `BRANCH`는 확인 후 아무 일도 일어나지 않는다. → 10-6에서 해결.
-        - **구현 (10-6):**
-            - 화면 규칙 `src/ui/branchView.ts`(순수): `branchLabel`(사용자 이름, 없으면 `Main` / "원본", `Branch n` / "가지 n"), `branchRows`(깊이 / 분기 시각 "from 1:24" · "1:24에서", 원본 "—" / 상태 = 종료 점수 "95 pts" · "95점" 또는 머리 시각 "to 0:50" · "0:50까지" / 지금 가지 / 삭제 가능), `branchMenuEnabled`(경기 중 + 보는 틱 이동 가능 + 재생 아님, 확인창이 떠 있으면 화면이 따로 막음), `forkMarks`(지금 가지 → 원본까지 각 분기 틱, 설명 "Branch 3 · from Main at 1:23" / "가지 3 · 원본의 1:23에서"), 확인창 문구 `branchConfirmText` / `branchFullText` / `deleteConfirmText`(하위 수) / `newMatchConfirmText`(가지 2개 이상이면 수), 결과 팝업 `shownBranchName`(가지 2개 이상이거나 사용자 이름이 있을 때) / `branchComparison`(종료 2개 이상, 동점 최고는 모두 표시), `fileBranchNumber`(원본이 아니면 번호 → 파일 이름 `_b{번호}`). 옛 "삭제될 기록 초" 계산(`branchConfirmParams`)은 삭제.
-            - 화면: 스크러버 줄 주 버튼 바로 옆 가지 버튼(`GitFork` + 지금 가지 이름, 최대 150u 말줄임, 경기 전에도 자리 유지 · 비활성) → 위로 펼치는 목록 `BranchMenu.tsx`(420u, 단계당 10u 들여쓰기, 줄 = 체크 · 이름(누르면 전환 후 닫힘) · 분기 시각 · 상태, 연필 = 줄 안 입력칸(24자, 빈칸 = 자동 이름 안내, Enter / 초점 이동 = 저장, Esc = 취소), 휴지통 = 삭제 확인창(원본 비활성)). 바깥 클릭 / Esc로 닫히고, 열 수 없는 상태(진행 · 재생 · 확인창 등)면 숨었다가 돌아오면 다시 보임(삭제 확인 뒤 목록 유지). 타임라인 분기 표식 = 파란 세로 막대(마우스 올리면 설명). 확인창에 "확인 버튼 하나" 안내창 모드(취소 문구 없음, Esc도 닫기) — 가득 참 안내. 결과 팝업: 진영 배지 옆 가지 이름(`GitFork`), RP 아래 `BRANCHES` / "가지 비교" 줄(가지별 이름 + 점수 칩, 지금 가지 주황 테두리, 최고 점수 트로피). 요약 텍스트의 가지 이름 = `shownBranchName`.
-            - **10-6 세부 결정:** ① 가지 버튼은 주 버튼 옆(분기 관련 조작을 한곳에) ② 한국어 삭제 문구는 조사 문제를 피해 "'{이름}' 가지를 삭제할까요?" / "'{이름}' 가지와 그 아래 가지 {n}개를 삭제할까요?" ③ 영어 하위 가지 문구는 수와 무관한 "with its sub-branches (n)" ④ 한 가지뿐인 경기는 결과 팝업 / 요약에 가지 이름을 쓰지 않음(사용자 이름이 있으면 씀).
-    - **프리셋 내보내기 / 불러오기 (SETTINGS 탭 `PRESETS` 구역):**
+1. **로봇 기구학 갱신 (`kinematics.ts`)과 상태별 주행 제어**
+    - **`INTAKING` (주행 중 흡입):** 주행 입력(`vx, vy, omega`)을 막지 않고 정상적으로 적분한다.
+    - **`SHOOTING`과 리프트 상태 전체 (`FLOWER_SETUP` / `FLOWER_READY` / `FLOWER_DROPPING` / `FLOWER_LOWERING`, 2.6.3항) — Stationary Lock:**
+        - 위치를 바로 고정하지 않고 목표 속도를 `(0, 0, 0)`으로 강제해 Slew Rate Limiter로 감속한다.
+        - 차체가 완전 정지 임계(`speed < 0.5 in/s`, `|omega| < 0.05 rad/s`)에 닿기 전까지는 제동 상태(`isBraking = true`)로 기다리며 동작 타이머를 줄이지 않는다.
+        - 완전히 멈추면 `isBraking = false`가 되고 그때부터 `stateTimer -= dt`.
+2. 로봇-환경, 로봇-로봇 충돌 해결 (위치 / 속도 보정)
+3. 바닥 공(`ON_FIELD`) 마찰 감속과 위치 적분 (`stepPieceDynamics`)
+4. 공 충돌 완화 루프 (공 vs 환경 / 로봇 / 공, 2회 반복)
+    - 4-2. 끼인 공 역보정 (`resolvePinnedPieces`): 완화 뒤에도 로봇과 겹친 공에 막힌 로봇을 되밀어 멈춤
+5. HIVE `tipProgressTimer += dt` 누적, `settleTime`이 된 공을 차례로 `ON_FIELD`로 내려놓기
+    - 5-2. 발사 비행 도착 (`stepShotArrivals`): 도착 틱이 된 발사를 발사 순서대로 명중 적재 / 무효 명중 반사 낙하 연장 / 최종 착지 (2.6.2항)
 
-        | 줄 | 파일 종류 `kind` | `EXPORT` | `IMPORT` |
-        |---|---|---|---|
-        | `R1` / `R2` | `ROBOT` (`RobotProfile`) | 그 로봇의 적용 값 | `ROBOT` 파일 → 그 로봇 초안 (R1에서 내보낸 파일을 R2에 넣어도 됨, 슬롯 id는 엔진이 강제) |
-        | `SCENARIO` | `SCENARIO` (`ScenarioConfig`, 시드 포함) | 적용 값 | → 시나리오 초안 |
-        | `ALL` | `SETUP` (R1 + R2 + 시나리오 전부) | 세 탭의 적용 값 | → 세 탭 초안 모두 |
-        | `MATCH` | 경기 레시피 | (결과 팝업에서) | 위 "경기 불러오기" |
+### 3.5 Slew Rate Limiter
 
-        - 파일 형식: `{ "format": "ftc-tactic-sim/preset", "presetVersion": 1, "kind": "ROBOT" | "SCENARIO" | "SETUP", "data": ... }` (`SETUP`의 `data` = `{ robot1, robot2, scenario }`).
-        - `EXPORT`는 SETTINGS 탭을 볼 수 있으면 언제나(경기 중 일시정지 포함, 적용 값이라 경기에 영향 없음). `IMPORT`는 경기 전에만 (초안은 경기 전에만 편집 가능, 3.8항).
-        - 불러오기 규칙: 파일 자체가 틀리면 거부(JSON 아님 / `format` 다름 / `kind`가 그 줄과 다름 / `presetVersion`이 현재보다 큼, 줄 아래 빨간 글자). 항목이 없거나 형식이 틀리면 **그 항목만 기본값**(자동 보관과 같은 정리 함수). 범위 검증에 걸리는 값은 버리지 않고 초안에 넣어 빨간 오류로 보여 준다 (사용자가 고쳐서 `APPLY`). 불러온 값은 **초안**에만 들어가고 기존 `APPLY` 흐름(LUT 재생성 포함)을 탄다. 적용 안 된 수정이 있는 탭에 넣으면 `COPY TO`와 같은 덮어쓰기 확인창.
-        - **구현 (10-2):**
-            - 순수 규칙 `src/ui/presetFile.ts`: `PRESET_FORMAT` / `PRESET_VERSION = 1`, 줄 `PresetRow`(`robot1` / `robot2` / `scenario` / `all`) → 종류(`ROW_KIND`) / 바꾸는 탭(`ROW_TABS`). `buildPresetFile`(적용 값 → 2칸 들여쓴 JSON, 로봇 데이터에 슬롯 id 없음), `presetFileName` / `fileTimestamp`(로컬 `YYYYMMDD-HHmm`, 10-4 재사용) / `safeFileName`. `parsePresetFile(text, row, defaults)` → 거부 코드 `NOT_JSON` / `NOT_PRESET`(형식 · 버전 · 종류 값 · `data` 틀림) / `MATCH_FILE`(경기 레시피) / `NEWER_VERSION` / `WRONG_KIND`, 파일 선택 쪽 `TOO_LARGE`(1 MB 초과) / `READ_FAILED`.
-            - 항목별 정리: 로봇(`sanitizeRobotPreset`) = 숫자 항목은 유한값만, 문자열 / 불리언 / 슈터 형식 / 터렛 범위(숫자 2개)는 형식이 맞을 때만, 흡입 구역은 형식이 맞는 구역만 남기고 최대 8개, 탄도는 항목별, 슬롯 id는 줄이 정함. 팀 번호 / 팀명이 입력칸 규칙에 어긋나면 값은 비우고 그 글자를 초안의 틀린 입력 글자로 보관(빨간 칸, 탭 `INVALID`). 시나리오(`sanitizeScenarioPreset`) = 선택 항목은 없으면 기본 시나리오 그대로, 형식이 틀린 항목만 기본값(시작 자세 x / y / heading, 적재물 `POLLEN` / `NECTAR` 목록, FLOWER 4개, GARDEN 두 값 등), 모르는 항목은 버림. 범위 검사는 하지 않음(초안의 탭 검증이 표시).
-            - `importPresetToDrafts`: 그 줄의 탭 초안 교체 + 그 탭의 틀린 입력 글자 지움 → 틀린 팀 글자만 다시 보관, 적용 값 불변. `importOverwriteTabs`(바꿀 탭 중 `OK`가 아닌 탭 → 덮어쓰기 확인창), `presetErrorMessage` / `presetLoadedNotice`(config 창 안내 줄).
-            - 화면: SETTINGS 탭 `Presets` / "프리셋" 구역(화면과 초기화 사이) — 줄 이름(`R1` / `R2` / `SCENARIO` / `ALL`, 한국어 탭 이름 / "전체") + 설명(로봇 = 적용된 `#팀 번호 팀명`, 전체 = `R1 + R2 + SCENARIO`) + `EXPORT` / `IMPORT`(lucide `Download` / `Upload`, 한국어 "내보내기" / "불러오기"). 경기 중에는 `IMPORT` 비활성 + 안내. 거부 사유는 오류 코드로 보관해 그릴 때 현재 언어로 만들고, 탭을 옮기면 지움. 파일 도우미 `src/ui/fileTransfer.ts`(`downloadTextFile` = Blob + `<a download>`, `pickTextFile` = 숨긴 `<input type=file>`, 취소 이벤트 → null). `MATCH` 줄은 10-4에서 추가.
-            - **(10-2 보완)** 로봇 탭 숫자 칸 전부에 저장 값 범위 검사(`checkValue`)를 켠다 (전에는 흡입 구역 칸만). 폼으로만 값이 들어오던 때는 범위 밖 값이 없었지만, 파일로 들어온 범위 밖 값이 탭 빨간 점만 뜨고 어느 칸인지 보이지 않았음.
-    - **파일 이름 (로컬 시각, 파일 이름에 쓸 수 없는 글자는 `_`):**
-        - 경기 `tacticsim-match_{YYYYMMDD-HHmm}_{RED|BLUE}_{총점}pts.json`, 원본이 아닌 가지는 끝에 `_b{번호}` (예: `tacticsim-match_20260930-1432_RED_87pts_b3.json`), 요약은 같은 이름의 `tacticsim-summary_….txt`.
-        - 프리셋 `tacticsim-robot_{팀 번호, 없으면 R1 / R2}.json`, `tacticsim-scenario_{RED|BLUE}.json`, `tacticsim-setup_{YYYYMMDD-HHmm}.json`.
-    - **문구:** 새 버튼 / 확인창 / 오류 / 배너 문구는 모두 문구 사전(영어 / 한국어)에 추가한다 (3.8항 규칙, 게임 용어 원어 대문자).
-    - **10-1 확정 (사용자 결정):** ① 재현용 입력 = 적용 입력 기록(모든 출처, 틱마다) 채택 ② 조작 모드는 레시피에 넣지 않음(변환 후 값 기록) 확인 ③ v1은 파일 다운로드 / 불러오기만 ④ 가지 상한 8개(원본 포함), 모든 가지 프레임 메모리 유지(측정 근거 위, 문제 시 6.4항 대안) ⑤ 가지 UI = 스크러버 가지 버튼 + 목록 + 타임라인 분기 표식 + 결과 팝업 가지 비교 줄 ⑥ 프리셋 `ALL` = R1 + R2 + 시나리오 전부 ⑦ 결과 팝업에서 레시피(`EXPORT MATCH`)와 요약(`EXPORT SUMMARY`)을 버튼을 나눠 모두 제공, 동사는 `EXPORT` / `IMPORT`로 통일.
-10. **도움말 / 버그 리포트 / 라이선스 / 버전 (v1.0.0 릴리스 준비):**
-    - **버전:** `package.json` `version` = **1.0.0**. 빌드 설정(`vite.config.ts` `define`)이 `__APP_VERSION__`으로 앱에 넣어 도움말 / 버그 리포트에 표시한다 (`src/ui/helpInfo.ts` `APP_VERSION`, 선언 `src/vite-env.d.ts`).
-    - **라이선스:** PolyForm Noncommercial License 1.0.0 (`LICENSE`, 사용자 결정 — 비상업적 목적이면 사용 · 복사 · 수정 · 재배포 자유, 상업적 사용 불가). 필수 고지 `Required Notice: Copyright 2026 7ISx7JuQ (https://github.com/7ISx7-JuQ/ftc-tactic-sim)`. `package.json` `license` = `PolyForm-Noncommercial-1.0.0`. 배포 번들에 들어가는 서드파티(React · react-dom · scheduler MIT, lucide-react ISC, Pretendard 폰트 OFL-1.1)는 `THIRD_PARTY_NOTICES.md`에 원문과 함께 고지.
-    - **도움말 창 (`HelpDialog.tsx`):** 접힌 config 띠의 펼치기 버튼 위 `?` 버튼(lucide `CircleHelp`, 언제나). 열면 진행 중인 경기 / 재생을 멈추고 단축키를 끈다 (닫으면 다시 켬, 경기는 일시정지 상태로 남음). 화면 전체 모달(640u, 본문 스크롤), Esc · 닫기 · 바깥 클릭으로 닫힘. 내용(영어 / 한국어, 게임 용어 원어 대문자 규칙 준수): 소개, 빠른 시작 4단계, 조작표(게임패드 / 키보드 — 키보드 칸은 `inputConfig` 키 설정을 그대로 읽음, `controlRows`), 복기와 가지, 저장과 공유, 알아 두기(데스크톱 · HTTPS · 시뮬레이션 한계), 버그 리포트, 정보(버전 · 라이선스 한 줄 · 소스 코드 / 라이선스 / 서드파티 고지 링크).
-    - **버그 리포트 (사용자 결정: 폼 없이 메일):** 받는 사람 `7isx7juq@gmail.com`(`BUG_REPORT_EMAIL`). 주 버튼 = Gmail 쓰기 창 링크 `https://mail.google.com/mail/?view=cm&fs=1&to=…&su=…&body=…`(새 탭), 보조 = 기본 메일 앱 `mailto:` 링크, 그 아래 주소 글자. 제목 `[FTC TacticSim {버전}] Bug report`, 본문 = 현재 화면 언어의 작성 틀(무슨 일 / 재현 순서 / 기대 결과 / 첨부 안내) + 앱 버전 · 브라우저(User-Agent) · 화면(가로 × 세로 @배율) · 언어. 앱은 메일을 보내지 않고 링크만 연다 (서버 없음).
-    - **정리:** Vite 템플릿 잔여물 삭제(`public/icons.svg`, `src/assets/hero.png` · `react.svg` · `vite.svg`), `README.md`를 영어 / 한국어 소개 · 빠른 시작 · 조작 · 직접 실행 · 버그 리포트 · 라이선스로 교체, `package.json`에 설명 / 저장소 주소.
+RoadRunner / Pedro Pathing 오도메트리 제원(최고 속도, 가속도 등)을 기준으로 목표 속도까지 선형으로 가감속한다.
 
-## 4. 데이터 인터페이스 명세 (`types.ts`)
+### 3.6 입력 계층과 실시간 루프
+
+엔진 바깥의 순수 TS 계층이 장치 입력을 틱마다 `RobotDriveInput`으로 만들어 엔진에 넣는다. 엔진 입력 인터페이스는 `step(r1Input, r2Input)`과 `inputProvider`다.
+
+#### 모듈 구성 (`src/input/`)
+
+- `inputConfig.ts`: 키 매핑 / 데드존 / 임계값 / 장치 배정 / 루프 상수를 한곳에 모은 설정 파일 (값만 바꿔 조정). 매핑 편집 화면은 없다 (v2 후보, 5.2항).
+- 순수 변환(축 처리, 행동 요청 결정, 탭 래치, 양자화), 입력 로그 / 입력 출처(`inputLog.ts`), 실시간 루프(`realtimeLoop.ts`, `liveControls.ts`): DOM 비의존. 시계 / 스케줄러 / 원시 입력을 주입받아 Node(Vitest)에서 가짜 시간으로 테스트한다.
+- 브라우저 어댑터(`browserInput.ts`): Gamepad 폴링, 키보드 이벤트, `requestAnimationFrame`, 포커스 / 가시성 이벤트를 연결만 하는 얇은 층.
+    - `BrowserInputAdapter`(브라우저 환경 객체 주입 가능, `attach(onPause)` / `detach`): 루프의 `poll()`에서 배정 슬롯 게임패드를 폴링하고 눌린 키를 다시 샘플한다. `gamepadStatus()`는 슬롯별 연결 / 표준 매핑 여부를 준다 (연결 표시용).
+    - `createAnimationFrameScheduler`, `createBrowserRealtimeLoop(engine, inputs, hooks)` → `{loop, adapter, dispose}`.
+    - 포커스를 잃거나 탭이 숨겨지면 눌린 키 집합을 비운 뒤 일시정지를 요청한다 (키를 뗀 이벤트 유실 대비). 사용자 일시정지 / 재개에서는 키 집합을 유지해, 누르고 있는 키가 다음 폴링에서 복원된다.
+
+#### 키 매핑
+
+`inputConfig.ts` 기본값, W3C Gamepad 표준 배열(`mapping === 'standard'`) 기준, 인덱스는 0부터.
+
+| 기능 | 게임패드 | 키보드 (`KeyboardEvent.code`) | 입력 방식 |
+|---|---|---|---|
+| 전후 평행이동 | 좌스틱 Y `axes[1]` (위 = −1이므로 부호 반전) | `KeyW` 전진 / `KeyS` 후진 | 아날로그 / ±1 |
+| 좌우 평행이동 | 좌스틱 X `axes[0]` (오른쪽 = +) | `KeyD` 오른쪽 / `KeyA` 왼쪽 | 아날로그 / ±1 |
+| 회전 | 우스틱 X `axes[2]` (오른쪽 = + = 시계 방향 = 헤딩 증가) | `ArrowRight` + / `ArrowLeft` − | 아날로그 / ±1 |
+| (미사용) | 우스틱 Y `axes[3]` | — | — |
+| `INTAKING` | LT `buttons[6]` (`value ≥ 0.5`) | `KeyM` | 누르는 동안 유지 |
+| `SHOOTING` | RT `buttons[7]` (`value ≥ 0.5`) | `Comma` | 누르는 동안 유지 |
+| 리프트 올림 / 내림 (`FLOWER_SETUP`) | A `buttons[0]` | `Period` | 누를 때마다 토글 |
+| `FLOWER_DROPPING` | B `buttons[1]` | `Slash` | 누르는 동안 유지 |
+
+- 키보드는 물리 키 위치(`event.code`)로 읽어 한 / 영 상태나 자판 배열과 무관하게 동작한다. 매핑된 키는 `preventDefault`(방향키 스크롤, Firefox `/` 빠른 찾기 방지)하고, 입력 폼(`input` / `textarea` / `select` / `contenteditable`)에 포커스가 있으면 무시하며, 자동 반복(`event.repeat`)은 눌림 에지로 세지 않는다.
+- 트리거 임계값 `TRIGGER_THRESHOLD = 0.5`, 나머지 버튼은 `pressed`. 비표준 매핑 패드도 같은 인덱스를 쓰고 연결 표시에서 경고한다.
+
+#### 장치 → 로봇 배정 (`inputConfig.ts` 고정값)
+
+- 게임패드 슬롯 0 → R1, 게임패드 슬롯 1 → R2, 키보드 → R2.
+- 게임패드 슬롯 = `navigator.getGamepads()` 배열 인덱스 (연결 순서). 브라우저 정책상 페이지에서 버튼을 한 번 눌러야 보인다.
+- 키보드 주행은 SETTINGS 탭 토글(기본 켬, 기본값 상수 `KEYBOARD_ENABLED`)로 끌 수 있다. 끄면 주행 키만 무시하고, 일시정지 / 스크러빙 단축키(Space, ← / →, Shift + ← / →)는 상태별로 키를 나눠 쓰므로 항상 동작한다 (3.8항).
+- 한 로봇에 장치가 여럿 배정되면(R2 = 패드 1 + 키보드) 합친다: 축은 채널별로 절댓값이 큰 값, 유지형 버튼은 OR, 토글 눌림 에지는 OR.
+
+#### 축 처리 (틱마다, 최신 샘플 사용)
+
+- 좌스틱 원형 데드존 `DEADZONE_LEFT = 0.08`: 크기 m < 0.08이면 0, 아니면 크기를 (min(m, 1) − 0.08) / (1 − 0.08)로 다시 맞춘다 (방향 유지, 크기 ≤ 1). 우스틱 X 데드존 `DEADZONE_RIGHT_X = 0.08` (같은 방식).
+- 키보드: 전진 f = W − S, 오른쪽 s = D − A, 동시 입력이면 크기 1로 정규화(대각선 0.707), 회전 r = Right − Left. 느린 이동 키는 없다.
+- 드라이버 기준 전진 f(스틱 위 = +), 오른쪽 s → 필드 좌표 정규화 속도 (ux, uy):
+    - **필드 기준 `FIELD` (기본):** 드라이버는 우리 벽에서 필드 안쪽을 본다 — RED는 x = 0 벽에서 +x 방향, BLUE는 x = 144 벽에서 −x 방향. RED: ux = f, uy = s / BLUE: ux = −f, uy = −s (캔버스 y-down에서 +x를 보는 드라이버의 오른쪽이 +y).
+    - **로봇 기준 `ROBOT`:** 직전 틱 상태의 헤딩 h 기준. ux = f·cos h − s·sin h, uy = f·sin h + s·cos h (앞 = (cos h, sin h), 오른쪽 = (−sin h, cos h)).
+    - 조작 모드(`DriveMode = 'FIELD' | 'ROBOT'`)는 로봇별 드라이버 설정이다 (로봇 제원이나 시나리오가 아님). 로그에는 변환이 끝난 필드 좌표 값을 기록하므로 모드는 재생에 영향이 없다.
+- 회전: 정규화 각속도 uω = r (두 모드 공통, + = 오른쪽 회전).
+
+#### 행동 요청 결정 (틱마다, 로봇별 `ActionRequest` 1개)
+
+직전 틱의 로봇 `actionState`와 이번 틱 버튼(탭 래치 적용)으로 정한다. 리프트 토글 값은 입력 계층에 따로 저장하지 않고 **매 틱 엔진 상태에서 유도**하므로, 엔진이 요청을 거부하면 토글도 자동으로 그 상태를 따른다 (어긋날 수 없음).
+
+- 리프트 의도 기본값 = 직전 상태가 `FLOWER_SETUP` / `FLOWER_READY` / `FLOWER_DROPPING`이면 켜짐, 그 외 꺼짐.
+- A 눌림 에지: 직전 상태가 `IDLE` / `INTAKING`이면 켜짐(올림 요청), `FLOWER_SETUP` / `FLOWER_READY`면 꺼짐(내림 요청), `SHOOTING` / `FLOWER_DROPPING` / `FLOWER_LOWERING`이면 무효 (투입 중에는 내릴 수 없음).
+- **직전 상태가 리프트 상태(`FLOWER_SETUP` / `FLOWER_READY` / `FLOWER_DROPPING`)일 때:** RT / LT는 반영하지 않는다. 의도 켜짐 → B면 `FLOWER_DROPPING`, 아니면 `FLOWER_SETUP` / 의도 꺼짐 → `IDLE`(내림 요청).
+- **그 외 상태:** 우선순위 **`SHOOTING`(RT) > `FLOWER_DROPPING`(B) > `FLOWER_SETUP`(A 켜짐) > `INTAKING`(LT) > `IDLE`**. 리프트가 올라가 있지 않으면 B는 무효이므로 실제 선택은 RT → A → LT 순. 같은 틱에 RT와 A가 함께 들어오면 `SHOOTING`이 선택되고 A는 버려진다.
+- 우선순위 근거: 계속 쥐고 있는 LT를 가장 낮게 두어 흡입 중에도 RT / A가 먹히게 하고(발사 뒤 LT를 쥐고 있으면 다시 흡입), 리프트 상태에서는 B가 A 토글보다 앞서야 투입할 수 있다. 엔진은 틱당 요청 1개만 받으므로 위 요청이 거부되면 아래 요청도 그 틱에는 수행되지 않는다 (예: 빈 적재함에서 LT + RT → RT를 쥐는 동안 흡입 정지).
+- `ActionRequest = 'IDLE' | 'INTAKING' | 'SHOOTING' | 'FLOWER_SETUP' | 'FLOWER_DROPPING'` (`FLOWER_READY` / `FLOWER_LOWERING`은 엔진 상태이며 요청 값이 아니다).
+
+#### 짧은 탭 래치
+
+게임패드는 `requestAnimationFrame`마다 폴링하고 키보드는 이벤트로 받아 원시 입력 누적기에 모은다. 틱을 소비할 때:
+
+- 유지형 버튼(LT / RT / B, 키보드 `M` / `,` / `/`): 눌림 = 현재 눌림 OR 직전 틱 소비 뒤 눌림 에지 1회 이상. 20 ms 안에 눌렀다 뗀 입력도 최소 1틱 요청으로 반영된다 (RT 탭 = 1발, B 탭 = 1개 투입 — 해당 동작은 시작 후 끝까지 진행되므로).
+- 토글(A, 키보드 `.`): 직전 틱 소비 뒤 눌림 에지가 1회 이상이면 토글 1회.
+- 한 화면 프레임에서 여러 틱을 소비하면 누적 에지는 첫 틱에만 적용하고 이후 틱은 현재 레벨을 쓴다. 축은 소비 시점의 최신 샘플.
+- 게임패드는 폴링 간격(약 16.7 ms)보다 짧은 탭을 API 한계로 놓칠 수 있다.
+
+#### 양자화 (입력 수신 시점, 8비트)
+
+- 로봇별 틱당 4바이트: `[qx, qy, qω]` int8 ∈ [−127, 127] + `[action]` (0 `IDLE`, 1 `INTAKING`, 2 `SHOOTING`, 3 `FLOWER_SETUP`, 4 `FLOWER_DROPPING`).
+- q = sign(u) · floor(|u| · 127 + 0.5), [−127, 127]로 제한 (u = 축 처리 결과 ux / uy / uω, 부호 대칭 반올림).
+- 엔진 입력 = 복호화 값: `targetVx = qx / 127 × maxSpeed`, `targetVy = qy / 127 × maxSpeed`, `targetOmega = qω / 127 × maxTurnRate`. **실시간 입력도 부호화 → 복호화를 거쳐 엔진에 들어가므로** 기록 재생 결과가 비트 단위로 같다.
+- 근거: 재현성은 해상도와 무관하고(엔진이 쓴 값 = 기록 값) 해상도는 조작감만 좌우한다. 1단계 = maxSpeed 60 in/s 기준 0.47 in/s(정지 임계 0.5 in/s 미만), 회전 4 rad/s 기준 0.03 rad/s, 풀스틱 방향 분해능 약 0.45°. 일반 패드는 원본이 8비트인 경우가 많고, 16비트 패드도 1% 이하는 잡음 / 데드존(8%) 범위다. int16은 크기 2배에 체감 이득이 없다.
+- 크기 / 메모리: 로봇 2대 × 6000틱 × 4 B = 48 KB (저장 시 연속 중복 압축, 3.9항). 로봇별 `Int8Array(6000 × 4)` = 24 KB를 미리 할당한다. 풀매치 타임라인은 힙 약 46 MB라 입력 기록은 그 0.1% 수준이다 — 메모리 관리의 초점은 타임라인이다 (3.9항).
+
+#### 입력 로그, 로봇별 입력 출처, 녹화 덧입히기
+
+- **녹화 로그:** 로봇별 채널 `{ data: Int8Array(6000 × 4), length }` (`InputLogChannel`). 인덱스 t = 틱 t → t + 1 스텝에 쓰인 입력 (`DriveInputProvider`의 tick 규약과 같음). 틱 t에 쓰면 t 이후 기록은 버리고, 기록 끝보다 뒤에 쓰면 사이 틱은 중립(0, 0, 0, `IDLE`)으로 채운다 (예: 1회차에 `NONE`이던 로봇을 중간 틱부터 `LIVE`로 기록).
+- **로봇별 입력 출처** `InputSource = 'LIVE' | 'REPLAY' | 'NONE'`:
+    - `LIVE`: 장치 입력 → 축 처리 / 요청 결정 → 부호화 → 로그 t에 기록 → 복호화 → 엔진.
+    - `REPLAY`: 로그 t 복호화 → 엔진. 기록 길이를 넘은 틱은 `NONE`과 같다.
+    - `NONE`: 0 입력 + `IDLE` (기록하지 않음).
+- **녹화 덧입히기:** 1회차 R1 `LIVE` / R2 `NONE`으로 R1 입력을 기록 → 원하는 틱으로 되감기 → 2회차 R1 `REPLAY` / R2 `LIVE`로, 한 사람이 두 로봇을 따로 조종한 경기를 만든다.
+    - 되감은 틱 k에서 이어 가면(분기) 새 가지에서는 k 이후 프레임을 버리고, `LIVE` 로봇의 녹화 로그도 k 이후를 버린 뒤 이어서 기록한다. `REPLAY` 로봇의 로그는 유지한다. 원래 가지는 그대로 남는다 (3.9항 분기 트리).
+    - `REPLAY`는 위치가 아니라 **조작 명령**을 재생한다. 2회차에 다른 로봇과 부딪히거나 기물을 먼저 가져가면 1회차와 궤적 / 결과가 달라질 수 있으며, 이는 결정론을 지킨 정상 동작이다. 리프트 요청도 기록된 요청을 그대로 보내고 수락 여부는 엔진이 다시 판정한다.
+- **즉시 재계산:** 두 로봇이 모두 `REPLAY` / `NONE`이면 실시간 루프 없이 `inputProvider` + `runFullMatch()`로 바로 계산할 수 있다. 입력 허브 `MatchInputs`(로봇별 로그 / 출처 / 조작 모드)의 `createReplayProvider()`는 만든 시점의 출처를 복사해 고정하고, `LIVE` 로봇도 기록된 로그를 읽기 전용으로 재생하며(방금 진행한 경기를 바로 재계산), `NONE`은 로그가 있어도 중립 입력이다. 실시간 진행은 `MatchInputs.step(engine, liveControls)`(틱 결정 → 기록 → 복호화 → `engine.step`).
+- 기록은 같은 로봇 설정 / 시나리오 / 시드 / 탄도 설정 / 엔진 버전을 전제로 한다 (저장 레시피, 3.9항).
+- **적용 입력 기록:** 녹화 로그와 별개로, 틱마다 엔진에 실제로 들어간 입력(`NONE`의 중립 포함)을 로봇별로 기록한다(`MatchInputs.applied`). 경기 저장 / 재현은 이 기록만 쓴다. 녹화 덧입히기 중 `REPLAY` → `NONE` 전환처럼 녹화 로그만으로는 재현되지 않는 경우가 있기 때문이다 (3.9항).
+
+#### 실시간 루프 (`requestAnimationFrame` + 20 ms 고정 스텝 누산기)
+
+- 화면 프레임마다 누산 시간 += 경과 시간, 20 ms마다 1틱 소비 (입력 결정 → `engine.step`).
+- **따라잡기 상한 `MAX_CATCHUP_TICKS = 5`:** 한 프레임에 최대 5틱(100 ms)만 소비하고, 그러고도 1틱 이상 밀려 있으면 밀린 누산 시간을 버린다 (1틱 미만 나머지는 다음 프레임으로 넘김). 순간 끊김 때 게임 시간이 잠깐 느려질 뿐, 입력이 틱별로 기록되므로 결정론은 유지된다.
+- **구성:** `RealtimeLoop(engine, inputs: MatchInputs, controls: LiveControlSource, scheduler: FrameScheduler, hooks)`. 프레임 스케줄러(`request` / `cancel`, 브라우저는 `requestAnimationFrame`)를 주입받아 가짜 시간으로 테스트한다. 상태 `READY` → `RUNNING` ⇄ `PAUSED` → `ENDED`, 일시정지 사유 `USER` / `HIDDEN` / `BLUR` / `GAMEPAD_DISCONNECTED`, 훅 `onFrame(소비 틱 수)`(렌더링 연결) / `onStateChange`.
+    - 루프가 `requestAnimationFrame`을 단독으로 소유하고, 프레임 시작 때 입력 공급의 `poll()`(게임패드 폴링 / 키 상태 재샘플)을 한 번 부른 뒤 틱을 소비한다 (폴링과 틱 소비의 순서 보장).
+    - 입력 수집기 `LiveControlCollector`: 배정 장치별 탭 래치(`sampleGamepad(slot, pad | null)` / `sampleKeyboard(codes)`), 틱마다 로봇별 합성(`consumeTick`), `reset`. 배정되지 않은 게임패드 슬롯은 무시하고, 연결 해제(`null`)는 중립.
+- **자동 일시정지:** 탭 숨김(`visibilitychange` → hidden), 창 포커스 소실(`blur`), 경기 중 배정된 게임패드 연결 해제(`gamepaddisconnected`). 탭이 숨겨지면 브라우저가 `requestAnimationFrame`을 멈추고 입력도 전달하지 않으므로(키를 뗀 이벤트 유실 → 키가 눌린 채 남음), 그대로 두면 돌아왔을 때 마지막 입력이 유지된 채 밀린 시간이 한꺼번에 계산된다.
+- **일시정지:** 루프 정지, 누산 시간 0, 원시 입력 누적기(키 상태 / 탭 래치 에지) 초기화. 엔진은 마지막으로 끝낸 틱에 멈춰 있다.
+- **재개:** 사용자의 명시적 조작(스크러버 줄 `RESUME` / `BRANCH` 버튼, Space — 3.8항)으로만 재개한다. 멈춘 틱(일시정지 중 되감았으면 그 틱)에서 이어 가며 첫 프레임은 경과 시간 0으로 시작한다. 시작 / 재개 때도 입력 누적기를 비워 일시정지 중 누른 탭은 발동하지 않고, 누르고 있는 입력은 다음 폴링에서 다시 샘플되어 이어진다.
+- 경기 종료(6000틱)에 루프가 자동으로 멈춘다. 종료 뒤에도 엔진을 종료 전 틱으로 되감았으면(분기) `resume()`으로 그 틱부터 다시 진행한다. 엔진이 6000틱이면 무시한다.
+- **새로고침 / 탭 닫힘 / 크래시 등으로 페이지 상태가 사라지면 그 경기는 사라진다** (v1은 자동 저장 / 복구 없음, 5.2항).
+
+### 3.7 렌더러
+
+#### 원칙과 모듈
+
+- `src/renderer/`는 React 비의존 순수 TS다. 좌표 계산(보기 변환, 비행 / 낙하 보간, 게이지 배치, 가득 참 판정, 적재물 배치, 히트맵 색)은 DOM 없는 순수 함수로 분리해 Vitest로 테스트하고, 그리기 함수는 `CanvasRenderingContext2D`만 쓴다.
+- **렌더러 입력 = 장면 1개:** `{ frame: DeepReadonly<TimelineFrame>, r1Config, r2Config, view, options }`. `RobotState`에는 로봇 크기 / 인테이크 구역이 없으므로 제원(`RobotConfig`)을 따로 받는다. 렌더러는 프레임을 읽기만 하고 엔진이나 판정 함수를 호출하지 않는다.
+- 그림은 (프레임, 제원, 보기, 옵션)만의 함수다 → 스크러빙 / 재생 / 분기에서 같은 틱은 같은 그림. 벽시계 시간을 쓰는 것은 보기 전환 애니메이션뿐이다.
+- **캔버스 글자:** HIVE 셀 알약(`▲ N{n} P{p}/{임계}`), 로봇 번호, 행동 배지뿐이다. 구조물 이름표(GARDEN / HIVE / FLOWER n / LOADING ZONE)는 그리지 않는다 (사용자가 필드 구성을 알고 있음). 캔버스에는 한국어를 그리지 않으며, 언어에 따라 바뀌는 글자는 모두 HTML(문구 사전)로 그린다.
+- 주요 파일: `sceneRenderer.ts`(경기 장면), `editSceneRenderer.ts`(필드 편집 모드 장면, 3.8항), `canvasRenderer.ts`(필드 바탕 / 색 `ALLIANCE_COLORS`), `viewTransform.ts`(보기 변환), `robotLayout.ts`(로봇 몸체 안 배치 / 배지), `gaugeLayout.ts`(게이지), `flightView.ts`(비행 공), `renderOptions.ts`(표시 옵션 / 명중 확률), `heatmapView.ts`(히트맵 색 / 픽셀), `spawnEditLayout.ts`(시작 자세 편집 기하), `fonts.ts`(글꼴).
+
+#### 캔버스 레이아웃 (논리 좌표, 1 in = 5 px)
+
+- **캔버스 = 필드 뷰포트:** 필드 144 in + 사방 여백 8 in = 160 in 정사각형(논리 800 × 800 px, `SCENE_WIDTH_PX = SCENE_HEIGHT_PX = VIEWPORT_PX = 800`, 중심 `(400, 400)`). 여백에는 FLOWER 게이지 / NECTAR 재고 게이지가 들어간다. 보기 회전은 필드 중심 (72, 72) 기준으로 이 뷰포트 안에서만 적용한다.
+- 화면에서는 CSS로 가용 영역에 맞춰 비율을 유지하며 확대 / 축소하고, 내부 버퍼는 `devicePixelRatio`만큼 키운다 (3.8항 필드 크기).
+- **좌표 변환:** 필드 inch ↔ 논리 px ↔ 화면(CSS) px 양방향. 역변환(`cssToCanvas` → `canvasToField`)은 필드 편집 모드의 클릭 / 끌기에 쓴다.
+
+#### 보기 방향 (`AUDIENCE` / `DRIVER`)
+
+- `AUDIENCE`: 좌표 그대로 (y = 144 관중석이 화면 아래). **경기 시작 전 화면**(설정, 필드 편집 모드, 점진 히트맵)은 항상 이 시점이다.
+- `DRIVER`: 선택 진영 드라이버 시점, 우리 벽이 화면 아래. RED는 필드 중심 기준 −90°(화면 반시계, 필드 +x → 화면 위, +y → 화면 오른쪽), BLUE는 +90°(필드 −x → 화면 위, −y → 화면 오른쪽). 회전만 쓰고 뒤집지 않으므로 `FIELD` 조작(3.6항)에서 스틱 위 = 화면 위, 스틱 오른쪽 = 화면 오른쪽이 된다.
+- 경기 시작 시 보기는 SETTINGS 탭의 기본 보기 방향(기본 `DRIVER`)이고, 경기 중에는 스크러버 줄 `VIEW`로 언제든 바꿀 수 있다 (3.8항).
+- **전환 애니메이션:** 경기 시작 시 `AUDIENCE` → `DRIVER`를 700 ms easeInOutCubic으로 회전한다. 회전 각 θ 동안 돌린 정사각형이 뷰포트를 벗어나지 않도록 배율 1 / (|cos θ| + |sin θ|)로 줄인다 (45°에서 약 0.71). 실시간 루프는 **애니메이션이 끝난 뒤** 시작한다 (회전 중 조종 방지). 기본 보기가 `AUDIENCE`여도 같은 700 ms를 기다린 뒤 시작한다. 경기 전 화면으로 돌아가면(`NEW`) 반대로 회전한다. 일시정지 / 재개 / 스크러빙은 보기를 바꾸지 않는다. 애니메이션은 화면 연출일 뿐 엔진 / 기록과 무관하다.
+- 글자, 배지, 시계 방향 윤곽 애니메이션의 시작점(12시), 비행 공 높이 오프셋은 보기 회전을 상쇄해 항상 **화면 기준**으로 그린다 (글자는 똑바로, 높이는 화면 위쪽).
+
+#### 그리기 순서, 캐시, 갱신
+
+1. 정적 레이어(배경, 타일, 벽, GARDEN / LOADING ZONE / HIVE 프레임 · 셀 바탕 / FLOWER 원통, 게이지 틀): 필드 좌표로 오프스크린 캔버스(진영 × `devicePixelRatio`별, 개수 상한 있음)에 한 번 그려 두고 매 프레임 보기 변환으로 복사한다. 글자는 캐시에 넣지 않는다 (회전 시 똑바로 그리기 위해).
+2. HIVE 셀 상태, FLOWER / 재고 게이지 내용
+3. 바닥 기물(`ON_FIELD`, `IN_GARDEN`), 경기 종료 강조(필드 쪽)
+4. 로봇 (조준선 옵션, 인테이크 구역, 몸체, 헤딩 화살표, 적재물), 주차 강조, 흡입 진행 옵션
+5. HIVE 시차 낙하 중인 기물, 비행 공 (그림자 → 공)
+6. 화면 공간: HIVE 셀 내용 / 알약, 로봇 번호, 행동 배지
+
+- **갱신:** 루프 `RUNNING` 중에는 `onFrame`마다 최신 틱 프레임을 그린다. 그 밖에는(일시정지 / 스크러빙 / 재생 / 옵션 변경) 요청을 `requestAnimationFrame` 1회로 모아 그리고, 보기 애니메이션 중에는 끝날 때까지 매 프레임 그린다. 웹폰트가 늦게 도착하면 한 번 다시 그린다.
+- **프레임 간 보간 없음:** 최신 틱 프레임만 그린다. 주사율이 50의 배수가 아니면(60 / 144 Hz) 같은 틱이 불규칙하게 두 번 보이는 미세한 끊김이 있을 수 있다 (보간은 v2 후보, 5.2항).
+
+#### 색과 정적 구조 스타일
+
+- 필드 바닥은 밝은 회색 타일, 필드 둘레(게이지 여백)는 어두운 배경이다 (3.8항 테마).
+- **진영 색 (`ALLIANCE_COLORS`, 공식 RGB에서 계산):** 기본(로봇 몸체 / 우리 NECTAR / 상향 셀) RED `#DF001B` · BLUE `#0F53A7`, 15% 어둡게(테두리 / 글자) `#BE0017` · `#0D478E`, 흰색과 7 : 3(하향 셀) `#F5B3BB` · `#B7CBE5`, 25% 투명(GARDEN / LOADING ZONE 바탕).
+- FLOWER는 중립이라 분홍 바탕 + 중립 테두리. POLLEN 노랑, HIVE 틀 회색, 인테이크 초록, 강조 주황.
+- **상대 진영 전용 구조물**(상대 HIVE 셀 2개, 상대 LOADING ZONE, 상대 GARDEN, 상대 NECTAR 재고 틀)은 2 v 0에서 쓰이지 않으므로 진영별 비활성 색으로 그린다: 바탕 = 진영 색 8% 투명, HIVE 셀 = 진영 색 12% + 밝은 회색(222), 테두리 = 진영 색 35% + 회색(170). 진영은 알아보되 한눈에 비활성으로 보인다. 상대 HIVE 셀에는 개수 / 임계 글자를 그리지 않는다. (상대 GARDEN 안의 POLLEN은 실제 기물이므로 기물은 정상 색.)
+
+#### 로봇
+
+- **몸체 OBB:** 진영 색 채움(윤곽선 2.25 px), 앞쪽 변을 굵게 + 헤딩 화살표, 번호 "1" / "2" (화면 공간, 똑바로).
+- **인테이크 구역**(`getBumperZoneOBB`): 평소 옅은 반투명, `INTAKING` 상태에서 진하게.
+- **몸체 안 배치 (`robotLayout.ts`):** 앞에서부터 헤딩 화살표(0.45L ~ 0.32L) → 적재물 받침(0.29L ~ −0.21L, 4칸, 원 반지름 = min(1.2 in, 칸 간격 × 0.42)) → 번호(−0.34L). 모두 몸체 길이 L의 비율이라 로봇 크기와 무관하게 겹치지 않는다.
+    - 적재물은 FIFO 순서대로 원 최대 4개(종류별 색, 크기 통일, 로봇 앞쪽부터 0번, 차체와 함께 회전). 0번(다음에 나갈 기물)은 굵은 진한 테두리로 강조한다.
+    - 받침은 밝은 반투명 바탕이라 몸체와 같은 진영색인 NECTAR도 구분되고, 적재 한도(`min(maxControlledPieces, 4)`)만큼 빈 칸 윤곽을 그려 남은 공간을 보여 준다.
+- **행동 상태 배지:** `INTAKING` / `SHOOTING` / `FLOWER_SETUP` / `FLOWER_READY` / `FLOWER_DROPPING` / `FLOWER_LOWERING`에서 그린다 (`IDLE`은 없음).
+    - 위치 (`badgeCenter`): 로봇 중심과 같은 화면 x, 화면에서 돌린 몸체의 가장 위 꼭짓점 바로 위(2 px). 회전과 무관하게 몸체와 겹치지 않으면서 가장 가깝다.
+    - 불투명도 (`BADGE_OPACITY`): 평소 60%, 제동 중(`isBraking`, "정지 대기 — 타이머 미차감")은 30%. 흰 원판이 뒤의 기물 / 로봇을 가리지 않으면서 약 21 px(1366 화면)에서도 식별되는 값이다.
+- **배지 이미지 (`src/assets/badges/{key}.svg`):** key = `intaking`, `shooting`, `lift-up`(`FLOWER_SETUP`), `lift-ready`(`FLOWER_READY`), `lift-drop`(`FLOWER_DROPPING`), `lift-down`(`FLOWER_LOWERING`). 표시 크기 6 in(30 논리 px) 정사각형.
+    - 공통 틀: `viewBox 0 0 24 24`, `width = height = 256`, 흰 원판(r 11) + 짙은 테두리 `#111827` 1.6 (밝은 필드와 어두운 여백 모두에서 보임). 그림 선 `#111827` 굵기 2~2.4, 둥근 끝.
+    - 강조색은 보라 `#7C3AED` 하나 (필드에서 뜻이 있는 진영 빨강 / 파랑, POLLEN 노랑, 인테이크 초록, 강조 주황, FLOWER 분홍과 겹치지 않음). 기물 / 리프트처럼 움직이는 부분에 칠한다.
+    - 모양: `intaking` 양쪽에서 가운데로 모이는 화살표 + 기물 점, `shooting` 왼쪽 아래 → 오른쪽 위 화살표 + 날아가는 기물 + 과녁, `lift-up` ▲ + 아래 막대, `lift-ready` 위 막대 + 일시정지 두 줄, `lift-drop` 기물이 바구니로 떨어짐, `lift-down` 위 막대 + ▼.
+    - 이미지로 그리므로 고정 색만 쓴다 (`currentColor` / `<text>` / 외부 참조 금지). 테스트(`robotLayout.test.ts`)가 키마다 자산 1개 + 정사각 viewBox + `width = height` + 고정 색 / 글자 없음을 검사한다.
+    - 자산을 불러오지 못하면 영어 글자 배지(둥근 사각형 + `INTAKE`, `SHOOT`, `LIFT ▲` 등)로 대신 그린다.
+
+#### 기물 상태별 표시
+
+| 상태 | 엔진 좌표 | 표시 |
+|---|---|---|
+| `ON_FIELD` | 실제 위치 | 좌표에 원 (실제 반지름, POLLEN 노랑 / NECTAR 우리 진영 색) |
+| `IN_GARDEN` | 실제 위치 | `ON_FIELD`와 같은 원 + 초록 테두리 |
+| `IN_HIVE` | 셀 조준점 바닥 투영 (모두 한 점) | 개별로 그리지 않고 HIVE 셀 안의 줄 / 개수로 표시. 시차 낙하 대기열(`pendingDrops`)의 기물은 낙하 연출로 그림 (엔진은 방출 전까지 `IN_HIVE`) |
+| `IN_FLOWER` | FLOWER 중심 | FLOWER 게이지로만 |
+| `CONTROLLED` | 로봇 중심 | 로봇 적재물로만 |
+| `IN_FLIGHT` | 발사구 바닥 투영 | 비행 대기열 보간으로만 |
+| `OUT_OF_BOUNDS` | 필드 밖 | NECTAR 재고 게이지로만 (POLLEN은 해당 없음) |
+
+#### HIVE
+
+- **우리 셀:** 셀 바탕 / 테두리는 필드 공간에 그린다 — 상향 셀은 진영색 + 노란 강조 테두리, TIP 진행 중에는 넘어간 셀(= 현재 상향 셀의 반대편)에 주황 점선 테두리.
+- **셀 내용은 화면 공간에서 똑바로:** 상향 셀의 화면 경계 상자 안에 위에서부터 NECTAR 줄 / `▲ N{n} P{p}/{임계}` 알약 / POLLEN 줄. 기물 줄을 필드 공간에 두면 드라이버 시점에서 세로줄이 되어 글자와 겹치기 때문이다. NECTAR는 상향 셀 바탕과 같은 진영색이라 흰 윤곽선을 굵게 그린다.
+- **상대 셀:** 비활성 스타일, 글자 없음.
+- **시차 낙하 연출:** `pendingDrops`의 각 항목에 진행률 u = clamp(`tipProgressTimer` / `settleTime`, 0, 1). 위치 = 넘어간 셀의 립 기준점(Lip_X, Lip_Y, 2.6.1항) → (`targetX`, `targetY`) 선형 보간, 불투명도 = 0.25 + 0.75·u, 윤곽선은 화면 12시에서 시계 방향으로 u × 360°까지 호 (u = 1에서 완전한 원 = 착지). 방출되어 `ON_FIELD`가 되면 일반 표시. 필요한 값이 모두 프레임에 있으므로 스크러빙에서도 같다.
+
+#### FLOWER 게이지 (필드 밖 직사각형, `gaugeLayout.ts`)
+
+- FLOWER 4개는 필드 변을 2 : 1로 내분하는 점에 있고 필드 중심 기준 90° 회전 대칭이다: R(x, y) = (144 − y, x)를 반복하면 (96, 142) → (2, 96) → (48, 2) → (142, 48).
+- 기준 게이지(관중석 벽 FLOWER (96, 142)): 필드 바깥 x ∈ [96, 120], y ∈ [144.6, 147.8] (벽과 0.6 in 간격, 두께 3.2 in, 양 끝 둥글게). FLOWER 쪽 끝(x = 96)이 bottom(`slot[0]`)이고, 필드 둘레를 따라 화면 기준 반시계 방향 끝(x = 120)이 top.
+- 나머지 3개는 R로 회전 복제: 왼쪽 벽 (2, 96) → x ∈ [−3.8, −0.6], y ∈ [96, 120], bottom y = 96 / 위쪽 벽 (48, 2) → x ∈ [24, 48], y ∈ [−3.8, −0.6], bottom x = 48 / 오른쪽 벽 (142, 48) → x ∈ [144.6, 147.8], y ∈ [24, 48], bottom y = 48.
+- **칸:** 길이 24 in를 9칸(칸당 약 2.667 in)으로 나눈다 (9 = 용량 테이블 최대 총 개수). 칸 k = `pieces[k]`. 기물은 종류별 색의 같은 크기 원(지름 2.2 in).
+- `slot[0]`이 `null`(NECTAR 잼)이면 칸 0을 검정으로 막는다. 칸 0과 칸 1 사이에 출구 턱 구분선(점선)을 그린다 (칸 0은 득점 제외).
+- **가득 참 표시:** POLLEN / NECTAR를 둘 다 더 넣을 수 없으면(엔진 용량 판정 `canFlowerAccept` 재사용, 규칙의 단일 출처 = 엔진) `pieces.length`번 ~ 8번 칸에 X를 그린다. 테이블이 NECTAR 수에 대해 엄격히 감소하므로 이는 "현재 조합이 용량 테이블의 최대 조합"과 같다 (예: {1, 6}은 7칸 + X 2칸, {9, 0}은 X 없음, 잼의 빈 `slot[0]`은 POLLEN 1개로 계산). ENDGAME NECTAR 제한처럼 시점에 따라 달라지는 조건은 반영하지 않는다.
+- 게이지 틀(둥근 직사각형, 빈 칸 윤곽 9개, 출구 턱 점선)은 정적 레이어, 칸 내용은 매 프레임 그린다.
+
+#### NECTAR 재고 게이지 (휴먼 플레이어, 룰북 Figure 10-2 ALLIANCE AREA)
+
+- 각 진영 벽 바깥 y = 72 중심. RED: x ∈ [−3.8, −0.6], 칸 5개가 y ∈ [65.33, 78.67] (칸당 약 2.667 in, FLOWER 게이지와 같은 두께 / 간격 / 원 크기). BLUE: 필드 중심 점대칭 x ∈ [144.6, 147.8], 같은 y 범위. 틀은 칸 5개 양 끝에 칸 하나 길이(`STOCK_GAUGE_END_PAD`)만큼 여유를 둔다.
+- 칸 채우는 순서: 우리 LOADING ZONE에 가까운 끝부터 (RED는 y가 작은 쪽, BLUE는 y가 큰 쪽). 앞에서부터 `pendingHumanNectar`개 = **투입 대기**(반투명 + 점선 테두리), 이어서 `nectarStock`개 = **재고**(정상 색), 나머지는 빈 칸 (이미 필드로 들어간 수 = 5 − 대기 − 재고).
+- 두 값의 차이: `nectarStock`은 휴먼 플레이어가 아직 투입을 정하지 않은 재고이고, `pendingHumanNectar`는 투입이 정해졌지만(TIP / ENDGAME / 오토 TIP) LOADING ZONE 빈 슬롯이 없어(로봇이 막고 있음 등) 기다리는 수다 (2.4항). 예: ENDGAME 진입 때 로봇이 LOADING ZONE에 서 있으면 재고 3 → 0, 대기 3이 되고 자리가 나는 대로 대기가 줄어든다.
+- 상대 진영 재고 틀은 비활성 색, 내용 없음.
+
+#### 비행 공 (`pendingShots`, `flightView.ts`)
+
+- 경과 시간 t = (tick − `launchTick`) · dt (발사 후 초). t < `contactTime`이면 명목 구간, 그 뒤는 충돌 후 구간(`segments`)에서 t를 담는 구간.
+- **명목 구간:** 진행률 s = clamp(t / `contactTime`, 0, 1). 수평 위치 = (`fromX`, `fromY`) → (`toX`, `toY`) 선형 보간.
+- **명목 구간 높이 (명목 포물선 + 선형 보정):** 명목 궤적 `{fromX, fromY, fromZ, heading, v0, pitch}`의 `heightAtDistance`로 z_nom(d)를 구하고, D = from → to 수평 거리일 때 z(s) = z_nom(s·D) + s·(`toZ` − z_nom(D)). s = 0에서 발사구, s = 1에서 `to`(조준점 / HIVE 접촉점 / 벽 접촉점 / 착지점)와 정확히 일치한다 (명중의 탐색 v0 / 고정형 조준 오차로 명목 포물선이 조준점을 비껴가도 끝점이 맞음). 포물선이 정의되지 않는 비정상 궤적은 높이를 발사구 → to 선형으로 한다.
+- **충돌 후 구간:** 기록된 구간을 그대로 계산한다 (`flightSegmentPoint`: `BALLISTIC` 중력 포물선, `ROLL` 높이 유지). 구간이 명목 구간 끝 / 서로 / 착지점과 연속이므로 공중 → 바닥 점프가 없다. 충돌 후 구간이 없으면 명목 구간 끝에 멈춘다.
+- **높이 연출:** 바닥 위치 (x, y)에 반투명 그림자(기물 반지름), 공은 화면 위쪽으로 0.3·z in 띄운 위치에 반지름 × (1 + z / 100)으로 그린다.
+- 결과(`HIT` / `MISS_*`)는 도착 전까지 구분하지 않는다 (같은 색, 표시 옵션 `flightResult`로 구분 가능). 도착 틱 프레임에서는 기물이 이미 결과 상태로 그려진다.
+- 비행 대기열의 모든 발사를 그린다 (연속 발사로 여러 발이 동시에 날 수 있음). 함수: `shotElapsed`, `shotPositionAt`, `shotTrail`(틱 간격 표본), `airborneDisplay`.
+
+#### 경기 종료 강조
+
+프레임에 `scoreBreakdown`이 있을 때(6000틱 프레임)만 그린다. **경기 중 예측 표시(LOADING ZONE / GARDEN 걸침 등)는 하지 않는다** (3.2항 실시간 / 확정 분리). 점수 글자는 캔버스에 그리지 않는다 (결과 팝업이 항목별 점수를 보여 줌).
+
+- **GARDEN:** 경기 중 `IN_GARDEN` 기물은 초록 테두리. 종료 프레임에서 득점 인정된 기물은 초록 대신 주황 테두리 (겹쳐 그리지 않음).
+- **FLOWER 소유권:** 필드의 FLOWER 원을 분홍 대신 진영 공식 색으로 칠한다.
+- **하단 보너스:** 게이지에서 유효 득점 볼륨(`slot[1 .. N]`)의 **가장 아래 NECTAR 하나**에 주황 테두리 (`bottomBonusSlot`). 2 v 0 규칙상 소유권과 하단 보너스는 항상 함께 성립하므로 득점 FLOWER는 두 표시를 모두 받는다.
+- **PARK:** 주차 인정 로봇에 몸체보다 사방 1.5 in 큰 주황 외곽선.
+
+#### 표시 옵션 (`RenderOptions`)
+
+사용자에게 공개하는 **공통 환경설정**(로봇별 아님)이며 기본값은 모두 꺼짐이다. SETTINGS 탭에서 경기 전 또는 일시정지 중에만 바꿀 수 있다 (3.8항).
+
+| 옵션 | 표시 |
+|---|---|
+| `aimGuide` 조준선 | 로봇 아래에 반지름 24 in 부채꼴 — 고정형은 헤딩 ± `aimTolerance`, 터렛형은 `turretRange` — 과 로봇 중심에서 발사 방향(`shotLaunchHeading`, 터렛 범위 밖이면 한계각)으로 조준점 거리만큼 점선. 터렛 범위 해석은 엔진 조준 판정과 같다 (각 끝을 [−π, π]로 정규화하므로 360°는 `[−π, π]`뿐이고 `[0, 2π]`는 폭 0). |
+| `intakeProgress` 흡입 진행 | 흡입 대상(`intakeTargetPieceId`) 둘레 + 0.6 in 반지름에 `intakeContactTimer` / 필요 시간 호 (화면 12시부터 시계 방향). 바닥 기물은 필요 시간 `intakeDelay`, FLOWER `slot[0]`이면 FLOWER 원통 둘레에 max(`intakeDelay`, 0.12 s). 필요 시간이 0이면 그리지 않는다. |
+| `hitProbability` 명중 확률 | 캔버스가 아니라 좌측 HTML 패널에 로봇별 POLLEN / NECTAR 정수 % (3.8항). 계산 함수 `hitProbabilities`(`renderOptions.ts`)가 경기의 판정 함수를 보는 틱 프레임의 로봇 자세 / 진영 / 상향 셀로 호출한다 (로봇 2 × 기물 2 = 4회, 값은 [0, 1] 제한 / 비유한값 0). 옵션이 꺼져 있으면 호출하지 않는다. 엔진은 발사할 때만 판정 함수를 부르므로 결정론과 무관하고, 비용은 약 0.5 µs/회로 무시할 수 있다. |
+| `flightTrail` 비행 잔상 | 발사구부터 현재까지 공 표시 위치(높이 오프셋 포함)를 점선으로. |
+| `flightResult` 비행 결과 색 | 비행 중 공 테두리를 결과별로 — `HIT` 초록 / `MISS_HIVE` 주황 / `MISS_FLOOR` 회색. |
+
+#### 테스트
+
+순수 계산 함수는 Vitest로 검사한다 — 보기 변환(RED / BLUE 회전 방향, 역변환 왕복, 애니메이션 배율), 비행 보간(s = 0 발사구, s = 1 도착점, 보정항), 낙하 보간(립 → 착지, 불투명도 / 호 진행), FLOWER 게이지(회전 대칭 좌표, 칸 위치, 가득 참 — 테이블 7조합 + 잼), 재고 게이지 칸 배정, 적재물 / 배지 배치, 히트맵 색 척도 / 픽셀, 시작 자세 편집 기하. 그리기 결과는 저장소 밖 일회성 헤드리스 Chromium 스크린샷으로 확인했고, Playwright는 저장소에 넣지 않았다 (스크린샷 비교는 폰트 / 안티앨리어싱 차이로 불안정, 5.2항).
+
+### 3.8 웹 화면 (GUI)
+
+엔진 / 입력 계층 / 실시간 루프 / 렌더러 / LUT Worker를 한 화면으로 묶는 사용자 화면이다.
+
+#### 기본 원칙
+
+- **대상 환경:** 데스크톱 / 노트북 브라우저 전용. 모바일 최적화는 하지 않는다 (태블릿 가로 화면은 동작하면 좋으나 보장하지 않음).
+- **화면 크기:** 최소 1366 × 768(브라우저 창 안쪽 가용 영역 약 1366 × 650 기준으로 설계), 최대 3840 × 2160. UI 치수(글자 / 패널 폭 / 버튼)는 기준 단위 `--u = max(1px, min(100vw / 1366, 100vh / 650))`에 비례해 4K에서도 1366 화면과 같은 비율로 보인다. 최소 크기보다 작으면 더 줄이지 않고 스크롤한다.
+- **이름:** 앱 표시 이름과 브라우저 탭 제목은 `FTC TacticSim`.
+- **React의 역할:** 컨트롤 UI / 스크러버 / 스코어보드 / 설정 폼만. 엔진 / 실시간 루프 / 렌더러 / LUT Worker는 React 밖의 앱 컨트롤러(`src/app/appController.ts`, `AppController`)가 소유하고, React는 상태 알림(`AppStatus`)을 구독한다. 상태 알림은 진행 중 최대 약 10 Hz이고 단계 / 루프 상태 변화는 즉시 보낸다.
+- **언어와 문구 사전 (`src/ui/i18n.ts`):** 기본 영어, SETTINGS 탭에서 한국어로 바꾼다. 모든 화면 문구는 `t(lang, key, params?)`를 거친다 (영어 사전 키 기준, 한국어 사전은 타입으로 모든 키를 강제, 없는 키는 영어 → 키 문자열로 대체, 자리표시자 `{name}`). 엔진 검증 오류 코드(`issue.*`) / LUT 상태(`lut.*`) / 일시정지 사유(`pause.*`)마다 문구를 두고, 화면은 엔진 메시지 대신 코드로 문구를 찾는다. 한국어는 짧은 명사형을 쓴다.
+    - **게임 용어는 언어와 무관하게 원어 대문자:** `POLLEN`, `NECTAR`, `HIVE`, `CELL`, `FLOWER`, `GARDEN`, `LOADING ZONE`, `TIP`, `PARK`, `ENDGAME`, `TELEOP`, `SWARM`, `POLLINATOR`, `RP`, `RED`, `BLUE`, `ALLIANCE`.
+- **타이머 (`formatMatchTime`):** 10초 초과는 `M:SS`, 10초 이하는 `0:SS.s`. 두 구간 모두 올림이라 표시가 건너뛰지 않는다 (2:00 → 1:59 … 0:11 → 0:10.0 → 0:09.9 … 0:00.1 → 종료 0:00.0). 틱 × 0.02의 부동소수점 오차는 1e-6초로 흡수한다.
+- **색과 테마:** 진영 공식 색 RED `#DF001B`, BLUE `#0F53A7` (UI와 렌더러 공통). 주변 UI / 팝업은 어두운 계열 — 배경 `#15171C`, 상자 `#1D2027` + 테두리 `#2C313B`, 보조 글자 `#9CA3AF`, 강조 / `ENDGAME` 주황 `#F59E0B`, 준비 초록 `#22C55E`. 필드 색은 3.7항.
+- **글꼴 (`src/renderer/fonts.ts` `FONT_FAMILY`):** `'Apple SD Gothic Neo', 'Pretendard Variable', Pretendard, system-ui, sans-serif`. macOS는 설치된 Apple SD 산돌고딕 Neo, 그 외는 Pretendard(OFL, npm `pretendard`, 쓰는 글자만 나눠 받는 dynamic subset 웹폰트). 굵기는 600 / 700 / 800만 쓴다. HTML과 캔버스(`canvasFont(크기, 굵기)`)가 같은 정의를 쓰고, 웹폰트가 늦게 도착하면(`document.fonts.ready`) 캔버스를 다시 그린다.
+- **아이콘:** `lucide-react`(ISC) 선 아이콘, `currentColor`. TIP 옆 HIVE 아이콘만 자체 제작(`HiveIcon.tsx`, 같은 24 × 24 / 선 굵기 2 규격). 역할: `START` Play / `PAUSE` Pause / `RESUME` Gamepad2 / `BRANCH` GitBranch / 가지 목록 GitFork / 1초 이동 Rewind · FastForward / 1틱 이동 ChevronLeft · ChevronRight / 재생 CirclePlay · CirclePause / `VIEW` SwitchCamera / `NEW` RotateCcw / `RESULT` Trophy / 로봇 Bot / 시나리오 Flag(진영색 채움) / 게임패드 Gamepad2 / 펼치기 PanelRightOpen / 도움말 CircleHelp / 준비 CircleCheck / 경고 TriangleAlert / 내보내기 · 불러오기 Download · Upload / 요약 FileText.
+- **파비콘 (`public/favicon.svg`):** lucide Gamepad2 선(흰색)을 어두운 둥근 사각형(`#15171C`)에 넣고 두 버튼을 진영 빨강 / 파랑으로 칠함. 밝은 / 어두운 탭 모두에서 16 px로 식별된다.
+
+#### 화면 구성
+
+화면은 **메인 화면 하나**다. 경기 / 일시정지 / 복기가 모두 같은 화면이고, 설정은 우측 config 창, 경기 결과는 팝업, 도움말은 모달이다.
+
+```
+┌──────────────┬──────────────────────────────────────────┬──────┐
+│  1:57 (타이머) │               [경고 토스트]                  │ R1 ◔ │
+├──────────────┤                                          │ R2 ✓ │
+│  RED  20     │                                          │  ⚑ ✓ │
+│  (진영 점수)    │           필드 뷰포트 (정사각형)              │  🎮 1 │
+├──────────────┤                                          │      │
+│ HIVE TIP 1/4 │                                          │  ?   │
+├──────────────┤                                          │      │
+│ R1 #19049    │                                          │      │
+│ R2 #24909    │                                          │      │
+│ (명중 확률)     │                                          │  ≡   │
+├──────────────┴──────────────────────────────────────────┴──────┤
+│ [주 버튼][가지] [⏮][◀] ━━━━━━●━━━━━━ [▶][⏭] [▶ 재생] 0.25 0.5 1 2× [VIEW] [NEW] [RESULT] │
+└────────────────────────────────────────────────────────────────┘
+  좌측 패널 ≈ 260u    필드 = 가용 높이 − 스크러버 줄          접힌 config ≈ 72u (펼침 ≈ 480u, 필드 영역을 밀어냄)
+```
+
+- **배치:** CSS 그리드 `좌측 패널 | 필드 | config 띠` + 아래 줄 전체 스크러버 (간격 12u, `layoutCssVars()`가 루트 CSS 변수로 넘김). 1366 × 650에서 필드는 약 558 px, 3840 × 2160에서 약 1900 px. config를 펼쳐도 1366 폭에서는 필드가 줄지 않고(높이 제한), 폭이 부족한 화면(예: 4K)에서는 필드가 줄어든다.
+- **필드 크기 (`fieldCanvasSize`):** CSS 크기 = 필드 영역의 짧은 변(내림), 버퍼 = CSS × dpr(반올림), 렌더 배율 = 버퍼 / 800. `ResizeObserver`와 창 `resize`(dpr만 바뀐 경우)마다 `AppController.setRenderScale`을 부르고, 버퍼가 바뀌었으면 다시 그린다.
+- **좌측 패널 (HTML, 보는 틱 기준):**
+    - 타이머: 경기 전에는 기본색, 경기가 시작된 뒤 남은 60초 이하(`ENDGAME`)면 주황, 남은 10초 이하면 빨강 + 초가 바뀔 때마다 맥박(아래 경기 종료 연출).
+    - 진영 점수: 진영 색 바탕 + 15% 어두운 테두리 + 흰 글자, 진영 이름 + 현재 `totalScore`. 경기 중에는 확정 점수(TELEOP TIP × 20)만 오르고 FLOWER / GARDEN / PARK는 종료 때 합산된다 (3.2항).
+    - `TIP`: HIVE 아이콘 + `{오토 TIP + TELEOP TIP} / {다음 RP 목표}` (`tipDisplay`). 목표는 4(`POLLINATOR 1`) → 달성 후 7(`POLLINATOR 2`) → 7 달성 후 `n / 7` + 초록 체크. 점수에는 오토 TIP을 넣지 않는다 (2.6.5항).
+    - 로봇: 팀 번호가 있으면 `#번호`(크게) + 팀명(작게), 없으면 `R1` / `R2` + 팀명 (`robotLabel`). 표시 옵션 `hitProbability`가 켜져 있으면 그 아래에 로봇별 `POLLEN` / `NECTAR` 명중 확률 정수 % (적재함 0번 종류 줄은 밝게, 다른 줄은 흐리게, 기물 색 점).
+    - 주차 여부는 표시하지 않는다 (경기 중에는 확정할 수 없음).
+- **필드 영역:** 캔버스(3.7항) 위에 HTML 층을 겹친다 — 경고 토스트, 자동 일시정지 배너, 불러온 경기 불일치 배너(3.9항), 경기 종료 연출, 필드 편집 모드 안내 띠 / 글자.
+- **스크러버 줄 (필드 아래):**
+
+    | 요소 | 동작 |
+    |---|---|
+    | 주 버튼 | 상태에 따라 하나: `START`(경기 전) / 비활성(회전 중, 종료 강조 · 결과 팝업 중) / `PAUSE`(진행 중) / **`RESUME`**(게임패드 아이콘, 일시정지 + 보는 틱 = 머리 + 경기 미종료) / **`BRANCH`**(갈라지는 화살표, 주황, 보는 틱 < 머리) |
+    | 가지 | 주 버튼 바로 옆, `GitFork` + 지금 가지 이름(최대 150u 말줄임). 누르면 가지 목록 (3.9항). 경기 전에는 자리만 두고 비활성 |
+    | 1초 `⏮` / `⏭`, 1틱 `◀` / `▶` | 보는 틱 이동, 일시정지 / 복기 중에만. 길게 누르면 0.4초 뒤부터 반복 |
+    | 타임라인 막대 | 0 ~ 6000틱, 10초 눈금 13개(`ENDGAME` 시작 눈금만 주황), 기록 구간 채움 + 보는 틱 동그라미 + 분기 표식(3.9항). 클릭 / 끌기로 보는 틱 이동 |
+    | 재생 `▶` / `⏸` | 기록된 프레임을 배속으로 보기만 함 (기록 불변) |
+    | 배속 | 0.25 / 0.5 / 1 / 2× (재생에만 적용, 조종은 항상 1×, 새 경기에서도 유지) |
+    | `VIEW` | 드라이버 / 관중석 시점 토글 (경기 중 언제나, 경기 전 비활성, 3.7항 전환 애니메이션) |
+    | `NEW` | 같은 설정 · 같은 시드로 새 경기 (확인창 → 관중석으로 회전 → 경기 전). 회전 중 비활성 |
+    | `RESULT` | 경기 종료 뒤 결과 팝업 다시 열기 (복기 중만) |
+
+- 버튼은 누른 뒤 포커스를 풀어 Space / Enter가 버튼을 다시 누르지 않게 한다.
+
+#### 앱 상태 흐름
+
+```
+SETUP ──START(모두 준비)──▶ ROTATING_IN ──(700 ms)──▶ RUNNING ◀──────RESUME──────┐
+  ▲                                                   │                        │
+  │                                   PAUSE / Space / 자동 일시정지                │
+  │                                                   ▼                        │
+  │                                                PAUSED ──(보는 틱 = 머리)──────┘
+  │                                                 │  ▲
+  │                                          재생 ▶  │  │ 재생 끝 / ⏸
+  │                                                 ▼  │
+  │                                               PLAYBACK
+  │
+  │    RUNNING ──(6000틱)──▶ HIGHLIGHT(5초) ──▶ RESULT(팝업) ──REVIEW──▶ REVIEW
+  │                          (클릭 / Space로 건너뛰기)          (= 경기 종료 뒤 일시정지, 재생 가능, RESUME 없음)
+  │
+  └── ROTATING_OUT ◀── NEW(확인창) ── 경기 시작 이후 모든 상태
+      (관중석 회전, 같은 설정 · 같은 시드로 0틱 새 엔진)
+
+PAUSED / REVIEW ──BRANCH(보는 틱 < 머리, 확인창)──▶ RUNNING  (새 가지, 기존 기록 보존 — 3.9항)
+```
+
+- **보는 틱과 머리를 구분한다.** 보는 틱(`viewTick`)은 화면에 그리는 틱이고, 머리(`headTick`)는 지금 가지의 마지막 기록 틱이다 (진행 중에는 둘 다 엔진 현재 틱). 스크러빙 / 재생 / 틱 이동은 보는 틱만 바꾸고 `engine.getFrame(보는 틱)`을 그리며, 엔진을 건드리지 않는다. 그리기와 좌측 패널 값(타이머 / 점수 / TIP / 명중 확률)은 보는 틱 프레임 기준이다.
+- **기록을 바꾸는 동작은 재개와 분기뿐이다.** 재개는 머리에서만 가능하고, 되감은 틱에서 이어 조종하려면 반드시 분기(확인창)를 거친다. 경기 종료 뒤에는 `RESUME`이 없지만, 종료 전 틱으로 되감으면 `BRANCH`로 그 시점부터 다시 조종할 수 있다.
+- **재생:** 머리에서 재생을 누르면(경기 종료 뒤 Space 포함) 0틱부터 재생한다. 재생은 머리에서 멈춘다. 재생 중 주 버튼은 보는 틱 기준 `RESUME` / `BRANCH`이며, 누르면 재생을 멈추고 그 동작을 한다. 재생 중에는 창 포커스를 잃어도 계속한다 (자동 일시정지는 조종 중에만).
+- **`NEW`:** 진행 중에 누르면 먼저 일시정지하고 확인창을 띄운다 (취소하면 일시정지 상태로 남음). 설정과 시드는 유지되며, 시드는 SCENARIO 탭 `REROLL`로만 바뀐다. 가지 트리도 모두 버린다 (3.9항).
+- **경기 종료 (`endStage`):** 루프 `ENDED` → `HIGHLIGHT`(`END_HIGHLIGHT_MS` = 5000, 필드 클릭 / Space로 건너뜀) → `RESULT` → `REVIEW`. 종료 강조 / 결과 팝업 중에는 보는 틱 이동 / 재생 / 재개 / 분기를 할 수 없다. 종료 뒤 분기해서 다시 6000틱에 닿으면 다시 `HIGHLIGHT`부터.
+- 입력 출처 / 조작 모드는 경기 전 또는 일시정지 중에만 바꿀 수 있고, 다음 `START` / `RESUME` / `BRANCH`부터 적용된다.
+- **컨트롤러 조작 (`AppController`):** `start` / `pause` / `resume` / `branch`, `setViewTick` / `stepView`(기록 구간 [0, 머리]로 제한, 재생 멈춤), `play` / `stopPlayback` / `togglePlayback` / `setPlaybackSpeed`(벽시계 × 배속 × 50틱/초), `reset`(`NEW`), `skipHighlight` / `closeResult` / `openResult`, `setShortcutsEnabled`(확인창 / 팝업 / 도움말 동안 끔), `setSetup`(경기 전에만 설정 교체), `setEditScene`(필드 편집 모드), 입력 설정(`setSourceChoice` / `setDriveMode` / `setKeyboardEnabled` / `setDefaultView`), 가지(`switchBranch` / `deleteBranch` / `renameBranch`), 불러오기(`loadMatch` / `recipeSource`, 3.9항).
+- **상태 (`AppStatus`):** 단계, 진영, 보기 / 보기 각도, 루프 상태 / 일시정지 사유 / 자동 일시정지 사유, 보는 틱 · 머리 · 남은 시간, 확정 점수, TELEOP / 오토 TIP, RP, 게임패드 슬롯, 명중 확률(옵션 켜짐일 때만), `matchEnded` / `canScrub` / `canResume` / `canBranch` / `playing` / `playbackSpeed` / `endStage` / `endSeq`, `result`(종료 프레임의 총점 / 득점 내역 / RP / TIP — 보는 틱과 무관), 입력 출처 / 조작 모드 / 키보드(선택 · 적용 중), 가지 목록 / 지금 가지.
+
+#### 확인창, 알림, 타임라인
+
+- **확인창 (`ConfirmDialog.tsx`):** 화면 전체 흐림 + 필드 영역 중앙 상자(결과 팝업 위에서도 열림). 문구 + `취소 Esc` / 동작 이름 버튼(`BRANCH` · `NEW` 등, 주황) `Enter`. 창 `keydown`을 캡처 단계에서 받아 Enter = 확인, Esc = 취소, Space는 막는다. 열린 동안 단축키는 꺼진다. 확인 버튼 하나만 있는 안내창 모드도 있다 (가지 가득 참 안내, Esc도 닫기).
+- **경고 토스트 (리프트 중 주행):** 로봇이 리프트 상태(`FLOWER_SETUP` / `FLOWER_READY` / `FLOWER_DROPPING` / `FLOWER_LOWERING`)인데 그 로봇의 `LIVE` 주행 입력(양자화 · 데드존 뒤 qx, qy, qω)이 0이 아니면 필드 위쪽 중앙에 빨간(`#DC2626`) 알약 + 경고 아이콘 `R2 · LOWER LIFT (A) TO MOVE` / "A로 리프트를 내려야 이동 가능"을 띄운다. 1.5초 뒤 0.3초 동안 흐려지며 사라지고, 같은 로봇은 2초(`LIFT_TOAST_COOLDOWN_MS`, 벽시계)에 한 번만. 리프트 상태 자체는 로봇 행동 배지로 보인다 (3.7항). 이 둘로 "리프트를 내려야 이동 가능"을 안내한다.
+- **자동 일시정지 배너:** 창 포커스 소실 / 탭 숨김 / 게임패드 연결 해제로 멈췄을 때만(사용자 일시정지는 배너 없음) 필드 위쪽 중앙에 어두운 띠 + 주황 테두리 + 경고 아이콘, 사유 + "Space / RESUME으로 재개". 재개 · 분기 · 재생 시작 · `NEW`에서 사라지고, 보는 틱 이동은 유지한다.
+- **타임라인:** 보는 틱을 움직일 수 있을 때 막대 클릭 / 끌기(포인터 캡처) → 막대 비율 × 6000 반올림(`timelineTickAt`) → 보는 틱 (기록 밖은 머리에 붙음, 재생 멈춤). 끄는 동안 동그라미 위에 경기 시계(`M:SS`)를 표시하고, 마우스를 올리면 동그라미가 1.2배로 커진다.
+
+#### 경기 종료 연출과 결과 팝업
+
+- **흐름:** 6000틱 도달 → 루프 정지 → **5초 동안 필드 경기 종료 강조**(3.7항) → 뒤 흐림 + 결과 팝업. 클릭 / Space로 5초 대기를 건너뛸 수 있다.
+- **종료 연출 (소리 없이 화면만, 모두 캔버스 밖 HTML 층):** 종료 순간을 알아채기 쉽게 한다.
+    - 마지막 10초: 경기가 시작된 뒤 남은 10초 이하(`FINAL_COUNTDOWN_SEC`)면 타이머가 빨강, 진행 중에는 초가 바뀔 때마다 0.42초 맥박(1.12배 → 1배).
+    - 종료 순간 흰빛: 필드 영역에 0.35초.
+    - 종료 배너: 종료 강조 5초 동안 필드 위쪽 중앙에 `MATCH COMPLETE` / "경기 종료"(주황, 튀어나오듯 등장) + 5초 동안 줄어드는 진행바 + "클릭 / Space로 결과 바로 보기". 배너는 클릭을 필드로 통과시켜 필드 클릭 건너뛰기가 그대로 동작한다.
+    - 점수 집계: 좌측 점수가 종료 직전 점수(TELEOP TIP × 20)에서 최종 점수로 1.5초 카운트업(easeOutCubic, 정수) + 종료 때 더해진 항목 칩(`+4 GARDEN` 등, 0점 제외, FLOWER → GARDEN → PARK, 0.35초 간격).
+    - 트리거 `endSeq` = 이 경기에서 실제로 6000틱에 도달한 횟수 (분기 뒤 다시 끝나면 +1, 재생 / 스크러빙으로 종료 틱을 보는 것과 가지 전환은 불변, `NEW`에서 0). 연출은 `HIGHLIGHT` 동안만 그리며 `endSeq`를 key로 새로 마운트해 매번 처음부터 재생한다. `prefers-reduced-motion`이면 움직임 없이 최종 상태만 보여 준다.
+- **결과 팝업 (`ResultPopup.tsx`, 폭 460u, 표시 규칙 `src/ui/resultModel.ts`):**
+    - 헤더: `FTC TacticSim` / `TELEOP MATCH COMPLETED` / 진영 배지 (+ 가지 이름, 3.9항). 그 아래 두 로봇 칩 — 진영색 `R1` / `R2` + 팀 번호(`#번호`, 있을 때) + 팀명.
+    - 총점, 항목별 점수와 한 줄 근거 (`scoreBreakdown`만 읽음, 3.2항):
+        - `HIVE` "TELEOP TIP n × 20" (오토 TIP이 있으면 "오토 TIP n회는 RP에만")
+        - `FLOWER` 소유한 FLOWER별 "FLOWER k: 기물 × 2 (+ 하단 보너스 5)" (없으면 "소유한 FLOWER 없음")
+        - `GARDEN` "POLLEN n × 1"
+        - `PARK` "R1 · R2 주차 × 5" (없으면 "주차한 로봇 없음")
+    - `RP` 카드 3개: 이름 + 조건과 지금 값 (`SWARM` "PARK 5 / 10", `POLLINATOR 1` "TIP 5 / 4", `POLLINATOR 2` "TIP 5 / 7", TIP은 오토 포함), 달성은 초록 체크.
+    - 가지가 2개 이상 끝났으면 `BRANCHES` 비교 줄 (3.9항).
+    - 동작: `EXPORT MATCH` / `EXPORT SUMMARY`(3.9항) 줄, 그 아래 `REVIEW`(팝업을 닫고 복기) / `RESTART`(= `NEW`, 확인창).
+
+#### config 창 (우측)
+
+- **접힌 상태 (세로 아이콘 띠, `ConfigRail`):**
+
+    | 아이콘 | 상태 표시 |
+    |---|---|
+    | R1 / R2 로봇 | 초록 체크 = 준비 완료(탭이 올바름 + 적용 안 된 수정 없음 + 명중 확률표 `READY`) / 주황 진행률 링 = 확률표 생성 중(마우스를 올리면 "생성 중 63% · 약 7초 남음") / 빨간 느낌표 = 틀린 입력 · 검증 실패 · 적용 안 된 수정 · 생성 오류 (마우스를 올리면 사유) |
+    | 시나리오 깃발 | 진영색 깃발 + 체크 = 유효 · 적용됨 / 빨간 느낌표 = 무효 또는 적용 안 된 수정 |
+    | 게임패드 | 연결된 패드 수, 비표준 매핑 경고. 마우스를 올리면 슬롯별 패드 이름 / 배정 로봇 |
+    | `?` 도움말 | 도움말 창 (3.10항), 언제나 |
+    | 펼치기 | 열 수 있는 시점에만 활성 |
+
+    - 로봇 / 시나리오 아이콘을 누르면 그 탭으로, 게임패드 아이콘은 SETTINGS 탭으로 펼친다.
+- **펼친 상태 (`ConfigPanel`, 약 480u, 필드를 밀어냄, 0.2초 전환):** 위쪽 탭 4개 `R1` / `R2`(로봇 제원) / `SCENARIO` / `SETTINGS` + 닫기, Esc로 닫는다. 문제가 있는 탭에는 빨간 점.
+- **초안과 적용:** R1 / R2 / SCENARIO 탭은 편집 중 값(초안)과 적용된 값을 따로 가진다 (`src/ui/configDraft.ts`).
+    - 탭 하단 `APPLY`는 초안이 유효하고 적용 값과 다를 때만 활성. 하단에 "적용 안 된 수정" 표시 + `RESET TAB`.
+    - 검증에 걸린 입력칸은 빨간 테두리 + 빨간 설명 글자. 적용 안 된 수정이 있으면 아이콘이 빨간 느낌표가 되고 `START`를 막는다 (옛 값으로 조용히 시작하지 않도록).
+    - 탭을 옮기거나 창을 닫아도 초안은 남는다.
+    - SETTINGS 탭은 바꾸는 즉시 적용된다 (`APPLY` 없음).
+- **되돌리기:** `RESET TAB`은 그 탭 초안을 기본 프리셋으로 되돌린다 (시나리오는 지금 시드 유지). SETTINGS 탭의 `RESET ALL`은 확인창 → SETTINGS 값은 즉시 기본값, R1 / R2 / SCENARIO는 초안만 기본값(각 탭 `APPLY` 필요). 경기 전에만.
+- **`START` 막기:** 준비가 안 됐으면(`startBlocker`: R1 탭 → R1 확률표 → R2 탭 → R2 확률표 → SCENARIO 순) config 창이 펼쳐지며 첫 문제 탭으로 이동하고 빨간 안내 띠를 보여 준다. 설정은 모두 끝났고 확률표 생성만 남았으면 "R2 확률표 생성 중 63%" 안내만 한다. 입력을 고치기 시작하면 안내를 지운다.
+- **열 수 있는 시점 / 편집 범위:**
+
+    | 앱 상태 | config 펼치기 | R1 / R2 / SCENARIO 탭 | SETTINGS 탭 |
+    |---|---|---|---|
+    | 경기 전 (`SETUP`) | 가능 | 편집 가능 | 전부 편집 가능 |
+    | 회전 중 / 진행 중 / 재생 중 / 종료 강조 / 결과 팝업 | **불가** (펼쳐져 있었으면 자동으로 접힘) | — | — |
+    | 일시정지 (경기 중 또는 복기) | 가능 | **읽기 전용** (경기가 있는 동안 입력칸을 흐리게 하고 "경기 중 잠금" 안내) | 입력 출처 / 조작 모드 / 키보드 / 표시 옵션 / 언어 / 단위 / 기본 보기 편집 가능, 프리셋 `EXPORT` 가능, `RESET ALL` · `IMPORT` 불가 |
+
+#### 로봇 탭 (R1 / R2)
+
+| 구역 | 항목 |
+|---|---|
+| 미리보기 | 탭 맨 위, 위에서 본 로봇(앞 = 위, `RobotPreview.tsx`, SVG) — 몸체 + 앞 변 굵은 선 + 앞 화살표, 흡입 구역 초록, 조준 범위 주황 부채꼴(360°면 원), 발사구 흰 점(오프셋 위치), 범례 |
+| 팀 | 팀 번호, 팀명 |
+| 하드웨어 | 가로 / 세로, 최고 속도, 최고 각속도, 최대 선형 가속도, 최대 각가속도, 최대 적재 수 |
+| 인테이크 | 흡입 딜레이, `NECTAR` 흡입 가능 토글, 흡입 구역 편집기 |
+| 슈터 | 형식(`FIXED` / `TURRET`), 허용 조준 오차 또는 터렛 왼쪽 / 오른쪽 한계(+ `±90°` / `360°` 프리셋), 발사 딜레이, 발사구 지상고, 발사각, 발사구 오프셋, 접힌 "고급 설정: 발사 편차"(속도 / 방위 / 피치 편차 3칸 + LUT에서만 쓴다는 안내) |
+| `FLOWER` 리프트 | 리프트 준비 시간(올림 = 내림), 투입 간격 |
+| 스윗스팟 → 명중 확률표 | 기준 CELL 라벨, 스윗스팟 X / Y, 검증 사유(빨간 글자), `SET ON FIELD`(필드 편집 모드), 명중 확률표 상태 상자, `SHOW HIT MAP`(히트맵 모드) |
+| 복사 | `COPY TO R2`(R1 탭) / `COPY TO R1`(R2 탭) |
+
+- **프로필 (`src/ui/robotForm.ts`):** 화면의 로봇 값은 `RobotProfile { teamNumber, teamName, config: RobotConfig, ballistics: ProfileBallistics }`다. 팀 번호 / 팀명은 화면 전용이고 `RobotConfig` 타입은 바꾸지 않는다 (`RobotConfig.name`은 엔진용 `R1` / `R2` 그대로, config 탭 이름 / 결과 팝업 / 캔버스 로봇 번호도 `R1` / `R2`). `ProfileBallistics` = 발사구(`dz`) / 발사각 / 오프셋 + 편차 3종 + 스윗스팟(`RED_AUDIENCE` 기준 좌표).
+- **입력칸 규칙 (`FormControls.tsx`):** 숫자 칸은 단위를 표시하고 칠 때마다 검사한다. 올바르면 그 칸 값만 엔진 단위로 초안에 반영하고(**고친 칸만 변환** — 표시 반올림으로 다른 칸 값이 바뀌지 않게), 틀리면 친 글자를 보관한 채 빨간 테두리 + 빨간 설명("6.00 – 18.00 in 사이", "정수만 입력", "숫자를 입력"). 틀린 글자가 남아 있는 동안 탭은 `INVALID`이고 적용할 수 없으며, 탭 이동 / 창 닫기에도 남고 `RESET TAB` · 복사 대상에서는 지운다. 초점이 있는 동안은 친 글자 그대로, 초점을 잃거나 Enter면 표시 형식으로 바꾼다. 저장 값이 범위 밖이면(파일로 들어온 값 등) 그 칸도 빨갛게 표시한다(`checkValue`).
+- **입력 허용 범위:**
+
+    | 항목 | 범위 |
+    |---|---|
+    | 가로 / 세로 | 6 ~ 18 in |
+    | 최고 속도 / 최대 가속도 | 1 ~ 200 in/s / 1 ~ 2000 in/s² |
+    | 최고 각속도 / 최대 각가속도 | 0.1 ~ 30 rad/s / 0.1 ~ 300 rad/s² |
+    | 최대 적재 수 | 정수 1 ~ 4 |
+    | 흡입 · 발사 딜레이, 리프트 준비 시간, 투입 간격 | 정수 0 ~ 5000 ms |
+    | 허용 조준 오차 | 0.1 ~ 45° |
+    | 터렛 한계 | −180 ~ 180° (터렛이면 왼쪽 ≠ 오른쪽) |
+    | 발사구 지상고 | 1 ~ 50 in (엔진 `dz = 53.5 − 지상고` = 3.5 ~ 52.5, 기본 14 in → 39.5) |
+    | 발사각 | 5 ~ 85° (기본 60°) |
+    | 발사구 오프셋 | −18 ~ 18 in (+ = 앞, 기본 0) |
+    | 속도 편차 / 방위 · 피치 편차 | 0 ~ 20 % (기본 2 %) / 0 ~ 10° (기본 0.02 / 0.006 rad) |
+    | 흡입 구역 수 / 위치 / 폭 / 깊이 | 0 ~ 8개 / ± 변 길이 ÷ 2 (앞 · 뒤 = 가로, 좌 · 우 = 세로) / 3.6 ~ 36 in (최소 = NECTAR 직경 — 기물보다 좁은 입구는 흡입 불가) / 0.25 ~ 12 in |
+    | 스윗스팟 X / Y | 0 ~ 144 in (1 in 격자 중심으로 맞춤) |
+    | 팀 번호 / 팀명 | 비움 또는 숫자 1 ~ 5자리 / 24자까지 |
+
+- **흡입 구역 편집기:** 구역마다 한 줄 — 면 버튼 묶음(앞 / 뒤 / 왼쪽 / 오른쪽) + 위치 / 폭 / 깊이 + 삭제. `구역 추가`(8개면 비활성) = 앞 · 위치 0 · 폭 = 변 길이 · 깊이 1 in. 프리셋 `FRONT` / `ANY`는 현재 로봇 크기로 구역 전체를 바꾼다 (이후 크기를 바꿔도 구역은 따라가지 않으며, 위치가 변 밖이면 오류로 알림). 구역 0개는 허용하되 "흡입 불가" 경고를 띄운다. 면을 바꾸면 그 구역 위치를 새 범위로 다시 검사하고, 추가 / 삭제 / 프리셋은 번호가 밀리므로 구역 칸의 틀린 글자를 모두 지운다.
+- **슈터:** 터렛으로 바꿀 때 범위 폭이 0이면 ±90°로 시작한다. 숨는 칸의 틀린 글자는 지운다. 발사구 지상고 / 발사각 / 오프셋은 경기 비행 처리에 바로 쓰이고(`MatchSetup.shooters`), 편차 3종과 스윗스팟은 명중 확률표 생성에만 쓰인다.
+- **명중 확률표 상태 상자 (`LutStatus.tsx`, 화면 규칙 `src/ui/lutView.ts`):** 적용한 설정 기준 상태 한 줄("생성 중 63% · 약 7초 남음", "준비 완료 (저장된 결과)") + 진행 막대 + 기물별 발사 속도 · 스윗스팟 명중률(0 %면 경고). 남은 시간은 생성 시작 후 처리 속도로 추정하며 진행 2 % · 0.5초 이후부터 보인다. 오류면 오류 문구 + `RETRY`. 초안의 LUT 입력(탄도 / 스윗스팟 / 로봇 크기, `lutInputsChanged`)이 적용 값과 다르면 "적용하면 새로 만듦".
+- **스윗스팟 입력 기준:** 현재 시나리오 진영(SCENARIO 탭 초안)의 공식 시작 상향 셀 — RED → `RED_AUDIENCE`, BLUE → `BLUE_OPPOSITE` — 을 기준으로 찍고, 칸 옆에 기준 셀 라벨(예: "기준: `BLUE_OPPOSITE`")을 보인다. 저장은 항상 `RED_AUDIENCE` 좌표이고 BLUE는 필드 중심 점대칭으로 변환한다 (2.6.2항). 진영을 나중에 바꿔도 LUT는 그대로이고 같은 스윗스팟이 새 진영 기준으로 대칭 이동해 보일 뿐이다. 시나리오에서 상향 셀을 바꿔도 표시 기준 셀은 바뀌지 않는다.
+- **검증:** 스윗스팟 칸 범위 + (다른 칸이 모두 올바를 때) `validateBallisticsConfig`의 `SWEET_SPOT_*` 사유는 빨간 오류로 `APPLY`를 막는다. 스윗스팟 명중률 0 %는 경고만 한다 (적용 / 시작 허용).
+- **`COPY TO`:** 팀 번호 / 팀명을 뺀 모든 항목(흡입 구역, 탄도, 스윗스팟 포함)을 상대 탭 초안으로 깊은 복사한다. 원본 탭에 틀린 입력이 있으면 불가. 상대 탭에 적용 안 된 수정이 있으면 확인창을 띄우고, 복사 뒤 "R2 초안에 복사함 — R2 탭에서 적용"을 안내한다.
+- LUT 시드 / 샘플 수는 고정값(`DEFAULT_BALLISTICS_SEED`, 격자당 2000 / v0 후보당 20000)이며 화면에 보이지 않는다.
+
+#### 명중 확률표 생성 연결
+
+- **생성 시작:** 로봇 탭 `APPLY`에서 LUT 입력이 바뀌었을 때, 그리고 앱 시작 때 자동 보관 / 기본 프리셋 설정으로 (캐시에 있으면 바로 `READY`). 연결 모듈 `src/app/lutTracker.ts`(React 비의존)가 관리자의 잦은 진행 알림을 100 ms로 모으고 단계 변화는 바로 알리며, 로봇별 생성 시작 시각을 보관하고 `retry`를 제공한다. 브라우저 Worker / IndexedDB 캐시는 `MainScreen`이 주입한다.
+- **경기 설정:** 두 로봇 결과가 모두 있으면 판정 함수 = `createLUTShotResolver`, 엔진 `shooters`에 기물별 사출 속도(`v0`, 못 찾은 기물은 엔진 기본 계산)를 넣고, 결과가 바뀔 때마다 경기 전 설정을 바꾼다(`setupFromDrafts` → `setSetup`). 결과가 없는 동안은 간이 판정 함수가 자리를 채우지만 `START`가 막혀 있으므로 경기에 쓰이지 않는다.
+- **첫 실행 등 확률표가 준비될 때까지 `START`를 막고 기다린다** (간이 판정으로 먼저 시작하지 않음). 생성 오류는 로봇 아이콘 빨간 느낌표 + 로봇 탭 오류 문구와 `RETRY`.
+- **측정:** 헤드리스 Chromium, 4코어(Worker 3개), 기본 프리셋에서 첫 실행 약 13 ~ 18초(R1 = R2라 한 번 생성), 새로고침 = 캐시 적중 약 0.3 ~ 0.9초, 한 로봇만 다른 설정으로 적용하면 약 13초. 남은 시간 추정은 가운데 행(명중 띠 근처)이 무거워 중간에 조금 늘었다 줄어든다.
+
+#### 시나리오 탭
+
+| 항목 | 입력 |
+|---|---|
+| 유효 배지 | 맨 위. 유효 = 초록, 무효 = 빨강 + 문제 수 + 문제 목록(로봇 문제는 "R2 · …") |
+| 진영 | `RED` / `BLUE` |
+| `HIVE` | 상향 셀(`AUDIENCE` / `OPPOSITE`) + 상향 셀 `POLLEN` / `NECTAR` 개수 조절기 + "NECTAR n개면 CELL이 POLLEN m개에서 TIP" 안내 |
+| 로봇 적재물 | 로봇별 칸 = 기물 색 원 + 번호 (FIFO, 0번이 먼저 나감). 칸을 누르면 `POLLEN` → `NECTAR`(흡입 가능 로봇만) → 빈 칸 순환, 빈 칸은 목록에서 빠져 뒤로 모임. 적재 한도를 넘는 칸은 빨간 테두리 |
+| 남은 기물 | `FLOWER` 4개 각 `POLLEN` 수, `GARDEN` 우리 / 상대 `POLLEN` 수 (개수 조절기) + 바닥 산포 / 휴먼 플레이어 재고 요약 |
+| 오토 TIP | `autoTipCount` 개수 조절기 (0 ~ 5) |
+| 시작 자세 | 로봇별 카드: X / Y / 헤딩 숫자 칸 + "ALLIANCE 기본" 표시 + `DEFAULT`(지정 해제), `EDIT ON FIELD`(필드 편집 모드) |
+| 난수 시드 | 적용된 시드 표시 + `REROLL` (경기 전에만) |
+
+- **검증:** `validateScenario()`(2.4항) + `validateRobotPlacement()`(아래). 둘 중 하나라도 걸리면 적용할 수 없다. 검증에 걸린 묶음은 빨간 테두리. 개수는 개수 조절기(`Stepper`)라 범위 밖 입력이 없고, 여러 칸이 얽힌 문제만 빨갛게 표시한다.
+- **초안 형식 (`src/ui/scenarioForm.ts`):** 초안은 엔진 `ScenarioConfig` 그대로다. 지정하지 않은 항목은 엔진 기본값(진영별 상향 셀 / 기본 시작 자세, 적재 한도만큼 `POLLEN`, `DEFAULT_RNG_SEED`)으로 풀어 보여 주고, 고칠 때만 그 항목을 명시 값으로 쓴다 (기본 시나리오 `{ allianceColor: 'RED' }`와 호환).
+- **진영을 바꾸면:** 직접 지정한 시작 자세는 **좌우 대칭**(x → 144 − x, 헤딩 → 180° − 헤딩 — RED R1 기본 (9, 36, 0°) ↔ BLUE R1 기본 (135, 36, 180°)이 정확히 맞음), 지정한 상향 셀은 반대 셀(RED 기본 `AUDIENCE` ↔ BLUE 기본 `OPPOSITE`), 나머지는 새 진영 기본값.
+- **시드 `REROLL`:** 초안 / 적용을 거치지 않고 바로 적용한다 (경기 전 설정 교체 → 바닥 산포가 바로 바뀜) + 자동 보관 (새로고침해도 같은 시드). 새 시드는 지금과 다른 부호 없는 32비트 값이다. `RESET TAB`도 시드는 유지한다.
+- 바닥에 남은 기물은 자동 계산 + 무작위 산포다 (직접 배치는 v2 후보, 5.2항).
+
+#### SETTINGS 탭
+
+| 구역 | 항목 | 바꿀 수 있는 때 |
+|---|---|---|
+| 게임패드 | 슬롯 → 로봇, 패드 이름 / "버튼을 한 번 눌러 연결" 안내, 비표준 매핑 경고 (읽기 전용) | — |
+| 입력 | 로봇별 입력 출처, 로봇별 조작 모드(필드 기준 / 로봇 기준), 키보드 주행 켜기 / 끄기, 접는 키보드 조작표 | 경기 전 / 일시정지 |
+| 표시 옵션 | 3.7항 5종 토글 (이름 + 한 줄 설명) | 경기 전 / 일시정지 |
+| 화면 | 언어(English / 한국어), 길이 단위(in / cm), 기본 보기 방향(`DRIVER` / `AUDIENCE`) | 경기 전 / 일시정지 |
+| 프리셋 `PRESETS` | `R1` / `R2` / `SCENARIO` / `ALL` 줄별 `EXPORT` / `IMPORT` + `MATCH` 줄 `IMPORT` (3.9항) | `EXPORT` 언제나 / `IMPORT` 경기 전만 |
+| 초기화 | `RESET ALL` | 경기 전만 |
+
+- 바꾸는 즉시 컨트롤러에 반영하고 저장한다. 입력 설정은 "다음 시작 / 재개 / 분기부터 적용"이며, 선택과 적용 중인 값이 다르면 "적용 대기"를 표시한다.
+- **입력 출처 선택 (`src/app/inputPlan.ts`):**
+    - 경기 전 선택지: `AUTO`(기본, 옆에 "지금: …"으로 예상 결과 표시) / `LIVE` / `NONE`. `START` 순간의 게임패드 상태로 풀어 적용한다.
+    - `AUTO` 규칙(`autoSource`): 그 로봇에 배정된 패드 슬롯 중 연결된 것이나 켜진 키보드가 있으면 `LIVE`, 아니면 `NONE`. 즉 R1 = 슬롯 0 패드가 있으면 `LIVE`, R2 = 슬롯 1 패드 **또는 키보드 켜짐**이면 `LIVE` (패드 없이 키보드로 R2를 몰 수 있고, 키보드를 끄면 패드 1개일 때 R2 = `NONE`).
+    - 일시정지 중 선택지: `LIVE` / `NONE` / `REPLAY`(그 로봇 녹화 기록이 있을 때만) + 녹화 덧입히기 안내. `REPLAY`인데 기록이 없으면 `NONE`.
+    - `RESUME` / `BRANCH` 때 선택 · 조작 모드 · 키보드를 입력 허브 / 어댑터에 적용한다. 분기는 적용 뒤 `LIVE` 로봇 기록만 자르므로 `REPLAY` 로봇은 기록이 유지된다 (= 녹화 덧입히기, 3.6항).
+- **키보드 토글:** 끄면 눌린 키를 비우고 주행 키를 가로채지 않는다 (다시 켜도 끄기 전 눌린 키는 되살아나지 않음). 단축키는 계속 동작한다.
+- **보기:** 경기 전 `VIEW`는 비활성이고, 새 경기(`START` / `NEW` / 설정 교체)는 기본 보기 방향으로 시작한다. 경기 중 `VIEW`는 그 경기에서만 임시로 바꾼다.
+- **설정 자동 보관 (`localStorage`, `src/ui/settings.ts`):** 마지막으로 적용한 로봇 프로필 / 시나리오(시드 포함)와 화면 설정(언어, 단위, 기본 보기, 표시 옵션, 키보드 토글, 로봇별 조작 모드)을 보관해 새로고침 뒤 복원한다. 입력 출처는 보관하지 않는다 (앱을 켤 때마다 `AUTO`). 경기 기록도 보관하지 않는다 (새로고침하면 경기는 사라짐, 3.6항).
+    - 키 `ftc-tactic-sim/settings` + `SETTINGS_VERSION` = 1. 없음 · JSON 손상 · 버전 다름 → 전부 기본값, 항목별 형식 오류 → 그 항목만 기본값.
+    - 적용 값 복원: 기본 프로필 모양에 맞추고(`mergeWithDefaults`: 없는 항목은 기본값으로 채움 → 이후 항목이 늘어도 저장한 로봇 유지, 종류가 다르면 버림) 숫자는 유한값, 진영 유효, 로봇 폼 · 시나리오 · 배치 검증을 통과할 때만 쓴다 (슬롯 id는 강제).
+    - 저장소를 쓸 수 없으면 기본값으로 시작하고 오류 없이 동작한다. 문서 `lang` 속성은 언어와 동기화한다.
+- **키보드 단축키 (상태별 키 공유):** 주행 키는 루프 `RUNNING`에서만, 스크러빙 단축키는 일시정지 / 복기 중에만 쓰이므로 같은 키를 겹쳐 쓴다. 키보드 주행을 꺼도 단축키는 항상 동작한다. 컨트롤러가 창 `keydown`을 직접 처리한다 (주행 키는 입력 어댑터).
+
+    | 키 | 진행 중 (`RUNNING`) | 일시정지 / 복기 | 재생 중 | 종료 강조 |
+    |---|---|---|---|---|
+    | Space | 일시정지 | 보는 틱 = 머리이고 경기 미종료면 `RESUME`, 그 외에는 재생 시작 (**Space는 분기하지 않음**) | 재생 멈춤 | 건너뛰기 |
+    | ← / → | R2 회전 (3.6항) | ∓1틱 | 재생 멈추고 ∓1틱 | — |
+    | Shift + ← / → | — | ∓1초 (50틱) | 재생 멈추고 ∓1초 | — |
+    | 그 밖의 주행 키 (W / A / S / D, M, `,` `.` `/`) | R2 주행 / 행동 (3.6항) | 무시 | 무시 | — |
+
+    - 방향키 자동 반복 = 연속 이동. Space는 자동 반복을 무시하고, 텍스트 입력칸이 아니면 항상 브라우저 기본 동작(스크롤 / 버튼 누름)을 막는다. 결과 팝업 / 확인창 / 도움말이 열려 있으면 단축키를 끈다.
+    - 텍스트 입력칸에 초점이 있으면 단축키를 무시한다. 게임패드에는 일시정지 / 재개를 매핑하지 않는다.
+    - 일시정지 중 누른 방향키가 재개 뒤 주행으로 새지 않는 것은 3.6항 규칙(시작 / 재개 때 입력 누적기 초기화)으로 보장된다.
+
+#### 필드 편집 모드 (경기 전, 관중석 시점)
+
+config 창의 편집 버튼을 누르면 메인 필드가 그 편집 모드로 바뀐다. 1366 × 768에서 config 창 안의 작은 캔버스는 1 in 격자가 약 2.5 px라 클릭할 수 없고, 경기 전 메인 필드는 비어 있으며 보기도 같은 관중석 시점이라 메인 필드를 쓴다.
+
+- **공통 (`src/ui/fieldEdit.ts`, 장면 `src/renderer/editSceneRenderer.ts`):**
+    - 컨트롤러 `setEditScene(scene | null)`은 경기 전에만 받아 경기 장면 대신 그린다 (같은 객체면 무시, `start()`에서 해제).
+    - 필드 위에 안내 띠(모드 이름, 버튼, 설명, Esc 안내)를 띄우고, config 창에는 같은 값의 숫자 칸이 함께 보여 실시간으로 따라온다. 한 번에 한 모드만.
+    - 클릭 / 끌기 좌표: 포인터 → 캔버스 CSS 좌표 → `cssToCanvas` → `canvasToField`(보기 = 상태의 `viewAngle`).
+    - **끝나는 경우:** 완료 버튼, Esc(캡처 단계라 config 창의 Esc 닫기보다 먼저 받음 — 창은 그대로), 다른 탭으로 이동, config 창 닫기, `START`(편집을 취소하고 시작 절차), 경기 전이 아니게 됨. 다른 탭 / 창 닫기 / 다른 모드로 전환하면 모드에서 바꾼 초안은 그대로 남는다 (숫자 칸 입력과 같음).
+    - **완료 = 그 탭 `APPLY`까지 (`editDoneAction`):** 적용할 수 있으면 적용(스윗스팟이면 확률표 생성 시작), 탭에 틀린 칸이 있어 적용할 수 없으면 초안에만 남기고 안내, 바뀐 것이 없으면 닫기만.
+    - **취소 (`CANCEL` / Esc / `START`):** 그 모드가 다루는 값과 그 칸의 틀린 글자만 들어오기 전으로 되돌린다 (모드 중 바꾼 다른 칸은 유지).
+- **히트맵 모드 `SHOW HIT MAP` (`HEATMAP`):**
+    - 로봇 탭 버튼 `SHOW HIT MAP` / `HIDE HIT MAP`("필드에서 확률표 보기" / "확률표 닫기", 열려 있으면 주황 강조, 같은 로봇이면 닫기 토글). 경기 중 비활성.
+    - **적용한 설정**의 명중 확률표를 보여 준다 (생성 중이면 조립 중 버퍼, 약 10 Hz로 새로 그려 계산된 행이 채워짐, 미계산 행은 사선 빗금). 초안의 LUT 입력이 적용 값과 다르면 안내 띠에 "적용하면 새로 만듦".
+    - 안내 띠(`FieldEditBanner.tsx`): `HIT MAP · R1` + `DONE`, 범례 줄(0 % → 100 % 척도 + 기준 CELL + 기물 버튼 `POLLEN` / `NECTAR`), 생성 상태 · 안내 · "Esc to close". 편집하는 값이 없어 `CANCEL`은 없다. 띠는 명중 띠를 가리지 않게 RED는 필드 위쪽, BLUE(기준 `BLUE_OPPOSITE`, 명중 띠가 위쪽)는 아래쪽에 둔다.
+    - 장면: 둘레 배경 → 바닥 회색(`#d9d9d9`) → 히트맵(144 × 144 이미지를 필드 크기로 확대, 확대 보간 = 런타임 조회 `sampleLUT`와 같은 쌍선형) → 미계산 행 빗금 → 타일 / 벽 → HIVE(기준 셀은 진영색 + 노란 테두리) → 스윗스팟 → 조준점 점선, 조준점(흰 원 + 십자), 스윗스팟(흰 원 + 굵은 테두리 + 가운데 점). 로봇 / 기물 / 게이지는 그리지 않는다.
+    - **색 척도 (`src/renderer/heatmapView.ts`):** 0 %는 바닥색 `#d9d9d9`, (0, 1]은 진영 파스텔 척도를 고르게 sRGB 선형 보간 — RED `#FECDD3 → #FDA4AF → #FB7185 → #F43F5E`, BLUE `#BAE6FD → #7DD3FC → #38BDF8 → #0284C7`. 더 밝은 앞쪽 색(흰색에 가까운 파스텔)은 회색 바닥보다 밝아 명중 띠 가장자리가 흰 테두리처럼 떠 보이므로 쓰지 않는다. 화면 격자 = 진영 기준 필드 좌표이고, BLUE는 기준 LUT를 점대칭(`BLUE_OPPOSITE`)해 그린다 (`heatmapPixels`, `pendingRowRanges`, `heatmapBasis`, 범례 `heatmapGradientCss`).
+    - 참고: 행 작업은 두 기물 중 v0 탐색이 먼저 끝난 기물부터 대기열에 들어가므로(2.6.2항), 생성 중 보고 있는 기물의 행이 나중에 채워질 수 있다.
+- **스윗스팟 모드 `SET ON FIELD` (`SWEET_SPOT`):**
+    - 로봇 탭 스윗스팟 칸 아래 `SET ON FIELD`("필드에서 찍기", 모드 중에는 "필드에서 찍는 중" 강조 · 비활성).
+    - 클릭 = 그 1 in 격자 중심으로 초안 스윗스팟 설정 (`fieldGridCell`, `placeSweetSpot`: 진영 기준 칸 → BLUE는 점대칭 보관). 클릭 뒤에도 모드를 유지해 여러 번 찍어 볼 수 있다. 검증에 실패하는 칸(몸체가 필드 밖 / HIVE와 겹침 / 해 없음)도 찍히고 빨간 오류가 된다 (숫자 칸에 틀린 값을 넣을 때와 같음, `APPLY` 막힘).
+    - 마우스를 올린 칸을 강조하고(찍기 가능 초록 / 불가 빨강) 그 자리에서 조준점을 향해 돌린 몸체 점선 윤곽과 말풍선(진영 기준 좌표 + 찍으면 생기는 사유)을 보여 준다. 필드는 십자 커서. 칸이 바뀔 때만 상태를 갱신하고, 클릭은 마지막 포인터 이동의 칸을 찍는다 (클릭 좌표 반올림으로 칸 경계에서 다른 칸이 되는 문제 방지).
+    - 장면: 바닥 위 **적용한 확률표** 반투명(50 %, 계산된 행만) → 타일 / 벽 / HIVE → 확률표를 만든 적용 스윗스팟(초안과 다를 때 점선 빈 고리) → 마우스 칸 + 몸체 윤곽 → 초안 스윗스팟 몸체 윤곽(앞 변 굵게, 틀리면 빨강, 크기 = 초안 로봇 크기) → 조준 점선 / 조준점 / 스윗스팟. 몸체 = `aimingRobotOBB`(스윗스팟 검증과 같은 함수). 스윗스팟을 옮기면 v0가 바뀌어 명중 띠 모양도 달라지므로 "적용한 스윗스팟 기준 — 완료하면 적용해 새로 만듦"을 안내한다.
+    - 안내 띠: `SWEET SPOT · R1` + `CANCEL` / `DONE · APPLY`, 범례 줄(척도 + 기준 CELL + 기물 버튼), 초안 좌표 + 빨간 사유, 생성 상태 · 설명 · "Esc to cancel".
+- **시작 자세 모드 `EDIT ON FIELD` (`SPAWN`):**
+    - 시나리오 탭 시작 자세 구역의 `EDIT ON FIELD`("필드에서 편집", 모드 중 "필드에서 편집 중").
+    - 조작: 로봇 몸체 끌기 = 위치(누른 점 대비 이동량, 좌표 0 ~ 144 제한), 회전 핸들 끌기 = 헤딩(중심 → 포인터 방향). 스냅은 없고 표시 자리수(0.1 in / 0.1°)로만 반올림한다 (칸에 보이는 값 = 보관 값). 겹쳐도 놓인다 (검증이 표시).
+    - 기하 (`src/renderer/spawnEditLayout.ts`, 렌더러와 입력이 같은 계산): 회전 핸들 = 앞 변 가운데에서 앞으로 7 in 떨어진 원(반지름 2.2 in, 막대로 연결). 잡기 판정(`spawnHitTest`)은 핸들 우선(다른 로봇 몸체 위여도 돌릴 수 있게), 나중에 그린 R2 우선, 여유 1 in.
+    - 장면: 경기 바닥(타일 / GARDEN / LOADING ZONE / HIVE / FLOWER) + GARDEN 기물 + 두 로봇(흡입 구역 / 몸체 / 앞 변 / 헤딩 화살표 / 번호 / 핸들). 바닥 산포 공은 그리지 않는다 (로봇 자리를 피해 다시 뿌려지므로 끌 때마다 공이 튀는 것 방지). 배치 문제 로봇은 흰 사선 빗금 + 빨간 테두리(RED 로봇에 빨간 덧칠은 보이지 않으므로), 마우스를 올린 몸체는 주황 점선, 잡은 핸들은 주황, 끄는 로봇을 위에 그린다.
+    - 로봇 위 좌표 / 헤딩 글자(`SpawnPoseTag`, 문제면 빨간 테두리)는 캔버스와 같은 크기의 HTML 글자 층에 장면 비율(%)로 배치한다. 벽에 붙은 로봇의 글자가 잘리지 않게 가로 기준점을 위치 비율만큼 옮긴다. 커서: 몸체 위 `move`, 핸들 위 `grab`, 끄는 중 `grabbing`.
+    - 안내 띠(`SpawnEditBanner`): `START POSE` + `CANCEL` / `DONE · APPLY`, 배치 문제 사유(빨강), "로봇을 끌어 옮기기 · 동그란 핸들을 끌어 돌리기" + Esc.
+    - 취소하면 시작 자세 / 칸 글자만 되돌린다 (지정 안 했던 자세는 지정 해제, 모드 중 진영을 바꿨으면 들어오기 전 자세를 좌우 대칭).
+
+#### 시작 자세 배치 검증 (`validateRobotPlacement`)
+
+`validateRobotPlacement(scenario, r1Config, r2Config) → PlacementIssue[]` (`{ code, robots, message }`, `robots` = 문제 로봇 id). `collision.ts`의 OBB / SAT를 재사용하는 순수 함수이며, 시작 자세를 지정하지 않은 로봇은 진영별 기본값(2.3항)으로, 로봇별 크기로 검사한다.
+
+| 코드 | 조건 |
+|---|---|
+| `PLACEMENT_OUT_OF_FIELD` | 로봇 OBB가 필드 [0, 144]² 밖으로 나감 (`testOBBvsFieldBounds`) |
+| `PLACEMENT_IN_HIVE` | OBB가 HIVE AABB와 겹침 |
+| `PLACEMENT_IN_FLOWER` | OBB가 FLOWER 원(반지름 2 in)과 겹침 (메시지에 FLOWER 번호) |
+| `PLACEMENT_ROBOT_OVERLAP` | R1 / R2 OBB끼리 겹침 (두 로봇 모두 표시) |
+| `PLACEMENT_PIECE_OVERLAP` | OBB가 시나리오로 정해지는 고정 배치 기물(GARDEN 기물)과 겹침 |
+
+- **닿음은 허용, 파고듦만 오류** (침투 깊이 > `PLACEMENT_TOLERANCE` = 1e-6 in). 기본 시작 자세는 벽에 붙어 있으므로 통과해야 한다.
+- 바닥 무작위 산포 기물과 오토 TIP NECTAR 슬롯은 이미 로봇을 피해 놓이므로 검사하지 않는다. GARDEN 기물 좌표는 `reset()`과 검증이 같은 함수(`gardenPiecePositions`)를 쓴다.
+- **`reset()` 사전 보정 (엔진 안전장치):** 화면을 거치지 않은 겹친 시작 자세에 대비해, 로봇을 만든 직후 · 기물 배치 전에 로봇–환경 / 로봇–로봇 겹침이 있는 동안 틱마다 쓰는 로봇 충돌 해결(`resolveRobotCollisions`)을 최대 50회 반복한다 (시간 진행 없음, 결정론 유지). 바닥 산포는 보정된 로봇 자리를 피한다. 겹침이 없으면 아무것도 바꾸지 않는다. GARDEN 기물과의 겹침은 보정하지 않는다 (다음 틱 충돌 처리로 기물이 밀림, 화면은 검증으로 막음).
+
+#### 단위와 표시
+
+화면 ↔ 엔진 변환은 화면이 하고, 엔진에는 항상 inch 기반 단위를 넘긴다 (`src/ui/units.ts`).
+
+| 항목 | 화면 단위 | 엔진 단위 |
+|---|---|---|
+| 길이 (크기 / 흡입 구역 / 오프셋 / 발사구 지상고 / 좌표) | in (토글 시 cm) | in |
+| 속도 / 가속도 | in/s, in/s² (토글 시 cm/s, cm/s²) | in/s, in/s² |
+| 최고 각속도 / 최대 각가속도 | rad/s, rad/s² (RoadRunner / Pedro Pathing 튜닝값과 같은 단위) | rad/s, rad/s² |
+| 터렛 범위 / 허용 조준 오차 / 발사각 / 방위 · 피치 편차 / 시작 헤딩 | ° | rad |
+| 딜레이 / 준비 시간 / 투입 간격 | ms | ms |
+| 속도 편차 | % | 비율 (0.02 = 2%) |
+
+- 발사구 지상고 h(바닥에서 잰 높이)를 받아 `dz = HIVE_RIM_Z − h = 53.5 − h`로 바꾼다.
+- **내부 값은 항상 inch로 보관**하고 표시할 때만 바꾼다 (토글을 반복해도 반올림 누적 없음). 길이 계열 입력은 변환 결과를 **1e-6 in 격자로 반올림**해, cm로 표시된 값을 그대로 다시 넣어도 원래 inch 값과 정확히 같다 (예: 45.72 cm → 18 in — 로봇 크기가 바뀐 것으로 보여 LUT를 다시 만드는 일 방지). 표시 반올림으로 정보가 줄어드는 값(0.25 in = 0.635 cm → "0.64")은 다시 넣으면 바뀌므로 폼은 사용자가 실제로 고친 칸만 변환한다.
+- 시작 헤딩 규약: 0° = 필드 +x(관중석 시점 오른쪽), 양수 = 관중석 시점 시계 방향 (엔진과 같은 부호), 표시 범위 (−180°, 180°].
+- **표시 소수 자리:** 길이 계열(길이 / 발사구 지상고 / 속도 / 가속도) 2자리, 좌표 1자리, ° 1자리, rad/s · rad/s² 2자리, ms 정수, % 1자리.
+- 숫자 입력 해석(`parseNumberInput`): 공백, 소수점 `.` · `,`, 부호, 지수 표기를 허용하고 그 밖은 오류.
+
+#### 기본 프리셋 (`src/app/defaultSetup.ts`)
+
+- R1 / R2 모두 같은 제원(`DEFAULT_ROBOT_CONFIGS`: 18 in, 앞면 흡입, 고정형 ±3°, 이름 `R1` / `R2`) + 기본 탄도(발사구 14 in, 발사각 60°, 오프셋 0, 편차 기본값) + 기본 스윗스팟.
+- **기본 스윗스팟** = 기준 셀 `RED_AUDIENCE` (59.5, 131.5). 후보 11곳 비교(기본 로봇, 발사구 14 in, 60°)에서 입구 정면 약 43 in, 스윗스팟 명중률 POLLEN 99.0 % / NECTAR 97.9 %, 50 % 이상 구역이 가장 넓은 후보였다. 발사각 60°에서는 조준점 수평 거리 25.6 in 이하(`D·tanθ ≤ Δz`)에 해가 없다.
+- 기본 시나리오는 `{ allianceColor: 'RED' }` (2.4항 공식 기본 배치).
+
+### 3.9 분기 타임라인과 경기 저장 / 공유
+
+분기해도 이전 기록을 가지로 보존하고, 끝난 경기를 파일(레시피)로 내보내 같은 결과를 다시 불러오며, 로봇 / 시나리오 설정을 프리셋 파일로 주고받는다. 직렬화 / 검증 / 트리 규칙은 React 밖 순수 TS이고 화면은 그 위에 얹는다.
+
+- **범위:** 저장 위치는 **파일 다운로드 / 파일 선택 불러오기만**이다 (브라우저 안 경기 · 프리셋 목록은 없음, 5.2항). 파일에는 화면 설정(언어 / 단위 / 기본 보기 / 표시 옵션 / 키보드 토글 / 조작 모드)을 넣지 않는다 (받는 사람의 환경을 따름).
+
+#### 적용 입력 기록
+
+- **왜 필요한가:** 녹화 로그는 `LIVE` 로봇만 기록하고 `REPLAY`의 재료로 쓰인다. 녹화 덧입히기 중 `REPLAY` 로봇을 일시정지에서 `NONE`으로 바꿔 재개하면 로그 뒷부분은 남은 채 엔진에는 중립 입력이 들어가므로, 녹화 로그만으로는 그 경기를 재현할 수 없다.
+- **규칙:** 입력 허브 `MatchInputs`에 로봇별 적용 입력 기록(`applied`, 녹화 로그와 같은 틱당 4 B 형식)을 둔다. 틱마다 엔진 `step`에 실제로 들어간 입력의 부호화 값을 출처와 무관하게 기록한다 — `LIVE` = 방금 기록한 값, `REPLAY` = 읽은 값(기록 끝을 넘으면 중립), `NONE` = 중립 `NEUTRAL_RECORD` `[0, 0, 0, IDLE]`. 길이 = 그 가지의 머리 틱. 녹화 로그 재생 공급 함수(`createReplayProvider`)는 기록하지 않는다.
+- 녹화 로그(`logs`)의 규칙(`LIVE`만 기록, 분기 때 `LIVE`만 자름, `REPLAY` 재료)은 그대로다. 적용 입력 기록은 재현 / 저장 전용이며 `REPLAY`의 재료가 아니다. 분기 때는 두 로봇 모두 분기 틱에서 자른다.
+- 레시피 재현은 적용 입력 기록만 재생한다 (`createInputRecordProvider(records)`: 출처 없이 기록 그대로 복호화, 기록 끝 너머 = 중립). 조작 모드는 부호화 전에 필드 좌표로 바뀌므로 저장하지 않는다 (3.6항).
+- 메모리: 로봇별 `Int8Array(6000 × 4)` = 24 KB, 가지마다 녹화 로그 2 + 적용 기록 2 = 96 KB (프레임에 비해 무시할 수 있음).
+
+#### 버전 상수
+
+| 상수 | 위치 | 올리는 때 |
+|---|---|---|
+| `ENGINE_VERSION` (현재 1) | `simulationEngine.ts` | 같은 시나리오 / 시드 / 입력에 대해 프레임 결과가 달라지는 커밋 (엔진 규칙, 충돌 / 동역학 상수, 시나리오 초기화, 난수 사용 순서, 프레임 형식) |
+| `BALLISTICS_MODEL_VERSION` (현재 1) | `ballistics.ts` | 명중 판정 / LUT 생성 규칙 / 투입구 기하가 바뀌는 커밋 (2.6.2항) |
+| `RECIPE_VERSION` (현재 1) | `src/app/matchRecipe.ts` | 경기 파일 구조 변경 |
+| `PRESET_VERSION` (현재 1) | `src/ui/presetFile.ts` | 프리셋 파일 구조 변경 |
+
+- **`ENGINE_VERSION` 올림 누락 방지:** `src/core/__tests__/engineVersion.test.ts`가 고정 제원 · 시나리오 · 시드 · 입력으로 흡입 / 발사 / HIVE TIP 3회 / 리프트 전 단계 / GARDEN 득점이 나오는 경기를 돌리고, 버전 + 종료 체크섬 + 체크포인트 121개를 이은 해시를 기대값으로 박아 둔다. 결과가 바뀌면 테스트가 실패하므로 그 커밋에서 버전을 올리고 기대값을 갱신한다.
+
+#### 상태 체크섬 (`src/core/checksum.ts`)
+
+- `frameChecksum(frame)` = `JSON.stringify(frame)`의 UTF-16 코드 단위에 대한 **FNV-1a 32비트** 해시(`fnv1a32`), 8자리 소문자 16진수. JS 숫자 → 문자열은 왕복 정확(최단 표기)이라 부동소수 비트 차이를 잡고, 키 순서는 엔진의 프레임 복제 순서로 고정된다. 목적은 위변조 방지가 아니라 **불일치 검출**이다 (다른 브라우저 / 다른 엔진 버전, 5.2항 교차 브라우저 결정론).
+- 체크포인트: 0, 50, 100, …, 6000틱 (1초 간격, 121개, `checkpointTicks` / `timelineCheckpoints`). 불러온 경기를 다시 계산해 비교하고(`compareCheckpoints`), 처음 어긋난 체크포인트로 "어디서부터 달라졌는지"(직전 일치 체크포인트 ~ 첫 불일치 체크포인트)를 알려 준다. 개수가 다르면 짧은 쪽 끝 다음에서 어긋난 것으로 본다.
+
+#### 경기 파일 (레시피, `.json`, 수 KB ~ 최대 약 100 KB)
+
+```
+{
+  "format": "ftc-tactic-sim/match",
+  "recipeVersion": 1,
+  "engineVersion": 1,
+  "ballisticsModelVersion": 1,
+  "createdAt": "2026-09-30T14:32:05+09:00",
+  "setup": { "robot1": RobotProfile, "robot2": RobotProfile, "scenario": ScenarioConfig },
+  "lut": { "seed": 12194135, "samples": 2000, "searchSamples": 20000 },
+  "inputs": { "ticks": 6000, "robot1": "<Base64>", "robot2": "<Base64>" },
+  "checksums": { "interval": 50, "values": ["1a2b3c4d", ...] },
+  "branch": { "name": "Branch 3" },
+  "result": { "totalScore": 87, "rp": { "swarm": false, "pollinator1": true, "pollinator2": false } }
+}
+```
+
+- `setup`: 경기에 쓴 **적용된 값** 그대로 — 로봇 프로필(팀 번호 / 팀명 / 제원 / 탄도 설정 = 스윗스팟 · 발사구 · 발사각 · 편차, 3.8항)과 시나리오. 로봇 데이터는 프리셋과 같은 형식(슬롯 id 없음). 시나리오 `rngSeed`가 비어 있으면 엔진 기본 시드를 채워 파일만으로 완결되게 한다.
+- `lut`: LUT 기준 시드 / 격자당 샘플 수 / v0 탐색 샘플 수 (지금 앱 상수 `DEFAULT_BALLISTICS_SEED` / `DEFAULT_LUT_SAMPLES` / `DEFAULT_V0_SEARCH_SAMPLES`, `CURRENT_LUT_SETTINGS`). LUT 자체는 저장하지 않는다 (불러올 때 캐시가 있으면 바로, 없으면 생성, 2.6.2항).
+- `inputs`: 로봇별 적용 입력 기록 0 ~ 5999틱을 **연속 중복 압축(RLE)** 한 뒤 Base64. 한 묶음 = `[반복 틱 수 uint16 LE][qx][qy][qω][action]` 6 B, 묶음들의 반복 수 합 = 6000. 최악(매 틱 다름)이 로봇당 36 KB → Base64 48 KB.
+- `checksums`: 체크포인트 121개.
+- `branch` / `result`: 사람이 파일을 알아보기 위한 정보. 불러오기 판정에는 쓰지 않는다 (가지 이름은 불러온 경기의 원본 가지 이름으로만 쓴다).
+- **저장 대상 = 경기 종료(6000틱)에 도달한 지금 가지 하나** (결과 팝업에서 내보냄). 가지의 조상 구간 입력을 이어 붙인 0 ~ 5999틱 전체가 한 파일이다. 미종료 가지 / 트리 전체 저장은 v2 후보(5.2항).
+- **함수 (`matchRecipe.ts`):** `encodeInputRecord` / `decodeInputRecord`(RLE + Base64), `appliedInputRecords(inputs)`, `buildMatchRecipe`(종료 전 / 입력 부족이면 `RangeError`, 시드 채움, 결과 = 종료 프레임 점수 · RP), `serializeMatchRecipe`, `parseMatchRecipe(text, defaults)` → 레시피 + 경고 또는 거부 코드, `recipeWarnings`, `verifyRecipe`.
+- **해석은 엄격하다** (재현이 목적이므로 프리셋과 달리 없는 항목을 기본값으로 채우지 않는다). 거부 코드:
+    - `NOT_JSON` / `PRESET_FILE`(프리셋 파일을 넣음) / `NOT_RECIPE`(`format` 다름) / `RECIPE_VERSION`
+    - `INVALID_FIELD` (`field` = `engineVersion` · `ballisticsModelVersion` · `setup.robot1` · `setup.robot2` · `setup.scenario` · `lut`)
+    - `INVALID_INPUTS` (`ticks` · `robot1` · `robot2`: Base64 / 묶음 길이 오류, 반복 0, 합 ≠ 6000, q = −128, 행동 코드 0 ~ 4 밖)
+    - `INVALID_CHECKSUMS` (개수 ≠ 121 등)
+    - `INVALID_SETUP` (`issues` = 로봇 폼 / `validateScenario` / `validateRobotPlacement` 문제 코드)
+    - 로봇 / 시나리오는 "프리셋 정리 함수가 아무것도 바꾸지 않아야 통과"로 엄격히 해석한다 (없는 항목 · 형식 틀림 · 틀린 팀 글자는 모두 값이 달라져 거부). 시나리오는 진영 + 시드가 필수. 파일의 모르는 항목은 무시하고, 알아보기 정보(`createdAt` / `branch` / `result`)는 틀려도 빈 값으로 받는다.
+
+#### 경기 불러오기 (`IMPORT MATCH`, SETTINGS 탭 `PRESETS` 구역의 `MATCH` 줄, 경기 전에만)
+
+1. **파일 선택 → 해석 / 검증.** 거부되면 줄 아래 빨간 글자로 사유를 보이고 아무것도 바꾸지 않는다 (파일 선택 오류 `TOO_LARGE`(1 MB 초과) / `READ_FAILED` 포함).
+2. **확인창:** "R1 / R2 / SCENARIO 설정을 파일 값으로 바꾸고 경기를 불러올까요?" + 해당될 때만 `⚠` 경고 줄 — 엔진 버전 다름 / 탄도 모델 버전 다름("다시 만든 확률표로 결과가 달라질 수 있음") / `lut` 값이 지금 앱 상수와 다름. 경고가 있어도 진행할 수 있다 (지금 앱의 엔진 / 탄도 모델 / LUT 상수로 다시 계산하고 결과 차이는 체크섬으로 드러남).
+3. **확인 →** R1 / R2 / SCENARIO의 **적용 값과 초안을 파일 값으로** 바꾸고(적용 안 된 수정은 버려짐, 자동 보관 갱신) 명중 확률표를 준비한다 (기존 생성 흐름). 준비 중에는 줄에 "경기 불러오는 중 · 명중 확률표 N%"(두 로봇 진행률 평균) + `CANCEL`. 생성 오류면 빨간 글자로 "로봇 탭에서 다시 시도하거나 취소"를 안내하고 대기한다. `CANCEL`하거나 준비 중에 `APPLY` / `REROLL` / `RESET ALL` / 프리셋 불러오기를 하면 불러오기만 취소되고, 이미 바뀐 설정은 그대로 경기 전 화면에 남는다.
+4. **확률표 준비 →** "재계산 중"을 한 번 그린 뒤 적용 입력 기록으로 전체 재계산(`AppController.loadMatch`: 새 엔진 + `MatchInputs.loadRecords` + 기록 재생 공급 함수로 `runFullMatch`, 약 1.5초) → 체크포인트 비교 → 기본 보기 방향으로 회전 후 **복기 상태**(보는 틱 0, 루프 `ENDED`, `RESUME` 없음). 불러온 경기는 새 트리의 원본 가지(이름 = 파일 `branch.name`)가 된다. 종료 연출 / 결과 팝업은 띄우지 않고(`endSeq` = 0) `RESULT`로 연다.
+5. 두 로봇의 입력 출처는 `REPLAY`(녹화 로그 = 불러온 적용 입력 기록)로 두어, 되감아 `BRANCH`하면 녹화 덧입히기로 이어 조종할 수 있다.
+6. **체크섬이 어긋나면** 필드 위 경고 배너(자동 일시정지 배너와 같은 모양, 닫기 가능, 경기 전 화면에서 사라짐): "파일 기록과 결과가 다릅니다 · {M:SS} ~ {M:SS} 사이부터" (+ 버전이 달랐으면 그 사유). 경기는 그대로 복기 / 분기할 수 있다.
+
+#### 경기 내보내기 (결과 팝업)
+
+- 결과 팝업의 `EXPORT MATCH`("경기 내보내기", 레시피 `.json`, `Download`) / `EXPORT SUMMARY`("요약 내보내기", 요약 `.txt`, `FileText`). 불러오기는 `IMPORT MATCH`("경기 불러오기"). 프리셋 구역도 같은 동사 `EXPORT` / `IMPORT`("내보내기" / "불러오기")를 쓴다.
+- 대상 = 결과 팝업이 보여 주는 지금 가지 (`AppController.recipeSource()` = 적용 입력 기록이 6000틱 모두 있으면 입력 + 타임라인 + 가지 이름). 레시피 설정 = 적용 값(경기 중에는 잠겨 있음). 내보내기는 기록을 바꾸지 않고 팝업을 닫지 않는다.
+- **요약 텍스트** (UTF-8, 줄바꿈 `\n`, 지금 화면 언어, 결과 팝업과 같은 규칙 `resultRows` / `rpCards` / `resultBasisText` 재사용, `matchSummaryText`):
+
+    ```
+    FTC TacticSim · TELEOP MATCH COMPLETED
+    2026-09-30 14:32 · RED · Branch 3
+    R1 #12345 Bumblebots · R2 Hive Mind
+    TOTAL SCORE 38
+    HIVE    20  TELEOP TIP 1 × 20 · auto TIP 5 counts for RP only
+    FLOWER   9  FLOWER 2: 2 × 2 + bottom bonus 5
+    GARDEN   4  POLLEN 4 × 1
+    PARK     5  R1 parked × 5
+    RP  SWARM PARK 5 / 10 · POLLINATOR 1 ✓ TIP 5 / 4 · POLLINATOR 2 TIP 5 / 7
+    SEED 12194135 · ENGINE v1 · BALLISTICS v1
+    ```
+
+    둘째 줄의 가지 이름은 결과 팝업과 같은 규칙(`shownBranchName`)일 때만 넣는다.
+
+#### 분기 트리
+
+- **보존:** `BRANCH`는 기존 기록을 지우지 않고 **새 가지**를 만든다. 가지 = `{ id, 번호, 이름, 부모 가지, 분기 틱 T, 타임라인, 녹화 로그 사본, 적용 입력 기록, 종료 도달 여부 }`.
+- **이름:** 원본 `Main` / "원본", 새 가지 `Branch {n}` / "가지 {n}" (경기 안에서 번호 재사용 없음). 이름 바꾸기 1 ~ 24자(앞뒤 공백 제거, 비우면 자동 이름). 파일에는 언어와 무관한 영어 자동 이름(`fileBranchName`)을 쓴다.
+- **프레임 공유:** 새 가지의 0 ~ T틱 프레임은 부모 가지의 프레임 객체를 **참조로 공유**하고(프레임은 불변 `DeepReadonly`), T + 1틱부터만 새로 만든다. 엔진은 기록 저장소를 타임라인 객체 `EngineTimeline { frames, rngStates }`로 꺼내 바꿀 수 있다 — `forkTimeline(tick)`(0 ~ tick 프레임 / 난수 상태를 참조로 복사한 새 배열을 설치 + 되감기, 원래 배열은 그대로라 부모 보존), `adoptTimeline(t)`(설치 + 그 머리로 복원), `currentTimeline`. 한 가지 안에서 프레임을 자르는 일은 없다 (재개는 머리에서만, 되감은 틱에서는 항상 새 가지).
+- **입력:** 새 가지는 부모의 녹화 로그를 복사해 시작하고 3.6항 분기 규칙을 **새 가지의 사본에만** 적용한다 (`LIVE` 로봇은 T 이후 폐기, `REPLAY`는 유지 = 녹화 덧입히기). 적용 입력 기록은 0 ~ T를 복사한다. 입력 허브는 지금 가지의 작업본이고, 떠나는 가지는 사본(`MatchInputs.snapshot()` / `restore()`, `BranchInputs`)을 보관한다.
+- **상한 `MAX_BRANCHES = 8`** (원본 포함). 가득 찬 상태에서 `BRANCH` → 안내창 "가지가 8개로 가득 찼습니다. 가지 목록에서 가지를 삭제한 뒤 분기하세요." (확인 버튼 하나, 분기 안 함).
+- **메모리 근거:** 끝까지 진행한 가지 하나(6001프레임)는 Node 측정 힙 약 38 ~ 46 MB이고, 가지 메모리는 (6000 − T) / 6000에 비례한다. 헤드리스 Chromium(1366 × 768, 기본 설정)에서 경기 초반에 갈라 끝까지 진행한 가지를 하나씩 늘리며 잰 JS 힙은 경기 전 16.1 MB → 가지 1개 38.8 → 2개 60.8 → … → 8개 187.9 MB (가지당 약 21 MB)로, 탭 힙 상한(약 4 GB)의 약 5%다. 그래서 **모든 가지의 프레임을 메모리에 유지**한다. 전체 재계산은 1.2 ~ 1.5초.
+- **분기 확인창:** "{M:SS}에서 새 가지를 만들어 다시 조종할까요? 지금 가지({이름})의 기록은 그대로 남습니다."
+- **가지 목록 (`BranchMenu.tsx`, 스크러버 줄 가지 버튼에서 위로 펼침, 420u):** 만든 순서대로, 깊이마다 10u 들여쓰기. 줄 = 지금 가지 체크 · 이름(누르면 전환 후 닫힘) · 분기 시각(`from 1:24` / "1:24에서", 원본은 "—") · 상태(종료 = 총점 `95 pts` / "95점", 미종료 = 머리 시각 `to 0:50` / "0:50까지") · 이름 바꾸기(연필 → 줄 안 입력칸, Enter / 초점 이동 = 저장, Esc = 취소) · 삭제(휴지통, 원본 비활성). 바깥 클릭 / Esc로 닫힌다. 열 수 없는 상태(진행 · 재생 · 확인창 등)가 되면 숨었다가 돌아오면 다시 보인다 (삭제 확인 뒤 목록 유지).
+- **타임라인 분기 표식:** 지금 가지와 그 조상이 갈라진 틱마다 파란 세로 막대, 마우스를 올리면 "Branch 3 · from Main at 1:23" / "가지 3 · 원본의 1:23에서" (`forkMarks`).
+- **가지 전환 (`switchBranch`):** 일시정지 / 복기 중에만 (진행 · 재생 · 회전 · 종료 강조 · 결과 팝업 · 확인창 중에는 목록 버튼 비활성, `branchMenuEnabled`). 재생을 멈추고 보는 틱은 유지하되 그 가지 머리를 넘으면 머리로. 전환한 가지가 미종료면 일시정지(보는 틱 = 머리일 때 `RESUME` — 루프가 `ENDED`여도 엔진이 6000틱 전이면 재개 가능), 종료면 복기. 기록을 바꾸지 않으므로 확인창 / 종료 연출이 없다 (`endSeq` 불변).
+- **가지 삭제 (`deleteBranch`):** 확인창 "'{이름}' 가지를 삭제할까요?" (하위 가지가 있으면 "'{이름}' 가지와 그 아래 가지 {n}개를 삭제할까요?", 영어는 "with its sub-branches (n)") → 그 가지와 모든 하위 가지 삭제. 지금 가지가 지워지면 먼저 그 부모로 전환한다. 원본은 삭제할 수 없다. id는 남은 가지 중 최대 + 1로 새로 매기되 번호는 재사용하지 않는다.
+- **`NEW` / 불러오기:** 트리 전체를 버리고 새 트리를 만든다. 가지가 2개 이상이면 `NEW` 확인창에 "가지 {n}개를 모두 버리고"를 넣는다.
+- **결과 팝업:** 가지가 2개 이상이거나 지금 가지에 사용자 이름이 있으면 헤더 진영 배지 옆에 가지 이름(`GitFork`). 종료된 가지가 2개 이상이면 RP 아래에 `BRANCHES` / "가지 비교" 줄 — 종료된 가지별 이름 + 점수 칩, 지금 가지 주황 테두리, 최고 점수(동점 모두) 트로피. 눌러도 전환하지는 않는다 (v2 후보, 5.2항).
+- **모듈:** 트리 규칙 `src/app/branchTree.ts`(순수, `createBranchTree` / `forkBranch` / `switchBranch` / `renameBranch` / `removeBranch` / `descendantIds` / `branchDepth` / `fileBranchName`), 화면 규칙 `src/ui/branchView.ts`(`branchLabel` / `branchRows` / `forkMarks` / 확인창 문구 / `shownBranchName` / `branchComparison` / `fileBranchNumber`), 컨트롤러 상태 `branches`(번호 / 이름 / 부모 / 분기 틱 / 깊이 / 머리 / 종료 / 종료 점수) · `currentBranchId` · `canFork` · `branchName`.
+
+#### 프리셋 파일 (SETTINGS 탭 `PRESETS` 구역, `src/ui/presetFile.ts`)
+
+| 줄 | 파일 종류 `kind` | `EXPORT` | `IMPORT` |
+|---|---|---|---|
+| `R1` / `R2` | `ROBOT` (`RobotProfile`) | 그 로봇의 적용 값 | → 그 로봇 초안 (R1에서 내보낸 파일을 R2에 넣어도 됨, 슬롯 id는 줄이 정함) |
+| `SCENARIO` | `SCENARIO` (`ScenarioConfig`, 시드 포함) | 적용 값 | → 시나리오 초안 |
+| `ALL` | `SETUP` (R1 + R2 + 시나리오) | 세 탭의 적용 값 | → 세 탭 초안 모두 |
+| `MATCH` | 경기 레시피 | (결과 팝업에서) | 위 "경기 불러오기" |
+
+- 파일 형식: `{ "format": "ftc-tactic-sim/preset", "presetVersion": 1, "kind": "ROBOT" | "SCENARIO" | "SETUP", "data": ... }` (`SETUP`의 `data` = `{ robot1, robot2, scenario }`, 2칸 들여쓴 JSON, 로봇 데이터에 슬롯 id 없음).
+- 줄 설명: 로봇 = 적용된 `#팀 번호 팀명`, 전체 = `R1 + R2 + SCENARIO`, 경기 = "경기 내보내기로 저장한 파일".
+- `EXPORT`는 SETTINGS 탭을 볼 수 있으면 언제나 (적용 값이라 경기에 영향 없음). `IMPORT`는 경기 전에만 (초안은 경기 전에만 편집 가능).
+- **불러오기 규칙:**
+    - 파일 자체가 틀리면 거부하고 줄 아래 빨간 글자로 사유를 보인다 — `NOT_JSON` / `NOT_PRESET`(형식 · 버전 · 종류 값 · `data` 틀림) / `MATCH_FILE`(경기 파일을 넣음) / `NEWER_VERSION`(`presetVersion`이 지금보다 큼) / `WRONG_KIND`(그 줄과 종류가 다름), 파일 선택 쪽 `TOO_LARGE`(1 MB 초과) / `READ_FAILED`. 사유는 오류 코드로 보관해 지금 언어로 그리고, 탭을 옮기면 지운다.
+    - 항목이 없거나 형식이 틀리면 **그 항목만 기본값**으로 채운다 (자동 보관과 같은 정리 함수). 로봇(`sanitizeRobotPreset`) = 숫자는 유한값만, 문자열 / 불리언 / 슈터 형식 / 터렛 범위(숫자 2개)는 형식이 맞을 때만, 흡입 구역은 형식이 맞는 구역만 최대 8개, 탄도는 항목별. 시나리오(`sanitizeScenarioPreset`) = 선택 항목은 없으면 기본 시나리오 그대로, 형식이 틀린 항목만 기본값, 모르는 항목은 버림.
+    - 범위를 벗어난 값은 버리지 않고 초안에 넣어 빨간 오류로 보여 준다 (사용자가 고쳐서 `APPLY`). 팀 번호 / 팀명이 입력칸 규칙에 어긋나면 값은 비우고 그 글자를 틀린 입력 글자로 보관한다.
+    - 불러온 값은 **초안**에만 들어가고 기존 `APPLY` 흐름(확률표 재생성 포함)을 탄다 (`importPresetToDrafts`). 적용 안 된 수정이 있는 탭에 넣으면 `COPY TO`와 같은 덮어쓰기 확인창(`importOverwriteTabs`).
+- 파일 도우미 `src/ui/fileTransfer.ts`: `downloadTextFile`(Blob + `<a download>`), `pickTextFile`(숨긴 `<input type=file>`, 취소 → null).
+
+#### 파일 이름 (로컬 시각, 파일 이름에 쓸 수 없는 글자는 `_`)
+
+- 경기 `tacticsim-match_{YYYYMMDD-HHmm}_{RED|BLUE}_{총점}pts.json`, 원본이 아닌 가지는 끝에 `_b{번호}` (예: `tacticsim-match_20260930-1432_RED_87pts_b3.json`). 요약은 같은 이름의 `tacticsim-summary_….txt`.
+- 프리셋 `tacticsim-robot_{팀 번호, 없으면 R1 / R2}.json`, `tacticsim-scenario_{RED|BLUE}.json`, `tacticsim-setup_{YYYYMMDD-HHmm}.json`.
+
+### 3.10 도움말, 버그 리포트, 라이선스, 버전
+
+- **버전:** `package.json` `version` = **1.0.0**. `vite.config.ts`의 `define`이 `__APP_VERSION__`으로 앱에 넣어(`src/ui/helpInfo.ts` `APP_VERSION`, 선언 `src/vite-env.d.ts`) 도움말 / 버그 리포트에 보인다.
+- **라이선스:** PolyForm Noncommercial License 1.0.0 (`LICENSE`) — 비상업적 목적이면 사용 · 복사 · 수정 · 재배포 자유, 상업적 사용 불가. 필수 고지 `Required Notice: Copyright 2026 7ISx7JuQ (https://github.com/7ISx7-JuQ/ftc-tactic-sim)`. `package.json` `license` = `PolyForm-Noncommercial-1.0.0`. 배포 번들에 들어가는 서드파티(React · react-dom · scheduler MIT, lucide-react ISC, Pretendard OFL-1.1)는 `THIRD_PARTY_NOTICES.md`에 원문과 함께 고지한다.
+- **도움말 창 (`HelpDialog.tsx`):** 접힌 config 띠의 `?` 버튼(`CircleHelp`, 언제나). 열면 진행 중인 경기 / 재생을 멈추고 단축키를 끈다 (닫으면 다시 켬, 경기는 일시정지 상태로 남음). 화면 전체 모달(640u, 본문 스크롤), Esc · 닫기 · 바깥 클릭으로 닫힌다.
+    - 내용 (영어 / 한국어, 게임 용어 원어 대문자): 소개, 빠른 시작 4단계, 조작표(게임패드 / 키보드 — 키보드 칸은 `inputConfig` 키 설정을 그대로 읽음, `controlRows`), 복기와 가지, 저장과 공유, 알아 두기(데스크톱 · HTTPS · 시뮬레이션 한계), 버그 리포트, 정보(버전 · 라이선스 한 줄 · 소스 코드 / 라이선스 / 서드파티 고지 링크).
+- **버그 리포트 (폼 없이 메일):** 받는 사람 `7isx7juq@gmail.com`(`BUG_REPORT_EMAIL`). 주 버튼 = Gmail 쓰기 창 링크 `https://mail.google.com/mail/?view=cm&fs=1&to=…&su=…&body=…`(새 탭), 보조 = 기본 메일 앱 `mailto:` 링크, 그 아래 주소 글자.
+    - 제목 `[FTC TacticSim {버전}] Bug report`, 본문 = 지금 화면 언어의 작성 틀(무슨 일 / 재현 순서 / 기대 결과 / 첨부 안내) + 앱 버전 · 브라우저(User-Agent) · 화면(가로 × 세로 @배율) · 언어.
+    - 앱은 메일을 보내지 않고 링크만 연다 (서버 없음).
+- **배포:** 정적 사이트(`npm run build` → `dist/`)라 어떤 정적 호스팅에도 올릴 수 있다. 명중 확률표 캐시(`crypto.subtle`)는 HTTPS에서만 동작하므로 HTTPS로 제공한다. 빌드에는 Node.js 22.12 이상이 필요하다.
+
+## 4. 데이터 인터페이스 (`types.ts`)
+
+엔진의 주요 타입이다 (`src/core/types.ts`). 좌표 / 길이는 inch, 각도는 라디안, 시간은 주석에 적힌 단위.
 
 ```tsx
 // 로봇 범퍼 면에 붙는 직사각형 구역 (로봇 기준 좌표, 3.3항)
@@ -1107,14 +1213,14 @@ export interface RobotPose {
   heading: number; // 라디안
 }
 
-// 텔레옵 시작 조건 (자율주행 결과 반영 시나리오 설정)
+// TELEOP 시작 조건 (오토 결과를 반영한 시나리오, 2.4항)
 export interface ScenarioConfig {
   allianceColor: 'RED' | 'BLUE';
 
-  // 로봇 시작 자세 (자율주행 종료 위치). 미지정 시 진영별 기본 스폰 적용
+  // 로봇 시작 자세 (오토 종료 위치). 미지정 시 진영별 기본값 (2.3항)
   r1Spawn?: RobotPose;
   r2Spawn?: RobotPose;
-  
+
   // HIVE 초기 상태
   hiveUpwardCell?: 'AUDIENCE_CELL' | 'OPPOSITE_CELL';
   hiveInitialPieces?: {
@@ -1122,7 +1228,7 @@ export interface ScenarioConfig {
     nectarCount: number; // 상향 셀 NECTAR (기본 3). {NECTAR, POLLEN}이 팁 임계 테이블 미만이어야 함
   };
 
-  // 텔레옵 시작 시 로봇 적재물 (순서 있는 목록, FIFO: 0번이 가장 먼저 나감)
+  // TELEOP 시작 시 로봇 적재물 (순서 있는 목록, FIFO: 0번이 가장 먼저 나감)
   // 미지정 시 적재 한도만큼 POLLEN. 길이 ≤ 적재 한도, NECTAR는 canIntakeNectar 로봇만
   r1Loadout?: ('POLLEN' | 'NECTAR')[];
   r2Loadout?: ('POLLEN' | 'NECTAR')[];
@@ -1136,8 +1242,8 @@ export interface ScenarioConfig {
     opponent: number;
   };
 
-  // 오토 중 발생한 HIVE 팁 횟수 (기본 0): 텔레옵 직전 휴먼 플레이어가 그 수만큼 로딩 존에 NECTAR 투입,
-  // POLLINATOR RP 팁 횟수에 합산 (텔레옵 점수에는 미포함)
+  // 오토 중 HIVE TIP 횟수 (기본 0): TELEOP 직전 휴먼 플레이어가 그 수만큼 LOADING ZONE에 NECTAR 투입,
+  // POLLINATOR RP TIP 횟수에 합산 (TELEOP 점수에는 미포함)
   autoTipCount?: number;
 
   // ※ 위에서 지정되지 않은 나머지 POLLEN / NECTAR는 모두 바닥에 무작위 산포 (자동 계산)
@@ -1211,8 +1317,8 @@ export interface RobotState {
   controlledPieces: GamePiece[]; // FIFO 적재함 (0번이 다음에 나감), 최대 길이 = 로봇 적재 한도
 }
 
-// 틱별 행동 요청 (입력 계층 → 엔진, 3.6항). FLOWER_READY / FLOWER_LOWERING은 엔진 상태이며 요청 값이 아님
-// (엔진 입력 RobotDriveInput.actionState의 타입, 07-2 적용)
+// 틱별 행동 요청 (입력 계층 → 엔진, 3.6항, 엔진 입력 RobotDriveInput.actionState의 타입)
+// FLOWER_READY / FLOWER_LOWERING은 엔진 상태이며 요청 값이 아님
 export type ActionRequest = 'IDLE' | 'INTAKING' | 'SHOOTING' | 'FLOWER_SETUP' | 'FLOWER_DROPPING';
 
 // 슈팅 판정 인터페이스 (엔진 생성자 필수 인자: 실제 경기는 LUT 기반, 테스트는 고정 확률)
@@ -1240,14 +1346,14 @@ export interface HiveState {
   nectarInUpwardCell: number; // 상향 셀 NECTAR 수
   pollenInUpwardCell: number; // 상향 셀 POLLEN 수
   isTipping: boolean;
-  tipCount: number; // 텔레옵 중 팁 횟수 (회당 20점)
-  autoTipCount: number; // 오토 중 팁 횟수 (ScenarioConfig, RP 판정에만 합산)
+  tipCount: number; // TELEOP 중 TIP 횟수 (회당 20점)
+  autoTipCount: number; // 오토 중 TIP 횟수 (ScenarioConfig, RP 판정에만 합산)
   tipProgressTimer: number; // 전복 시작 후 누적 경과 시간 (초 단위)
   pendingDrops: PendingDrop[];
 }
 
 // 5. 필드 통합 상태 및 RP
-// 충돌 후 자유 비행 구간 (08-2). 시각은 발사 후 초, τ = t − t0
+// 충돌 후 자유 비행 구간 (2.6.2항). 시각은 발사 후 초, τ = t − t0
 // BALLISTIC: (x, y, z) + (vx, vy, vz)·τ, z에서 g·τ²/2 차감 / ROLL: HIVE 윗면 위 수평 등속 (z 일정)
 export interface FlightSegment {
   kind: 'BALLISTIC' | 'ROLL';
@@ -1291,9 +1397,9 @@ export interface RPState {
   pollinator2: boolean;
 }
 
-// 경기 종료(Tick 6000) 득점 내역 (08-1 확정, 08-3 구현 완료). hive + flower + garden + park = totalScore
+// 경기 종료(6000틱) 득점 내역 (3.2항). hive + flower + garden + park = totalScore
 export interface ScoreBreakdown {
-  hive: number;   // 텔레옵 팁 × 20
+  hive: number;   // TELEOP TIP × 20
   flower: number; // 득점 FLOWER의 (slot[1..N] 기물 수 × 2 + 하단 보너스 5) 합
   garden: number; // 아군 GARDEN 인정 기물 수 × 1
   park: number;   // 주차 인정 로봇 수 × 5
@@ -1302,6 +1408,8 @@ export interface ScoreBreakdown {
   gardenPieceIds: string[];               // 득점 인정 GARDEN 기물 id
   parkedRobots: ('robot1' | 'robot2')[];  // 주차 인정 로봇
 }
+
+// 엔진이 공개하는 기록은 DeepReadonly<T>로 감싸 읽기 전용 (3.2항)
 
 // 6. 타임라인 프레임 스냅샷
 export interface TimelineFrame {
@@ -1313,573 +1421,60 @@ export interface TimelineFrame {
   pieces: GamePiece[];
   totalScore: number;
   rpAchieved: RPState;
-  scoreBreakdown: ScoreBreakdown | null; // 종료 프레임(Tick 6000)만 기록, 그 외 null
+  scoreBreakdown: ScoreBreakdown | null; // 종료 프레임(6000틱)만 기록, 그 외 null
 }
 ```
 
-## 5. 개발 지시사항 (Implementation Instructions for Claude)
+## 5. 개발 현황과 향후 과제
 
-1. **좌상단(0,0) 캔버스 좌표계 엄수:** 모든 기물 및 구역 좌표는 명세서 2.2항을 기준으로 작성하라.
-2. **필드 초기화 및 시나리오 지원:**
-    - 선택된 얼라이언스 색상에 맞춰 32개의 POLLEN과 8개의 NECTAR를 생성하라.
-    - `ScenarioConfig`가 주어지지 않은 경우 기본 공식 룰(HIVE 상향 셀 기본 방향, NECTAR 3개 적재, 로봇당 POLLEN 4개 적재(적재 한도 이내), FLOWER/GARDEN 각 4개)로 초기화하라.
-    - `ScenarioConfig`가 제공된 경우 해당 파라미터(HIVE 방향/적재량, 로봇 적재물, FLOWER/GARDEN 잔여 수, 오토 팁 횟수, 로봇 시작 자세, 난수 시드)를 우선 반영하고, 지정되지 않은 나머지 기물은 HIVE/FLOWER/로봇/기존 기물 데드존을 회피하여 `ON_FIELD` 정지 상태로 필드에 무작위 스폰하라 (2.4항 배치 순서 및 검증 규칙 준수).
-    - 로봇 시작 자세는 `ScenarioConfig.r1Spawn` / `r2Spawn`을 우선 적용하고, 미지정 시 아래 진영별 기본 스폰을 적용하라.
-    - Red 기본 스폰: R1 `(9, 36)`, R2 `(9, 108)`, Heading `0`.
-    - Blue 기본 스폰: B1 `(135, 36)`, B2 `(135, 108)`, Heading `Math.PI`.
-    - HIVE 초기화: Red HIVE의 `upwardCell`은 `AUDIENCE_CELL`, Blue HIVE는 `OPPOSITE_CELL`.
-3. **충돌 및 기물 동역학 모듈 (`src/core/collision.ts`):**
-    - SAT 기반 로봇-환경, 로봇-로봇 슬라이딩 충돌 보정을 구현하라.
-    - 공(`ON_FIELD`)의 타일 마찰 감속(`stepPieceDynamics`) 및 공-환경/로봇/공 충돌 완화 루프를 구현하라.
-    - HIVE 30도 틸트 기반 시차 낙하 큐 생성 함수(`generateTippedPiecePlan`)를 구현하고, 아군 진영에 따른 `Lip_X` 분기 및 데드존 Re-roll 로직을 엄수하라.
-4. **의존성 분리:** `simulationEngine.ts`는 React Hook에 의존하지 않는 순수 TS 클래스로 작성하여 50Hz 루프(`dt = 0.02`)를 독자적으로 돌게 하라.
-5. **상태 전이(FSM) 타이머 및 주행 제어 (리프트 상태 `FLOWER_READY` / `FLOWER_LOWERING`도 Stationary Lock, 리프트 전이는 2.6.3항 리프트 FSM):** `actionState === 'INTAKING'`일 때는 주행 입력을 유지하여 Mobile Intake를 수행하고 공 접촉 타이머를 누적하도록 지시. `SHOOTING`, `FLOWER_SETUP`, `FLOWER_DROPPING`일 때는 감속 제동(`isBraking = true`) 후 정지 완료 시점에 `stateTimer`를 차감하도록 지시.
-6. **FLOWER 슬롯 구조 및 하단 추출/블로킹 구현:**
-    - `flower.pieces[0]`을 지면 슬롯(`slot[0]`), `[1..N]`을 유효 스코어링 볼륨으로 취급하라.
-    - 로봇 인테이크 구역(`intakeZones`)이 FLOWER 원통 정사영과 겹칠 때 `slot[0]`의 POLLEN만 추출(`shift`) 가능하며, 추출 쿨다운은 `max(intakeDelay, 0.12s)`를 적용하라.
-    - 추출 후 바로 위 기물이 NECTAR인 경우 `slot[0]`을 `null`로 두고 NECTAR를 `slot[1]`에 고정시켜 추가 추출을 영구 차단하라.
-    - FLOWER 득점 집계 시 `slot[0]`은 배제하고, `slot[1..N]` 내 NECTAR 존재 여부에 따라 소유권(개당 2점) 및 하단 보너스(5점)를 경기 종료 틱(Tick 6000)에 일괄 산출하라.
-7. **탄도 모델 분리:** 슈터 몬테카를로 히트맵 생성기는 오프라인/별도 모듈로 격리하고, 엔진 루프는 필수 주입 인자인 판정 함수(`ShotProbabilityResolver`: R1/R2 × 기물 종류별 LUT + 조준 오차 판정)를 통해 결정론적으로 동작하도록 지시. 투입구 통과 명중 판정은 LUT 생성 시에만 사용.
-8. **엔드게임 전환:** 남은 경기 시간 60초 도달 시 `ENDGAME` 페이즈 전환 및 잔여 NECTAR 재고 전량을 아군 로딩 존에 투입하라 (빈 슬롯이 없으면 `pendingHumanNectar`로 대기 후 순차 배치).
-9. **점수 집계 타이밍 엄수:**
-    - Tick 0 ~ 5999 구간에는 HIVE Tip 점수(회당 20점)만 실시간으로 `totalScore`에 누적하라.
-    - GARDEN 점수, PARK 점수, FLOWER 점수는 Tick 6000(경기 종료)에 도달하는 순간 최종 합산하여 프레임에 기록하라.
-    - 종료 프레임에는 항목별 득점 내역과 인정 근거(`scoreBreakdown`, 3.2항)를 함께 기록하고, 그 외 프레임은 `null`로 두라.
-10. **렌더러 (3.7항):** 렌더러는 프레임 / 로봇 제원 / 보기 / 표시 옵션만으로 그리며 엔진을 호출하거나 득점 규칙을 다시 계산하지 않는다. 좌표 계산은 순수 함수로 분리해 테스트하라.
-11. **분기 / 저장 (3.9항):** 분기는 기존 가지를 보존하고 프레임은 참조로 공유한다. 경기 재현 / 저장은 적용 입력 기록 + 설정 + 시드 + LUT 설정만으로 하며, 같은 입력에 대한 프레임 결과가 바뀌는 커밋은 `ENGINE_VERSION`을 올리고 체크섬 회귀 기대값을 갱신하라.
+개발 규칙(작은 단계로 구현, 검증 명령, 테스트 갱신, `ENGINE_VERSION` 올리기)은 [CLAUDE.md](CLAUDE.md)를 따른다. 단계별 상세 기록은 git 커밋 이력에 있다.
 
-## 6. 개발 진행 현황 및 로드맵 (Progress & Roadmap)
+### 5.1 개발 단계 (v1.0.0까지 완료)
 
-> 다음 작업은 새 대화에서 이어간다. 이 장은 지금까지 완료된 범위, 확정된 설계 결정, 남은 Step을 요약한다. 상세 규칙은 위 1~5장이 기준이다.
-
-### 6.1 완료된 Step (커밋 기준, `claude` 브랜치)
-
-| Step | 내용 | 핵심 파일 |
+| Step | 내용 | 주요 위치 |
 |---|---|---|
-| 01 | 타입 정의 및 프로젝트 세팅 (Vite + React + TS) | `types.ts` |
-| 02 | 룰북 좌표계 반영, HIVE 4-Cell 필드 렌더러 | `canvasRenderer.ts`, `FieldCanvas.tsx` |
-| 03 | 기구학 (Slew Rate 가감속, 헤딩 적분) | `kinematics.ts` |
-| 04 | 충돌 엔진 (SAT, 로봇-환경/로봇-로봇, 기물 동역학, PBD, HIVE 시차 낙하 계획) | `collision.ts` |
-| 05 | 50Hz 결정론적 메인 루프 엔진 및 룰 전반 (아래 6.2) | `simulationEngine.ts` |
-| 5.5 | 테스트 인프라: Vitest 도입, 엔진 통합 회귀 테스트 스위트 저장소 편입 (아래 6.2) | `src/core/__tests__/simulationEngine.test.ts` |
-| 06-1 | 탄도 모듈 명세 구체화 및 기존 코드 정비 (아래 6.2.2) | `collision.ts`, `types.ts`, `simulationEngine.ts` |
-| 06-2 | 탄도 계산 함수 (v0 닫힌 해, 비행 시간, 사거리, HIVE 직육면체 교차) (아래 6.2.3) | `ballistics.ts`, `__tests__/ballistics.test.ts` |
-| 06-3 | 몬테카를로 명중 판정, v0 탐색, LUT 생성 / 4셀 대칭 복사 (아래 6.2.4) | `ballistics.ts`, `__tests__/ballistics.test.ts` |
-| 06-4 | HIVE 진입 면 / 림 아래 벽 정확 판정, 1 in 격자 · 샘플 수 상향 · 보간 조회, 격자별 독립 난수 · 도달 불가 격자 생략 (아래 6.2.5) | `ballistics.ts`, `types.ts`, `__tests__/ballistics.test.ts` |
-| 06-5 | LUT 명중 확률 판정 함수(`createLUTShotResolver`) + LUT 생성 실행 / 사용자 경험 명세 (아래 6.2.6) | `ballistics.ts`, `types.ts`, 두 테스트 파일 |
-| 06-6 | 발사 비행 처리 (발사 / 도착 분리, `IN_FLIGHT`, 비행 대기열, 명중 / HIVE 반사 / 바닥 착지) (아래 6.2.7) | `ballistics.ts`, `simulationEngine.ts`, `types.ts`, 두 테스트 파일 |
-| 07-1 | 입력 계층 / 실시간 루프 명세 구체화, FLOWER 리프트 FSM 명세 (아래 6.2.8) | 명세서 |
-| 07-2 | FLOWER 리프트 FSM 엔진 구현 (올림 / 대기 / 투입 / 내림, `ActionRequest`) (아래 6.2.9) | `simulationEngine.ts`, `types.ts`, `__tests__/simulationEngine.test.ts` |
-| 07-3 | 입력 설정 + 순수 변환 (장치 읽기, 탭 래치, 장치 합성, 조작 모드, 행동 요청, 8비트 부호화) (아래 6.2.10) | `src/input/inputConfig.ts`, `src/input/controls.ts`, `src/input/__tests__/controls.test.ts` |
-| 07-4 | 입력 로그 + 로봇별 입력 출처 + 녹화 덧입히기 + 로그 재생 공급 함수 (아래 6.2.11) | `src/input/inputLog.ts`, `src/input/__tests__/inputLog.test.ts` |
-| 07-5 | 실시간 루프 컨트롤러 + 입력 수집기 (20 ms 누산기, 따라잡기 5틱, 일시정지 / 재개, 종료) (아래 6.2.12) | `src/input/realtimeLoop.ts`, `src/input/liveControls.ts`, `src/input/inputConfig.ts`, `src/input/__tests__/realtimeLoop.test.ts` |
-| 07-6 | 브라우저 입력 어댑터 (게임패드 폴링, 키보드, rAF, 자동 일시정지 이벤트) + 헤드리스 Chromium 점검 (아래 6.2.13) — Step 7 완료 | `src/input/browserInput.ts`, `src/input/__tests__/browserInput.test.ts` |
-| 08-1 | 렌더러 / 화면 연결 명세 구체화 (보기 방향, 캔버스 레이아웃, 로봇 / 기물 / HIVE / FLOWER · 재고 게이지 / 비행 공 표시, 표시 옵션, 경기 종료 득점 내역, 개발 하네스) (아래 6.2.14) | 명세서 |
-| 08-2 | 발사 비행 개정(06-6): HIVE / 벽 충돌 후 반사 포물선 낙하, 충돌 후 구간 기록, 무효 명중 반사 (아래 6.2.15) | `ballistics.ts`, `simulationEngine.ts`, `types.ts`, 두 엔진 테스트 파일, 입력 테스트 제한 시간 |
-| 08-3 | 경기 종료 득점 내역 `scoreBreakdown` 기록 (항목별 점수 + 인정 근거) (아래 6.2.16) | `simulationEngine.ts`, `types.ts`, `__tests__/simulationEngine.test.ts` |
-| 08-4 | 장면 렌더러 1: 캔버스 레이아웃 / 좌표 변환 / 보기 회전 · 애니메이션, 정적 레이어 캐시(상대 진영 채도 제거), 구조물 라벨, 로봇, 바닥 기물 (아래 6.2.17) | `src/renderer/viewTransform.ts`, `robotLayout.ts`, `badgeAssets.ts`, `sceneRenderer.ts`, `canvasRenderer.ts`, `src/renderer/__tests__/` |
-| 08-5 | 장면 렌더러 2: HIVE 셀 상태 / 팁 낙하 연출, FLOWER 9칸 게이지, NECTAR 재고 게이지, 경기 종료 강조 (아래 6.2.18) | `src/renderer/gaugeLayout.ts`, `sceneRenderer.ts`, `canvasRenderer.ts`, `collision.ts`, `simulationEngine.ts`, `__tests__/gaugeLayout.test.ts` |
-| 08-6 | 장면 렌더러 3: 비행 공(명목 구간 보간 + 끝점 보정, 충돌 후 구간, 그림자 / 높이 오프셋 / 크기), 표시 옵션 5종 (아래 6.2.19) | `src/renderer/flightView.ts`, `renderOptions.ts`, `sceneRenderer.ts`, `__tests__/flightView.test.ts`, `__tests__/renderOptions.test.ts` |
-| 08-7 | 개발 하네스: 정식 엔진 / 입력 / 실시간 루프 / 렌더러 화면 연결, 회전 후 루프 시작, 옵션 체크박스 (아래 6.2.20) — Step 8 완료 | `src/dev/devSetup.ts`, `harnessController.ts`, `DevHarness.tsx`, `src/dev/__tests__/harness.test.ts`, `App.tsx`, `App.css` |
-| 09-1 | 웹 GUI 명세 구체화 (메인 화면 / config 창 / 앱 상태 흐름 / 재생 · 재개 · 분기 / 단위 / 스윗스팟 진영 기준 / 배치 검증 / 결과 팝업 / 하위 Step 분할) (아래 6.2.21) | 명세서 |
-| 09-2 | `ballistics.ts` LUT 병렬 생성 사전 준비: 행 범위 LUT, 시드 파생 공개, 모델 버전, 스윗스팟 진영 기준 변환 (아래 6.2.22) | `ballistics.ts`, `__tests__/ballistics.test.ts` |
-| 09-3 | LUT Worker 풀 + 작업 대기열(v0 탐색 우선) + 조립 + 로봇별 상태 머신 / 취소 / 재요청 무시 / 오류 처리 (아래 6.2.23) | `src/workers/lutProtocol.ts`, `lutWorker.ts`, `createLUTWorker.ts`, `lutManager.ts`, `src/workers/__tests__/lutManager.test.ts` |
-| 09-4 | IndexedDB LUT 캐시 (SHA-256 키, 기준 셀 LUT 저장 / 4셀 복원, 최근 사용 20개 + 다른 모델 버전 삭제, 실패 허용) + 관리자 연동 (아래 6.2.24) | `src/workers/lutCache.ts`, `lutManager.ts`, `src/workers/__tests__/lutCache.test.ts`, `fakeWorker.ts` |
-| 09-5 | 시작 자세 배치 검증 `validateRobotPlacement`(오류 코드 5종, 닿음 허용) + `reset()` 사전 보정 (아래 6.2.25) | `simulationEngine.ts`, `__tests__/simulationEngine.test.ts` |
-| 09-6a | GUI 순수 기반: 문구 사전 `t()`(영어 / 한국어), 단위 변환 · 표시(길이 소수 2자리, 1e-6 in 입력 반올림), 입력 문자열 해석, 경기 타이머 표시 (아래 6.2.26) | `src/ui/i18n.ts`, `src/ui/units.ts`, `src/ui/__tests__/` |
-| 09-6b | 렌더러 전환: 캔버스 = 필드 뷰포트 800 × 800(좌우 패널 삭제, 장면 입력 `shotResolver` 제거), 혼합 테마, 진영 공식 색, `LOADING ZONE` 두 줄 라벨 (아래 6.2.27) | `viewTransform.ts`, `canvasRenderer.ts`, `sceneRenderer.ts`, `renderOptions.ts`, 하네스, `src/renderer/__tests__/` |
-| 09-6c | 앱 컨트롤러 `AppController`(경기 설정 주입, 하네스 흐름 일반화, 상태에 TIP / RP / 명중 확률), 하네스를 그 위로 이전 (아래 6.2.28) | `src/app/appController.ts`, `src/dev/devSetup.ts`, `DevHarness.tsx`, `src/app/__tests__/appController.test.ts` |
-| 09-6d | 화면 뼈대: 좌측 득점 패널 / 필드 / 접힌 config 띠(표시만) / 스크러버 줄(기존 동작만), 화면 비례 단위 `--u`, 글꼴(Apple SD Gothic Neo → Pretendard) / lucide 아이콘, 새 GUI 기본 화면 + 하네스 `?harness` (아래 6.2.29) | `src/components/`, `src/ui/mainScreenModel.ts`, `src/app/defaultSetup.ts`, `src/renderer/fonts.ts`, `App.tsx`, `main.tsx`, `src/ui/__tests__/mainScreenModel.test.ts` |
-| 09-7a | 경기 흐름: 보는 틱 / 재생 · 배속 / 틱 · 1초 이동 / 재개 · 분기 / 종료 강조 5초 → 결과 팝업(기본형) → 복기, 상태별 단축키, 스크러버 줄 연결 (아래 6.2.30) | `appController.ts`, `realtimeLoop.ts`, `ScrubberBar.tsx`, `ResultPopup.tsx`, `MainScreen.tsx`, `mainScreenModel.ts`, 테스트 |
-| 09-7b | 확인창 모달(Enter / Esc, 필드 중앙), 경고 토스트(리프트 중 주행 입력, 로봇당 2초), 자동 일시정지 배너, 타임라인 클릭 / 끌기 (아래 6.2.31) | `ConfirmDialog.tsx`, `FieldNotices.tsx`, `ScrubberBar.tsx`, `MainScreen.tsx`, `appController.ts`, 테스트 |
-| 09-8a | config 창 틀: 펼치기(480u, 필드를 밀어냄) / 자동 접힘 / 탭 4개 / 잠금, 초안 · 적용 · `RESET TAB` 규칙, 아이콘 띠 탭 상태, `START` 막기 (아래 6.2.32) | `src/ui/configDraft.ts`, `ConfigPanel.tsx`, `ConfigRail.tsx`, `MainScreen.tsx`, `defaultSetup.ts`, `src/ui/__tests__/configDraft.test.ts` |
-| 09-7c | 경기 종료 연출(사용자 피드백): 마지막 10초 타이머 빨강 맥박, 종료 흰빛, `MATCH COMPLETE` 배너 + 5초 진행바, 점수 카운트업 + 항목 칩, 종료 신호 `endSeq` (아래 6.2.33) | `EndOverlay.tsx`, `LeftPanel.tsx`, `mainScreenModel.ts`, `appController.ts`, 테스트 |
-| 09-8b | SETTINGS 탭(게임패드 / 입력 출처 · 조작 모드 · 키보드 + 조작표 / 표시 옵션 / 언어 · 단위 · 기본 보기 / `RESET ALL`), 입력 선택을 START · RESUME · BRANCH에 적용(녹화 덧입히기), 새 경기 = 기본 보기, `localStorage` 자동 보관 (아래 6.2.34) | `src/app/inputPlan.ts`, `src/ui/settings.ts`, `SettingsTab.tsx`, `appController.ts`, `browserInput.ts`, `liveControls.ts`, 테스트 |
-| 09-9a | 로봇 탭 1: 프로필(팀 번호 / 팀명), 입력칸 규칙(단위 · 범위 · 빨간 오류, 틀린 글자 보관), 하드웨어 · 인테이크 딜레이 · 슈터 형식 / 범위 · 리프트 폼, COPY TO, 저장 형식(없는 항목 채우기), 좌측 패널 팀 표시 (아래 6.2.35) | `src/ui/robotForm.ts`, `configDraft.ts`, `settings.ts`, `FormControls.tsx`, `RobotTab.tsx`, `LeftPanel.tsx`, `MainScreen.tsx`, 테스트 |
-| 09-9b | 로봇 탭 2: 로봇 미리보기(흡입 구역 / 조준 범위 / 발사구), 흡입 구역 편집기(면 · 위치 · 폭 · 깊이, 추가 / 삭제, 프리셋), 슈터 탄도 칸(발사구 지상고 / 발사각 / 오프셋 + 고급 편차 3종), 경기 비행 연결 (아래 6.2.36) | `src/ui/robotForm.ts`, `RobotPreview.tsx`, `RobotTab.tsx`, `FormControls.tsx`, `MainScreen.tsx`, `defaultSetup.ts`, `i18n.ts`, `MainScreen.css`, 테스트 |
-| 09-9c | 흡입 구역 폭 최소값 0.5 → 3.6 in (NECTAR 직경, 아래 6.2.37) | `src/ui/robotForm.ts`, 테스트 |
-| 09-10a | 스윗스팟 입력(진영 기준, 기본 C) + 명중 확률표 생성 연결(앱 시작 / `APPLY`, 로봇 간 공유) + 진행 표시(띠 진행률 링, 로봇 탭 상태 · 진행 막대 · 남은 시간 · 기물별 v0 / 명중률) + LUT 판정 교체 + 준비 전 `START` 막기 (아래 6.2.38) | `src/ui/robotForm.ts`, `lutView.ts`, `src/app/lutTracker.ts`, `defaultSetup.ts`, `src/workers/lutManager.ts`, `LutStatus.tsx`, `RobotTab.tsx`, `ConfigRail.tsx`, `MainScreen.tsx`, `i18n.ts`, `MainScreen.css`, 테스트 |
-| 09-10b | 필드 편집 모드 공통 틀(안내 띠 / `DONE` · Esc / 탭 이동 · 창 닫기 · `START`에서 종료, 컨트롤러 편집 장면) + 히트맵 모드 `SHOW HIT MAP`(회색 바닥 + 진영별 파스텔 척도, 미계산 행 빗금, 점진 표시, 기물 전환) (아래 6.2.39) | `src/renderer/heatmapView.ts`, `editSceneRenderer.ts`, `canvasRenderer.ts`, `src/ui/fieldEdit.ts`, `appController.ts`, `lutTracker.ts`, `FieldEditBanner.tsx`, `RobotTab.tsx`, `MainScreen.tsx`, `i18n.ts`, `MainScreen.css`, 테스트 |
-| 09-10c | 스윗스팟 모드 `SET ON FIELD`: 필드 클릭 = 초안 스윗스팟(모드 유지, 틀린 칸도 빨간 오류), 마우스 칸 강조 + 몸체 윤곽 + 말풍선(좌표 / 사유), 적용 확률표 반투명, `DONE · APPLY` / `CANCEL` · Esc · `START` 되돌림 (아래 6.2.40) | `src/ui/fieldEdit.ts`, `editSceneRenderer.ts`, `ballistics.ts`(`aimingRobotOBB` 공개), `FieldEditBanner.tsx`, `RobotTab.tsx`, `MainScreen.tsx`, `i18n.ts`, `MainScreen.css`, 테스트 |
-| 09-11a | 시나리오 탭: 유효 배지 + 문제 목록, 진영(시작 자세 좌우 대칭), `HIVE` / 적재물(칸 순환) / 잔여 기물 / 오토 TIP 개수 조절기, 시작 자세 숫자 칸, 시드 `REROLL`(바로 적용 + 보관), `RESET TAB` 시드 유지 (아래 6.2.41) | `src/ui/scenarioForm.ts`, `configDraft.ts`, `simulationEngine.ts`(기본값 공개), `ScenarioTab.tsx`, `FormControls.tsx`(`Stepper`), `ConfigPanel.tsx`, `MainScreen.tsx`, `i18n.ts`, `MainScreen.css`, 테스트 |
-| 09-11b | 시작 자세 편집 모드 `EDIT ON FIELD`: 몸체 끌기 = 위치, 회전 핸들 = 헤딩(스냅 없음, 0.1 in / 0.1° 반올림), 겹침 흰 빗금 + 사유, 로봇 위 좌표 글자, `DONE · APPLY` / `CANCEL` · Esc · `START` 되돌림 (아래 6.2.42) — 09-11 완료 | `src/renderer/spawnEditLayout.ts`, `editSceneRenderer.ts`, `src/ui/fieldEdit.ts`, `scenarioForm.ts`, `simulationEngine.ts`(GARDEN 좌표 공개), `FieldEditBanner.tsx`, `ScenarioTab.tsx`, `MainScreen.tsx`, `i18n.ts`, `MainScreen.css`, 테스트 |
-| 09-12 | 결과 팝업 확정(로봇 칩, 항목별 점수 + 한 줄 근거, RP 카드 조건 + 진행) + 개발 하네스 / `tmp_shots.ts` 삭제 (아래 6.2.43) — Step 9 완료 | `src/ui/resultModel.ts`, `ResultPopup.tsx`, `appController.ts`, `MainScreen.tsx`, `App.tsx`, `i18n.ts`, `MainScreen.css`, 삭제: `src/dev/`, `App.css`, `src/tmp_shots.ts`, 테스트 |
-| 10-1 | 분기 타임라인 / 경기 저장 · 공유 명세 구체화 (적용 입력 기록, 레시피 형식 · 체크섬 · 버전, 경기 불러오기 / 내보내기, 분기 트리 · 가지 상한 8 · 메모리 측정, 프리셋 파일, 하위 Step 분할) (아래 6.2.44) | 명세서 |
-| 10-2 | 프리셋 파일: 순수 직렬화 / 해석 / 항목별 정리 / 초안 반영 + SETTINGS 탭 `PRESETS` 구역(줄별 `EXPORT` / `IMPORT`, 거부 사유, 덮어쓰기 확인창) + 파일 도우미, 로봇 탭 숫자 칸 저장 값 범위 검사 (아래 6.2.45) | `src/ui/presetFile.ts`, `fileTransfer.ts`, `SettingsTab.tsx`, `MainScreen.tsx`, `RobotTab.tsx`, `FormControls.tsx`, `i18n.ts`, `MainScreen.css`, `src/ui/__tests__/presetFile.test.ts` |
-| 10-3 | 레시피 저장 순수 계층: 적용 입력 기록(`MatchInputs.applied`, 분기 시 자름) + 기록 재생 공급 함수, `ENGINE_VERSION` + 올림 누락 방지 기대값 테스트, 체크섬 / 체크포인트, 입력 RLE + Base64, 레시피 만들기 / 문자열 / 해석 · 검증 · 경고 (아래 6.2.46) | `src/input/inputLog.ts`, `src/core/checksum.ts`, `simulationEngine.ts`, `src/app/matchRecipe.ts`, `appController.ts`, `src/ui/presetFile.ts`, 테스트 `matchRecipe.test.ts` / `engineVersion.test.ts` / `inputLog.test.ts` G |
-| 10-4 | 경기 불러오기 / 내보내기 연결: 컨트롤러 `loadMatch`(재계산 → 회전 → 종료 연출 없이 복기, `REPLAY`) / `recipeSource`, SETTINGS `MATCH` 줄(해석 · 거부 사유 · 확인창 버전 경고 · 명중 확률표 준비 진행 · `CANCEL`), 체크섬 불일치 배너, 결과 팝업 `EXPORT MATCH` / `EXPORT SUMMARY`, 요약 텍스트 / 파일 이름 (아래 6.2.47) | `appController.ts`, `inputLog.ts`, `src/ui/matchFile.ts`, `resultModel.ts`, `MainScreen.tsx`, `SettingsTab.tsx`, `FieldNotices.tsx`, `ResultPopup.tsx`, `i18n.ts`, `MainScreen.css`, 테스트 |
-| 10-5 | 분기 트리 엔진 / 컨트롤러: 엔진 가지 타임라인(분기 = 참조 공유 새 배열, 전환 = 설치), 순수 트리 규칙(8개 상한 / 번호 · 이름 / 하위 포함 삭제 / 원본 보호), 가지별 입력 기록 사본, 컨트롤러 `branch` / `switchBranch` / `deleteBranch` / `renameBranch` · 상태 가지 목록, 헤드리스 Chromium 8개 가지 힙 실측 (아래 6.2.48) | `simulationEngine.ts`, `src/app/branchTree.ts`, `inputLog.ts`, `appController.ts`, `MainScreen.tsx`, 테스트 `engineTimeline.test.ts` / `branchTree.test.ts` / `appController.test.ts` K / `inputLog.test.ts` H |
-| 10-6 | 분기 UI: 가지 버튼 / 목록(전환 · 이름 바꾸기 · 삭제), 타임라인 분기 표식, 분기 확인창 새 문구 / 가득 참 안내창, `NEW` 확인창 가지 수, 결과 팝업 가지 이름 + 가지 비교 줄, 파일 이름 `_b{번호}` (아래 6.2.49) — Step 10 완료 | `src/ui/branchView.ts`, `BranchMenu.tsx`, `ScrubberBar.tsx`, `ResultPopup.tsx`, `ConfirmDialog.tsx`, `MainScreen.tsx`, `matchFile.ts`, `mainScreenModel.ts`, `i18n.ts`, `MainScreen.css`, 테스트 |
-| v1.0.0 | 릴리스 준비: 버전 1.0.0, PolyForm Noncommercial 라이선스 + 서드파티 고지, 템플릿 잔여물 삭제, README 영 / 한, 앱 안 도움말 창 + 버그 리포트(Gmail 쓰기 창 / 메일 앱 링크), 풀매치 컨트롤러 테스트 제한 시간 (아래 6.2.50) | `LICENSE`, `THIRD_PARTY_NOTICES.md`, `README.md`, `package.json`, `vite.config.ts`, `src/vite-env.d.ts`, `src/ui/helpInfo.ts`, `HelpDialog.tsx`, `ConfigRail.tsx`, `MainScreen.tsx`, `i18n.ts`, `MainScreen.css`, 테스트 |
-
-### 6.2 Step 05 (메인 루프) 세부 완료 항목
-
-- **엔진 API:** `reset / step / runFullMatch / getFrame / scrubTo`, `inputProvider`, 읽기 전용 타임라인(`DeepReadonly<TimelineFrame>`), 스크러빙 후 `step()` 시 미래 프레임 폐기 분기.
-- **결정론:** Mulberry32 시드 PRNG(`ScenarioConfig.rngSeed`), 틱별 PRNG 상태 기록으로 스크러빙 후 재시뮬레이션 완전 재현 (동일 JS 엔진 기준).
-- **틱 파이프라인:** 기구학/Stationary Lock → 로봇 충돌 → 기물 동역학 → 기물 충돌 2회 → 끼인 공 역보정(Step 4-2) → HIVE 시차 낙하 → 발사 비행 도착(Step 5-2, 06-6) → 흡입/추출 → 액션 완료 → 엔드게임/휴먼 NECTAR 투입 → GARDEN 안착 → 점수.
-- **로봇:** `RobotConfig`(하드웨어) / `ScenarioConfig`(시작 조건) 분리, 시작 자세는 시나리오(미지정 시 진영 기본), 적재 한도 `min(maxControlledPieces, 4)`, FIFO 적재함, 로봇 id 슬롯 강제.
-- **인테이크:** `BumperZone[]`(면/offset/width/depth) 일반화, FRONT/ANY 프리셋, z축 정사영 원-사각형 판정, FLOWER 하단 추출도 인테이크 구역 기준.
-- **HIVE:** {NECTAR, POLLEN} 팁 임계 테이블, 도달 즉시 팁, 팁 중 발사 전부 빗맞음(현실 연사 재현을 위해 의도적으로 유지), 오토 팁은 RP에만 합산.
-- **FLOWER:** 21.5 in 원통 용량 테이블(지그재그 적층 계산값), `slot[0]` 불변식(NECTAR 불가), NECTAR 잼 시 빈 `slot[0]`을 POLLEN으로 계산(턱/공 받침 차이 의도적 무시), 투입 가능 여부 요청 시점 검사.
-- **시작 상황:** 적재물 순서 목록, FLOWER/GARDEN/HIVE 잔여 수, 오토 팁 NECTAR 로딩 존 투입, 미지정 기물 자동 산포(GARDEN/로딩 존 제외), `validateScenario()`(GUI 확정 버튼 비활성화용).
-- **득점:** Tick 0~5999는 텔레옵 팁(20점)만 실시간, Tick 6000에 FLOWER/GARDEN(정사영 걸침 인정)/PARK(로딩 존 부분 진입 인정) 확정.
-- **물리 보정:** 끼인 공 역보정(로봇-벽/장애물/로봇 사이), 휴먼 NECTAR는 로딩 존 빈 슬롯이 없으면 대기(`pendingHumanNectar`).
-- **검증:** 타입 체크(`tsc -b`), ESLint, 빌드, 통합 테스트 통과.
-
-### 6.2.1 Step 5.5 (테스트 인프라) 완료 항목
-
-- **러너:** Vitest 5 (`devDependencies`), `npm test` = `vitest run`, `npm run test:watch` = `vitest`.
-- **스위트:** `src/core/__tests__/simulationEngine.test.ts` — 16개 테스트 그룹(A~P), 검증 196개(반복문 포함). 풀매치를 여러 번 돌리는 그룹이 있어 테스트당 제한 시간 120초, 전체 약 35초.
-    - A 시작 자세 / B 초기화 / C 슈팅·팁 / D FLOWER 추출·잼·투입 / E 바닥 흡입 / F PARK / G 시드 / H 풀매치 결정론·스크러빙·분기 / I GARDEN 정사영 / J BumperZone 인테이크 / K 시작 상황·검증 / L 끼인 공 역보정 / M HIVE 팁 테이블·RP / N FLOWER 투입 요청 시점 거부 / O FLOWER 용량 테이블·잼 / P 코드 리뷰 반영(읽기 전용 기록, 로봇 id, 로딩 존 대칭, 산포 제외).
-- **타입 검사 포함:** 테스트 파일도 `tsconfig.app.json`(`src` 포함) 대상이라 `tsc -b`로 함께 타입 검사됨.
-- **동작 확인:** 엔진 상수를 일부러 틀리게 바꿨을 때 해당 그룹이 실패 메시지와 함께 실패함을 확인.
-
-### 6.2.2 Step 06-1 (탄도 명세 구체화) 완료 항목
-
-- **HIVE 셀 투입구 기하:** 오각형(20 × 7.61 직사각형 + 이등변 삼각형, 높이 14), 림 z 53.5, 지면과 60°, 4셀 대칭 좌표 표, 조준점(면적 중심), 비행 판정용 HIVE 직육면체 높이 65.62 (`HIVE_RIM_Z`, `HIVE_CELL_TILT`, `HIVE_RIM_Y`, `HIVE_HEIGHT`, `hiveCellAimPoint`).
-- **스윗스팟 한 점 입력 확정:** 3-Tier 폐기, 기물 종류별 v0 탐색 → 72 × 72 LUT의 2단계 몬테카를로.
-- **몬테카를로 명중 판정 기준:** 앞면 통과 + 반지름만큼 줄인 오각형 내부 + 림 통과 높이 (LUT 생성 전용).
-- **LUT 16장:** 로봇 × 기물 종류 × 4셀, `Float32Array`, 기준 셀만 몬테카를로 후 대칭 복사 (약 2초, 324 KB).
-- **`shooterAccuracy` 폐기:** 판정 함수를 엔진 생성자 필수 인자로 변경 (`(r1, r2, shotResolver, alliance?, scenario?)`), 판정 함수에 기물 종류 인자 추가.
-- **조준 각도 규약:** `aimTolerance` / `turretRange`는 헤딩 기준 상대각(rad), [-π, π] 정규화, α > β는 ±π를 가로지르는 구간.
-- **비행 처리 범위:** 궤도 결과(도착 지점 / 시점 / 착지 속도)는 Step 6, 렌더러 보간은 Step 8. 빗맞음은 HIVE 직육면체 충돌 또는 바닥 착지(`landingSpeedRetention`).
-- **물리 상수:** `GRAVITY` ≈ 386.09 in/s², `landingSpeedRetention` 0.3 (실측 방법 2.5항).
-- **엔진:** HIVE 내부 기물을 조준점 바닥 정사영에 배치. 테스트 그룹 Q 추가 (셀 기하 / 대칭 / 기물별 판정 함수 / 조준점 배치).
-
-### 6.2.3 Step 06-2 (탄도 계산 함수) 완료 항목
-
-- **`src/core/ballistics.ts` 신설:** 2.6.2항 "탄도 계산 함수" 목록 (발사구 / 조준, v0 닫힌 해, 궤적 조회, 사거리, HIVE 직육면체 교차). 순수 함수, 엔진 미연결.
-- **HIVE 직육면체 교차 규칙 구체화:** 공 표면 기준(반지름만큼 박스 확장), 슬랩 방식 지면 구간 + 포물선 하강 근으로 옆면 / 윗면 판정, 착지 이후 구간 제외, 발사구가 박스 안이면 거리 0 옆면 충돌.
-- **테스트:** `src/core/__tests__/ballistics.test.ts` 5개 그룹 (A 발사구 / 조준, B v0 닫힌 해 역대입 · 해 없음, C 스윗스팟 명목 궤적이 조준점 통과, D 비행 시간 · 높이 · 사거리 하강 근, E HIVE 옆면 / 넘어감 / 윗면 낙하 / 못 미침 / 비껴감 / 반지름 확장 / 박스 안 발사). 하강 근 대신 작은 근을 쓰거나 반지름 확장을 빼면 실패함을 확인.
-
-### 6.2.4 Step 06-3 (몬테카를로 LUT 생성) 완료 항목
-
-- **`ballistics.ts` 추가 (엔진 미연결):** `isShotInHiveCell`(투입구 명중 판정), `createRng`(Mulberry32), `estimateHitRate`, `validateBallisticsConfig`, `snapSweetSpot` / `lutGridIndex` / `lutCellCenter` / `lutIndex`, `searchLaunchSpeed`, `generateReferenceLUT`, `mirrorLUTSet`, `generateRobotLUTs`. `collision.ts`의 `sampleNormal`을 공개하여 재사용.
-- **스윗스팟 격자 중심 스냅:** 근거리 상승 사격의 좁은 명중 띠 때문에 v0 탐색 위치와 LUT 격자 중심을 일치시킴 (2.6.2항).
-- **테스트:** `ballistics.test.ts`에 5개 그룹 추가 (F 투입구 명중 판정: 4셀 대칭 / 변별 여유 / NECTAR 여유 / 짧음 · 김 / 뒷면 / 림 통과 높이 / 상승 사격, G 명중률 결정론 · NECTAR ≤ POLLEN · 점대칭 일치, H v0 탐색, I 검증 · 스냅, J 대칭 복사 인덱스 · LUT 생성 · 결정론 · 검증 실패 시 0). 큰 근 대신 작은 근, 림 조건 제거, 빗변 여유 제거, 대칭 뒤집기 오류, 스냅 제거 각각에서 실패함을 확인.
-- **조회 방식:** 근거리 상승 사격은 명중 띠가 격자보다 좁을 수 있어 06-4에서 1 in 격자 + 쌍선형 보간으로 결정.
-
-### 6.2.5 Step 06-4 (탄도 판정 정밀화 / LUT 정밀도) 완료 항목
-
-- **HIVE 진입 면 조건 (④):** 셀 앞면(셀 폭 안) 또는 셀 위 윗면으로만 진입 허용. HIVE 옆에서의 명중과 y = 93 행 줄무늬 제거.
-- **림 아래 벽 정확 판정 (③ 교체):** 벽 단면을 반지름만큼 넓힌 영역(옆 띠 / 윗면 띠 / 둥근 윗모서리)과의 교차를 정확히 판정. 이전 림 y 높이 조건(상승 진입 과대 인정)과 네모 모서리 근사(최대 약 40%p 과소 인정)를 대체.
-- **LUT 정밀도:** 1 in 격자(144 × 144), 격자당 2000샘플, v0 탐색 후보당 20000샘플, 스윗스팟 1 in 격자 중심 스냅, 쌍선형 보간 조회 함수 `sampleLUT` (06-5 판정 함수에서 사용).
-- **격자별 독립 난수 구간 + 도달 불가 격자 생략:** `createRng(seed, skip)` O(1) 점프, `RNG_DRAWS_PER_SAMPLE = 6`, `canPossiblyHit`(±6σ 보수 판정, 생략해도 결과 동일). 생략 비율 약 11~16%.
-- **테스트:** 기존 F~J를 1 in 격자 / 몬테카를로 기준 설정(발사구 14 in, 발사각 70°, 스윗스팟 (60.5, 134.5))으로 갱신, K(진입 면: 옆면 / 프레임 차단, 앞면 / 윗면 진입), L(쌍선형 보간), M(난수 점프 / 격자별 구간 / 생략 동일성) 추가. 진입 면 제거, 벽 판정 제거, 모서리 판정 제거, 최근접 조회, 난수 점프 무시, 전부 생략, 과도한 생략(0.5σ), 공유 난수 스트림 각각에서 실패함을 확인.
-
-### 6.2.6 Step 06-5 (LUT 명중 확률 판정 함수) 완료 항목
-
-- **`createLUTShotResolver(luts, r1Config, r2Config)`:** 로봇 슬롯 · 기물 종류 · 아군 상향 셀 LUT를 쌍선형 보간으로 조회 + 조준 판정(고정형 허용 오차 / 터렛 범위). 보조 함수 `hiveCellKey`, `isAimWithinShooterRange`. 타입 `MatchHeatmapLUTs`. 엔진 수정 없이 생성자에 주입.
-- **조준 규약 확정:** Δψ = 조준점 방위 − 헤딩 (+ = 로봇 오른쪽), 경계 포함, 비정상 허용 오차는 0, 비정상 터렛 범위는 조준 불가, 슈터 설정은 생성 시점 복사.
-- **LUT 생성 실행 / 사용자 경험 명세 (Step 9 구현):** Web Worker 풀 병렬 생성, 진행 표시(v0 선표시 / 진행 막대 / 남은 시간 / 점진 히트맵), 비차단 작업 흐름(로봇별 상태 머신 / 취소 / 시뮬레이션 시작만 잠금), IndexedDB 캐시(`BALLISTICS_MODEL_VERSION`) — 2.6.2항. 저정밀 미리보기는 불채택 (6.4항).
-- **테스트:** `ballistics.test.ts` N(합성 LUT로 슬롯 / 기물 / 셀 매핑, 보간, 고정형 경계 / 각도 감김 / 비정상 허용 오차, 터렛 전방 / 후방(±π 가로지름) / 정규화 / 360° / 부호, 비정상 LUT, 설정 복사), `simulationEngine.test.ts` R(생성한 LUT를 엔진에 주입: 스윗스팟 정면 사격 고확률 · 득점 · 팁 후 상향 셀 전환 반영, 조준 이탈 / 명중 띠 밖은 확률 0). 조준 판정 제거, 셀 키 고정, 후방 구간 논리 오류, Δψ 부호 반전, 최근접 조회, 설정 미복사 각각에서 실패함을 확인.
-
-### 6.2.7 Step 06-6 (발사 비행 처리) 완료 항목
-
-- **발사 / 도착 분리:** 발사 시점에 명중 확정(난수 3회 고정 소비) + `planShotFlight`로 명목 궤적 / 도착 지점 / 비행 시간 계산 → `IN_FLIGHT` + `pendingShots` 등록 → Step 5-2에서 도착 틱에 반영. 기존 즉시 적재 / 로봇 기준 즉시 빗맞음 방출(`ejectMissedShot`)을 대체 (`ejectFromHive`: 접촉 지점 기준).
-- **명중 유효성:** 도착 시점에 전복 중이거나 상향 셀이 발사 시점과 달라졌으면 반사 방출. 팁은 명중 도착 틱에 발동.
-- **슈터 탄도:** 엔진 생성자 선택 인자 `shooters`(`MatchShooterBallistics`), 기본 자동 슈터 `DEFAULT_SHOOTER_BALLISTICS`, 생성 결과 변환 `shooterBallisticsFrom`, 발사 방향 `shotLaunchHeading`(터렛 한계각 제한).
-- **바닥 착지:** 사거리 지점, 착지 속도 = 발사 방향 v0·cosθ × `landingSpeedRetention`, 착지 전 벽에 닿으면 벽 앞 정지. 경기 종료까지 도착하지 못한 비행은 무득점.
-- **테스트:** 엔진 C / K / M / Q / R을 도착 기준으로 갱신(비행 대기 헬퍼 `settle`), 엔진 S(발사 대기열 / IN_FLIGHT / 도착 틱 공식 / 도착 틱 적재 / 프레임 기록 보호 / HIVE 충돌 반사 방향 / 바닥 착지 속도 / 난수 소비 고정 / 비행 중 스크러빙 재시뮬레이션 동일 / 종료 시 비행 무득점), 탄도 O(발사 방향 · 터렛 제한, 명중 비행 시간, v0 우선순위, 발사각 기본값, HIVE 충돌 / 바닥 착지 / 벽 정지, 탄도 변환). 도착 시 유효성 검사 제거, 명중 시 난수 미소비, 즉시 도착, 착지 감쇠 제거, 대기열 미복제, 벽 정지 제거, 반사 방향 반전 각각에서 실패함을 확인.
-
-- **08-2 개정:** 위 반사 방출(`ejectFromHive`: HIVE 외곽 바닥에 무작위 속도 즉시 스폰)과 벽 앞 즉시 정지는 08-2에서 충돌 후 반사 포물선 낙하로 교체됨 (6.2.15).
-
-### 6.2.8 Step 07-1 (입력 계층 명세 구체화) 완료 항목
-
-- **FLOWER 리프트 FSM (2.6.3항):** 올림(`FLOWER_SETUP`) → 대기(`FLOWER_READY`) ⇄ 투입(`FLOWER_DROPPING`) → 내림(`FLOWER_LOWERING`). `IDLE`에서 투입 요청 무효, 내림 시간 = 올린 시간(`flowerSetupDelay` 기준), 투입 중 내림 요청 무시, 리프트 상태에서 슈팅 / 흡입 불가. 새 타입 `ActionRequest`.
-- **입력 계층 (3.6항):** `inputConfig.ts` 키 매핑(표준 Gamepad 0부터: LT 6 흡입, RT 7 발사, A 0 리프트 토글, B 1 투입 / 키보드 WASD · ← → · m , . /), 장치 배정(패드 0 → R1, 패드 1 → R2, 키보드 → R2 비공개 디버그), 데드존, 필드 기준(기본) / 로봇 기준 조작, 우선순위 `SHOOTING > FLOWER_DROPPING > FLOWER_SETUP > INTAKING`, 리프트 토글의 엔진 상태 유도, 짧은 탭 래치.
-- **8비트 양자화 / 입력 로그:** 로봇별 틱당 4 B, 입력 수신 시점 부호화 → 복호화 후 엔진 입력, 로봇별 입력 출처(`LIVE` / `REPLAY` / `NONE`)와 녹화 덧입히기.
-- **실시간 루프:** 20 ms 누산기, 따라잡기 상한 5틱, 포커스 소실 / 탭 숨김 / 패드 분리 시 자동 일시정지(누산 시간 · 입력 초기화, 일시정지 틱에서 재개), 새로고침 등으로 사라진 경기는 폐기.
-- **측정:** 풀매치 타임라인 힙 약 46 MB, `runFullMatch()` 약 1.6초 (Node, 로봇 1대 주행 입력).
-
-### 6.2.9 Step 07-2 (FLOWER 리프트 FSM) 완료 항목
-
-- **타입:** `RobotState.actionState`에 `FLOWER_READY` / `FLOWER_LOWERING` 추가, 요청 타입 `ActionRequest` 신설 (`RobotDriveInput.actionState`). 리프트 상태는 `IDLE` / `INTAKING` 외 상태로서 기구학상 자동으로 Stationary Lock.
-- **엔진 (`applyActionRequest` / `processActionCompletion`):** `IDLE` / `INTAKING`에서 올림 요청만 수락(투입 가능할 때), 투입 요청 무효. 올리는 중 내림 = 올린 시간(제동 중이면 즉시 `IDLE`), 올림 완료 → `FLOWER_READY`. 대기 중 투입 요청(투입 가능할 때) → `FLOWER_DROPPING`, 내림 요청 → `FLOWER_LOWERING`(`flowerSetupDelay`). 투입 / 내림 / 발사는 커밋. 투입 완료 후 투입 요청 유지 + 다음 기물 가능 → 연속 투입, 그 외 대기 복귀. 내림 완료 → `IDLE`.
-- **테스트:** 기존 D / J / K / N / O를 올림 → 투입 흐름(헬퍼 `stepDrop`: A 켬 + B 유지와 같은 입력)으로 갱신 — 투입 후 리프트는 `FLOWER_READY` 유지, 가득 찬 FLOWER에 투입 요청 시 대기 유지, 투입 중 FLOWER가 가득 차면 완료 시 거부 후 대기 복귀. 엔진 T(리프트 FSM: `IDLE` 투입 무효, 올림 25틱 후 대기, 투입 탭 1개 커밋, 대기 중 내림 25틱, 올리는 중 내림 = 올린 시간, 제동 중 취소 즉시 `IDLE`, 투입 중 내림 무시, 내림 중 올림 무시, 리프트 상태 슈팅 / 흡입 불가, 정지 유지) 추가. 올림 완료 시 자동 투입, 부분 내림을 전체 시간으로, 투입 중 내림 수용, `IDLE` 투입 수락, 제동 중 즉시 `IDLE` 제거, 대기 중 주행 허용, 내림 중 올림 수용, 투입 후 `IDLE` 복귀 각각에서 실패함을 확인.
-
-### 6.2.10 Step 07-3 (입력 설정 + 순수 변환) 완료 항목
-
-- **`src/input/inputConfig.ts`:** 게임패드 축 / 버튼 매핑(`GAMEPAD_AXES`, `GAMEPAD_BUTTONS`: 표준 배열 0부터, 트리거는 아날로그 임계값), 키보드 매핑(`KEYBOARD_BINDINGS`, `event.code`), `KEYBOARD_ENABLED`, 장치 배정(`DEVICE_ASSIGNMENT`), `TRIGGER_THRESHOLD`, `DEADZONE_LEFT` / `DEADZONE_RIGHT_X`, `DEFAULT_DRIVE_MODE`, `QUANT_MAX`. 루프 상수(20 ms, 따라잡기 상한 5틱)는 07-5에서 추가.
-- **`src/input/controls.ts` (DOM 비의존 순수 함수):**
-    - 장치 읽기: `readGamepad`(구조적 `GamepadSnapshot`, 원형 / 축 데드존 `applyRadialDeadzone` / `applyAxialDeadzone`, 비유한값 0), `readKeyboard`(눌린 코드 집합, 대각선 정규화) → 드라이버 기준 `ControlSample`.
-    - 탭 래치: 장치별 `ControlLatch`(`sample` / `consume` / `reset`) → `TickControls`(유지형 = 현재 OR 에지, 토글 = 에지, 여러 틱 소비 시 에지는 첫 틱만).
-    - 장치 배정 / 합성: `assignedDevices`, `mergeTickControls`(축 절댓값 큰 값, 버튼 / 토글 OR).
-    - 조작 모드: `driverToField`(FIELD RED / BLUE, ROBOT 헤딩 회전, 합성 후 단위원 제한).
-    - 행동 요청: `resolveActionRequest`(직전 엔진 상태에서 리프트 의도 유도, 리프트 중 RT / LT 무시, 투입 중 A 무효, 우선순위), `buildDriveCommand`.
-    - 8비트: `quantizeUnit`(부호 대칭 반올림), `encodeDriveCommand` → `[qx, qy, qω, action]`, `decodeDriveInput`(튜플 / `Int8Array` 오프셋, ±127 제한, 알 수 없는 행동 코드는 `IDLE`), `ACTION_CODES` 고정 순서.
-- **테스트 (`src/input/__tests__/controls.test.ts`, 그룹 A~I):** A 설정 기본값, B 게임패드(축 방향 / 데드존 / 트리거 임계값 / X·Y 미배정), C 키보드, D 짧은 탭 래치(유지형 3종 / 토글 / 캐치업 첫 틱 / 최신 축 / reset), E 장치 합성, F 조작 모드, G 행동 요청(상태 × 버튼 조합), H 8비트 부호화 / 복호화, I 엔진 연동(부호화 → 복호화 → `step`: RED / BLUE 전진, 리프트 전체 흐름, 리프트 중 RT / 스틱 무시, 투입 중 A 무효, 거부된 A가 FLOWER 옆에서 다시 발동하지 않음). Y축 반전 제거, 데드존 재조정 제거, 래치 에지 무시(흡입 / 투입) / 미초기화, 축 합산, BLUE 미반전, 로봇 기준 부호 반전, 흡입 우선, 리프트 중 RT 반영, 투입 중 A 내림, `IDLE`에서 B 유효, 비대칭 반올림, 복호화 제한 제거, 단위원 제한 제거 각각에서 실패함을 확인.
-
-### 6.2.11 Step 07-4 (입력 로그 / 입력 출처 / 녹화 덧입히기) 완료 항목
-
-- **`src/input/inputLog.ts`:**
-    - `InputLogChannel`: `Int8Array(6000 × 4)` 미리 할당, `write(t, record)`(t 이후 폐기, 끝 뒤에 쓰면 사이 틱 중립 채움, 범위 밖 `RangeError`), `has` / `truncate` / `clear`, `length`.
-    - `MatchInputs`: 로봇별 `logs` / `sources`(기본 둘 다 `LIVE`) / `modes`(기본 `FIELD`). `resolve(engine, live)`: 엔진 현재 틱에서 `LIVE`는 직전 로봇 상태 · 엔진 진영 · 로봇별 모드로 명령을 만들어 기록 후 복호화, `REPLAY`는 로그 복호화(기록 범위 밖 중립), `NONE`은 중립. `step(engine, live)` = `resolve` + `engine.step`(경기 종료 후 기록 없음). `createReplayProvider()`: 출처 복사, `LIVE`도 읽기 전용 재생, 로그에 쓰지 않음.
-    - 되감기 분기는 별도 처리 없이 성립: 되감은 틱 k에서 `LIVE` 로봇이 기록하면 k 이후 로그가 폐기되고, 엔진은 k 이후 프레임을 폐기(기존 규칙), `REPLAY` 로봇 로그는 유지.
-- **테스트 (`src/input/__tests__/inputLog.test.ts`, 그룹 A~F):** A 로그 채널(기록 / 앞 틱 덮어쓰기 절단 / 빈 틱 중립 채움 / 범위 밖 거부), B 입력 출처(LIVE 기록 = 부호화 값, 로봇별 제원 복호화, NONE 미기록, REPLAY 절단된 옛 데이터 미재생, 로봇별 헤딩 · 모드, 엔진 진영, 로봇별 리프트 의도), C 풀매치 실시간 = 로그 재생(6000틱 전 프레임 동일, 발사 포함 / 명중 확률 0.6, R2 로봇 기준 모드, 재생 중 로그 불변), D 녹화 덧입히기(1회차 R1 기록 → 되감기 → 2회차 R1 재생 + R2 실시간: 간섭 없으면 R1 궤적 동일, R2가 경로에 들어오면 명령은 같고 궤적은 달라짐, R1 로그 불변, 덧입힌 결과 로그 재생 재현), E 되감기 분기(LIVE 로그 400틱 이후 교체 / REPLAY 로그 유지 / 분기 결과 재현), F 재생 공급 함수(출처 복사 고정, NONE은 로그 무시). 복호화 생략(원시 값 입력), 덮어쓰기 절단 제거, 빈 틱 채움 제거, 재생 중 기록, 출처 미복사(R1 / R2), NONE 로그 재생, 절단 데이터 재생, 다른 로봇 상태 사용, 진영 무시, 모드 공유(R1 / R2) 각각에서 실패함을 확인.
-
-### 6.2.12 Step 07-5 (실시간 루프) 완료 항목
-
-- **`inputConfig.ts`:** 루프 상수 `TICK_MS = 20`(엔진 DT), `MAX_CATCHUP_TICKS = 5` 추가.
-- **`src/input/liveControls.ts`:** `LiveControlSource` 인터페이스(`poll?` / `consumeTick` / `reset`), `LiveControlCollector`(배정 장치별 탭 래치 → 로봇별 합성, 미배정 슬롯 무시, 연결 해제 중립, 키보드 비활성화 반영).
-- **`src/input/realtimeLoop.ts`:** `RealtimeLoop`(주입 스케줄러, 20 ms 누산기, 따라잡기 상한 후 밀린 시간 버림 / 1틱 미만 나머지 이월, 프레임마다 `poll` 후 틱 소비, 일시정지 시 요청 취소 · 누산 0 · 입력 초기화, 재개 첫 프레임 경과 0 · 입력 초기화, 6000틱 도달 시 `ENDED`).
-- **테스트 (`src/input/__tests__/realtimeLoop.test.ts`, 그룹 A~H, 가짜 스케줄러 / 가짜 시간):** A 상수, B 누산기(20 / 10 ms 프레임, 30 / 60 / 120 / 144 Hz에서 초당 50틱), C 따라잡기(70 ms → 3틱 + 나머지 이월, 110 ms → 5틱 + 나머지 유지, 250 ms 끊김 → 5틱 후 밀린 시간 버림), D 일시정지 / 재개(사유, 요청 취소, 정지 중 틱 없음, 30초 후 재개 첫 프레임 0틱, 상태 이벤트 순서, 잘못된 순서 호출 무시), E 경기 종료(남은 틱만 소비 후 `ENDED`, 이후 호출 무시, 끝난 경기 시작 시 즉시 `ENDED`), F 틱당 입력 1회 소비 / 프레임당 폴링 1회(소비 전), G 통합(키보드 → R2 주행, 따라잡기 프레임 중 탭은 첫 틱만 발사, 탭 숨김 중 뗀 키 유실 후 재개 시 저절로 달리지 않음, 일시정지 중 되감기 후 재개, 불규칙 프레임 간격 · 끊김 · 일시정지가 섞인 풀매치 실시간 결과 = 로그 재생 결과), H 입력 수집기(배정 / 합성 / 미배정 슬롯 / 연결 해제 / 초기화 / 키보드 비활성화).
-
-### 6.2.13 Step 07-6 (브라우저 입력 어댑터) 완료 항목
-
-- **`src/input/browserInput.ts`:** `BrowserInputAdapter`(`LiveControlSource` 구현) — 키보드: 매핑 키만 처리(`event.code`), `preventDefault`(방향키 / `/`), 입력 폼 대상 무시(`isEditableTarget`), 자동 반복은 새 눌림 아님, `KEYBOARD_ENABLED = false`면 가로채지도 않음. 게임패드: `poll()`에서 배정 슬롯만 `navigator.getGamepads()` 폴링(연결 해제 / API 없음 / 예외 → 중립). 자동 일시정지: `blur` / `visibilitychange`(hidden) → 눌린 키 비우고 `BLUR` / `HIDDEN`, 배정 슬롯 `gamepaddisconnected` → `GAMEPAD_DISCONNECTED`. `gamepadStatus()`, `detach()`. `createAnimationFrameScheduler`, `createBrowserRealtimeLoop`.
-- **테스트 (`src/input/__tests__/browserInput.test.ts`, 그룹 A~F, Node `EventTarget` 가짜 환경):** A 입력 폼 판정, B 키보드(차단 / 미매핑 키 통과 / 자동 반복 / 입력 폼 / 짧은 탭 / 비활성화), C 게임패드 폴링(슬롯 배정 / 연결 해제 / 미배정 슬롯 / API 예외 · 없음 / 연결 상태 · 비표준 매핑), D 자동 일시정지(포커스 소실 · 탭 숨김 시 키 제거, 보이게 될 때는 무시, 미배정 패드 분리 무시, `detach`), E 루프 연결(키보드 주행, 사용자 일시정지 / 재개 후 누르고 있는 키 유지, 포커스 소실 후 재개 시 정지, `dispose`), F rAF 스케줄러. 차단 제거, 입력 폼 가로채기, 키보드 플래그 무시, 포커스 소실 / 탭 숨김 시 키 유지, 보이게 될 때도 일시정지, 미배정 패드 분리 일시정지, 폴링 시 키 재샘플 누락, 연결 해제 플래그 무시, 예외 처리 제거, `detach` 누락, 일시정지 사유 오류, 표준 매핑 판정 누락 각각에서 실패함을 확인.
-- **헤드리스 Chromium 점검 (저장소 밖 일회성 스크립트, 실제 `KeyboardEvent` / `requestAnimationFrame` / 가짜 `navigator.getGamepads`, 12항목 통과):** 실시간 루프 초당 약 50틱(49), 실제 W 키로 R2 주행, 매핑 키 기본 동작 차단 / 미매핑 키 통과, `,` 짧은 탭 = 발사 1회, 입력 폼에 `,` 입력 시 가로채지 않음, 게임패드 슬롯 0 → R1 주행 · 연결 상태, 포커스 소실 → 일시정지 중 틱 정지 · 재개 후 눌린 키 제거, 탭 숨김 / 배정 패드 분리 → 일시정지, 상태 이벤트 순서, 브라우저 실시간 결과 = 로그 재생 결과.
-
-### 6.2.14 Step 08-1 (렌더러 명세 구체화) 완료 항목
-
-- **렌더러 / 화면 연결 (3.7항):** 렌더러 입력 = (프레임, 로봇 제원, 보기, 표시 옵션, 판정 함수), 좌표 계산 순수 함수 분리. 논리 캔버스 1200 × 800 px(필드 뷰포트 160 in 정사각형 + 좌우 R1 / R2 패널), CSS 비율 유지 확대 / 축소, 양방향 좌표 변환.
-- **보기 방향:** 경기 전 화면(설정 / 스윗스팟 / LUT 점진 히트맵)은 관중석 시점, 경기 중 기본 드라이버 시점(RED −90°, BLUE +90°, 회전만), 공통 설정으로 전환. 경기 시작 시 700 ms easeInOutCubic 회전 + 배율 1 / (|cos θ| + |sin θ|) 후 루프 시작. 글자 / 배지 / 높이 오프셋은 화면 기준.
-- **표시 규칙:** 상대 진영 전용 구조물 채도 제거, 로봇(진영 색 몸체 · 헤딩 · 번호, 인테이크 구역 강조, FIFO 적재물, 행동 상태 배지 — 이미지 자산은 사용자 제공, 없으면 글자 배지, 제동 중 50%), 기물 상태별 표시 표, HIVE 시차 낙하(립 → 착지 선형 보간, 불투명도 증가, 12시부터 시계 방향 윤곽 호).
-- **FLOWER 게이지:** 필드 밖 직사각형(관중석 FLOWER 기준 x 96~120, y 144.6~147.8, FLOWER 쪽이 bottom, 반시계 방향이 top), 90° 회전 복제, 9칸 · 크기 통일 원, 잼 = 검정 칸, 최대 조합 도달 시 나머지 칸 X. 기존 측면 단면 원통 게이지 폐기.
-- **NECTAR 재고 게이지:** 벽 바깥 y = 72 중심 5칸, 로딩 존 쪽 끝부터 투입 대기 → 재고 → 빈 칸.
-- **비행 공:** 수평 선형 보간 + 명목 포물선 높이에 선형 보정(끝점 일치, `MISS_FLOOR`는 바닥 높이로 보정), 그림자 + 화면 위 0.3·z in 오프셋 + 크기 1 + z / 100, 결과는 도착 시 표시.
-- **표시 옵션(공통, 사용자 공개, 기본 꺼짐):** 조준선, 흡입 접촉 진행, 실시간 명중 확률(좌우 패널 글자, 그리는 프레임마다 4회 호출, 실측 약 0.5 µs/회 → 무시 가능), 비행 잔상, 비행 결과 색.
-- **경기 종료 득점 내역:** `TimelineFrame.scoreBreakdown`(`ScoreBreakdown`, 종료 프레임만) — 렌더러 / 스코어보드는 규칙을 재계산하지 않음. 경기 중 예측 표시 없음.
-- **개발 하네스:** 개발 서버 전용, 정식 엔진 / 입력 / 루프 / 렌더러 + 고정 제원 + 간이 판정 함수(조준 가능 시 0.6).
-- **테스트 방침:** 순수 계산 함수 Vitest + 단계별 1회성 헤드리스 Chromium 점검, Playwright 저장소 편입 안 함.
-
-### 6.2.15 Step 08-2 (발사 비행 개정: 충돌 후 낙하) 완료 항목
-
-- **배경:** 08-1 렌더러 명세 중 발견 — HIVE / 벽에 공중에서 닿은 공(빗맞음, 무효 명중, 벽에 막힌 바닥 착지)이 도착 틱에 바로 바닥에 놓여 화면에서 최대 약 66 in 높이에서 1프레임 만에 떨어짐. 렌더러만으로는 고칠 수 없음 (도착 후 기물은 이미 `ON_FIELD`라 흡입 / 충돌 대상).
-- **규칙 (2.6.2항 충돌 후 낙하):** 충돌 순간 속도를 반사한 뒤 중력 포물선으로 바닥까지. 옆면 = 수평 법선 성분 −e배 + 산포 ±15° + 최소 이탈 속도 20 in/s, 윗면 = 수직 성분 −e배 반복 튐(최대 3회) 후 박스 이탈 또는 굴러 떨어짐, 무효 명중 = 조준점에서 셀 쪽 앞면 법선 반사, 벽 = 수평 정지 후 수직 낙하(높이 무한 · 반발 0 벽). 착지 속도 = 수평 속도 × `landingSpeedRetention`. 반발 계수는 기물별 restitution × (0.8~1.2).
-- **`ballistics.ts`:** `FlightState`, `BounceRolls`, `PostContactFlight`, `flightSegmentPoint`, `planFallToFloor`, `planHiveBounce`, `planVoidedHitBounce`, 상수 `HIVE_BOUNCE_RESTITUTION_SPREAD` / `HIVE_BOUNCE_ANGLE_SPREAD` / `HIVE_TOP_MAX_BOUNCES` / `HIVE_BOUNCE_MIN_SPEED`. `planShotFlight`가 `contactTime` / `flightTime`(최종 착지) / `segments` / `landing`을 반환, 반사 산포 난수 입력(`bounceRolls`).
-- **`types.ts`:** `FlightSegment` 신설, `PendingShot`에 `contactTime` / `segments` / `landX` / `landY` 추가, 난수 이름 `ejectSpeedRoll` / `ejectAngleRoll` → `bounceRestitutionRoll` / `bounceAngleRoll`.
-- **엔진:** 발사 시 반사 산포 난수를 비행 계획에 전달, 도착 틱 = 명중은 조준점 도착 / 그 외는 최종 착지, 무효 명중은 도착 틱에 반사 낙하 구간을 붙여 `MISS_HIVE`로 바꾸고 착지 틱까지 `IN_FLIGHT` 유지, 착지는 `landX` / `landY`. `ejectFromHive`와 고정 방출 상수(20~60 in/s, ±60°) 삭제. 스냅샷이 구간 목록까지 복제. 난수 소비(발사마다 3회)는 그대로.
-- **테스트:** 탄도 O(명중 = 접촉 시각 · 구간 없음, HIVE 충돌 후 착지가 접촉보다 늦음, 바닥 착지 = 명목 끝, 벽 접촉 후 수직 낙하) 갱신, 탄도 P(구간 위치 공식, 옆면 반사 방향 / 크기, 산포 세기 · 각도, 스침 충돌 최소 이탈 속도, 윗면 한 번 튀고 이탈, 느린 공 3회 튐 → 굴러감 → 낙하, 정지 공 가장 가까운 면으로 굴러감, 벽 수평 정지 · 수직 속도 연속, 무효 명중 AUDIENCE / OPPOSITE 반사, 착지 안전장치, 모든 경우 구간 연속 · 바닥 착지 · HIVE 밖) 추가. 엔진 S(HIVE 충돌 후 낙하 중 `IN_FLIGHT` · 착지 틱 = 최종 착지 · 착지점, 무효 명중: 팁 중 도착 → `MISS_HIVE` · 착지 틱 연장 · 셀 앞 착지 · 미득점, 프레임 구간 목록 복제) 갱신. 벽 무시, 옆면 반사 제거, 최소 이탈 속도 제거, 윗면 튐 제거, 착지 속도 감쇠 제거, 무효 명중 즉시 착지, 구간 목록 미복제 각각에서 실패함을 확인.
-- **입력 테스트 제한 시간:** 풀매치를 도는 입력 테스트(입력 로그 C~F, 실시간 루프 E / G)에 엔진 테스트와 같은 120초 제한 시간을 지정 (기본 5초는 병렬 실행 부하에서 부족해 입력 로그 C가 6.3초로 시간 초과한 것을 08-2 검증 중 확인).
-
-### 6.2.16 Step 08-3 (경기 종료 득점 내역) 완료 항목
-
-- **`types.ts`:** `ScoreBreakdown {hive, flower, garden, park, flowers[{id, scoringPieces, owned, points}], gardenPieceIds, parkedRobots}`, `TimelineFrame.scoreBreakdown: ScoreBreakdown | null`.
-- **엔진:** `finalizeScore`가 기존 합산과 같은 판정으로 항목별 점수와 인정 근거(FLOWER별 slot[1..N] 수 / 소유 / 점수, 득점 GARDEN 기물 id, 주차 로봇 슬롯 id)를 함께 만든다 (규칙 변경 없음, 항목 합 = `totalScore`). 종료 전 틱은 `null`, `reset` 시 `null`, 프레임 기록 / 스크러빙 복원 시 복제.
-- **테스트:** 엔진 U(기본 경기 RED / BLUE: 종료 전 프레임 `null`, GARDEN 4 + 주차 5 = 9, 주차 로봇 · GARDEN 기물 id 식별, FLOWER 4개 미소유 / slot[1..] 3 / 전 항목 경기: 팁 20 + FLOWER 1개 소유 9 + GARDEN 4 + 주차 5 = 38, 항목 합 = `totalScore`, 득점 FLOWER만 owner 설정 / 종료 전으로 되감으면 내역 없음, 재시뮬레이션 종료 프레임 동일, 종료 프레임 되감기 유지 / 같은 설정 결정론). 하단 보너스 누락, slot[0] 포함, GARDEN 아군 필터 누락, 내역 미기록, 매 틱 내역 기록, 주차 로봇 id 오류 각각에서 실패함을 확인.
-
-### 6.2.17 Step 08-4 (장면 렌더러 1: 보기 / 정적 레이어 / 로봇 / 바닥 기물) 완료 항목
-
-- **`viewTransform.ts` (순수):** 레이아웃 상수(뷰포트 160 in = 800 px, 좌우 패널 200 px, 장면 1200 × 800), `viewAngle` / `restingView`(AUDIENCE 0, DRIVER RED −90° / BLUE +90°), `fitScale`, `easeInOutCubic`, `ViewAnimator`(700 ms, 벽시계 주입, 도중 전환 시 현재 각도에서 이어감, `jump`), `fieldToCanvas` / `canvasToField` / `cssToCanvas`, `fieldPxMatrix`(필드 px 공간 그리기용 캔버스 행렬 × dpr), `labelCenter`, `screenUpInField`.
-- **`robotLayout.ts` (순수):** 행동 상태 배지 키 / 제동 중 50% / 글자 배지 문구, 헤딩 화살표 · 적재물 받침 · 칸 · 번호 라벨 배치(몸체 길이 비율), `localToField`, 외접원 반지름.
-- **`badgeAssets.ts`:** `src/assets/badges/{key}.svg | .png`를 `import.meta.glob`으로 찾아 로드, 없으면 null(글자 배지). 아직 자산 없음 (09-7 전에 6종 SVG 추가, 3.7항 "배지 자산 확정").
-- **`sceneRenderer.ts`:** `renderScene(ctx, {frame, r1Config, r2Config, view}, dpr)` — 배경 / 좌우 패널, 뷰포트 클립, 정적 레이어(오프스크린 캐시, 없으면 직접 그림), 구조물 라벨, 바닥 기물(`IN_GARDEN` 초록 테두리), 로봇(인테이크 구역 / 몸체 / 앞 변 / 화살표 / 받침 · 적재물 · 빈 칸), 번호, 배지. HIVE 셀 상태 / 게이지 / 비행 공 / 경기 종료 강조 / 표시 옵션은 이후 단계.
-- **`canvasRenderer.ts`:** 색상 / `pieceColors` 공개, 라벨 없이 그리기 옵션, 상대 로딩 존 채도 제거, `drawHiveBase`(아군 셀 기본색 / 상대 셀 채도 제거, 상태 표시 없음). 기존 `renderField`(정식 빌드 정적 화면) 출력은 그대로.
-- **`collision.ts`:** `getRobotOBB` 매개변수 타입을 사용하는 필드(위치 / 헤딩 / 크기)로 좁힘 (읽기 전용 프레임에서 호출, 로직 변경 없음).
-- **테스트 (`src/renderer/__tests__/`):** 보기 변환 A~D(레이아웃, RED / BLUE 드라이버 방향 · 뒤집기 없음 · 아군 벽 아래, 역변환 왕복 · 행렬 = 변환 · CSS 변환 · 라벨 배치(세로 구조물에서 반폭만큼 밀림), 이징 · 배율 · −180~180° 회전 중 뷰포트 꼭짓점 이탈 없음 · 애니메이터 중간 / 끝 / 도중 전환 / 즉시 이동), 로봇 배치 A~B(배지 키 / 제동 반투명 / 자산 경로, 18 · 14 · 12 in에서 화살표 → 받침 → 라벨 순서 · 원 겹침 없음 · 받침 안 · 최대 4칸).
-- **헤드리스 Chromium 점검 (저장소 밖 1회성, 5장면 스크린샷 확인):** RED 관중석 / RED · BLUE 드라이버 / 45° 회전 중 / 행동 상태(제동 중 발사 배지, 흡입 구역 강조, 바닥 산포 기물, NECTAR 선두 적재). 첫 점검에서 발견한 적재물 0번 · 화살표 겹침, 진영색 NECTAR가 몸체에 묻힘, 회전 시 라벨이 구조물 · 기물과 겹침을 몸체 안 비율 배치 / 밝은 받침 / 라벨 바깥 밀기 / 라벨을 로봇 아래로로 고친 뒤 재확인. 12 in 로봇에서 적재물 원이 겹치는 문제는 단위 테스트로 발견해 반지름을 칸 간격에서 유도하도록 수정.
-
-### 6.2.18 Step 08-5 (장면 렌더러 2: HIVE / 게이지 / 경기 종료 강조) 완료 항목
-
-- **`gaugeLayout.ts` (순수):** `flowerGaugeLayout`(관중석 벽 기준 게이지를 R(x, y) = (144 − y, x)로 회전 복제, 칸 중심 / bottom → top 방향 / 바깥 법선), `stockGaugeLayout`(벽 바깥 y = 72, RED 로딩 존 쪽 bottom, BLUE 점대칭), `stockSlotStates`(대기 → 재고 → 빈 칸), `flowerGaugeSlots` / `isFlowerFull`(잼 = JAM, 가득 참 = 남은 칸 FULL), `tipDropView`(립 → 착지 선형 보간, 불투명도, 호 진행률).
-- **`sceneRenderer.ts`:** 정적 레이어에 게이지 틀(FLOWER 4 + 재고 2, 상대 재고 채도 제거) 추가, HIVE 셀 상태(필드 공간 바탕 / 테두리 + 화면 공간 기물 줄 / 알약 글자), 게이지 내용(기물 / 검정 잼 / X / 투입 대기 반투명 점선), 팁 낙하(전복된 셀 립 → 착지점, 화면 12시부터 시계 방향 윤곽 호), 경기 종료 강조(GARDEN 고리, 주차 외곽, 득점 게이지 테두리 + 점수 알약). 그리기 순서: 정적 레이어 → 라벨 → HIVE / 게이지 → 바닥 기물 → 종료 강조(GARDEN / FLOWER) → 로봇 → 주차 강조 → 팁 낙하 → 화면 글자.
-- **공유 규칙 추출 (로직 변경 없음):** `collision.ts` `hiveTipLipOrigin`(엔진 낙하 계획과 렌더러 낙하 연출이 같은 립 기준점 사용), `simulationEngine.ts` `canFlowerAccept` 공개(읽기 전용 FLOWER 인자 허용, 게이지 가득 참 판정 재사용). `canvasRenderer.ts` `hiveCellBox` 추출, 폐기된 측면 단면 원통 게이지(`drawFlowerGauge`) 삭제.
-- **테스트 (`src/renderer/__tests__/gaugeLayout.test.ts`, A~D):** A FLOWER 게이지(4개 좌표 명세 일치, 칸 0 = FLOWER 옆, 칸 간격 24 / 9, 반시계 방향, 필드 밖 · 여백 안, 게이지 6개 서로 안 겹침), B 재고 게이지(y = 72 중심, 점대칭, 로딩 존 쪽 bottom, 칸 상태 순서 / 제한), C FLOWER 칸(용량 테이블 7개 최대 조합 가득 참 · POLLEN 하나 적으면 아님 · X 칸 수, {1, 6} X 2칸, 잼 가득 / 비가득, 빈 / 기본 FLOWER X 없음), D 팁 낙하(립 기준점, 시작 / 중간 / 착지 / 착지 시간 0).
-- **헤드리스 Chromium 점검 (저장소 밖 1회성, 6장면):** RED 드라이버 기본(게이지 / 재고 5 / 상향 셀), 팁 진행 중 드라이버 · 관중석(낙하 공 윤곽 호, TIPPING, 상향 셀 전환, 로딩 존이 막혀 투입 대기 1), FLOWER 잼 가득 / {1, 6} X / 기본 / 빈, 경기 종료(38점: 주차 · GARDEN · FLOWER +9 강조), BLUE 엔드게임(로딩 존이 막혀 투입 대기 5). 첫 점검에서 드라이버 시점 HIVE 셀 기물 줄이 세로가 되어 글자와 겹침, 게이지 쪽 점수 알약이 여백에서 잘림을 발견해 기물 줄을 화면 공간으로 / 점수 알약을 FLOWER 라벨 옆으로 옮긴 뒤 재확인.
-
-### 6.2.19 Step 08-6 (장면 렌더러 3: 비행 공 / 표시 옵션) 완료 항목
-
-- **`flightView.ts` (순수):** `shotElapsed`, `shotPositionAt`(명목 구간: 수평 선형 + 명목 포물선 높이에 끝점 오차를 진행률만큼 보정 / 충돌 후 구간: 기록된 포물선 · 굴러감), `shotTrail`, `airborneDisplay`(0.3·z in 오프셋, 반지름 × (1 + z / 100)).
-- **`renderOptions.ts` (순수):** `RenderOptions` / `DEFAULT_RENDER_OPTIONS`(모두 꺼짐), `aimGuide`(고정형 헤딩 ± 허용 오차, 터렛 헤딩 + 범위 — 엔진과 같은 정규화, 발사 방향 `shotLaunchHeading`), `intakeProgress`(바닥 기물 `intakeDelay` / FLOWER slot[0] max(`intakeDelay`, 0.12 s), 필요 시간 0이면 없음), `hitProbabilities`(로봇 2 × 기물 2 호출, [0, 1] 제한, 다음 기물 종류).
-- **`sceneRenderer.ts`:** 장면 입력 `options` / `shotResolver`, 비행 공(그림자 → [잔상] → 공, [결과 색 테두리]), 조준선(로봇 아래), 흡입 진행 호(로봇 위), 좌우 패널 명중 확률. 옵션이 꺼져 있으면 판정 함수를 호출하지 않음.
-- **테스트:** `flightView.test.ts` A~C(엔진이 실제 기록한 비행으로: 탐색 v0 가정 명중에서 명목 포물선이 조준 높이를 비껴가도 t = contact에서 조준점과 정확히 일치 · 중간 높이 = 명목 + 절반 보정, HIVE 반사 / 바닥 착지 / 벽 낙하에서 접촉점 → 충돌 후 구간 연속 · 착지점 z = 반지름, 잔상 시작 / 끝 / 표본 수, 높이 연출), `renderOptions.test.ts` A~D(조준선 고정형 / 터렛 ±90° / 후방 ±π 가로지름 / 360° [-π, π] / [0, 2π] = 폭 0, 흡입 진행 바닥 · FLOWER · 필요 시간 0 · 제한, 명중 확률 4회 · 제한 · 다음 기물, 모든 프레임을 호출 없는 가짜 캔버스로 그리기: 옵션 꺼짐 호출 0회 · 켜짐 프레임당 4회 · 판정 함수 없음). 끝점 보정 제거, 충돌 후 구간 무시, 패널 항상 그림, FLOWER 쿨다운 무시, 확률 미제한 각각에서 실패함을 확인.
-- **헤드리스 Chromium 점검 (저장소 밖 1회성, 5장면):** 명중 비행 중(옵션 끔 / 전부 켬: 고정형 · 터렛 부채꼴, 흡입 호, 잔상, 결과 색, 좌우 패널), HIVE 반사 낙하, 긴 빗맞음, 벽 낙하. 점검 중 연속 발사 2발이 동시에 그려지는 것을 확인 (마지막 발사 요청 틱에 완료되면 다음 기물로 재장전되는 엔진 규칙, 07-2).
-
-### 6.2.20 Step 08-7 (개발 하네스) 완료 항목 — Step 8 완료
-
-- **구현:** 3.7항 개발 하네스 "구현" 참고 (`devSetup.ts` / `harnessController.ts` / `DevHarness.tsx`, `App.tsx` 개발 서버 전용 지연 로딩).
-- **테스트 (`src/dev/__tests__/harness.test.ts`, A~C, 가짜 브라우저 환경 / 프레임 / 시계):** A 간이 판정 함수(조준 / ±3° 안 0.6, 5° 이탈 0, 360° 터렛, 진영별 엔진), B 경기 흐름(준비 화면 관중석 · 루프 대기, 진영 선택 / 경기 중 잠금, 회전 중 루프 대기 · 틱 없음 → 회전 완료 후 시작 · 드라이버 각도, 초당 약 50틱 · 남은 시간, 키보드 W로 R2 +x 주행 · R1 정지, 일시정지 중 틱 정지 · 옵션 2회 변경 = 다시 그리기 1회, 일시정지 중 보기 전환 애니메이션, 재개, 창 포커스 소실 자동 일시정지, 리셋 → 0틱 새 경기 → 관중석으로 반대 회전 → 준비 화면, 해제 시 대기 프레임 없음), C BLUE 드라이버 +90°, 진행 중 상태 알림 약 10 Hz, 관중석 경기 시작.
-- **헤드리스 Chromium 종단 점검 (저장소 밖 1회성, 실제 개발 서버 + `App`):** 준비 화면 → 시작 클릭 → 회전 중(루프 대기, 틱 0) → 회전 후 루프 동작 → 실제 W 키 1초(R2 주행, 초당 약 50틱) / `,` 발사(비행 공) → 옵션 5종 체크 → 일시정지(틱 고정) → 관중석 시점 → 리셋(0틱, 준비 화면). 콘솔 오류 없음. 정식 빌드 미리보기는 정적 필드(720 × 720)만 표시, 하네스 없음.
-
-### 6.2.21 Step 09-1 (웹 GUI 명세 구체화) 완료 항목
-
-- **3.8항 신설 (웹 GUI):** 데스크톱 전용(1366 × 768 ~ 3840 × 2160, 화면 비례 단위 `--u`), 영어 기본 + 한국어 토글(게임 용어 원어 대문자), 진영 공식 색(RED `#DF001B`, BLUE `#0F53A7`), 앱 이름 `FTC TacticSim`.
-- **화면:** 메인 화면 하나 = 좌측 득점 패널(타이머 / `ENDGAME` 색 변경, 진영 점수 = 확정 점수, `TIP` 횟수 = 오토 + 텔레옵 / 다음 RP 목표 4 → 7, 팀 번호, 명중 확률) + 필드(뷰포트만, 경고 토스트 / 자동 일시정지 배너) + 우측 config 창(접힌 아이콘 띠: 로봇 준비 신호 · LUT 진행률 링 / 시나리오 깃발 / 게임패드, 펼친 탭 4개) + 스크러버 줄. 별도 복기 창 없음, 결과는 팝업. 주차(P) 표시 없음.
-- **경기 흐름:** 재생(기록 불변, 0.25 / 0.5 / 1 / 2×) / 재개(게임패드 아이콘, 마지막 기록 틱에서만) / 분기(분기 아이콘, 확인창, 이후 기록 폐기) 분리, 보는 틱과 엔진 머리 구분, 틱 / 1초 이동, `NEW` = 설정 · 시드 유지 새 경기, 종료 후 5초 강조 → 블러 결과 팝업 → 복기, `RESULT`로 다시 열기.
-- **config 창:** 탭 `R1` / `R2` / `SCENARIO` / `SETTINGS`, 초안 / `APPLY` / 탭별 · 전체 되돌리기, 경기 전 / 일시정지 중에만 펼침, 경기가 있는 동안 로봇 · 시나리오 읽기 전용, 표시 옵션은 경기 전 / 일시정지 중에만 변경 (3.7항 수정), 준비 안 된 채 `START` → 첫 문제 탭으로 유도.
-- **입력 규칙:** 단위(길이 in / cm 토글, 각속도 · 각가속도 rad/s · rad/s², 그 외 각도 °, 시간 ms, 발사구 지상고 → `dz`, 내부 값 항상 inch), 팀 번호 GUI 전용(`RobotProfile`), 기본 프리셋 = 하네스 제원 + 기본 탄도 / 스윗스팟 + 앱 시작 시 LUT 자동 생성(2.6.2항 예외), 스윗스팟 진영 기준 입력 + 점대칭 저장, 시드 읽기 전용 + `REROLL`, 편집 모드는 메인 필드(스윗스팟 / 시작 자세 / 히트맵).
-- **키보드 / 입력 출처 (3.6항 수정):** 키보드 주행 유지 + 런타임 끄기 토글, 상태별 키 공유(Space 일시정지 / 재개 / 재생, ← / → 1틱, Shift 1초, Space는 분기하지 않음), 기본 입력 출처(R2는 슬롯 1 패드 또는 키보드 켜짐이면 `LIVE`).
-- **배치 검증:** `validateRobotPlacement()` 오류 코드 5종(닿음 허용, 침투 > 1e-6 in만 오류) + `reset()` 사전 보정 (6.4항에서 Step 9로 이동).
-- **설정 자동 보관:** 마지막 적용 설정 + UI 환경설정을 `localStorage`에 보관 (경기 기록 제외). JSON 내보내기 / 불러오기는 Step 10.
-
-### 6.2.22 Step 09-2 (LUT 병렬 생성 사전 준비) 완료 항목
-
-- **`ballistics.ts`:** `generateReferenceLUTRows`(행 범위 [gyStart, gyEnd), 전체 LUT 기준 격자 인덱스 / 난수 구간, 범위 내림 · [0, 144] 제한 · 역순 = 빈 배열), `generateReferenceLUT` = `generateReferenceLUTRows(…, 0, 144)`, `robotLUTSeeds(seed)`(기물 종류별 탐색 / LUT 시드, `generateRobotLUTs`가 사용), `BALLISTICS_MODEL_VERSION = 1`, `sweetSpotBasisCell` / `sweetSpotFromBasis` / `sweetSpotToBasis`(진영 기준 좌표에서 스냅 후 점대칭).
-- **리팩터링 동일성:** 이전 커밋의 `ballistics.ts`와 `generateRobotLUTs` 결과(탄도 설정 2종 × 로봇 크기 2종, v0 / 명중률 / LUT 8장)가 비트 단위로 같음을 일회성 비교로 확인.
-- **테스트 (`__tests__/ballistics.test.ts` Q):** 행 분할(1행 / 7행 / 불균등 / 전체, 역순 처리) 조립 === `generateReferenceLUT`, 부분 행 = 전체의 해당 구간, 빈 / 역순 / 범위 밖 / 소수 범위, `skipUnreachable` 전달, 시드 파생(기본값 고정 값, 4개 서로 다름, 기준 시드 의존), 작업 계획(로봇 2대 × 기물 2종, v0 탐색 → 4행 묶음 역순 → 조립 → 대칭 복사) 16장 === `generateRobotLUTs`, 모델 버전 양의 정수, 스윗스팟 진영 기준(RED 스냅만, BLUE 점대칭, 경계 클릭 격자 유지, 필드 가장자리 포함 왕복, BLUE 조준점 = 기준 조준점 점대칭, BLUE 기준 HIVE 앞 → `SWEET_SPOT_IN_HIVE`, BLUE 기준 스윗스팟 격자의 `BLUE_OPPOSITE` 값 = 기준 값). 난수 구간 지역 인덱스 사용, 행 오프셋 누락, 변환 후 스냅, 시드 용도 뒤바뀜, 점대칭 143 기준, 범위 제한 누락 각각에서 실패함을 확인.
-
-### 6.2.23 Step 09-3 (LUT Worker 풀 / 대기열 / 상태 머신) 완료 항목
-
-- **구현:** 2.6.2항 "LUT 생성 실행 / 사용자 경험" 1의 "구현 (09-3)" 참고 (`handleLUTJob`, `lutWorker.ts`, `createBrowserLUTWorker`, `LUTManager`, `defaultLUTPoolSize`, `lutRequestKey`).
-- **테스트 (`src/workers/__tests__/lutManager.test.ts` A~E, 가짜 Worker가 실제 처리기를 구조화 복제 경계로 호출, 처리 순서를 테스트가 조종):** A 처리기(탐색 결과 = `searchLaunchSpeed`, 행마다 진행 144 / 288 / 432, 행 결과 = `generateReferenceLUTRows`, transferable, v0 없는 행 작업 오류, 닫힌 해 없음), B 결정론(풀 1 / 3 / 8 / 2, 행 묶음 4 / 7 / 144, 완료 순서 역순 → 로봇 2대 결과 === `generateRobotLUTs`, 진행 완료, `matchLUTs`), C 상태 전이(`QUEUED > SEARCHING > GENERATING > READY`, 탐색 직후 v0 선표시, 부분 조립 행 = 최종 LUT 행, 두 번째 로봇 탐색이 대기 중 행 작업보다 먼저, 진행 단조 증가 · 행 단위 진행), D 재요청(같은 입력 무시, 로봇 크기 변경 재생성, 생성 중 설정 변경 → `CANCELLED > QUEUED` · 새 세대 · 이전 작업 결과 무시, `cancel` 유지 / `READY`에는 무시, 검증 실패 → `IDLE` + 사유), E 오류(`error` 메시지 / `onerror` / 행 길이 불일치 → `ERROR`, 다른 로봇 계속, 재요청 복구, 잃은 작업의 늦은 응답 무시), 풀 크기 공식, `dispose`, 요청 키 정규화. v0 탐색 우선 없음, 세대 확인 없음, 대기열 정리 없음, 재요청 무시 없음, 실행 중 진행 미집계, 오류 시 작업 유지, 기물 LUT 뒤바뀜, `CANCELLED` 알림 없음, 행 길이 검사 없음 각각에서 실패함을 확인.
-- **헤드리스 Chromium 점검 (저장소 밖 1회성):** 임시 페이지에서 실제 Worker 3개로 로봇 2대 생성 → 개발 서버 / 정식 빌드(미리보기) 모두 `generateRobotLUTs`와 비트 단위 동일, 콘솔 오류는 리소스 404 1건뿐(임시 페이지에 파비콘이 없어 생긴 것 — 09-4 점검에서 파비콘을 넣자 사라짐). 기본 정밀도 전체 약 9.3초 (4코어).
-
-### 6.2.24 Step 09-4 (IndexedDB LUT 캐시) 완료 항목
-
-- **구현:** 2.6.2항 "LUT 생성 실행 / 사용자 경험" 4의 "구현 (09-4)" 참고. 새 의존성 없음 (IndexedDB 연결부는 브라우저 점검, 규칙은 메모리 저장소로 Node 테스트).
-- **테스트 (`src/workers/__tests__/lutCache.test.ts` A~E, 가짜 Worker는 `fakeWorker.ts`로 관리자 테스트와 공용):** A 캐시 키(SHA-256 표준 테스트 벡터, 정규화 요청 키 64자), 레코드 변환(버퍼 복사, 원본 변경 무영향, v0 null 허용), 깨진 레코드 5종 → 미스, B 정리 규칙(다른 버전 + 최근 사용 20개 초과분, 20개면 없음, 동률 키 순), C 저장소 캐시(해시 키 저장, 적중 시 사용 시각만 갱신, 재저장 시 생성 시각 유지, 21개 추가 저장 중 사용한 레코드 생존 · 가장 오래된 것 삭제 · 20개 유지, 깨진 레코드 미스 · 미갱신, IndexedDB 없음 → 항상 미스), D 관리자 연동(미스: 조회 중 `QUEUED` · 작업 없음 → 생성 → 저장 내용 = 생성 결과, 새 관리자 적중: Worker 작업 0 · `QUEUED > READY` · 결과 === `generateRobotLUTs` · 4셀 대칭 복원 · 재저장 없음), E 조회 도중 설정 변경(옛 요청 미스 무시 · 최신 요청 결과), 조회 도중 취소 / 정리, 조회 실패(비동기 / 동기 예외) → 생성, 저장 실패 → `READY`. 사용 시각 미갱신, 다른 버전 유지, 최신 것 삭제, 버전 미검사, 버퍼 미복사, 생성 시각 초기화, 적중 재저장, 옛 조회 결과 적용, 조회 실패 무대응, 적중 후 생성, 동기 예외 미처리 각각에서 실패함을 확인.
-- **헤드리스 Chromium 점검 (저장소 밖 1회성, 실제 IndexedDB / `crypto.subtle` / Worker):** 1회차(DB 삭제 후) 생성 → 레코드 2개 저장, 새 페이지 2회차 → Worker 작업 0개 · 48 ms에 두 로봇 `READY`(캐시) · 결과 생성본과 비트 단위 동일, 22개 추가 저장 → 20개 유지 · 다른 모델 버전 삭제 · 레코드 기준 LUT 82,944 B. 콘솔 오류 없음.
-
-### 6.2.25 Step 09-5 (시작 자세 배치 검증 / 사전 보정) 완료 항목
-
-- **구현:** 3.8항 "시작 자세 배치 검증"의 "구현 (09-5)" 참고 (`validateRobotPlacement`, `PlacementIssue`, `PLACEMENT_TOLERANCE`, `gardenPiecePositions`, `reset()` 사전 보정).
-- **동일성:** 이전 커밋 엔진과 겹침 없는 시나리오 4종(기본 RED / BLUE, HIVE · 벽에 닿은 자세 + 회전 헤딩 + GARDEN 8 / 0, 오토 팁 + NECTAR 적재)을 조작 입력과 함께 1500틱 진행해 프레임이 같음을 일회성 비교로 확인.
-- **테스트 (엔진 V):** 기본 스폰 RED / BLUE 통과, 닿음 허용(HIVE 면 · 회전 헤딩 π/2 / π의 부동소수점 잔차, 벽, 나란한 로봇, FLOWER 가장자리), 코드별(HIVE 0.01 in, 벽 0.1 in, 45° 회전 모서리, 필드 밖, FLOWER 번호, 로봇끼리 두 로봇, 문제 누적, 로봇별 크기, 비유한 자세 → 기본 스폰), GARDEN(아군 기물, 빈 GARDEN, BLUE 진영에서 RED GARDEN = 상대, 상대 GARDEN, 수량 1 / 3 / 8에서 엔진이 놓은 기물의 윗가장자리 · 마지막 기물 오른쪽 가장자리와 검증 경계 일치), 사전 보정(HIVE 침투, 로봇끼리, 필드 밖, FLOWER + 벽 모서리, 한 로봇이 HIVE에 밀림, HIVE 옆 완전 겹침 18 in → 0번 프레임 겹침 없음 · 시간 / 헤딩 유지 · 산포 기물이 보정 자리 회피 · 결정론, 시드 6개 × 산포 32개도 회피), 겹침 없으면 그대로, GARDEN 기물 겹침은 보정하지 않음. 허용 오차 없음, 사전 보정 없음, 반복 20회, GARDEN 수량 무시, 아군 / 상대 뒤바뀜, 로봇끼리 한 로봇만 표시, 로봇 크기 혼동, 자세 기본값 미적용, 기물 검사 없음, 보정 시 로봇끼리 무시, 보정을 기물 배치 뒤에 수행 각각에서 실패함을 확인.
-
-### 6.2.26 Step 09-6a (GUI 순수 기반) 완료 항목
-
-- **분할 (09-6 → 09-6a ~ 09-6d):** 09-6은 순수 계산 / 렌더러 / 컨트롤러 / React 화면이 한꺼번에 들어 있어, 시각 결정이 여러 곳에 동시에 퍼지지 않도록 눈으로 확인할 수 있는 단위로 나눈다. 화면이 바뀌는 단계(09-6b, 09-6d)는 1366 × 768 / 3840 × 2160 스크린샷으로 사용자 확인을 받는다.
-- **구현:** 3.8항 "문구 사전 구현 (09-6a)", "타이머 (09-6a 확정)", 로봇 제원 탭 단위의 "표시 소수 자리 / 구현 (09-6a)" 참고.
-- **테스트 (`src/ui/__tests__/`):** `i18n.test.ts` A~C(한국어 = 영어 키 집합, 빈 문구 없음, 자리표시자 일치, 두 언어 모든 문구에서 게임 용어는 대문자 원형만, 영어에 쓴 게임 용어는 한국어에도 원어로, 엔진 오류 코드 18종 / LUT 상태 7종 / 일시정지 사유 4종 문구 존재(타입으로 목록 강제), 조회 · 치환 · 대체), `units.test.ts` A~E(종류별 변환, 발사구 지상고 ↔ dz, 헤딩 범위, cm 표시값 재입력 = 원래 inch 값, 반올림 격자, 손실 표시 사례, 토글 표시만 변경, 소수 자리 / 단위 기호 / 음수 0 / 비유한값, 입력 문자열 해석, 타이머 경계 · 전체 경기 틱에서 역행 없음 · 모든 초 / 10초 이하 모든 0.1초 표시 · 정수 초 틱 오차 흡수, `ENDGAME` 전환 틱 일치). 반올림 격자 없음, 헤딩 −180 유지, 음수 0, 0.1초 내림, 오차 흡수 없음, 속도 cm 미적용, 쉼표 거부, `ENDGAME` 경계, 게임 용어 소문자, 한국어에서 용어 번역, 자리표시자 누락, 영어 대체 없음, 치환 없음 각각에서 실패함을 확인.
-
-### 6.2.27 Step 09-6b (렌더러 전환) 완료 항목
-
-- **결정 (사용자 확정):** 테마 = 혼합(필드 밝게, 둘레 / UI 어둡게), 진영 색 적용 = 기본안, 나머지 색 유지, 배지 글자 영어 고정, 로딩 존 라벨 `LOADING ZONE`, 전환 기간 하네스 명중 확률 표시 없음, 캔버스 스크린샷 5장으로 확인.
-- **구현:** 3.7항 "구현 (09-6b)" / "(09-6b 변경)", 3.8항 "테마 / 진영 색 적용 / 캔버스 글자 (09-6b 확정)" 참고. 정식 빌드의 정적 필드 화면(`renderField`, 720 × 720)은 09-6d에서 대체되므로 색과 로딩 존 라벨만 바뀐다.
-- **테스트:** 보기 변환 A / D 갱신(장면 800 × 800, 중심 (400, 400), AUDIENCE 필드 40 ~ 760, 회전 중 꼭짓점이 캔버스 안), 표시 옵션 D 갱신(렌더러는 옵션과 무관하게 판정 함수 호출 0회, `hitProbabilities` 자체는 4회), 신규 `palette.test.ts` A~B(공식 RGB, 파생 색 값, 팔레트 / 진영 NECTAR가 공식 색 사용, `LOADING ZONE` 라벨 2개, 렌더러 소스의 문자열 리터럴에 한국어 없음). 옅은 색 비율 변경, 테두리 = 기본색, 한 줄 라벨, 한국어 배지, 옛 뷰포트 중심 각각에서 실패함을 확인. 한국어 경고 토스트 문구(`toast.lowerLift`) 번역 누락도 함께 수정.
-- **헤드리스 Chromium 점검 (저장소 밖 1회성, 캔버스 800 × 800 스크린샷 5장):** RED / BLUE 드라이버 시점 시작, 관중석 시점 경기 중(산포 기물 · 회전한 로봇 · 두 줄 로딩 존 라벨), 팁 낙하 + 비행 공 + 게이지 + 표시 옵션 전부(조준선 / 잔상 / 결과 색 / 배지), 경기 종료 강조(주차 · GARDEN). 콘솔 오류 없음.
-- **사용자 검토 반영 (같은 Step, 09-6c와 함께 커밋):** ① 구조물 이름표 / `TIPPING` / 경기 종료 점수 알약 삭제 (HIVE 셀 알약 / 로봇 번호 유지) ② 상대 GARDEN도 비활성 스타일 ③ FLOWER 중립 테두리, 경기 종료 소유 FLOWER = 진영색 원, 하단 보너스 = 가장 아래 NECTAR 주황 테두리 (게이지 테두리 강조 삭제) ④ 재고 게이지 양 끝 여유 ⑤ 득점 GARDEN 기물은 초록 대신 주황 (겹침 없음) ⑥ 비활성 색을 진영별 희미한 색으로 ⑦ 로봇 윤곽선 1.5배 ⑧ 상향 셀 안 NECTAR 흰 윤곽선 1.5배(2.25 px) ⑨ 소유 FLOWER 원에 주황 테두리 ⑩ 배지: `INTAKING` 배지 추가(구역 강조와 함께), 몸체 윗꼭짓점 바로 위로 붙임, 불투명도 85%. 테스트 `palette.test.ts` A~C 갱신(비활성 색 값, 가짜 캔버스로 실제 그린 글자 = 알약 / 번호 / 배지뿐 · `TIPPING` / 점수 알약 없음, `bottomBonusSlot`, 득점 GARDEN 초록 테두리 없음, 소유 FLOWER 주황 테두리 1개 추가, 재고 게이지 여유, 셀 NECTAR 윤곽선 2.25 px, 소유 FLOWER 주황 테두리 2개), 로봇 배치 A 갱신(`INTAKING` 배지, 불투명도, `badgeCenter` 보기 4종 × 헤딩 6종에서 윗꼭짓점 2 px 위). 스크린샷 5장 재확인 + 경기 종료 게이지 4배 확대 확인 (R2가 ENDGAME에 FLOWER 2에 NECTAR부터 투입한 경기).
-
-### 6.2.28 Step 09-6c (앱 컨트롤러) 완료 항목
-
-- **구현:** 3.8항 "앱 컨트롤러 구현 (09-6c)" 참고. `src/dev/harnessController.ts` 삭제, `DevHarness.tsx`는 `AppController` + `createDevSetup`, `devSetup.ts`에 `createDevSetup(진영) → MatchSetup` 추가(`createDevEngine`은 그 설정으로 생성).
-- **테스트:** `src/app/__tests__/appController.test.ts` B~D — B / C는 08-7 하네스 흐름 테스트를 옮긴 것(관중석 준비, 회전 중 루프 대기, 회전 후 드라이버 시점에서 시작, 초당 약 50틱, 키보드 R2 주행, 일시정지 중 옵션 2회 = 다시 그리기 1회, 일시정지 중 보기 전환, 재개, 포커스 소실 자동 일시정지, 리셋 반대 회전, BLUE +90°, 상태 알림 약 10 Hz, 관중석 경기), 진영 선택 대신 설정 교체(경기 중 거부)로 바꿈. D 신규(주입한 시나리오로 엔진 생성, 오토 / 텔레옵 TIP · 점수 · RP, 명중 확률 꺼짐 = null · 호출 0 / 켜짐 = 4회 · 주입한 판정 함수 값, 경기 전 설정 교체 = 새 0틱 엔진, 경기 중 거부, 리셋은 현재 설정 유지, `SETUP` 복귀 후 다시 교체 가능). 테스트 설정은 하네스와 독립(하네스 삭제 후에도 유지). `src/dev/__tests__/harness.test.ts`는 하네스 설정 검사(A + `createDevSetup`)만 남김. 경기 중 설정 교체 허용, 명중 확률 항상 계산, 시나리오 무시, 오토 TIP 필드 혼동, 회전 전 루프 시작 각각에서 실패함을 확인.
-- **헤드리스 Chromium 점검 (저장소 밖 1회성, 실제 개발 서버 + 하네스):** 준비 화면 → 진영 교체 → 시작 → 회전 후 `MATCH` / `RUNNING` → 키보드 W 주행 → 일시정지(틱 고정). 콘솔 오류 없음.
-
-### 6.2.29 Step 09-6d (화면 뼈대) 완료 항목
-
-- **구현:** 3.8항 "글꼴 / 아이콘 (09-6d)", "화면 뼈대 구현 (09-6d)", 3.7항 개발 하네스 "(09-6d 변경)" 참고. `AppController`에 `setRenderScale(배율)`(잘못된 값 / 같은 값 무시) / `redraw()` 추가, 정적 레이어 캐시 최대 4개(창 크기를 바꿀 때마다 배율별 캐시가 쌓이지 않도록 가득 차면 비움). 의존성 추가: `lucide-react`(ISC), `pretendard`(OFL). 09-6b에 실수로 커밋된 임시 점검 페이지 `shotcheck.html` 삭제.
-- **테스트 (`src/ui/__tests__/mainScreenModel.test.ts` A~D):** A CSS 변수 값, 기준 화면 필드 크기(≈ 558 px), 캔버스 크기(짧은 변 내림 / dpr 반올림 / 배율, 비정상 dpr · 0 크기), B `TIP` 표시(4 → 7 → 달성, 음수 제한), 로봇 이름(팀 번호 공백 = R1 / R2), 명중 확률 %, 타이머 `ENDGAME` 색(엔진 `ENDGAME_START_TICK` 경계, 경기 전 제외), C 주 버튼 6가지 상태, 타임라인 비율 / 눈금, 게임패드 요약, D 글꼴 순서 / `canvasFont`. 문구 사전에 `rail.*`, `panel.tipTarget` / `tipAllDone`, `control.timeline` 추가 (게임 용어 대문자 검사 통과). 하네스 테스트는 로봇 이름 `R1` 기대로 갱신.
-- **헤드리스 Chromium 점검 (저장소 밖 1회성):** 실제 개발 서버 1366 × 650 / 1366 × 768 / 3840 × 2160 경기 전 화면, 한국어, 시작 → 회전 → 키보드 주행 → 일시정지(`RESUME`) 화면, 가짜 상태(0:48 `ENDGAME` 주황, 60점, `TIP` 7 / 7 체크, 명중 확률, 비표준 게임패드 경고) RED / BLUE 한국어 / 4K, 기준보다 작은 창(1200 × 560 → 1366 × 650 스크롤), 아이콘 표. 점검 중 개발 모드 StrictMode 재마운트에서 새 컨트롤러가 이미 맞춰진 캔버스를 만나 배율 1로 그리는 문제를 발견해 생성 시 배율 전달 + 매번 배율 전달로 수정 후 재확인. 개발 서버 `?harness` = 하네스, 정식 빌드 미리보기 `?harness` = 메인 화면. 콘솔 오류는 임시 페이지의 파비콘 404뿐.
-
-### 6.2.30 Step 09-7a (경기 흐름: 보는 틱 / 재생 / 분기 / 종료 → 결과) 완료 항목
-
-- **결정:** 3.8항 앱 상태 흐름 "09-7 확정" / "09-7 기본안" 참고 (09-7을 09-7a 컨트롤러 흐름 + 단축키 + 버튼 연결 / 09-7b 확인창 모달 · 토스트 · 배너 · 타임라인 끌기로 분할).
-- **구현:** 3.8항 "경기 흐름 구현 (09-7a)", 3.6항 실시간 루프 "(09-7a 변경)" 참고. 문구 사전 `result.*` 추가.
-- **테스트:** `appController.test.ts` E(Space 경기 전 무반응 · 진행 중 일시정지, ← 1틱 / Shift + ← 50틱 / 머리 · 0 제한, 되감은 틱에서 재개 무시, Space 재생(분기 아님) 1× ≈ 25틱 / 0.5초 · 2× ≈ 50틱, 재생 멈춤 유지, 머리에서 자동 정지 → 재개 가능, 머리에서 재생 = 0틱부터, 틱 이동이 재생 멈춤, 분기 → 이후 기록 교체(주행 안 한 R2가 원래 주행 위치보다 뒤) · 옛 프레임 사라짐, 단축키 끔, 진행 중 ←는 주행), F(6000틱 → 종료 강조 · 조작 잠금 · 결과 총점 = 항목 합, 5초 전 / 후, 결과 팝업 중 단축키 무시, 복기 RESUME / BRANCH 없음 · Space 처음부터 재생, RESULT 다시 열기, 종료 후 분기 → 다시 종료 강조, 클릭 / Space 건너뛰기, NEW 초기화), `mainScreenModel.test.ts` 주 버튼 9상태 + 분기 확인 문구 값, `realtimeLoop.test.ts` E 종료 후 되감으면 재개. 재개 조건에서 머리 비교 누락, 머리에서 재생 시 0틱 복귀 누락, Space 분기, 5초 대기 없음, 결과 팝업 중 Space 허용, 멈출 때 보는 틱 미갱신, 배속 무시, Shift 1초 무시, 분기 시 종료 단계 미초기화, 결과 팝업 조건 뒤집힘 각각에서 실패함을 확인.
-- **헤드리스 Chromium 점검 (저장소 밖 1회성, 실제 개발 서버):** 시작 → W 주행 → Space 일시정지(`RESUME`) → Shift + ← / ←(`BRANCH`, 타이머 되감김) → Space 재생 → 머리에서 멈춤(`RESUME`) → 되감고 `BRANCH` 클릭 → 확인창 문구 "Recorded match after 1:59 (1.0 s) will be deleted…" 확인 → 진행 → 120초 경기 끝까지 → 종료 강조(주 버튼 비활성) → 5초 뒤 결과 팝업(9점: GARDEN 4 + PARK 5) → `REVIEW`. 콘솔 오류 없음.
-
-### 6.2.31 Step 09-7b (확인창 / 경고 토스트 / 자동 일시정지 배너 / 타임라인 끌기) 완료 항목 — 09-7 완료
-
-- **구현:** 3.8항 "확인창 / 알림 / 타임라인 구현 (09-7b)" 참고 (`ConfirmDialog.tsx`, `FieldNotices.tsx`, `ScrubberBar.tsx` 타임라인, `AppController` `onToast` / `autoPauseReason`, 문구 `pause.resumeHint`). 09-7a의 임시 `confirm` 제거.
-- **테스트:** `appController.test.ts` G(리프트 올린 채 W → R2 토스트 1회, 누르고 있어도 2초 안 반복 없음 · 2초 뒤 다시, 입력 없으면 없음, 리프트 내린 뒤 주행은 없음, 포커스 소실 배너 → 틱 이동 유지 → 재생 시작 해제, 재개 / 분기 / NEW 해제, 사용자 일시정지 배너 없음), `mainScreenModel.test.ts` 타임라인 위치 → 틱(양 끝 제한, 반올림, 폭 0 / 비유한값). 쿨다운 없음, 리프트 상태 검사 없음, 입력 축 검사 없음, 재생 시작 시 배너 유지, 사용자 일시정지도 배너 각각에서 실패함을 확인.
-- **헤드리스 Chromium 점검 (저장소 밖 1회성, 실제 개발 서버, 영어 / 한국어):** 시작 → 리프트 올리고 W(토스트) → 리프트 내리고 주행 → 창 포커스 소실(배너) → 타임라인 끌기(시간 표시 `1:59`, 주 버튼 `BRANCH`, 배너 유지) → `BRANCH` 확인창(문구 · Space 무시 · Esc 취소 · Enter 분기 → 진행) → 진행 중 `NEW`(일시정지 후 확인창, Esc → `RESUME` 상태로 남음). 브라우저 기본 대화상자 / 콘솔 오류 없음.
-
-### 6.2.32 Step 09-8a (config 창 틀 / 탭 / 초안 · 적용 / START 막기) 완료 항목
-
-- **결정:** 3.8항 우측 config 창 "09-8 확정" / "09-8 기본안" 참고.
-- **구현:** 3.8항 "구현 (09-8a)" 참고 (`configDraft.ts`, `ConfigPanel.tsx`, `ConfigRail.tsx`, `MainScreen.tsx`, `defaultSetup.ts` `DEFAULT_DRAFT_VALUES` / `buildMatchSetup`, 문구 `config.status.*` / `config.emptyTab`).
-- **테스트 (`src/ui/__tests__/configDraft.test.ts` A~E):** A 편집 → DIRTY → 적용(적용 값 반영, 초안 복사본, 적용할 것 없으면 그대로, 이전 상태 불변, 같은 값 편집 = 수정 아님), B 검증 실패(FLOWER 9개 → INVALID · 적용 불가 · 시나리오 탭이 막음, R1 시작 자세 HIVE 안 = 배치 오류, R2 수정이 시나리오 오류보다 먼저, 로봇 초안 적재 한도 축소 → 시나리오 적재 초과), C `RESET TAB`(초안만 기본값, 기본값이면 불가), D 열 수 있는 시점 9상태 / 잠금, E 깊은 비교. `mainScreenModel.test.ts` 펼친 열 480u(1366 기준 필드 유지). 검증 실패 적용 허용, 배치 검증 누락, 막는 탭 순서 뒤집힘, 재생 중 펼치기 허용, 복사 없음 각각에서 실패함을 확인 (undefined 속성 걸러내기는 중복 코드임을 발견해 삭제).
-- **헤드리스 Chromium 점검 (저장소 밖 1회성, 실제 개발 서버):** 경기 전 펼치기(1366 × 650 필드 558 px 유지, 3840 × 2160 1901 → 1625 px), 탭 전환, Esc 닫기, 로봇 아이콘 → R1 탭, `START` → 창 접힘 · 펼치기 비활성, Space 일시정지 → 펼침(잠금 안내, `APPLY` 비활성) → Space 재개 → 자동으로 접힘, 한국어. 콘솔 오류 없음. (`START` 막힘은 탭 폼이 생기는 09-9부터 화면에서 발생 — 규칙은 단위 테스트로 확인.)
-
-### 6.2.33 Step 09-7c (경기 종료 연출) 완료 항목
-
-- **결정 (사용자):** 제안 A~F 중 A(종료 흰빛) + C(배너 + 5초 진행바) + D(점수 카운트업 + 항목 칩) + E(마지막 10초 빨강 맥박) 채택, 배너 문구 `MATCH COMPLETE` / "경기 종료". B(테두리 글로우)는 C와 역할 중복, F(스포트라이트)는 렌더러 수정 대비 효과가 작아 제외.
-- **구현:** 3.8항 경기 종료와 결과 팝업 "종료 연출 (09-7c)" 참고.
-- **테스트:** `mainScreenModel.test.ts` E(마지막 10초 경계 = 5500틱 · 경기 전 제외, 집계 시작 점수 / 칩 순서 · 0점 제외, 카운트업 시작 / 끝 / 단조 정수 / easeOut / 비정상 입력), `appController.test.ts` F(실제 종료 `endSeq` 1, 복기 재생이 종료 틱까지 가도 불변, 분기 후 재종료 2, NEW 0). 신호 증가 누락, NEW 초기화 누락, 10초 경계 미포함, 0점 칩 포함, 선형 카운트업, 집계 시작 점수 0 각각에서 실패함을 확인.
-- **헤드리스 Chromium 점검 (저장소 밖 1회성, 실제 개발 서버, 한국어, 120초 경기):** 0:06.8 빨강 타이머, 종료 직후 카운트업 중간(4점 + `+4 GARDEN`) · 배너 · 진행바, 약 2초 뒤 9점 + `+4 GARDEN` / `+5 PARK`, 5초 뒤 결과 팝업(연출 사라짐). 콘솔 오류 없음.
-
-### 6.2.34 Step 09-8b (SETTINGS 탭 / 입력 출처 · 조작 모드 연결 / 설정 자동 보관) 완료 항목
-
-- **결정:** 3.8항 SETTINGS 탭 "09-8b 확정" 참고.
-- **구현:** 3.8항 SETTINGS 탭 "구현 (09-8b)" 참고 (`inputPlan.ts`, `settings.ts`, `SettingsTab.tsx`, `AppController`, `browserInput.ts` / `liveControls.ts` 키보드 런타임 토글, 문구 `settings.*` / `option.*` / `confirm.resetAll`).
-- **테스트:** `src/app/__tests__/inputPlan.test.ts` A~B(`AUTO` 규칙 6조합 · 배정 안 된 슬롯, 풀이, 경기 전 / 경기 중 선택지), `src/ui/__tests__/settings.test.ts` A~F(기본값, 저장 → 복원 왕복 · 입력 출처 미보관, 없음 / 손상 / 버전 다름 / 항목별 형식 오류, 적용 값 모양 · 유한값 · 진영 · 시나리오 · 배치 검증, 메모리 / 없음 / 오류 저장소, 키 이름), `appController.test.ts` H(`AUTO` 예상 · 키보드 끄면 R2 `NONE`, 시작 시 풀이 + 기본 보기 관중석, 진행 중 변경 거부, 경기 중 `AUTO` · 기록 없는 `REPLAY` 거부, 녹화 덧입히기 — R2를 1회차 기록대로 `REPLAY` 분기 → 같은 틱에서 위치 비트 단위 일치, 조작 모드 / 키보드는 재개 때 적용 · 키보드 끄면 W 무반응, 경기 중 `VIEW` 후 `NEW` → 기본 보기 · 경기 전 선택 복귀), C 갱신(경기 전 `VIEW` 무시, 기본 보기로 관중석 경기), `browserInput.test.ts` B 런타임 키보드 토글. 재개 시 적용 누락, 새 경기 보기 초기화 누락, 경기 전 `VIEW` 허용, 분기 시 적용 누락, 진행 중 변경 허용, 키보드 끔 무시, 적용 값 검증 생략, 비유한값 허용, 버전 무시, 끌 때 눌린 키 유지 각각에서 실패함을 확인.
-- **헤드리스 Chromium 점검 (저장소 밖 1회성, 실제 개발 서버 1366 × 768):** 경기 전 `VIEW` 비활성, 게임패드 아이콘 → SETTINGS(영어), 키보드 조작표, 한국어 · 명중 확률 켬 · 기본 보기 관중석 → `localStorage` 저장 확인 → 새로고침 후 복원(한국어, 명중 확률 줄 표시), 시작 → 관중석 그대로 → 일시정지 → R2 `REPLAY` 선택("적용 대기"), R1 `REPLAY` 비활성(기록 없음), `RESET ALL` 비활성. 콘솔 오류 없음.
-
-### 6.2.35 Step 09-9a (로봇 탭 1: 프로필 / 입력칸 규칙 / 제원 폼 / COPY) 완료 항목
-
-- **결정:** 3.8항 로봇 제원 탭 "09-9 확정" / "입력 허용 범위 (09-9 확정)" 참고.
-- **구현:** 3.8항 로봇 제원 탭 "구현 (09-9a)" 참고 (`robotForm.ts`, `configDraft.ts`, `settings.ts`, `FormControls.tsx`, `RobotTab.tsx`, `SettingsTab.tsx`, `ConfigPanel.tsx`, `LeftPanel.tsx`, `MainScreen.tsx`, `defaultSetup.ts`, 문구 `robot.*` / `form.*` / `confirm.copyOverwrite`).
-- **테스트:** `src/ui/__tests__/robotForm.test.ts` A~F(기본 프로필 유효, 입력 → 엔진 값: in / cm 변환 · 표시값 재입력 = 원래 inch · 범위 · 정수 · 빈 칸 · 45° = π/4 · ±180° · rad/s 그대로, 표시 in / cm / ° / 개수, 팀 번호 / 팀명, 범위 밖 칸 · 터렛 폭 0(고정형 무관) · 후방 터렛 · 쓰기 복사본, COPY 대상 유지 항목 · 깊은 복사), `configDraft.test.ts` F~G(틀린 글자 보관 → INVALID · 적용 불가 · 지우면 DIRTY · 같은 글자 무변화 · 틀린 글자만 있어도 되돌리기 가능 · RESET TAB이 지움, COPY 결과 · 대상 틀린 글자 지움 · 원본이 틀리면 불가 · 로봇 값 범위 밖 = INVALID), `settings.test.ts` B / D 갱신(프로필 저장 왕복, 범위 밖 / 팀 번호 오류 버림, 없는 항목 채우기 + 슬롯 id 강제, 09-8b 형식 → 기본 프로필, `mergeWithDefaults`). 정수 검사 누락은 없음(중복 검사 제거 후), 범위 확대, 팀 번호 6자리 허용, 고정형 터렛 폭 검사, COPY 팀 번호 덮어씀, 틀린 글자 무시(적용 / 상태), 복사 대상 글자 유지, 로봇 탭 검증 없음, 채우기 없음, 프로필 검증 생략 각각에서 실패함을 확인. (돌연변이 점검에서 입력 글자 정수 검사와 경계값 맞춤이 중복 코드임을 발견해 삭제, 약한 테스트 1개 보강.)
-- **헤드리스 Chromium 점검 (저장소 밖 1회성, 실제 개발 서버 1366 × 768):** 로봇 아이콘 → R1 탭, 팀 번호 / 팀명 입력, 가로 30 → "Must be 6.00 – 18.00 in", 적재 2.5 → "Whole numbers only", `START` → "Cannot start: R1 — invalid settings", 고침 + 터렛 전환(±90°로 시작), `COPY TO R2`(안내), R1 `APPLY` → 필드 로봇 16 in / 적재 3, R2 탭 cm 표시(40.64 cm, 190.50 cm/s, 팀 번호 비어 있음) → `APPLY`, 좌측 패널 `#19049 Bumblebees`, 새로고침 후 복원, 한국어 cm 오류 "15.24 ~ 45.72 cm 사이". 콘솔 오류 없음. 점검 후 `COPY TO` 버튼 줄바꿈과 고친 뒤에도 남는 막힘 안내를 수정.
-
-### 6.2.36 Step 09-9b (로봇 탭 2: 미리보기 / 흡입 구역 편집기 / 슈터 탄도) 완료 항목 — 09-9 완료
-
-- **결정:** 3.8항 로봇 제원 탭 "09-9b 확정" / "입력 허용 범위 (09-9b 확정)" 참고.
-- **구현:** 3.8항 로봇 제원 탭 "구현 (09-9b)" 참고 (`robotForm.ts`, `RobotPreview.tsx`, `RobotTab.tsx`, `FormControls.tsx` `checkValue` / `displayRange`, `MainScreen.tsx` `setupFromDrafts` · 여러 칸 글자 지우기, `defaultSetup.ts`, 문구 `robot.preview*` / `robot.zone.*` / `robot.side.*` / `robot.launchHeight` 등).
-- **테스트:** `src/ui/__tests__/robotForm.test.ts` G~I(탄도 칸: 지상고 ↔ `dz` 변환 · cm · 범위 표시 순서 · % / ° 변환 · 읽기 / 쓰기, 구역 칸: 위치 범위 = ± 변 길이 / 2(면 / 크기별) · 폭 / 깊이 · 새 구역 · 변 밖 위치 오류 · 면 바꾸면 범위 변경 · 8개 허용 / 9개 오류 · 0개 허용 · 잘못된 면, 미리보기 사각형 = 엔진 `getBumperZoneOBB`(4면 × 위치 0 / 3 / −5 / ±20 제한) · 크기 0 = 없음 · 조준 부채꼴 고정형 / 터렛 / 후방), F 갱신(COPY가 탄도 복사), `src/app/__tests__/setup.test.ts`(적용 값 → `MatchSetup.shooters`, 발사구 지상고 10 / 30 in로 실제 경기 발사 → 궤적 시작 높이 일치), `settings.test.ts` B / D 갱신(탄도 저장 왕복, 탄도 없는 09-9a 형식 → 기본 탄도로 채움), `configDraft.test.ts` G 값 모양 갱신. 위치 범위 반값 누락, 변 길이 가로 / 세로 뒤바꿈, 미리보기 좌 / 우 부호, 위치 제한 하한, 범위 표시 순서, COPY 탄도 누락, 후방 터렛 2π, 구역 수 경계, 새 구역 폭, 지상고 범위, 깊이 범위, R2 탄도에 R1 값, 탄도 미전달 각각에서 실패함을 확인. (돌연변이 점검에서 위치 제한 하한 / 구역 수 경계가 살아남아 테스트 보강.)
-- **헤드리스 Chromium 점검 (저장소 밖 1회성, 실제 개발 서버 1366 × 768):** R1 탭 맨 위 미리보기(고정형: 앞 흡입 구역 + 좁은 조준 부채꼴 + 중앙 발사구), `ANY` 프리셋 → 4구역(미리보기 네 변), 구역 1 위치 12 → "Must be -9.00 – 9.00 in", 구역 2 폭 0.2 → "Must be 0.50 – 36.00 in"(R1 탭 빨간 표시), 구역 1 면을 왼쪽으로 → 위치 오류 지움, 구역 2 삭제 → 3구역 · 구역 칸 오류 모두 지움, 터렛 360° + 오프셋 −5 in(발사구가 뒤쪽 점) + 지상고 60 → "Must be 1.00 – 50.00 in", 고급 설정 펼침(2.0 % / 1.1° / 0.3°), 한국어 cm(폭 45.72 cm, 지상고 50.80 cm, 오프셋 −12.70 cm), 구역 모두 삭제 → "흡입 구역 없음" 경고, `FRONT` → `APPLY` → 새로고침 후 복원(구역 1개, 지상고 / 오프셋 유지). 콘솔 오류 없음. 점검 후 프리셋 글자 세로 정렬과 좁은 조준 부채꼴 선 굵기를 수정.
-
-### 6.2.37 Step 09-9c (흡입 구역 폭 최소값 수정) 완료 항목
-
-- **결정 (사용자):** 구역 폭 최소 0.5 in는 기물 크기(POLLEN 2.8 in / NECTAR 3.6 in)보다 작아 말이 안 됨 → 최소 = 가장 큰 기물 직경.
-- **구현:** `robotForm.ts` `MIN_ZONE_WIDTH` = 2 × max(`PIECE_PHYSICS` POLLEN / NECTAR 반지름) = 3.6 in, `zoneFieldSpec('width')` / `newIntakeZone` 적용. 엔진 규칙(`BumperZone` 검증)은 그대로 — GUI 입력 범위만. 저장된 설정에 3.6 in 미만 구역이 있으면 저장값 검증 실패로 기본값이 된다.
-- **테스트:** `robotForm.test.ts` H 갱신(폭 범위 3.6 ~ 36, 3.6 허용 / 3.5 오류). 최소값을 POLLEN 직경으로 바꾸면 실패함을 확인.
-
-### 6.2.38 Step 09-10a (스윗스팟 입력 / 명중 확률표 생성 연결) 완료 항목
-
-- **결정:** 3.8항 로봇 제원 탭 "09-10 확정" / 기본 프리셋(기본 스윗스팟 C) 참고. 후보 비교는 저장소 밖 1회성 스크립트(기본 로봇으로 후보 11곳 v0 탐색 + 기준 셀 LUT, 관중석 시점 히트맵 비교 이미지)로 사용자에게 보여 주고 확정.
-- **구현:** 3.8항 로봇 제원 탭 "구현 (09-10a)", 2.6.2항 "로봇 간 공유" 참고.
-- **테스트:** `src/workers/__tests__/lutManager.test.ts` F(같은 키 두 로봇: 한 로봇분 작업만 · 진행 공유 · 같은 결과 객체 · 따라가는 로봇 상태 `SEARCHING > GENERATING > READY`, 결과를 받은 뒤 앞선 로봇 설정 변경에도 `READY` 유지 · 앞선 로봇만 재생성, `READY` 로봇과 같은 키 → 즉시 `READY`, 앞선 로봇 설정 변경 / 취소 / 오류 → 따라가던 로봇이 스스로 생성해 같은 결과, 따라가던 로봇의 설정 변경은 독립), `lutCache.test.ts` E 갱신(정리 확인용 요청을 다른 설정으로), `src/ui/__tests__/robotForm.test.ts` J(기본 스윗스팟, RED / BLUE 읽기 · 쓰기 · 격자 중심 · 점대칭 · 다른 축 유지, 칸 범위, `HIVE` / 해 없음 / 필드 밖 사유, 작은 로봇은 벽 가까이 허용, 다른 칸 오류 시 탄도 검증 생략, 깊은 복사), `src/ui/__tests__/lutView.test.ts` A~F(단계, 생성 시작 기록 / 남은 시간 추정 · 문턱, 화면 요약, LUT 입력 변경 여부, `START` 막기 순서, 상태 한 줄), `src/app/__tests__/lutTracker.test.ts` A~D(기본 프리셋 한 번 생성 · 결과 공유 = `generateRobotLUTs`, 알림 모음 100 ms / 단계 변화 즉시, 남은 시간, 오류 → 다시 시도 · 정리 후 알림 없음), `setup.test.ts` B(LUT 판정 · 로봇별 값 · 조준 밖 0 · 기물별 사출 속도가 실제 발사에 쓰임, 없으면 간이 판정). 공유 조건 `READY` 제외, 따라가기 재시작 누락, 따라가는 로봇 진행 표시, 결과 복사 후 따라가기 해제 누락, 남은 시간 문턱, `START` LUT 조건, LUT 입력 비교 항목, 생성 시작 기록 초기화, 남은 초 반올림, 단계 변화 즉시 알림, 사출 속도 누락, LUT 판정 교체, 스윗스팟 스냅 / 점대칭, 탄도 검증 조건, 스윗스팟 얕은 복사 각각에서 실패함을 확인. (돌연변이 점검에서 결과 복사 후 따라가기 해제가 살아남아 테스트 보강, 다시 시도의 상태 조건은 관리자 규칙과 중복이라 삭제.)
-- **헤드리스 Chromium 점검 (저장소 밖 1회성, 실제 개발 서버 + 빌드 미리보기 1366 × 768, 캐시 없는 새 브라우저):** 시작 직후 R1 / R2 아이콘 진행률 링, 마우스 올림 "R1: Generating hit map 16% · about 9 s left", 생성 중 `START` → "Cannot start: R1 — hit map not ready yet" + R1 탭(스윗스팟 59.5 / 131.5, 기준 CELL `RED_AUDIENCE`, 진행 막대, 기물별 v0 선표시), 약 18초 뒤 두 아이콘 초록 체크, "POLLEN: launch speed 220.81 in/s · sweet spot hit rate 99.0%" / "NECTAR: … 221.45 in/s · 97.9%"(후보 비교 값과 같음), `START` → 경기 시작, 새로고침 → 약 0.9초에 "Ready (saved result)", 스윗스팟 Y 100 → `HIVE` / 해 없음 두 사유 + R1 탭 빨간 표시, 126.2 → 126.5로 맞춤 + "APPLY to rebuild…" 안내 → `APPLY` → 약 13초 뒤 233.13 in/s · 98.4 %(후보 B와 같음), 한국어 cm 표시(151.1 / 321.3 cm, 592.16 cm/s). 콘솔 오류 없음. (처음 측정 스크립트가 config 창이 열린 동안 접힌 띠를 기다려 154초로 잘못 잰 것을 바로잡음.)
-
-### 6.2.39 Step 09-10b (필드 편집 모드 틀 / 히트맵 모드) 완료 항목
-
-- **결정:** 3.8항 로봇 제원 탭 "09-10b 확정" 참고 (09-10b / 09-10c 분할, 적용한 설정의 LUT 표시, `tmp_shots.ts`는 09-12에서 삭제). 색 척도는 합성 명중 띠 비교 이미지(저장소 밖 1회성)로 세 안을 비교해 넷째 색부터 시작하는 안으로 정함.
-- **구현:** 3.8항 "구현 (09-10b)" 참고.
-- **테스트:** `src/renderer/__tests__/heatmapView.test.ts` A~D(색 척도: 0 % = 바닥색 · 100 % = 팔레트 끝 · 정지점 · 범위 밖 / 비유한 잘라냄 · 선형 보간 · 범례 CSS, 픽셀: RED 그대로 · BLUE = `mirrorLUTSet` `BLUE_OPPOSITE` · 미계산 행 바닥색(BLUE 뒤집힘) · 버퍼 재사용, 빗금 행 구간, 기준 셀 / 조준점 점대칭), `src/ui/__tests__/fieldEdit.test.ts` A~C(열기 / 닫기 / 로봇 전환, 유지 조건, 장면의 진영 기준 스윗스팟 · 버퍼 전달), `lutTracker.test.ts` E(조립 중 버퍼가 행 단위로 채워짐, 따라가는 로봇 같은 버퍼, 완성 = `generateRobotLUTs`, 재생성 시 새 버퍼), `appController.test.ts` I(SETUP에서 편집 장면이 경기 장면 대신, 같은 객체 무시 · 새 객체 다시 그림, null = 경기 장면, `START`에서 해제, 경기 중 무시 — `NEW`로 돌아온 뒤 다시 그려도 남지 않음). BLUE 점대칭 / 행 뒤집기 / 미계산 행 색 / 범위 잘라냄 / 기준 셀, 유지 조건의 탭 검사, 같은 로봇 닫기, 진영 기준 스윗스팟, `START` 해제, SETUP 가드, 같은 객체 무시, 기물별 버퍼 각각에서 실패함을 확인 (돌연변이 점검에서 `START` 해제 / SETUP 가드가 살아남아 `NEW` 뒤 다시 그리기 확인을 추가).
-- **헤드리스 Chromium 점검 (저장소 밖 1회성, 개발 서버 1366 × 768):** R1 탭 `SHOW HIT MAP` → 필드가 회색 바닥 + 빗금으로 바뀌고 안내 띠 "HIT MAP · R1", 생성 중 행이 채워짐(캔버스 픽셀 표본이 빗금 → 바닥 / 척도 색으로 바뀜), 완성 후 관중석 쪽 분홍 명중 띠 + 기준 셀 `RED_AUDIENCE` 강조 + 조준점 · 스윗스팟(59.5, 131.5) 점선, `NECTAR` 전환, Esc → 띠 닫힘 · config 창 유지. 한국어 + BLUE(저장값 진영만 바꿈): R2 탭 "필드에서 확률표 보기" → 안내 띠가 필드 아래쪽, 기준 `BLUE_OPPOSITE` 강조, 필드 위쪽 파랑 명중 띠, 스윗스팟(84.5, 12.5), 다른 탭 이동 → 닫힘, 다시 열고 `START` → 닫히고 경기 시작. 콘솔 오류 없음.
-
-### 6.2.40 Step 09-10c (스윗스팟 모드 SET ON FIELD) 완료 항목 — 09-10 완료
-
-- **결정:** 3.8항 로봇 제원 탭 "09-10c 확정" 참고 (`DONE` = 그 탭 `APPLY`까지, 모드 유지, 틀린 칸도 찍힘, 적용 확률표 반투명 + 안내).
-- **구현:** 3.8항 "구현 (09-10c)" 참고.
-- **테스트:** `src/ui/__tests__/fieldEdit.test.ts` D~I(들어올 때 기억 · 같은 로봇 유지 · 기물 이어받음 · 히트맵 전환, 격자 중심 · 필드 밖 null, 찍기: 기준 셀 보관(BLUE 점대칭) · 틀린 글자 지움 · 미리 보기 사유 = 찍은 뒤 사유 · 필드 밖 / `HIVE` / 해 없음 · 다른 칸이 틀리면 탄도 검증 생략, 되돌리기: 스윗스팟과 그 칸 글자만 · 다른 칸 유지, `DONE` 동작 3종, 장면: 초안 / 검증 / 크기 / 마우스 칸 가능 여부 / 적용 스윗스팟 / BLUE), `src/renderer/__tests__/editScene.test.ts` A~B(가짜 캔버스: 빗금은 히트맵 모드만, 마우스 칸 초록 / 빨강, 틀린 초안 빨간 윤곽, 적용 스윗스팟 고리는 초안과 다를 때만). 돌연변이 18종(기억 유지 / 기물 이어받음 / 글자 기억 / 필드 경계 / 격자 반올림 / 두 축 기록 / 글자 지움 / 글자 복원 / 스윗스팟 복원 / `DONE` 두 분기 / 적용 스윗스팟 / 마우스 칸 검증 / 초안 크기 / 빗금 조건 / 마우스 칸 색 / 초안 윤곽 색 / 고리 조건) 모두 실패 확인.
-- **헤드리스 Chromium 점검 (저장소 밖 1회성, 개발 서버 1366 × 768):** R1 `SET ON FIELD` → 반투명 확률표 + 초안 몸체 윤곽, (40.3, 120.7) 위 말풍선 "X 40.5 in · Y 120.5 in", `HIVE` 근처 (60, 100) → 빨간 칸 / 점선 윤곽 + 사유 2개, 클릭 → X / Y 칸 40.5 / 120.5 + 적용 스윗스팟 점선 고리 + 반투명 확률표 안내, `CANCEL` → 59.5 / 131.5 복원, 틀린 칸 클릭 → 빨간 사유 + `DONE · APPLY` → 초안에만 남김 안내, 올바른 칸 → `DONE · APPLY` → 적용 + 확률표 재생성 시작, 클릭 후 Esc → 복원 · config 창 유지, 찍은 뒤 `START` → 모드 닫히고 되돌린 초안으로 경기 시작(되돌리지 않았다면 R1 탭 미적용으로 막혔을 것). 한국어 + BLUE: R2 칸이 점대칭 (84.5, 12.5)로 표시, 안내 띠 필드 아래쪽, 필드 위쪽 반투명 파랑 명중 띠, (100.2, 25.2) 클릭 → 100.5 / 25.5, "완료 · 적용" → 적용 + 재생성 시작. 첫 점검에서 칸 경계 클릭이 강조 칸과 다른 칸에 찍히고 이동 직후 클릭이 이전 칸을 쓰는 문제를 발견해 ref로 고침. 콘솔 오류 없음.
-
-### 6.2.41 Step 09-11a (시나리오 탭 / 시드 / 유효 배지) 완료 항목
-
-- **결정:** 3.8항 시나리오 탭 "09-11 확정" 참고 (09-11a / 09-11b 분할, `REROLL` 바로 적용 + 보관, 진영 전환 좌우 대칭, 편집 모드 표시).
-- **구현:** 3.8항 시나리오 탭 "구현 (09-11a)" 참고.
-- **테스트:** `src/ui/__tests__/scenarioForm.test.ts` A~G(기본값 읽기 · 기본 시나리오 유효, 진영 전환: 기본 스폰끼리 대칭 · 지정 자세 / 상향 셀 · 지정 안 한 항목 · 두 번 = 원래대로, 적재 칸 순환 · 빈 칸 뒤로, 시작 자세 한 축 / 지정 해제 · 개수 칸, 화면용 검증: 코드 / 로봇 / 빨간 묶음 · `tabIssues`와 같은 문제 종류, 바닥 산포 요약, 시드: `REROLL` · 다른 초안 유지 · `RESET TAB` 시드 유지 · 새 시드는 다름). 돌연변이 17종(상향 셀 기본값 / 대칭식 / 상향 셀 반전 / 지정 자세 대칭 / NECTAR 흡입 불가 순환 / 빈 칸 제거 / 한 축 기본값 / 지정 해제 / 새 시드 다름 / 초안 시드 / 로봇 붙이기 / NECTAR 초과 묶음 / 겹침 로봇 / 바닥 NECTAR / 틀린 FLOWER만 / RESET 시드 / `canResetTab`) 모두 실패 확인.
-- **헤드리스 Chromium 점검 (저장소 밖 1회성, 개발 서버 1366 × 768):** SCENARIO 탭 "Valid scenario", `HIVE` POLLEN +12 → 무효 2개(TIP 임계 / POLLEN 32 초과) + `APPLY` 비활성, `RESET TAB` → 유효, R1 1번 칸 → NECTAR → "HIVE + robot NECTAR exceeds …", 다시 클릭 → 빈 칸이 뒤로, R1 (60, 80) → "R1 body overlaps the HIVE" + 빨간 카드, (60, 30) → 유효, BLUE → R1 (84, 30, 180°) · R2 기본 (135, 108, 180°) · 상향 `OPPOSITE`, `APPLY` → 필드 BLUE, `REROLL` → 시드 바뀜 · 수정 없음 · 저장값 `rngSeed` 반영 · 새로고침 뒤 같은 시드. 콘솔 오류 없음.
-
-### 6.2.42 Step 09-11b (시작 자세 편집 모드) 완료 항목 — 09-11 완료
-
-- **결정:** 3.8항 시나리오 탭 "09-11 확정" ④ 참고 (필드 = 구조물 + GARDEN 기물 + 두 로봇, `DONE` = SCENARIO 탭 `APPLY`). 명세의 "스냅 없음"은 그대로 두고 값만 표시 자리수(0.1 in / 0.1°)로 반올림.
-- **구현:** 3.8항 시나리오 탭 "구현 (09-11b)" 참고.
-- **테스트:** `src/renderer/__tests__/spawnEditLayout.test.ts` A~C(핸들 위치, 돌린 몸체 안 / 비스듬한 헤딩, 잡기: 핸들 우선 · R2 우선 · 빈 곳), `src/ui/__tests__/fieldEdit.test.ts` J~O(연 탭 = SCENARIO · 기억값 · 모드 전환, 끌기: 이동량 · 범위 제한 · 핸들 방향 · 0.1 반올림 · 중심 위 그대로, 놓기: 그 로봇만 · 칸 글자 · 겹침 허용, 되돌리기: 지정 해제 · 칸 글자 · 다른 칸 유지 · 진영 전환 대칭 · 히트맵은 그대로, `DONE` 3종, 장면: 배치 문제 로봇 · GARDEN = 엔진 좌표 · 강조 · BLUE), `src/renderer/__tests__/editScene.test.ts` C(문제 로봇만 빗금 / 빨간 테두리, 잡은 핸들만 주황). 돌연변이 20종 모두 실패 확인 (몸체 안 판정의 오른쪽 축 부호 뒤집기가 축 위 점만으로는 살아남아 비스듬한 헤딩 경우를 추가). 테스트 중 `Math.round(v / 0.1) * 0.1`이 `40.300000000000004`처럼 잔여를 남기는 것을 발견해 `Math.round(v * 10) / 10`으로 수정.
-- **헤드리스 Chromium 점검 (저장소 밖 1회성, 개발 서버 1366 × 768):** SCENARIO 탭 `EDIT ON FIELD` → 필드가 구조물 + GARDEN 기물 + 두 로봇(핸들)으로, 글자 "R1 9.0 in · 36.0 in · 0.0°", R1 몸체 (9, 36) → (40, 50) 끌기 → 칸 40.0 / 50.0, 핸들을 아래로 → 90.0°, R2를 R1 위로 → 두 글자 빨강 + 사유 3개(R1 / R2 HIVE 겹침, 로봇끼리 겹침) + 흰 빗금, `CANCEL` → 두 로봇 "ALLIANCE 기본" 복원, 다시 열어 (30, 40)으로 → `DONE · APPLY` → 적용 · 수정 없음, 다시 열어 끈 뒤 Esc → (30, 40) 복원 · config 창 유지. 벽에 붙은 로봇 글자가 필드 영역 밖으로 잘리던 것을 기준점 이동으로, RED 로봇의 빨간 덧칠이 안 보이던 것을 흰 빗금으로 고침. 콘솔 오류 없음.
-
-### 6.2.43 Step 09-12 (결과 팝업 확정 / 하네스 삭제) 완료 항목 — Step 9 완료
-
-- **결정:** 3.8항 경기 종료와 결과 팝업 "09-12 확정" 참고 (사용자 시안은 없어 09-7a 기본형 기반).
-- **구현:** 3.8항 "구현 (09-12)" 참고.
-- **테스트:** `src/ui/__tests__/resultModel.test.ts` A~B(근거: 텔레옵 / 오토 TIP, 소유 FLOWER만 · 번호 · 보너스 있음 / 없음, GARDEN 수, PARK 로봇 순서, 빈 경우 / RP 카드 조건 · 지금 값 · 달성). 돌연변이 7종 중 6종 실패 확인 (GARDEN 인정 수 ↔ GARDEN 점수 바꾸기는 규칙상 항상 같은 값이라 동등 변이). `src/dev/__tests__/harness.test.ts`는 하네스와 함께 삭제 (앱 컨트롤러 테스트가 같은 흐름을 이미 다룸).
-- **헤드리스 Chromium 점검 (저장소 밖 1회성, 개발 서버 1366 × 768, Playwright 가짜 시계로 120초 경기를 빨리 진행):** 저장값에 R1 팀 `#12345 Bumblebots`, R2 팀명 `Hive Mind`, 오토 TIP 5를 넣고 경기 종료 → 로봇 칩 "R1 #12345 Bumblebots · R2 Hive Mind", `HIVE` 0 "TELEOP TIP 0 × 20 · auto TIP 5 counts for RP only", `FLOWER` 0 "No FLOWER owned", `GARDEN` 4 "POLLEN 4 × 1", `PARK` 5 "R1 parked × 5", `SWARM` "PARK 5 / 10", `POLLINATOR 1` 달성 "TIP 5 / 4", `POLLINATOR 2` "TIP 5 / 7". 한국어 화면도 확인. 콘솔 오류 없음.
-
-### 6.2.44 Step 10-1 (분기 타임라인 / 경기 저장 · 공유 명세 구체화) 완료 항목
-
-- **3.9항 신설 (분기 타임라인 및 경기 저장 / 공유):** 범위(v1 = 파일 다운로드 / 불러오기만, UI 환경설정 제외), 적용 입력 기록, 버전 상수(`ENGINE_VERSION` / `RECIPE_VERSION` / `PRESET_VERSION`), 상태 체크섬(FNV-1a 32비트, 1초 간격 체크포인트 121개), 저장 레시피 형식(RLE + Base64 입력, LUT 설정만 저장), 경기 불러오기 / 내보내기, 분기 트리, 프리셋 파일, 파일 이름.
-- **결정:** 3.9항 "10-1 확정" 참고 — 재현용 입력은 적용 입력 기록(녹화 덧입히기 중 `REPLAY` → `NONE` 전환은 녹화 로그만으로 재현되지 않음을 코드에서 확인), 조작 모드 미저장, 파일만, 가지 상한 8개 + 전 가지 프레임 유지, 가지 UI 권장안, 프리셋 `ALL` = R1 + R2 + 시나리오, 결과 팝업 `EXPORT MATCH` / `EXPORT SUMMARY` 분리 + 동사 `EXPORT` / `IMPORT` 통일(한국어 "내보내기" / "불러오기").
-- **보완 (3.6 / 3.8 / 2.6.2항):** 분기 폐기 규칙은 새 가지 사본에만 적용(10-1 변경 표기), 적용 입력 기록 항목, 상태 흐름 그림 / 분기 확인창 문구 / 스크러버 표 가지 줄, SETTINGS `PRESETS` 줄, 결과 팝업 내보내기 버튼, 5장 개발 지시사항 11 추가.
-- **측정 (저장소 밖 1회성, Node V8, 기본 설정 + 사인파 주행 / 흡입 / 발사 입력):** 끝까지 진행한 경기 6001프레임 힙 약 38 MB / 경기, `runFullMatch` 1.2 ~ 1.5초, 같은 입력 5회 종료 프레임 동일. 최악 8개 가지 약 370 MB 추정 → 데스크톱 Chrome 탭 힙 상한(약 4 GB) 안이라 전 가지 유지, 브라우저 실측은 10-5.
-
-### 6.2.45 Step 10-2 (프리셋 파일) 완료 항목
-
-- **결정:** 3.9항 프리셋 규칙 그대로. 명세에 없던 세부: ① 파일 크기 상한 1 MB ② 흡입 구역은 형식이 맞는 구역만 남기고 8개까지 자름 ③ 경기 파일을 프리셋 줄에 넣으면 따로 알림(`MATCH_FILE`) ④ 로봇 줄 설명 = 적용된 팀 번호 + 팀명 ⑤ 로봇 탭 숫자 칸 전부 저장 값 범위 검사 (3.9항 "구현 (10-2)").
-- **구현:** 3.9항 "구현 (10-2)" 참고.
-- **테스트:** `src/ui/__tests__/presetFile.test.ts` A~I(줄별 왕복 · 슬롯 id 없음 · R1 파일을 R2로, 거부 7종, 로봇 항목별 정리(범위 밖 유지 · 형식 틀림만 기본값 · 구역 8개 · 원본 불변), 틀린 팀 글자 → 틀린 입력 글자 · `INVALID`, 시나리오 항목별 정리 → 범위 밖이면 탭 `INVALID`, `ALL` 초안 3개 · 적용 값 불변 · 틀린 입력 글자 지움, 파일 이름, 덮어쓰기 대상 탭, 문구 영어 / 한국어). 돌연변이 12종 중 11종 실패 확인 — 남은 1종(시나리오 항목 값이 `undefined`면 건너뛰기)은 JSON에서 나올 수 없는 동등 변이라 조건을 지우고 단순화.
-- **헤드리스 Chromium 점검 (저장소 밖 1회성, 개발 서버 1366 × 768):** SETTINGS `Presets` 구역 4줄, R1 `EXPORT` → `tacticsim-robot_R1.json`(`kind` `ROBOT`, 슬롯 id 없음), `ALL` `EXPORT` → `tacticsim-setup_{시각}.json`, `ALL` 파일을 R1 줄에 → "This file goes on the ALL row", 틀린 팀 번호 + 최고 속도 999 파일을 R2 줄에 → 안내 줄 + R2 탭 빨간 점, R2 탭에서 "Digits only, up to 5" / "Must be 1.00 – 200.00 in/s"(이 점검에서 숫자 칸 범위 표시 누락을 발견해 보완) + `APPLY` 비활성, 고친 파일을 다시 R2 줄에 → 덮어쓰기 확인창 → Enter → 팀 `12345 Bumblebots` → `APPLY`, 한국어 화면(줄 이름 / 버튼 / "JSON 파일이 아님"). 콘솔 오류 없음.
-
-### 6.2.46 Step 10-3 (레시피 저장 순수 계층) 완료 항목
-
-- **결정:** 3.9항 규칙 그대로. 명세에 없던 세부: ① 프리셋 파일을 경기로 불러오면 따로 알림(`PRESET_FILE`) ② 레시피의 모르는 항목은 무시, 알아보기 정보는 틀려도 받음 ③ 엄격 해석은 프리셋 정리 함수 재사용("정리해도 바뀌지 않아야 통과") ④ 엔진 버전 기대값 테스트는 앱 기본 설정이 아닌 자체 제원 / 시나리오로 (앱 기본값 변경과 엔진 변경을 구분) (3.9항 "구현 (10-3)").
-- **구현:** 3.9항 "구현 (10-3)" 참고.
-- **테스트:** `src/app/__tests__/matchRecipe.test.ts` A~F(RLE 왕복 · 압축 크기 · 해독 거부 7종, FNV-1a 표준값 · 한글 코드 단위 · 체크포인트 121개 · 비교 결과, 녹화 덧입히기 + `REPLAY` → `NONE` 전환 풀매치 저장 → 파일 → 해석 → 재계산 체크포인트 전부 일치 · 종료 프레임 동일 · 다른 시드는 불일치 검출, 만들기 오류 · 시드 채움 · 시각 형식, 거부 사례 25건, 알아보기 정보 관대 · 경고 3종), `src/core/__tests__/engineVersion.test.ts` A, `src/input/__tests__/inputLog.test.ts` G(출처별 적용 기록, 길이 = 머리, `NONE` 틱은 녹화 로그가 남아도 중립, 적용 기록 재생 = 실제 경기 · 녹화 로그 재생은 어긋남, `NONE`으로 달린 구간을 다시 `REPLAY`로 덮기, 기록 재생 공급 함수). 돌연변이 22종 중 18종 실패 → 남은 4종 중 2종은 테스트 보강(한글 코드 단위 해시, `NONE` 구간 재덧입히기)으로 실패 확인, 1종(틀린 팀 글자 검사)은 뒤의 비교와 중복이라 조건 삭제, 1종(기록 재생 공급 함수의 음수 틱 검사)은 복호화가 없는 값을 0으로 처리하는 동등 변이라 방어 코드로 유지.
-
-### 6.2.47 Step 10-4 (경기 불러오기 / 내보내기 연결) 완료 항목
-
-- **결정:** 3.9항 규칙 그대로 + "구현 (10-4)"의 세부 결정 ① ~ ③.
-- **구현:** 3.9항 경기 내보내기 아래 "구현 (10-4)" 참고.
-- **테스트:** `src/app/__tests__/appController.test.ts` J(불러오기 = 독립 엔진 재계산과 같은 결과, 회전 뒤 0틱 복기 · 종료 연출 / 결과 팝업 / 종료 신호 없음, `REPLAY` 출처, `RESULT`로 열기, 내보내기 재료 = 불러온 기록, 두 로봇 `REPLAY` 분기 → 같은 결과 + 이번에는 종료 연출, 경기 중 불러오기 거부, `NEW` → 가지 이름 초기화, 미종료 경기는 재료 없음), `src/ui/__tests__/matchFile.test.ts` A~F(거부 문구 10종 영어 / 한국어, 확인창 경고 줄, 준비 진행 평균 · 내림, 불일치 배너 처음부터 / 구간 / 버전 사유, 파일 이름, 요약 텍스트 전체 줄 영어 · 한국어). 돌연변이 13종 중 10종 실패 → 1종(진행률 반올림)은 테스트 보강으로 실패 확인, 2종(불러온 경기의 보는 틱 0 설정, 내보내기 재료의 진행 중 / 타임라인 검사)은 앞뒤 규칙과 중복이라 코드 삭제.
-- **헤드리스 Chromium 점검 (저장소 밖 1회성, 개발 서버 1366 × 768, Playwright 가짜 시계로 120초 경기):** 키보드로 R2를 몰아 경기 종료 → 결과 팝업 `EXPORT MATCH`(`tacticsim-match_{시각}_RED_9pts.json`, 약 5 KB) / `EXPORT SUMMARY`(요약 10줄) → `RESTART` → SETTINGS `MATCH` 줄에 요약 `.txt` → "Not a JSON file", 경기 파일 → 확인창 → 같은 명중 확률표라 바로 재계산 → 드라이버 시점 2:00 복기, 배너 · 종료 연출 · 결과 팝업 없음, `RESULT` 총점 9 = 원래 경기. 체크섬 1개를 바꾼 파일 → "Results differ from the file · From between 1:51 and 1:50" 배너(닫기 버튼). 한국어 화면에서 R1 스윗스팟을 바꾼 파일 → 줄에 "경기 불러오는 중 · 명중 확률표 70%" + 취소 → 취소 후 줄 복귀 → 다시 불러와 생성 완료 뒤 복기, 결과 팝업 "경기 내보내기" / "요약 내보내기". 콘솔 오류 없음.
-
-### 6.2.48 Step 10-5 (분기 트리 엔진 / 컨트롤러) 완료 항목
-
-- **결정:** 3.9항 분기 트리 규칙 그대로 + 세부: ① 가지 id는 남은 가지 중 최대 + 1, 표시 번호는 재사용 없음 ② 이름은 24자를 넘으면 잘라서 받음 ③ 가지 이름 바꾸기는 진행 중에도 허용(기록과 무관) ④ 재개 조건을 루프 상태 대신 머리 / 종료 여부로 판단 ⑤ 메모리 실측으로 "전 가지 프레임 유지" 확정 (3.9항 메모리 근거, "구현 (10-5)").
-- **구현:** 3.9항 분기 트리 아래 "구현 (10-5)" 참고.
-- **테스트:** `src/core/__tests__/engineTimeline.test.ts` A~C(분기 = 0 ~ T 프레임 같은 객체 · 부모 배열 보존, 같은 입력이면 부모와 같은 결과, 전환 = 머리 복원 · 난수 배열도 교체 · 이어 기록 = 한 번에 진행한 결과 · 중첩 분기 공유), `src/app/__tests__/branchTree.test.ts` A~E(번호 / 상한, 이름 규칙, 하위 포함 삭제 · 부모로 전환(원본이 아닌 부모 포함) · 번호 재사용 없음, 불변 값, 파일 이름), `src/input/__tests__/inputLog.test.ts` H(사본 독립 · 복원), `src/app/__tests__/appController.test.ts` K(분기해도 원본 보존, 전환 시 보는 틱 · 머리 프레임, 원본 이어 기록, 이름, 8개 상한에서 분기 거부, 하위 포함 삭제 후 원본 타임라인 설치, 진행 중 전환 / 삭제 거부, 종료 가지 ↔ 미종료 가지 전환(복기 / `ENDED` 루프에서 재개), 원본 입력 기록만으로 독립 재계산 = 원본 결과, `NEW` = 트리 폐기). 돌연변이 16종 중 12종 실패 → 남은 4종(부모가 원본이 아닌 삭제, 전환 시 난수 배열, 분기 시 원래 가지 입력 사본, 지금 가지 삭제 시 전환)은 테스트 보강으로 모두 실패 확인.
-- **헤드리스 Chromium 측정 (저장소 밖 1회성, 개발 서버 1366 × 768, 가짜 시계, CDP `HeapProfiler.collectGarbage` + `Runtime.getHeapUsage` — 가짜 시계가 `performance`를 바꿔 `performance.memory`는 쓸 수 없음):** 경기 → 끝까지 → `REVIEW` → 타임라인 맨 앞 클릭 → `BRANCH`(확인창 Enter) → 끝까지를 7번 반복해 가지 8개: 힙 16.1 → 38.8 → 60.8 → 82.1 → 103.3 → 124.4 → 145.6 → 166.7 → 187.9 MB, 탭 힙 상한 4096 MB. 9번째 `BRANCH`는 분기하지 않음(주 버튼 그대로). 콘솔 오류 없음.
-
-### 6.2.49 Step 10-6 (분기 UI) 완료 항목 — Step 10 완료
-
-- **결정:** 3.9항 가지 선택 / 전환 / 삭제 / `NEW` / 결과 팝업 규칙 그대로 + "구현 (10-6)"의 세부 결정 ① ~ ④.
-- **구현:** 3.9항 분기 트리 아래 "구현 (10-6)" 참고.
-- **테스트:** `src/ui/__tests__/branchView.test.ts` A~G(가지 이름 영어 / 한국어, 목록 줄 · 0틱 분기도 시각 표시, 목록 열기 조건, 분기 표식 순서 · 설명, 확인창 문구 4종 · 하위 수 · 가지 2개부터 NEW 문구, 결과 팝업 가지 이름 조건 · 비교 줄 · 동점 최고, 파일 이름 `_b{번호}`), `i18n.test.ts` / `mainScreenModel.test.ts` 갱신(새 분기 확인창 문구, 옛 계산 삭제). 돌연변이 12종 중 8종 실패 → 2종(0틱 분기 표시, 가지 2개 NEW 문구)은 테스트 보강으로 실패 확인, 2종(원본 = 번호 1, 종료 = 점수 있음)은 규칙상 같은 뜻인 동등 변이라 조건을 하나로 줄임.
-- **헤드리스 Chromium 점검 (저장소 밖 1회성, 개발 서버 1366 × 768, 가짜 시계):** 경기 끝까지 → 1:24 지점 `BRANCH` → 확인창 "Start a new branch at 1:24 … The current branch (Main) keeps its record." → 끝까지 → 결과 팝업 진영 옆 "Branch 2" + `BRANCHES` Main 9 / Branch 2 9(동점 둘 다 트로피) → `EXPORT MATCH` `…_9pts_b2.json` → 가지 목록 2줄 → 이름 "Fast cycle" → 분기 표식 설명 "Fast cycle · from Main at 1:24" → 원본으로 전환(표식 없음) → 삭제 확인창 → 목록 1줄 · 원본 휴지통 비활성 → 계속 분기해 8개 → 확인 버튼 하나 "All 8 branches are in use …" → `NEW` 확인창 "… with all 8 branches …" → 한국어 목록("원본 — 9점", "가지 3 1:36에서 1:36까지"). 7단계 중첩에서 영어 이름이 잘려 들여쓰기 14u → 10u, 목록 폭 380u → 420u로 고침. 콘솔 오류 없음.
-
-### 6.2.50 v1.0.0 릴리스 준비 완료 항목
-
-- **결정 (사용자):** ① 라이선스 = PolyForm Noncommercial 1.0.0(상업적 사용만 금지), 저작권 표기 `7ISx7JuQ` ② 버그 리포트 = 메일만(폼 없음), 받는 사람 `7isx7juq@gmail.com`, 링크를 누르면 Gmail 쓰기 창 ③ 앱 안 도움말 탑재 ④ README 영 / 한 간단 소개 + 사용법 ⑤ 버전 1.0.0. 세부(도움말 위치 = config 띠 `?`, 열면 일시정지, 기본 메일 앱 보조 링크, 본문 환경 정보)는 3.10항.
-- **구현:** 3.10항 참고.
-- **테스트:** `src/ui/__tests__/helpInfo.test.ts` A~D(앱 버전 = `package.json`, Gmail 링크의 받는 사람 / 제목 / 본문이 줄바꿈 · `&` · `#` · 한글까지 그대로 풀림, `mailto`, 본문 환경 정보 · 영어 / 한국어 틀, 조작표 = 키 설정). `i18n.test.ts`의 게임 용어 규칙으로 도움말 문구의 `TELEOP` / `ALLIANCE` 표기를 고침. 전체 실행에서 간헐적으로 5초 기본 제한을 넘던 풀매치 컨트롤러 테스트 J(10-4) / K(10-5)에 다른 풀매치 테스트와 같은 120초 제한 적용.
-- **헤드리스 Chromium 점검 (저장소 밖 1회성, 개발 서버 1366 × 768):** 경기 중 `?` → 도움말(경기 일시정지, Space로 재개되지 않음), Gmail 링크 받는 사람 / 제목 / 본문 끝 환경 정보, `mailto` 링크, 정보(버전 1.0.0 · 라이선스 · 링크 3개), Esc로 닫힘, 한국어 도움말 · 한국어 메일 틀. 운영 빌드 결과물에 `icons.svg` 없음. 콘솔 오류 없음.
-
-### 6.3 남은 Step (권장 순서)
-
-> 모든 Step은 완료 시 `npm test`(엔진 회귀 테스트)가 통과해야 하며, 새로 추가한 규칙에는 테스트 그룹을 추가한다.
-
-- **Step 6 — 탄도 모듈 + 발사 비행 처리 (`src/core/ballistics.ts`):** 06-1(명세), 06-2(탄도 계산), 06-3(LUT 생성), 06-4(판정 / LUT 정밀화), 06-5(판정 함수), 06-6(비행 처리) 완료 — Step 6 완료.
-    - ~~06-2: 탄도 계산 함수 ($v_0$ 닫힌 해, 비행 시간, 사거리 R, HIVE 직육면체 교차) + 테스트.~~ (완료, 6.2.3)
-    - ~~06-3: 몬테카를로 명중 판정, 기물 종류별 v0 탐색, 기준 셀 72 × 72 LUT 생성, 4-Cell 대칭 복사 (로봇당 8장, 합계 16장).~~ (완료, 6.2.4)
-    - ~~06-5: `createLUTShotResolver(luts, r1Config, r2Config)`: 쌍선형 보간 조회(`sampleLUT`) + 조준 판정(FIXED 허용 오차 / TURRET 회전 범위) → 엔진 생성자에 주입 (엔진 수정 불필요).~~ (완료, 6.2.6)
-    - ~~06-6: 2.6.2항의 발사 비행 처리 구현 (`IN_FLIGHT`, 비행 대기열, 도착 규칙, 착지 속도) + 엔진 회귀 테스트.~~ (완료, 6.2.7)
-- **Step 7 — 입력 계층 및 실시간 루프 (상세 규칙 3.6항, 리프트 FSM 2.6.3항):** 07-1(명세), 07-2(리프트 FSM), 07-3(입력 변환), 07-4(입력 로그 / 덧입히기), 07-5(실시간 루프), 07-6(브라우저 어댑터) 완료 — Step 7 완료.
-    - ~~07-1: 입력 계층 / 실시간 루프 / 리프트 FSM 명세 구체화.~~ (완료, 6.2.8)
-    - ~~07-2: 엔진 리프트 FSM (`actionState` 확장, `ActionRequest`, 요청 / 완료 처리, FLOWER 테스트 갱신 + 테스트 그룹 T).~~ (완료, 6.2.9)
-    - ~~07-3: `src/input/inputConfig.ts` + 순수 변환 (장치 읽기 / 탭 래치 / 장치 합성 / 조작 모드 / 행동 요청 / 8비트 부호화) + 단위 테스트.~~ (완료, 6.2.10)
-    - ~~07-4: 입력 로그 + 로봇별 입력 출처(`LIVE` / `REPLAY` / `NONE`) + 녹화 덧입히기 + 로그 기반 `inputProvider`.~~ (완료, 6.2.11)
-    - ~~07-5: 실시간 루프 컨트롤러 + 입력 수집기 — 20 ms 누산기, 따라잡기 상한 5틱, 일시정지 / 재개, 경기 종료 자동 정지, 가짜 시간 테스트.~~ (완료, 6.2.12)
-    - ~~07-6: 브라우저 어댑터 (게임패드 폴링, 키보드, `requestAnimationFrame`, 자동 일시정지 이벤트) + 헤드리스 Chromium 점검.~~ (완료, 6.2.13). 화면 연결은 Step 8.
-- **Step 8 — 렌더러 엔진 연결 (상세 규칙 3.7항):** 08-1(명세), 08-2(발사 비행 개정), 08-3(득점 내역), 08-4(보기 / 정적 레이어 / 로봇 / 바닥 기물), 08-5(HIVE / 게이지 / 경기 종료 강조), 08-6(비행 공 / 표시 옵션), 08-7(개발 하네스) 완료 — Step 8 완료.
-    - ~~08-1: 렌더러 / 화면 연결 명세 구체화.~~ (완료, 6.2.14)
-    - ~~08-2: 발사 비행 개정(06-6) — HIVE / 벽 충돌 후 반사 포물선 낙하 (명세 + `ballistics.ts` + 엔진 + 테스트).~~ (완료, 6.2.15)
-    - ~~08-3: 엔진 경기 종료 득점 내역 `scoreBreakdown` 기록 (`types.ts`, 엔진, 회귀 테스트 그룹 추가 — 항목 합 = `totalScore`, 인정 근거, 종료 전 프레임 `null`, 스크러빙 후 재기록).~~ (완료, 6.2.16)
-    - ~~08-4: 캔버스 레이아웃 / 좌표 변환 / 보기 회전(애니메이션 배율 포함), 정적 레이어 캐시(상대 진영 채도 제거), 로봇(몸체 / 인테이크 구역 / 적재물 / 배지 — 글자 배지 대체), 바닥 기물.~~ (완료, 6.2.17)
-    - ~~08-5: HIVE(아군 셀 상태, 시차 낙하 연출), FLOWER 게이지(필드 밖 9칸, 잼, 가득 참 X), NECTAR 재고 게이지(게이지 틀은 정적 레이어에 추가), 경기 종료 강조.~~ (완료, 6.2.18)
-    - ~~08-6: 비행 공(명목 구간 보간 + 높이 보정, 충돌 후 구간, 그림자 / 오프셋 / 크기), 표시 옵션 5종.~~ (완료, 6.2.19)
-    - ~~08-7: 개발 하네스(정식 엔진 / 입력 / 루프 + 간이 판정 함수, 시작 회전 후 루프 시작, 옵션 체크박스) + 헤드리스 Chromium 점검.~~ (완료, 6.2.20)
-- **Step 9 — 웹 GUI (React, 상세 규칙 3.8항):** 09-1(명세), 09-2(탄도 사전 준비), 09-3(LUT Worker 풀), 09-4(LUT 캐시), 09-5(배치 검증), 09-6a(GUI 순수 기반), 09-6b(렌더러 전환), 09-6c(앱 컨트롤러), 09-6d(화면 뼈대), 09-7a(경기 흐름), 09-7b(확인창 / 토스트 / 배너 / 타임라인), 09-8a(config 창 틀), 09-7c(경기 종료 연출), 09-8b(SETTINGS / 자동 보관), 09-9a(로봇 탭 1), 09-9b(로봇 탭 2), 09-9c(구역 폭 최소값), 09-10a(스윗스팟 / 명중 확률표 생성 연결), 09-10b(필드 편집 모드 틀 / 히트맵), 09-10c(스윗스팟 모드), 09-11a(시나리오 탭), 09-11b(시작 자세 편집 모드), 09-12(결과 팝업 확정 / 하네스 삭제) 완료 — Step 9 완료.
-    - ~~09-1: 웹 GUI 명세 구체화.~~ (완료, 6.2.21)
-    - ~~09-2: `ballistics.ts` 사전 준비 — `generateReferenceLUTRows`, `robotLUTSeeds`, `BALLISTICS_MODEL_VERSION`, 스윗스팟 진영 기준 변환 함수 + 분할 / 작업 계획 동일성 테스트.~~ (완료, 6.2.22)
-    - ~~09-3: LUT Worker 풀(`src/workers/lutWorker.ts`) + 작업 대기열 + 조립 + 로봇별 상태 머신 / 취소 (React 비의존, 가짜 Worker 테스트).~~ (완료, 6.2.23)
-    - ~~09-4: IndexedDB LUT 캐시 (캐시 키 / LRU 20개 / 실패 허용).~~ (완료, 6.2.24)
-    - ~~09-5: `validateRobotPlacement()` + `reset()` 사전 보정 + 엔진 회귀 테스트 그룹.~~ (완료, 6.2.25)
-    - 09-6: GUI 기반 — 아래 4단계로 분할 (6.2.26).
-        - ~~09-6a: 순수 기반 — 문구 사전 / 언어, 단위 변환 · 표시, 입력 문자열 해석, 경기 타이머 표시.~~ (완료, 6.2.26)
-        - ~~09-6b: 렌더러 전환 — 캔버스를 필드 뷰포트(800 × 800)만 남기고 좌우 정보 패널 삭제, 진영 공식 색, 캔버스 글자 정리, 하네스를 새 캔버스 크기에 맞춤 (스크린샷 확인).~~ (완료, 6.2.27)
-        - ~~09-6c: 앱 컨트롤러 — 하네스 컨트롤러를 React 비의존 `AppController`로 확장 (엔진 / 입력 / 루프 / 렌더링 예약 / 10 Hz 상태 알림, 기능은 하네스 수준: 시작 · 일시정지 · 재개 · 리셋).~~ (완료, 6.2.28)
-        - ~~09-6d: 화면 뼈대 — 좌측 득점 패널 / 필드 / 접힌 config 아이콘 띠(표시만) / 스크러버 줄(기존 동작만), 화면 비례 단위 `--u`, 명중 확률 좌측 패널 (스크린샷 확인).~~ (완료, 6.2.29)
-    - (09-7 전 자산) 행동 배지 SVG 6종 + 파비콘 추가, TIP 아이콘은 09-6d 것 유지 (3.7항 "배지 자산 확정", 3.8항 "파비콘").
-    - 09-7: 경기 흐름 — 시작 / 일시정지 / 재개 / 분기(확인창) / 재생 / 배속 / 틱 · 1초 이동 / 새 경기, 상태별 키 공유, 경고 토스트 / 자동 일시정지 배너 (`ENDGAME` 타이머 색은 09-6d에서 완료). 행동 상태 배지 이미지 자산은 09-7 전에 추가 완료. 2단계로 분할:
-        - ~~09-7a: 컨트롤러 흐름(보는 틱 / 재생 · 배속 / 틱 · 1초 이동 / 재개 · 분기 / 종료 강조 5초 → 결과 → 복기) + 상태별 단축키 + 스크러버 줄 버튼 연결 + 결과 팝업 기본형(점수 집계표), 확인창은 임시 `confirm`.~~ (완료, 6.2.30)
-        - ~~09-7b: 확인창 모달, 경고 토스트, 자동 일시정지 배너, 타임라인 클릭 / 끌기 (스크린샷 확인).~~ (완료, 6.2.31)
-        - ~~09-7c: 경기 종료 연출 (사용자 피드백 추가) — 마지막 10초 빨강 맥박, 종료 흰빛, 종료 배너 + 5초 진행바, 점수 카운트업 + 항목 칩.~~ (완료, 6.2.33) — 09-7 완료
-    - 09-8: config 창 — 아이콘 띠(준비 신호 / 진행률 링 / 깃발 / 게임패드) + 탭 틀 + 초안 / 적용 / 되돌리기 + SETTINGS 탭(게임패드 상태, 입력 출처, 조작 모드, 키보드 토글, 표시 옵션, 언어, 단위, 기본 보기) + 설정 자동 보관. 2단계로 분할:
-        - ~~09-8a: 창 틀(펼치기 / 자동 접힘 / 탭 4개 / 잠금) + 초안 · 적용 · `RESET TAB` 틀 + 아이콘 띠 상태 + `START` 막기.~~ (완료, 6.2.32)
-        - ~~09-8b: SETTINGS 탭(게임패드 상태, 입력 출처 `AUTO` / `LIVE` / `NONE` / `REPLAY`, 조작 모드, 키보드 토글, 표시 옵션, 언어, 단위, 기본 보기, `RESET ALL`) + 컨트롤러 연결 + `localStorage` 자동 보관 (스크린샷 확인).~~ (완료, 6.2.34) — 09-8 완료
-    - 09-9: 로봇 탭 — 제원 폼, `BumperZone` 편집기, 슈터 / 리프트, 팀 번호, 상대 탭 복사, 탭 되돌리기. 2단계로 분할:
-        - ~~09-9a: 로봇 프로필(팀 번호 / 팀명) + 입력칸 공통 규칙 + 식별 · 하드웨어 · 인테이크 딜레이 · 슈터 형식 / 범위 / 딜레이 · 리프트 + COPY + 저장 형식 + 좌측 패널 팀 표시.~~ (완료, 6.2.35)
-        - ~~09-9b: 인테이크 구역 편집기(면 / offset / width / depth, 프리셋, 로봇 기준 미리보기 + 터렛 부채꼴) + 슈터 탄도 입력칸(발사구 지상고, 발사각, 오프셋, 고급 설정 편차 3종) + 엔진 비행 연결 (스크린샷 확인).~~ (완료, 6.2.36)
-    - ~~09-10a: 스윗스팟 입력 + LUT 진행 표시(v0 선표시 / 진행 막대 / 남은 시간) + 기본 프리셋 자동 생성 + LUT 판정 교체.~~ (완료, 6.2.38)
-    - 09-10b / 09-10c: 필드 편집 모드 — 2단계로 분할 (3.8항 09-10b 확정 ①):
-        - ~~09-10b: 편집 모드 공통 틀(안내 띠 / `DONE` · Esc / 끝나는 경우 / 컨트롤러 편집 장면) + `SHOW HEATMAP`(히트맵, 점진 표시) — 회색 필드 + 진영별 파스텔 척도 (3.8항 09-10 확정 ⑦).~~ (완료, 6.2.39)
-        - ~~09-10c: `SET ON FIELD`(스윗스팟 모드) — 클릭 = 격자 중심으로 스윗스팟 초안, 마우스를 올린 격자 강조 + 좌표, 조준점을 향한 로봇 몸체 윤곽, 검증 실패 사유, (LUT가 있으면) 히트맵 반투명, `DONE` / `CANCEL`.~~ (완료, 6.2.40) — 09-10 완료
-    - 09-11: 시나리오 탭 + 시작 자세 편집 모드 + 시드 `REROLL` + 유효 배지. 2단계로 분할 (3.8항 09-11 확정 ①):
-        - ~~09-11a: 시나리오 탭 폼(진영 / `HIVE` / 적재물 / 잔여 기물 / 오토 TIP / 시작 자세 숫자 칸) + 시드 `REROLL` + 유효 배지.~~ (완료, 6.2.41)
-        - ~~09-11b: 시작 자세 편집 모드 `EDIT ON FIELD` — 로봇 몸체 드래그 = 위치, 회전 핸들 = 헤딩(스냅 없음), 배치 검증(겹친 로봇 빨간색 + 사유), 좌표 / 헤딩 글자, 필드 = 구조물 + `GARDEN` 기물 + 두 로봇, `DONE · APPLY` / `CANCEL`.~~ (완료, 6.2.42) — 09-11 완료
-    - ~~09-12: 결과 팝업 세부 디자인 확정(09-7a 기본형 기반, 사용자와 확정), 개발 하네스 삭제(+ 1회성 스크립트 `src/tmp_shots.ts`도 함께 삭제, 09-10b 확정 ③) — Step 9 완료.~~ (완료, 6.2.43)
-- **Step 10 — 분기 타임라인 및 경기 저장/공유:** (09-1 추가) 로봇 프로필 / 시나리오 JSON 내보내기 · 불러오기(SETTINGS 탭 프리셋 관리), 결과 팝업 로그 / JSON 내보내기. 분기 트리(부모 프레임 공유, 분기 이후 프레임만 생성), 저장 레시피(설정 + 시나리오 + 시드 + 양자화 입력 로그 + 탄도 설정 / LUT 시드 / 샘플 수 / `BALLISTICS_MODEL_VERSION` + 엔진 버전 + 상태 체크섬, LUT 자체는 저장하지 않고 캐시 또는 재생성). 레시피 약 50 KB 수준으로 파일/IndexedDB 저장 가능 (10-1: v1은 파일만). 입력 로그 형식(로봇별 틱당 4 B, 8비트)은 3.6항, 저장 시 연속 중복 압축. — **Step 10 완료** (10-1 ~ 10-6).
-    - 10-1(명세) 완료. 상세 규칙 3.9항. 하위 Step (각 Step 완료 시 `npm test` / `npx tsc -b` / `npm run build` 통과):
-    - ~~10-1: 분기 타임라인 / 경기 저장 · 공유 명세 구체화.~~ (완료, 6.2.44)
-    - ~~10-2: 프리셋 파일 — 순수 직렬화 / 해석 / 정리(`ROBOT` / `SCENARIO` / `SETUP`, 자동 보관 정리 함수 재사용) + SETTINGS 탭 `PRESETS` 구역(`R1` / `R2` / `SCENARIO` / `ALL` 줄 `EXPORT` / `IMPORT`, 초안 반영 · 덮어쓰기 확인창 · 거부 사유) + 파일 다운로드 / 선택 도우미 + 테스트 (스크린샷 확인).~~ (완료, 6.2.45)
-    - ~~10-3: 레시피 저장 순수 계층 — 적용 입력 기록(`MatchInputs.applied`, 분기 시 자름), `ENGINE_VERSION` / `RECIPE_VERSION`, `frameChecksum` + 체크포인트, 입력 RLE + Base64 부호화 / 해독, 레시피 만들기 / 해석 · 검증(거부 사유 코드) + 재현 테스트(저장 → 해독 → 재계산 체크섬 전부 일치, `REPLAY` → `NONE` 전환 경기, 버전 누락 방지 기대값).~~ (완료, 6.2.46)
-    - ~~10-4: 경기 불러오기 / 내보내기 연결 — `IMPORT MATCH`(확인창 + 버전 경고, 적용 값 교체, LUT 준비 · 취소, 재계산, 복기 상태, 체크섬 불일치 배너) + 결과 팝업 `EXPORT MATCH` / `EXPORT SUMMARY`(요약 텍스트 규칙) + 파일 이름 규칙 (스크린샷 확인).~~ (완료, 6.2.47)
-    - ~~10-5: 분기 트리 엔진 / 컨트롤러 — 엔진 타임라인 객체 교체 API(분기 = 0 ~ T 참조 공유, 전환 = 교체), 가지 트리 규칙(`MAX_BRANCHES = 8`, 번호 / 이름, 삭제 = 하위 포함, 원본 보호), 가지별 녹화 로그 사본 / 적용 입력 기록, 전환 시 루프 상태(일시정지 / 복기), `endSeq` 규칙, `NEW` = 트리 폐기 + 테스트 + 헤드리스 Chromium 8개 가지 힙 측정.~~ (완료, 6.2.48)
-    - ~~10-6: 분기 UI — 스크러버 가지 버튼 / 목록(전환 · 이름 바꾸기 · 삭제), 타임라인 분기 표식, 분기 확인창 새 문구 / 가득 참 안내창, `NEW` 확인창 가지 수, 결과 팝업 헤더 가지 이름 + `BRANCHES` 비교 줄 (스크린샷 확인) — Step 10 완료.~~ (완료, 6.2.49)
-
-### 6.4 보류 / 후속 검토 항목
-
-- ~~**시작 자세 배치 검증:**~~ → Step 9로 이동 (09-1, 3.8항 시작 자세 배치 검증, 09-5 구현 완료).
-- **1프레임 겹침 스폰:** HIVE 팁 낙하 착지 지점, 발사 비행(충돌 후 낙하 포함)의 착지 지점이 그 사이 이동한 로봇이나 기물 위일 수 있음 (다음 틱 충돌 처리로 밀려남). 비행 중 FLOWER 원통 / 로봇과의 충돌도 무시.
-- **필드 벽 반사 / 필드 밖 이탈:** 공중에서 벽에 닿은 공은 높이 무한 · 반발 0 벽으로 가정해 수평 정지 후 수직 낙하한다 (2.6.2항, 08-2). 필드 테스트에서 어색하면 반발 계수 > 0 반사로 교체. 벽을 넘어 필드 밖으로 나가는 공은 전술이 아닌 실수이므로 구현하지 않음.
-- **HIVE 충돌 후 낙하 파라미터:** 반발 계수(기물별 restitution 재사용), 산포(세기 ±20%, 방향 ±15°), 윗면 최대 튐 3회, 최소 이탈 속도 20 in/s는 실측 전 임시값. HIVE 윗부분의 실제 형상(평판 아님)과 공이 HIVE 위에 걸려 멈추는 경우는 모델링하지 않음.
-- **조준 오차에 따른 비행 연출:** 고정형 슈터가 허용 오차 안에서 비스듬히 쏜 명중도 조준점으로 도착 처리 (LUT 결과 우선). 연출상 지면 직선과 조준점 사이 최대 약 ±3° 어긋남.
-- **FLOWER 투입 방향 구역(`flowerDropZones`):** v1은 방향 무관(도달 거리 1.0 in). 필드 테스트 후 필요 시 `BumperZone` 재사용.
-- **바닥 잔여 공 직접 배치 GUI:** v1 이후 (현재는 무작위 산포).
-- **실측 보정:** FLOWER 용량 테이블, HIVE 팁 임계 테이블, 빗맞음 방출 파라미터, 착지 속도 유지 비율(`landingSpeedRetention`, 실측 방법 2.5항), 슈터 편차 파라미터(실측 명중률로 보정)는 실측 데이터 확보 시 교체.
-- **저정밀 LUT 미리보기 (불채택):** 샘플을 줄인 빠른 미리보기 LUT를 먼저 보여주고 정밀본으로 교체하는 방식은 채택하지 않음. 미리보기로 경기를 돌리면 저장 레시피 재현 시 결과가 달라져 결정론이 깨지고, 표시용으로만 제한해도 정밀본과 달라 보이는 혼란이 생김. 대신 정밀본을 행 단위로 점진 표시 (2.6.2항 진행 상황 표시).
-- **경기 자동 저장 / 복구:** v1은 새로고침 / 크래시 시 경기 폐기 (3.6항). 입력 로그를 주기적으로 저장해 두면 로그 재생으로 복구할 수 있으므로 필요 시 Step 10 이후 검토. (10-1: Step 10 범위 밖 확정. 적용 입력 기록 + 레시피 형식을 그대로 쓰면 구현 비용이 작다.)
-- **브라우저 안 경기 / 프리셋 목록 (10-1 신규):** v1은 파일 다운로드 / 불러오기만 (3.9항). IndexedDB에 이름 붙인 경기 / 프리셋 목록을 두는 것은 후속 검토.
-- **가지 프레임 해제 (10-1 신규):** v1은 모든 가지의 프레임을 메모리에 유지 (최악 약 370 MB 추정, 3.9항). 10-5 브라우저 실측이나 사용 중 메모리가 문제가 되면 현재 가지 외 프레임을 해제하고 선택 시 적용 입력 기록으로 재계산(≤ 1.5초)하는 방식으로 교체. (10-5 실측: 8개 가지 약 188 MB, 상한의 약 5% — 당분간 불필요.)
-- **미종료 가지 / 트리 전체 저장 (10-1 신규):** v1 레시피는 종료된 가지 하나만 저장 (3.9항). 일시정지 중 저장 / 여러 가지를 한 파일에 저장은 후속 검토.
-- ~~**키보드 입력:**~~ → 해결 (09-1): 키보드 주행 유지 + SETTINGS 탭 런타임 끄기 토글 + 상태별 키 공유로 스크러빙 단축키와 공존 (3.6항, 3.8항).
-- **브라우저 자동 테스트:** 07-6의 헤드리스 Chromium 점검은 저장소 밖 일회성 스크립트(`playwright-core`, 작업 공간에만 설치)로 수행했다. 08-1에서 Step 8도 같은 방식(순수 계산 함수 Vitest + 단계별 1회성 점검)으로 결정하고 Playwright는 저장소에 넣지 않았다 (스크린샷 비교는 폰트 / 안티앨리어싱 차이로 불안정). Step 9 GUI 상호작용이 복잡해지면 Vitest 브라우저 모드 편입을 다시 검토.
-- **렌더링 프레임 간 보간:** v1은 최신 틱 프레임만 그린다 (3.7항). 50의 배수가 아닌 주사율(60 / 144 Hz)에서 같은 틱이 불규칙하게 반복되는 미세한 끊김이 거슬리면, 실시간 루프 `onFrame`에 누산기 잔여 비율(alpha)을 넘겨 직전 / 현재 프레임을 보간하는 방식을 검토 (화면이 최대 1틱 20 ms 늦게 보임). 모니터 주사율을 100 Hz 등 50의 배수로 맞추면 틱당 같은 수의 화면 프레임이 대응되어 이 끊김이 없어진다 (60 Hz로 낮추는 것은 해결되지 않음).
-- **리프트 상태 주행:** v1은 리프트 상태 전체(올림 / 대기 / 투입 / 내림)를 Stationary Lock으로 둔다. 실제 로봇이 리프트를 올린 채 미세 이동이 가능하면 대기 상태의 저속 주행 허용을 검토. (09-1 검토: 실제 로봇이 리프트를 올린 채 주행 가능한지 확인되면 `RobotConfig` 옵션(리프트 중 최고 속도, 0 = 잠금)으로 추가. 그 전까지 Step 9 범위 밖.)
-- **교차 브라우저 결정론:** `Math.sin/cos/hypot` 등 초월함수 결과가 JS 엔진마다 최하위 비트에서 다를 수 있어, 다른 브라우저 간 리플레이는 비트 단위 동일성이 보장되지 않음 (저장 레시피에 상태 체크섬 포함 권장 → 10-1 채택: 1초 간격 체크포인트로 불일치 구간 표시, 3.9항).
-- **복기 중 로봇 동선 표시 (09-1 신규):** 저장된 프레임에서 틱 구간의 로봇 위치를 선으로 그려 동선 최적화 회의에 활용 (표시 옵션 후보). 프레임이 모두 저장돼 있어 구현 비용이 작다. Step 9 이후. (10-1: Step 10 범위 밖 확정.)
-- **드라이버 연습용 3D 보기 (09-1 참고):** 드라이버 감각 연습은 3D 시점이 유리하다는 의견. 현재 범위 밖, 참고로만 기록.
+| 01 ~ 02 | 프로젝트 세팅(Vite + React + TS), 타입 정의, 룰북 좌표계와 필드 | `src/core/types.ts` |
+| 03 ~ 04 | 기구학(Slew Rate 가감속), 충돌 엔진(SAT, 기물 동역학, PBD, HIVE 시차 낙하 계획) | `kinematics.ts`, `collision.ts` |
+| 05 | 50 Hz 결정론적 엔진과 게임 규칙 전반, Vitest 회귀 테스트 | `simulationEngine.ts` |
+| 06 | 탄도 모델: v0 탐색, 몬테카를로 명중 판정, LUT 생성 / 4셀 대칭, 명중 판정 함수, 발사 비행 | `ballistics.ts` |
+| 07 | 입력 계층: 리프트 FSM, 입력 변환 / 양자화, 입력 기록 / 녹화 덧입히기, 실시간 루프, 브라우저 어댑터 | `src/input/` |
+| 08 | 렌더러: 보기 회전, 로봇 / 기물 / HIVE / 게이지, 비행 공, 표시 옵션, 종료 득점 내역 | `src/renderer/` |
+| 09 | 웹 GUI: LUT Worker 풀 / IndexedDB 캐시, 배치 검증, 앱 컨트롤러, 메인 화면, 경기 흐름, config 창(로봇 / 시나리오 / SETTINGS), 필드 편집 모드, 결과 팝업 | `src/workers/`, `src/app/`, `src/ui/`, `src/components/` |
+| 10 | 분기 트리, 경기 파일(레시피) 불러오기 / 내보내기, 프리셋 파일 | `branchTree.ts`, `matchRecipe.ts`, `presetFile.ts` |
+| v1.0.0 | 라이선스, 서드파티 고지, README(영 / 한), 앱 안 도움말, 버그 리포트 | `LICENSE`, `README.md`, `HelpDialog.tsx` |
+
+### 5.2 v2 후보 (보류 항목)
+
+**기능**
+
+- **경기 자동 저장 / 복구:** v1은 새로고침 / 크래시 때 경기가 사라진다 (3.6항). 적용 입력 기록 + 레시피 형식을 그대로 쓰면 구현 비용이 작다.
+- **브라우저 안 경기 / 프리셋 목록:** v1은 파일 다운로드 / 불러오기만 (3.9항). IndexedDB에 이름 붙인 목록을 둔다.
+- **미종료 가지 / 트리 전체 저장:** v1 경기 파일은 끝난 가지 하나만 저장한다 (3.9항).
+- **결과 팝업 가지 비교 줄에서 바로 전환:** v1은 표시만 한다.
+- **복기 중 로봇 동선 표시:** 저장된 프레임에서 틱 구간의 로봇 위치를 선으로 그려 동선 회의에 활용 (표시 옵션 후보). 프레임이 모두 저장돼 있어 구현 비용이 작다.
+- **바닥 기물 직접 배치 화면:** v1은 무작위 산포 (2.4항).
+- **리프트 상태 주행:** v1은 리프트 상태 전체를 Stationary Lock으로 둔다 (3.4항). 실제 로봇이 리프트를 올린 채 움직일 수 있으면 `RobotConfig` 옵션(리프트 중 최고 속도, 0 = 잠금)으로 추가.
+- **FLOWER 투입 방향 구역 (`flowerDropZones`):** v1은 방향 무관(도달 거리 1.0 in, 2.6.3항). 필요하면 인테이크 구역과 같은 `BumperZone` 구조로 대상 판정만 교체.
+- **게임패드 매핑 편집 화면:** v1은 `inputConfig.ts` 고정 매핑 (3.6항).
+
+**물리 / 모델**
+
+- **실측 보정:** FLOWER 용량 테이블, HIVE TIP 임계 테이블, TIP 낙하 분포, 착지 속도 유지 비율(`landingSpeedRetention`, 실측 방법 2.5항), 슈터 편차 파라미터(실측 명중률로 보정)를 실측 데이터로 교체.
+- **HIVE 충돌 후 낙하 파라미터:** 반발 계수(기물별 restitution 재사용), 산포(세기 ±20%, 방향 ±15°), 윗면 최대 튐 3회, 최소 이탈 속도 20 in/s는 실측 전 임시값. HIVE 윗부분의 실제 형상과 공이 HIVE 위에 걸려 멈추는 경우는 모델링하지 않는다.
+- **필드 벽 반사:** 공중에서 벽에 닿은 공은 높이 무한 · 반발 0 벽으로 가정한다 (2.6.2항). 필드 테스트에서 어색하면 반발 계수 > 0 반사로 교체 (구조 동일). 벽을 넘어 필드 밖으로 나가는 공은 전술이 아닌 실수이므로 구현하지 않는다.
+- **1프레임 겹침 스폰:** HIVE TIP 낙하 / 발사 비행의 착지 지점이 그 사이 움직인 로봇이나 기물 위일 수 있다 (다음 틱 충돌 처리로 밀려남). 비행 중 FLOWER / 로봇과의 충돌도 무시한다.
+- **조준 오차에 따른 비행 연출:** 고정형 슈터가 허용 오차 안에서 비스듬히 쏜 명중도 조준점으로 도착 처리한다 (LUT 결과 우선). 연출상 지면 직선과 조준점 사이가 최대 약 ±3° 어긋난다.
+
+**기술**
+
+- **브라우저 자동 테스트 편입:** v1은 순수 함수 Vitest + 저장소 밖 일회성 헤드리스 Chromium 점검이다 (3.7항). 화면 상호작용 회귀가 잦아지면 Vitest 브라우저 모드 편입을 검토한다.
+- **렌더링 프레임 보간:** v1은 최신 틱 프레임만 그린다 (3.7항). 60 / 144 Hz에서 끊김이 거슬리면 실시간 루프 `onFrame`에 누산기 잔여 비율(alpha)을 넘겨 직전 / 현재 프레임을 보간한다 (화면이 최대 1틱 20 ms 늦게 보임). 모니터 주사율을 100 Hz 등 50의 배수로 맞추면 이 끊김이 없어진다 (60 Hz로 낮추는 것은 해결되지 않음).
+- **교차 브라우저 결정론:** `Math.sin/cos/hypot` 등 초월함수 결과가 JS 엔진마다 최하위 비트에서 다를 수 있어, 다른 브라우저 간 재현은 비트 단위 동일성이 보장되지 않는다. v1은 체크섬 체크포인트로 불일치 구간을 보여 주기만 한다 (3.9항).
+- **가지 프레임 해제:** v1은 모든 가지의 프레임을 메모리에 둔다 (8개 약 188 MB, 3.9항). 문제가 되면 지금 가지 외 프레임을 해제하고 선택할 때 적용 입력 기록으로 다시 계산(≤ 1.5초)한다. 지금은 필요 없다.
+
+### 5.3 하지 않는 것
+
+- **상대 로봇과 오토 구간 시뮬레이션:** 2 v 0 TELEOP 전용이다. 오토 결과는 시나리오로 넣는다 (2.4항).
+- **모바일 화면:** 데스크톱 / 노트북 전용 (3.8항).
+- **저정밀 LUT 미리보기:** 샘플을 줄인 빠른 LUT를 먼저 보여 주고 정밀본으로 바꾸는 방식은 쓰지 않는다. 미리보기로 경기를 돌리면 경기 파일 재현 결과가 달라져 결정론이 깨지고, 표시용으로만 써도 정밀본과 달라 보여 혼란스럽다. 대신 정밀본을 행 단위로 점진 표시한다 (2.6.2항).
+- **3D 보기:** 드라이버 감각 연습에는 3D 시점이 유리하다는 의견이 있었으나 범위 밖이다.

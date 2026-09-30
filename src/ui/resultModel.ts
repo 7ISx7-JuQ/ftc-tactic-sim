@@ -12,7 +12,7 @@ import { POLLINATOR_1_TIPS, POLLINATOR_2_TIPS } from './mainScreenModel';
 
 const SHORT: Readonly<Record<'robot1' | 'robot2', string>> = { robot1: 'R1', robot2: 'R2' };
 
-export const FLOWER_PIECE_POINTS = 2;   // FLOWER 소유권: slot[1..N] 기물당 (2.6.4)
+export const FLOWER_PIECE_POINTS = 2;   // FLOWER 소유권: slot[1..N] 기물당 (2.6.3)
 export const SWARM_PARK_POINTS = 10;    // SWARM RP: 두 로봇 주차 = PARK 10점 (2.6.5)
 
 export type ResultRow =

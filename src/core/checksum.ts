@@ -1,5 +1,5 @@
 // 상태 체크섬 (명세서 3.9 상태 체크섬, 10-3): 불러온 경기를 재계산한 결과가 파일 기록과 같은지 / 어디서부터 달라졌는지 검출.
-// 위변조 방지가 아니라 불일치 검출 (다른 브라우저 / 다른 엔진 버전, 6.4항 교차 브라우저 결정론).
+// 위변조 방지가 아니라 불일치 검출 (다른 브라우저 / 다른 엔진 버전, 5.2항 교차 브라우저 결정론).
 import { MATCH_TICKS } from './simulationEngine';
 import type { DeepReadonly, TimelineFrame } from './types';
 
