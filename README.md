@@ -4,6 +4,8 @@
 
 A 2D tactic simulator for the **FTC BioBuzz TELEOP period** (2:00). Drive your two ALLIANCE robots live, review every tick, branch from any moment to try another plan, and compare the scores — all in the browser.
 
+**▶ Open the app: https://biobuzz-tacticsim.7isx7juq.workers.dev**
+
 - 50 Hz deterministic engine: the same setup and inputs always give the same match.
 - Your robot specs: size, speed, intake zones and shooter (launch height, angle, sweet spot). Hit maps are generated automatically and cached.
 - Scenario: ALLIANCE, what autonomous left behind (HIVE, loadouts, remaining pieces, auto TIPs) and start poses.
@@ -28,7 +30,7 @@ The **?** button on the right edge opens the in-app help (controls, branches, fi
 | Lift up · down / drop into FLOWER | A / B | . / / |
 | Pause · resume | — | Space |
 
-Designed for desktop browsers at 1366 × 768 or larger. Open it over HTTPS so hit maps can be cached.
+Designed for desktop browsers at 1366 × 768 or larger. The hosted app above uses HTTPS; if you host it yourself, serve it over HTTPS so hit maps can be cached.
 
 ## Run locally
 
@@ -55,6 +57,8 @@ Free for **non-commercial** use under the [PolyForm Noncommercial License 1.0.0]
 
 **FTC BioBuzz TELEOP**(2:00)을 위한 2D 전술 시뮬레이터입니다. 같은 ALLIANCE 로봇 2대를 직접 조종하고, 모든 틱을 복기하고, 원하는 시점에서 가지를 나눠 다른 작전을 시도하며 점수를 비교할 수 있습니다. 브라우저에서 바로 동작합니다.
 
+**▶ 앱 열기: https://biobuzz-tacticsim.7isx7juq.workers.dev**
+
 - 50 Hz 결정론적 엔진: 같은 설정과 입력이면 항상 같은 경기가 나옵니다.
 - 우리 로봇 제원: 크기, 속도, 흡입 구역, 슈터(발사구 높이 · 발사각 · 스윗스팟). 명중 확률표는 자동으로 만들어지고 저장됩니다.
 - 시나리오: ALLIANCE, 오토가 남긴 상태(HIVE, 적재물, 남은 기물, 오토 TIP), 시작 자세.
@@ -79,7 +83,7 @@ Free for **non-commercial** use under the [PolyForm Noncommercial License 1.0.0]
 | 리프트 올림 · 내림 / FLOWER 투입 | A / B | . / / |
 | 일시정지 · 재개 | — | Space |
 
-1366 × 768 이상의 데스크톱 브라우저용입니다. 명중 확률표 저장을 위해 HTTPS 주소로 접속하세요.
+1366 × 768 이상의 데스크톱 브라우저용입니다. 위 주소는 HTTPS입니다. 직접 호스팅할 때도 명중 확률표 저장을 위해 HTTPS로 제공하세요.
 
 ### 직접 실행
 
