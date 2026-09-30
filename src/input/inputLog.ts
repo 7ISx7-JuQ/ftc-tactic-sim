@@ -1,6 +1,7 @@
 // ============================================================
 // 입력 로그 / 로봇별 입력 출처 / 녹화 덧입히기 (명세서 3.6항)
 // 로그 인덱스 t = 틱 t → t + 1 스텝에 쓰인 입력 (DriveInputProvider의 tick 규약과 동일)
+// 10-3: 적용 입력 기록(applied) — 녹화 로그와 별개로 엔진에 실제로 들어간 입력을 출처와 무관하게 틱마다 기록 (명세서 3.9, 레시피 재현 전용)
 // ============================================================
 
 import { MATCH_TICKS } from '../core/simulationEngine';
@@ -17,6 +18,8 @@ export const LOG_RECORD_BYTES = 4; // [qx, qy, qω, action]
 export type InputSource = 'LIVE' | 'REPLAY' | 'NONE';
 
 const NEUTRAL_INPUT: Readonly<RobotDriveInput> = { targetVx: 0, targetVy: 0, targetOmega: 0, actionState: 'IDLE' };
+// 중립 입력의 부호화 값 (0, 0, 0, IDLE) — 복호화하면 NEUTRAL_INPUT과 같다
+export const NEUTRAL_RECORD: EncodedDriveInput = [0, 0, 0, 0];
 
 // ============================================================
 // 1. 로봇별 입력 로그 채널
@@ -64,6 +67,9 @@ export class InputLogChannel {
 
 export class MatchInputs {
   readonly logs: Record<RobotId, InputLogChannel> = { robot1: new InputLogChannel(), robot2: new InputLogChannel() };
+  // 적용 입력 기록 (10-3): resolve / step이 틱마다 기록 (LIVE = 기록한 값, REPLAY = 읽은 값, NONE / 기록 끝 너머 = 중립). 길이 = 엔진 머리 틱.
+  // 녹화 로그와 달리 REPLAY의 재료가 아니며, 되감은 틱에서 진행하면 그 틱 이후가 자동으로 폐기된다 (분기 시 컨트롤러가 명시적으로도 자름)
+  readonly applied: Record<RobotId, InputLogChannel> = { robot1: new InputLogChannel(), robot2: new InputLogChannel() };
   readonly sources: Record<RobotId, InputSource> = { robot1: 'LIVE', robot2: 'LIVE' };
   readonly modes: Record<RobotId, DriveMode> = { robot1: DEFAULT_DRIVE_MODE, robot2: DEFAULT_DRIVE_MODE };
 
@@ -116,10 +122,31 @@ export class MatchInputs {
       const state: RobotState = robot === 'robot1' ? engine.r1 : engine.r2;
       const settings = { alliance: engine.field.allianceColor, mode: this.modes[robot] };
       log.write(tick, encodeDriveCommand(buildDriveCommand(controls ?? NEUTRAL_TICK, state, settings)));
-    } else if (source === 'NONE') {
+    }
+    if (source === 'NONE' || !log.has(tick)) {
+      if (record) this.applied[robot].write(tick, NEUTRAL_RECORD);
       return { ...NEUTRAL_INPUT };
     }
     // LIVE도 방금 기록한 값을 복호화해 엔진에 넣음 → 로그 재생과 비트 단위로 같은 입력
-    return log.has(tick) ? decodeDriveInput(log.data, tick * LOG_RECORD_BYTES, config) : { ...NEUTRAL_INPUT };
+    const offset = tick * LOG_RECORD_BYTES;
+    if (record) this.applied[robot].write(tick, [log.data[offset], log.data[offset + 1], log.data[offset + 2], log.data[offset + 3]]);
+    return decodeDriveInput(log.data, offset, config);
   }
+}
+
+// ============================================================
+// 3. 입력 기록 재생 (레시피 재현, 10-3)
+// ============================================================
+
+/**
+ * 로봇별 입력 기록(틱당 4 B, 0 ~ 5999틱) → engine.inputProvider (runFullMatch로 재계산). 출처 개념 없이 기록 그대로 복호화한다.
+ * 적용 입력 기록 / 레시피에서 해독한 입력에 쓴다. 기록 길이를 넘은 틱은 중립 (채널은 유효 구간만 넘길 것:
+ * `channel.data.subarray(0, channel.length * LOG_RECORD_BYTES)` — 자른 뒤의 배열 뒷부분에는 옛 값이 남아 있다).
+ */
+export function createInputRecordProvider(records: Readonly<Record<RobotId, ArrayLike<number>>>): DriveInputProvider {
+  const input = (data: ArrayLike<number>, tick: number, config: RobotConfig): RobotDriveInput => {
+    const offset = tick * LOG_RECORD_BYTES;
+    return tick >= 0 && offset + LOG_RECORD_BYTES <= data.length ? decodeDriveInput(data, offset, config) : { ...NEUTRAL_INPUT };
+  };
+  return (tick, engine) => ({ r1: input(records.robot1, tick, engine.r1Config), r2: input(records.robot2, tick, engine.r2Config) });
 }

@@ -56,8 +56,8 @@ const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 // 1. 내보내기
 // ============================================================
 
-/** 로봇 프로필 → 파일 데이터 (슬롯 id는 넣지 않음: 불러오는 줄이 정함) */
-function robotData(profile: RobotProfile): unknown {
+/** 로봇 프로필 → 파일 데이터 (슬롯 id는 넣지 않음: 불러오는 줄이 정함). 경기 레시피도 같은 형식 (10-3) */
+export function robotPresetData(profile: RobotProfile): unknown {
   const config: Partial<RobotConfig> = { ...profile.config };
   delete config.id;
   return { teamNumber: profile.teamNumber, teamName: profile.teamName, config, ballistics: profile.ballistics };
@@ -68,10 +68,10 @@ export function buildPresetFile(row: PresetRow, applied: DraftValues): string {
   const kind = ROW_KIND[row];
   const data =
     row === 'robot1' || row === 'robot2'
-      ? robotData(applied[row])
+      ? robotPresetData(applied[row])
       : row === 'scenario'
         ? applied.scenario
-        : { robot1: robotData(applied.robot1), robot2: robotData(applied.robot2), scenario: applied.scenario };
+        : { robot1: robotPresetData(applied.robot1), robot2: robotPresetData(applied.robot2), scenario: applied.scenario };
   return `${JSON.stringify({ format: PRESET_FORMAT, presetVersion: PRESET_VERSION, kind, data }, null, 2)}\n`;
 }
 

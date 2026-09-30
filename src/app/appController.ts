@@ -305,6 +305,7 @@ export class AppController {
     this.applyInputChoices(); // 분기부터 새 출처 (REPLAY로 바꾼 로봇은 기록 유지 = 녹화 덧입히기)
     for (const robot of ['robot1', 'robot2'] as const) {
       if (this.inputs.sources[robot] === 'LIVE') this.inputs.logs[robot].truncate(tick);
+      this.inputs.applied[robot].truncate(tick); // 적용 입력 기록은 출처와 무관하게 분기 틱 이후 폐기 (10-3)
     }
     this.endStage = 'NONE';
     this.loop.resume();

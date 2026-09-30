@@ -967,6 +967,12 @@
         - `checksums`: 위 체크포인트 121개.
         - `branch` / `result`: 사람이 파일을 알아보기 위한 정보. 불러오기 판정에는 쓰지 않는다 (가지 이름은 불러온 경기의 원본 가지 이름으로만 쓴다).
         - **v1 저장 대상 = 경기 종료(6000틱)에 도달한 현재 가지 하나** (결과 팝업에서 내보냄). 미종료 가지 / 트리 전체 저장은 하지 않는다. 가지의 조상 구간 입력을 이어 붙인 0 ~ 5999틱 전체가 한 파일이다.
+        - **구현 (10-3):**
+            - 적용 입력 기록 (`src/input/inputLog.ts`): `MatchInputs.applied`(로봇별 `InputLogChannel`), `resolve` / `step`이 틱마다 기록 — `LIVE` = 방금 기록한 값, `REPLAY` = 읽은 녹화 로그 값, `NONE` / 녹화 끝 너머 = `NEUTRAL_RECORD` `[0, 0, 0, 0]`. 녹화 로그 재생 공급 함수(`createReplayProvider`)는 기록하지 않는다. 되감은 틱에서 진행하면 채널 규칙대로 그 뒤가 폐기되고, 컨트롤러 `branch()`도 두 로봇 모두 명시적으로 자른다. 기록 재생 공급 함수 `createInputRecordProvider(records)`(출처 없이 기록 그대로 복호화, 기록 끝 너머 = 중립).
+            - 엔진 버전 `ENGINE_VERSION = 1` (`simulationEngine.ts`) + 올림 누락 방지 테스트 `src/core/__tests__/engineVersion.test.ts`(자체 제원 · 시나리오 · 시드 · 틱 함수 입력으로 흡입 / 발사 / HIVE 팁 3회 / 리프트 전 단계 / GARDEN 득점이 나오는 경기, 기대값 = 버전 + 종료 체크섬 + 체크포인트 121개를 이은 해시).
+            - 체크섬 `src/core/checksum.ts`: `fnv1a32` / `frameChecksum` / `timelineCheckpoints`(기록된 체크포인트까지) / `compareCheckpoints`(처음 어긋난 번호 + 직전 일치 틱 · 첫 불일치 틱, 개수가 다르면 짧은 쪽 끝 다음에서 어긋남).
+            - 레시피 `src/app/matchRecipe.ts`: `RECIPE_VERSION = 1`, `CURRENT_LUT_SETTINGS`(LUT 관리자 기본값), `encodeInputRecord` / `decodeInputRecord`(RLE + Base64, 묶음 반복 수 1 ~ 65535, 해독 거부: Base64 / 묶음 길이 / 반복 0 / 합 ≠ 6000 / q = −128 / 행동 코드 밖), `appliedInputRecords(inputs)`, `buildMatchRecipe`(종료 전 / 입력 부족이면 `RangeError`, 시드 채움, 결과 = 종료 프레임 점수 · RP) / `serializeMatchRecipe`(로봇 데이터는 프리셋과 같은 형식, 슬롯 id 없음) / `isoLocal`, `parseMatchRecipe(text, defaults)` → 레시피 + 경고 또는 거부 코드, `recipeWarnings`, `verifyRecipe`.
+            - 거부 코드: `NOT_JSON` / `PRESET_FILE`(프리셋 파일을 넣음) / `NOT_RECIPE` / `RECIPE_VERSION` / `INVALID_FIELD`(`field` = `engineVersion` · `ballisticsModelVersion` · `setup.robot1` · `setup.robot2` · `setup.scenario` · `lut`) / `INVALID_INPUTS`(`ticks` · `robot1` · `robot2`) / `INVALID_CHECKSUMS` / `INVALID_SETUP`(`issues` = 탭 검증 문제 코드). 로봇 / 시나리오의 엄격 해석 = 프리셋 정리 함수가 아무것도 바꾸지 않아야 통과 (없는 항목 · 형식 틀림 · 틀린 팀 글자는 모두 값이 달라져 거부). 시나리오는 진영 + 시드 필수. 파일의 모르는 항목은 무시하고, 알아보기 정보(`createdAt` / `branch` / `result`)는 틀려도 빈 값으로 받는다.
     - **경기 불러오기 (`IMPORT MATCH`, SETTINGS 탭 `PRESETS` 구역, 경기 전(`SETUP`)에만):**
         - ① 파일 선택 → 해석 / 검증. **거부**(해당 줄 아래 빨간 글자로 사유, 아무것도 바꾸지 않음): JSON 아님 / `format` 다름 / `recipeVersion` 다름 / 필수 항목 누락 · 형식 틀림 / 설정 검증 실패(로봇 폼 규칙, `validateScenario`, `validateRobotPlacement`) / 입력 해독 실패(Base64 · RLE 오류, 합 ≠ 6000, `action` 0 ~ 4 밖) / 체크포인트 수 ≠ 121. 재현이 목적이므로 프리셋과 달리 **없는 항목을 기본값으로 채우지 않는다**.
         - ② 확인창: "R1 / R2 / SCENARIO 설정을 파일 값으로 바꾸고 경기를 불러올까요?" + 해당될 때만 경고 줄 — 엔진 버전 다름 / 탄도 모델 버전 다름("재생성한 확률표로 결과가 달라질 수 있음", 2.6.2항) / `lut` 값이 현재 앱 상수와 다름. 경고가 있어도 진행 가능 (현재 앱의 엔진 / 탄도 모델 / LUT 상수로 재계산하고 결과 차이는 체크섬으로 드러남).
@@ -1378,6 +1384,7 @@ export interface TimelineFrame {
 | 09-12 | 결과 팝업 확정(로봇 칩, 항목별 점수 + 한 줄 근거, RP 카드 조건 + 진행) + 개발 하네스 / `tmp_shots.ts` 삭제 (아래 6.2.43) — Step 9 완료 | `src/ui/resultModel.ts`, `ResultPopup.tsx`, `appController.ts`, `MainScreen.tsx`, `App.tsx`, `i18n.ts`, `MainScreen.css`, 삭제: `src/dev/`, `App.css`, `src/tmp_shots.ts`, 테스트 |
 | 10-1 | 분기 타임라인 / 경기 저장 · 공유 명세 구체화 (적용 입력 기록, 레시피 형식 · 체크섬 · 버전, 경기 불러오기 / 내보내기, 분기 트리 · 가지 상한 8 · 메모리 측정, 프리셋 파일, 하위 Step 분할) (아래 6.2.44) | 명세서 |
 | 10-2 | 프리셋 파일: 순수 직렬화 / 해석 / 항목별 정리 / 초안 반영 + SETTINGS 탭 `PRESETS` 구역(줄별 `EXPORT` / `IMPORT`, 거부 사유, 덮어쓰기 확인창) + 파일 도우미, 로봇 탭 숫자 칸 저장 값 범위 검사 (아래 6.2.45) | `src/ui/presetFile.ts`, `fileTransfer.ts`, `SettingsTab.tsx`, `MainScreen.tsx`, `RobotTab.tsx`, `FormControls.tsx`, `i18n.ts`, `MainScreen.css`, `src/ui/__tests__/presetFile.test.ts` |
+| 10-3 | 레시피 저장 순수 계층: 적용 입력 기록(`MatchInputs.applied`, 분기 시 자름) + 기록 재생 공급 함수, `ENGINE_VERSION` + 올림 누락 방지 기대값 테스트, 체크섬 / 체크포인트, 입력 RLE + Base64, 레시피 만들기 / 문자열 / 해석 · 검증 · 경고 (아래 6.2.46) | `src/input/inputLog.ts`, `src/core/checksum.ts`, `simulationEngine.ts`, `src/app/matchRecipe.ts`, `appController.ts`, `src/ui/presetFile.ts`, 테스트 `matchRecipe.test.ts` / `engineVersion.test.ts` / `inputLog.test.ts` G |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
@@ -1731,6 +1738,12 @@ export interface TimelineFrame {
 - **테스트:** `src/ui/__tests__/presetFile.test.ts` A~I(줄별 왕복 · 슬롯 id 없음 · R1 파일을 R2로, 거부 7종, 로봇 항목별 정리(범위 밖 유지 · 형식 틀림만 기본값 · 구역 8개 · 원본 불변), 틀린 팀 글자 → 틀린 입력 글자 · `INVALID`, 시나리오 항목별 정리 → 범위 밖이면 탭 `INVALID`, `ALL` 초안 3개 · 적용 값 불변 · 틀린 입력 글자 지움, 파일 이름, 덮어쓰기 대상 탭, 문구 영어 / 한국어). 돌연변이 12종 중 11종 실패 확인 — 남은 1종(시나리오 항목 값이 `undefined`면 건너뛰기)은 JSON에서 나올 수 없는 동등 변이라 조건을 지우고 단순화.
 - **헤드리스 Chromium 점검 (저장소 밖 1회성, 개발 서버 1366 × 768):** SETTINGS `Presets` 구역 4줄, R1 `EXPORT` → `tacticsim-robot_R1.json`(`kind` `ROBOT`, 슬롯 id 없음), `ALL` `EXPORT` → `tacticsim-setup_{시각}.json`, `ALL` 파일을 R1 줄에 → "This file goes on the ALL row", 틀린 팀 번호 + 최고 속도 999 파일을 R2 줄에 → 안내 줄 + R2 탭 빨간 점, R2 탭에서 "Digits only, up to 5" / "Must be 1.00 – 200.00 in/s"(이 점검에서 숫자 칸 범위 표시 누락을 발견해 보완) + `APPLY` 비활성, 고친 파일을 다시 R2 줄에 → 덮어쓰기 확인창 → Enter → 팀 `12345 Bumblebots` → `APPLY`, 한국어 화면(줄 이름 / 버튼 / "JSON 파일이 아님"). 콘솔 오류 없음.
 
+### 6.2.46 Step 10-3 (레시피 저장 순수 계층) 완료 항목
+
+- **결정:** 3.9항 규칙 그대로. 명세에 없던 세부: ① 프리셋 파일을 경기로 불러오면 따로 알림(`PRESET_FILE`) ② 레시피의 모르는 항목은 무시, 알아보기 정보는 틀려도 받음 ③ 엄격 해석은 프리셋 정리 함수 재사용("정리해도 바뀌지 않아야 통과") ④ 엔진 버전 기대값 테스트는 앱 기본 설정이 아닌 자체 제원 / 시나리오로 (앱 기본값 변경과 엔진 변경을 구분) (3.9항 "구현 (10-3)").
+- **구현:** 3.9항 "구현 (10-3)" 참고.
+- **테스트:** `src/app/__tests__/matchRecipe.test.ts` A~F(RLE 왕복 · 압축 크기 · 해독 거부 7종, FNV-1a 표준값 · 한글 코드 단위 · 체크포인트 121개 · 비교 결과, 녹화 덧입히기 + `REPLAY` → `NONE` 전환 풀매치 저장 → 파일 → 해석 → 재계산 체크포인트 전부 일치 · 종료 프레임 동일 · 다른 시드는 불일치 검출, 만들기 오류 · 시드 채움 · 시각 형식, 거부 사례 25건, 알아보기 정보 관대 · 경고 3종), `src/core/__tests__/engineVersion.test.ts` A, `src/input/__tests__/inputLog.test.ts` G(출처별 적용 기록, 길이 = 머리, `NONE` 틱은 녹화 로그가 남아도 중립, 적용 기록 재생 = 실제 경기 · 녹화 로그 재생은 어긋남, `NONE`으로 달린 구간을 다시 `REPLAY`로 덮기, 기록 재생 공급 함수). 돌연변이 22종 중 18종 실패 → 남은 4종 중 2종은 테스트 보강(한글 코드 단위 해시, `NONE` 구간 재덧입히기)으로 실패 확인, 1종(틀린 팀 글자 검사)은 뒤의 비교와 중복이라 조건 삭제, 1종(기록 재생 공급 함수의 음수 틱 검사)은 복호화가 없는 값을 0으로 처리하는 동등 변이라 방어 코드로 유지.
+
 ### 6.3 남은 Step (권장 순서)
 
 > 모든 Step은 완료 시 `npm test`(엔진 회귀 테스트)가 통과해야 하며, 새로 추가한 규칙에는 테스트 그룹을 추가한다.
@@ -1789,7 +1802,7 @@ export interface TimelineFrame {
     - 10-1(명세) 완료. 상세 규칙 3.9항. 하위 Step (각 Step 완료 시 `npm test` / `npx tsc -b` / `npm run build` 통과):
     - ~~10-1: 분기 타임라인 / 경기 저장 · 공유 명세 구체화.~~ (완료, 6.2.44)
     - ~~10-2: 프리셋 파일 — 순수 직렬화 / 해석 / 정리(`ROBOT` / `SCENARIO` / `SETUP`, 자동 보관 정리 함수 재사용) + SETTINGS 탭 `PRESETS` 구역(`R1` / `R2` / `SCENARIO` / `ALL` 줄 `EXPORT` / `IMPORT`, 초안 반영 · 덮어쓰기 확인창 · 거부 사유) + 파일 다운로드 / 선택 도우미 + 테스트 (스크린샷 확인).~~ (완료, 6.2.45)
-    - 10-3: 레시피 저장 순수 계층 — 적용 입력 기록(`MatchInputs.applied`, 분기 시 자름), `ENGINE_VERSION` / `RECIPE_VERSION`, `frameChecksum` + 체크포인트, 입력 RLE + Base64 부호화 / 해독, 레시피 만들기 / 해석 · 검증(거부 사유 코드) + 재현 테스트(저장 → 해독 → 재계산 체크섬 전부 일치, `REPLAY` → `NONE` 전환 경기, 버전 누락 방지 기대값).
+    - ~~10-3: 레시피 저장 순수 계층 — 적용 입력 기록(`MatchInputs.applied`, 분기 시 자름), `ENGINE_VERSION` / `RECIPE_VERSION`, `frameChecksum` + 체크포인트, 입력 RLE + Base64 부호화 / 해독, 레시피 만들기 / 해석 · 검증(거부 사유 코드) + 재현 테스트(저장 → 해독 → 재계산 체크섬 전부 일치, `REPLAY` → `NONE` 전환 경기, 버전 누락 방지 기대값).~~ (완료, 6.2.46)
     - 10-4: 경기 불러오기 / 내보내기 연결 — `IMPORT MATCH`(확인창 + 버전 경고, 적용 값 교체, LUT 준비 · 취소, 재계산, 복기 상태, 체크섬 불일치 배너) + 결과 팝업 `EXPORT MATCH` / `EXPORT SUMMARY`(요약 텍스트 규칙) + 파일 이름 규칙 (스크린샷 확인).
     - 10-5: 분기 트리 엔진 / 컨트롤러 — 엔진 타임라인 객체 교체 API(분기 = 0 ~ T 참조 공유, 전환 = 교체), 가지 트리 규칙(`MAX_BRANCHES = 8`, 번호 / 이름, 삭제 = 하위 포함, 원본 보호), 가지별 녹화 로그 사본 / 적용 입력 기록, 전환 시 루프 상태(일시정지 / 복기), `endSeq` 규칙, `NEW` = 트리 폐기 + 테스트 + 헤드리스 Chromium 8개 가지 힙 측정.
     - 10-6: 분기 UI — 스크러버 가지 버튼 / 목록(전환 · 이름 바꾸기 · 삭제), 타임라인 분기 표식, 분기 확인창 새 문구 / 가득 참 안내창, `NEW` 확인창 가지 수, 결과 팝업 헤더 가지 이름 + `BRANCHES` 비교 줄 (스크린샷 확인) — Step 10 완료.

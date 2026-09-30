@@ -4,7 +4,7 @@ import { createIntakeZonePreset } from '../../core/collision';
 import type { RobotConfig, RobotPose, ScenarioConfig } from '../../core/types';
 import { NEUTRAL_TICK, buildDriveCommand, decodeDriveInput, encodeDriveCommand } from '../controls';
 import type { TickControls } from '../controls';
-import { InputLogChannel, LOG_RECORD_BYTES, MatchInputs } from '../inputLog';
+import { InputLogChannel, LOG_RECORD_BYTES, MatchInputs, createInputRecordProvider } from '../inputLog';
 import type { RobotId } from '../inputConfig';
 
 // 풀매치를 도는 테스트의 제한 시간 (기본 5초는 병렬 실행 부하에서 부족, 엔진 테스트와 같은 값)
@@ -40,6 +40,8 @@ const script = (t: number, seed: number): TickControls => ({
 const both = (t: number, s1: number, s2: number): Record<RobotId, TickControls> => ({ robot1: script(t, s1), robot2: script(t, s2) });
 const frameJSON = (e: SimulationEngine, t: number) => JSON.stringify(e.getFrame(t));
 const logBytes = (m: MatchInputs, r: RobotId) => Array.from(m.logs[r].data.subarray(0, m.logs[r].length * LOG_RECORD_BYTES));
+const appliedBytes = (m: MatchInputs, r: RobotId) => m.applied[r].data.subarray(0, m.applied[r].length * LOG_RECORD_BYTES);
+const record = (m: MatchInputs, r: RobotId, t: number) => Array.from(m.applied[r].data.subarray(t * LOG_RECORD_BYTES, (t + 1) * LOG_RECORD_BYTES));
 
 describe('입력 로그 / 입력 출처 / 녹화 덧입히기 (명세서 3.6)', () => {
   it('A. 로그 채널 (기록 / 절단 / 빈 틱 채움 / 범위)', () => {
@@ -215,5 +217,63 @@ describe('입력 로그 / 입력 출처 / 녹화 덧입히기 (명세서 3.6)', 
     r2.inputProvider = live;
     r2.runFullMatch();
     assert(r2.getFrame(100)!.r1.x === e.getFrame(100)!.r1.x && r2.getFrame(100)!.r2.x === e.getFrame(100)!.r2.x, 'REPLAY provider reproduces the recorded drive');
+  }, TEST_TIMEOUT_MS);
+
+  it('G. 적용 입력 기록 (10-3): 출처와 무관하게 엔진에 들어간 입력, 길이 = 머리, 되감은 틱에서 진행하면 자름, 기록 재생 = 실제 경기', () => {
+    const e = eng();
+    const m = new MatchInputs();
+    m.sources.robot2 = 'NONE';
+    while (e.currentTick < 300) m.step(e, both(e.currentTick, 0, 1));
+    assert(m.applied.robot1.length === 300 && m.applied.robot2.length === 300, 'both robots recorded every tick (NONE too)');
+    assert(appliedBytes(m, 'robot1').join() === logBytes(m, 'robot1').join(), 'LIVE: applied = recording log');
+    assert(appliedBytes(m, 'robot2').every(b => b === 0) && m.logs.robot2.length === 0, 'NONE: neutral applied, no recording');
+
+    // 녹화 덧입히기 중 REPLAY → NONE 전환: 녹화 로그는 남지만 적용 기록은 중립
+    e.scrubTo(100);
+    m.sources.robot1 = 'REPLAY';
+    m.sources.robot2 = 'LIVE';
+    while (e.currentTick < 200) m.step(e, both(e.currentTick, 0, 7));
+    m.sources.robot1 = 'NONE';
+    while (e.currentTick < 400) m.step(e, both(e.currentTick, 0, 7));
+    assert(m.applied.robot1.length === 400 && m.applied.robot2.length === 400, 'applied length = engine head (truncated at 100, then 300 new ticks)');
+    assert(record(m, 'robot1', 150).join() === logBytes(m, 'robot1').slice(150 * 4, 151 * 4).join(), 'REPLAY tick: applied = replayed log value');
+    assert(record(m, 'robot1', 250).every(b => b === 0) && logBytes(m, 'robot1').slice(250 * 4, 251 * 4).some(b => b !== 0), 'NONE tick: applied neutral while the recording log still holds pass-1 input');
+    assert(m.logs.robot1.length === 300, 'R1 recording log untouched by REPLAY / NONE');
+    assert(record(m, 'robot1', 350).every(b => b === 0), 'REPLAY past the recording end would also be neutral (here NONE)');
+
+    // 적용 기록 재생 = 실제 경기, 녹화 로그 재생은 어긋남
+    const byApplied = eng();
+    byApplied.inputProvider = createInputRecordProvider({ robot1: appliedBytes(m, 'robot1'), robot2: appliedBytes(m, 'robot2') });
+    byApplied.runFullMatch();
+    let same = true;
+    for (let t = 0; t <= 400 && same; t++) same = frameJSON(byApplied, t) === frameJSON(e, t);
+    assert(same, 'applied record reproduces the match (ticks 0..400)');
+    const byLog = eng();
+    m.sources.robot1 = 'REPLAY';
+    byLog.inputProvider = m.createReplayProvider();
+    byLog.runFullMatch();
+    assert(frameJSON(byLog, 400) !== frameJSON(e, 400), 'recording-log replay cannot reproduce the REPLAY -> NONE switch');
+
+    // NONE으로 달린 구간(200 ~ 300)을 다시 REPLAY로 덮으면 그 틱의 적용 기록은 녹화 로그 값, 기록 끝(300) 너머는 중립
+    e.scrubTo(100);
+    m.sources.robot1 = 'REPLAY';
+    while (e.currentTick < 350) m.step(e, both(e.currentTick, 0, 7));
+    assert(m.applied.robot1.length === 350, 'applied re-recorded from the rewound tick');
+    assert(record(m, 'robot1', 250).join() === logBytes(m, 'robot1').slice(250 * 4, 251 * 4).join() && record(m, 'robot1', 250).some(b => b !== 0), 'REPLAY over a former NONE tick: applied = log value');
+    assert(record(m, 'robot1', 320).every(b => b === 0), 'REPLAY past the recording end: neutral');
+    const overdub = eng();
+    overdub.inputProvider = createInputRecordProvider({ robot1: appliedBytes(m, 'robot1'), robot2: appliedBytes(m, 'robot2') });
+    overdub.runFullMatch();
+    let again = true;
+    for (let t = 0; t <= 350 && again; t++) again = frameJSON(overdub, t) === frameJSON(e, t);
+    assert(again, 'applied record reproduces the re-overdubbed match (ticks 0..350)');
+    // 기록 재생 공급 함수: 기록 끝 너머 / 음수 틱은 중립
+    const p = createInputRecordProvider({ robot1: new Int8Array([10, 0, 0, 1]), robot2: new Int8Array(0) });
+    const r = eng();
+    const at = (t: number) => {
+      const out = p(t, r)!;
+      return { r1: out.r1!, r2: out.r2! };
+    };
+    assert(at(0).r1.actionState === 'INTAKING' && at(0).r1.targetVx > 0 && at(1).r1.targetVx === 0 && at(0).r2.targetVx === 0 && at(-1).r1.actionState === 'IDLE', 'record provider: decode / neutral beyond the record');
   }, TEST_TIMEOUT_MS);
 });
