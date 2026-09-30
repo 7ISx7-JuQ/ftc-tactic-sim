@@ -748,7 +748,7 @@ export default function MainScreen() {
         ))}
       {status && <ScrubberBar status={status} lang={lang} actions={actions} />}
       {status?.endStage === 'RESULT' && status.result && (
-        <ResultPopup result={status.result} alliance={status.alliance} lang={lang} onReview={() => c()?.closeResult()} onRestart={newMatch} />
+        <ResultPopup result={status.result} alliance={status.alliance} teams={{ robot1: drafts.applied.robot1, robot2: drafts.applied.robot2 }} lang={lang} onReview={() => c()?.closeResult()} onRestart={newMatch} />
       )}
       {confirm && <ConfirmDialog request={confirm.request} anchor={confirm.anchor} onClose={closeConfirm} />}
     </div>

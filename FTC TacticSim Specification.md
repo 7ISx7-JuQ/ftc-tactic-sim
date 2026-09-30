@@ -922,6 +922,8 @@
             - 트리거: 컨트롤러 상태 `endSeq`(이 경기에서 실제로 6000틱에 도달한 횟수 — 분기 후 재종료마다 +1, 재생 / 스크러빙으로 종료 틱을 보는 것은 불변, `NEW`에서 0). 연출 요소는 `endStage = HIGHLIGHT` 동안만 그리며 `endSeq`를 key로 새로 마운트해 매 종료마다 처음부터 재생. `prefers-reduced-motion`이면 움직임 없이 최종 상태만.
             - 구현: `EndOverlay.tsx`(흰빛 / 배너 / 진행바, `--end-ms` = `END_HIGHLIGHT_MS`), `LeftPanel.tsx`(`timer-pulse`, `ScoreTally`), 순수 규칙 `mainScreenModel.ts`(`timerIsFinalCountdown`, `endScoreTally`, `tallyValue`, `END_TALLY_MS`, `END_CHIP_STAGGER_MS`), 문구 `end.banner` / `end.skipHint`.
         - 팝업 구성(사용자 제공 시안 기준, 세부는 해당 하위 Step에서 사용자와 확정): 헤더(`FTC TacticSim` / `TELEOP MATCH COMPLETED` / 진영), 로봇(팀 번호 + 이름), 총점, 항목별 득점(`HIVE` / `FLOWER` / `GARDEN` / `PARK`, `scoreBreakdown`만 읽음, 3.2항), `RP` 카드(`SWARM` / `POLLINATOR 1` / `POLLINATOR 2`, 팁 횟수는 오토 포함), 동작 `REVIEW`(팝업 닫고 복기) / `RESTART`(= `NEW`). 로그 / JSON 내보내기는 Step 10.
+        - **09-12 확정 (사용자 결정, 시안 없이 09-7a 기본형 기반):** ① 항목별 점수 + 한 줄 근거 — `HIVE` "TELEOP TIP n × 20"(오토 TIP이 있으면 "오토 TIP n회는 RP에만"), `FLOWER` 소유한 FLOWER별 "FLOWER k: 기물 × 2 (+ 하단 보너스 5)"(없으면 "소유한 FLOWER 없음"), `GARDEN` "POLLEN n × 1", `PARK` "R1 · R2 주차 × 5"(없으면 "주차한 로봇 없음") ② RP 카드 = 이름 + 조건과 지금 값 (`SWARM` "PARK 5 / 10", `POLLINATOR 1` "TIP 5 / 4", `POLLINATOR 2` "TIP 5 / 7", TIP은 오토 포함), 달성은 초록 체크 ③ 헤더 아래 두 로봇 칩 — 진영색 `R1` / `R2` 표시 + 팀 번호(`#번호`, 있을 때) + 팀명 (좌측 패널과 같은 규칙).
+        - **구현 (09-12):** 표시 규칙 `src/ui/resultModel.ts`(`resultRows` / `rpCards`, 순수), `MatchResult`에 `autoTips` / `teleopTips` 추가(`appController.ts`), `ResultPopup.tsx`(로봇 칩 / 근거 줄 / RP 진행, 팝업 폭 460u), 팀 = 적용한 로봇 프로필. 헤더의 "TIP n" 한 줄은 RP 카드 진행으로 옮겨 삭제(`result.tips` 문구 삭제). 개발 하네스(`src/dev/`, `App.tsx`의 `?harness`, 하네스 전용 `App.css`)와 1회성 스크립트 `src/tmp_shots.ts` 삭제 — 앱 진입점은 메인 화면만.
     - **LUT 생성 흐름 연결 (2.6.2항 보완):** 생성 시작 = 로봇 탭 `APPLY`에서 LUT 무효화 조건이 바뀌었을 때 + 앱 시작 시 기본 프리셋 / 자동 보관 설정 (캐시 적중이면 즉시 `READY`). 진행 표시 위치 = 접힌 config 띠의 로봇 아이콘 진행률 링 + 로봇 탭(진행 막대, 남은 시간, v0 / 스윗스팟 명중률) + 히트맵 편집 모드. `START` 비활성 사유는 config 창 / 아이콘으로 안내.
 
 ## 4. 데이터 인터페이스 명세 (`types.ts`)
@@ -1270,6 +1272,7 @@ export interface TimelineFrame {
 | 09-10c | 스윗스팟 모드 `SET ON FIELD`: 필드 클릭 = 초안 스윗스팟(모드 유지, 틀린 칸도 빨간 오류), 마우스 칸 강조 + 몸체 윤곽 + 말풍선(좌표 / 사유), 적용 확률표 반투명, `DONE · APPLY` / `CANCEL` · Esc · `START` 되돌림 (아래 6.2.40) | `src/ui/fieldEdit.ts`, `editSceneRenderer.ts`, `ballistics.ts`(`aimingRobotOBB` 공개), `FieldEditBanner.tsx`, `RobotTab.tsx`, `MainScreen.tsx`, `i18n.ts`, `MainScreen.css`, 테스트 |
 | 09-11a | 시나리오 탭: 유효 배지 + 문제 목록, 진영(시작 자세 좌우 대칭), `HIVE` / 적재물(칸 순환) / 잔여 기물 / 오토 TIP 개수 조절기, 시작 자세 숫자 칸, 시드 `REROLL`(바로 적용 + 보관), `RESET TAB` 시드 유지 (아래 6.2.41) | `src/ui/scenarioForm.ts`, `configDraft.ts`, `simulationEngine.ts`(기본값 공개), `ScenarioTab.tsx`, `FormControls.tsx`(`Stepper`), `ConfigPanel.tsx`, `MainScreen.tsx`, `i18n.ts`, `MainScreen.css`, 테스트 |
 | 09-11b | 시작 자세 편집 모드 `EDIT ON FIELD`: 몸체 끌기 = 위치, 회전 핸들 = 헤딩(스냅 없음, 0.1 in / 0.1° 반올림), 겹침 흰 빗금 + 사유, 로봇 위 좌표 글자, `DONE · APPLY` / `CANCEL` · Esc · `START` 되돌림 (아래 6.2.42) — 09-11 완료 | `src/renderer/spawnEditLayout.ts`, `editSceneRenderer.ts`, `src/ui/fieldEdit.ts`, `scenarioForm.ts`, `simulationEngine.ts`(GARDEN 좌표 공개), `FieldEditBanner.tsx`, `ScenarioTab.tsx`, `MainScreen.tsx`, `i18n.ts`, `MainScreen.css`, 테스트 |
+| 09-12 | 결과 팝업 확정(로봇 칩, 항목별 점수 + 한 줄 근거, RP 카드 조건 + 진행) + 개발 하네스 / `tmp_shots.ts` 삭제 (아래 6.2.43) — Step 9 완료 | `src/ui/resultModel.ts`, `ResultPopup.tsx`, `appController.ts`, `MainScreen.tsx`, `App.tsx`, `i18n.ts`, `MainScreen.css`, 삭제: `src/dev/`, `App.css`, `src/tmp_shots.ts`, 테스트 |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
@@ -1602,6 +1605,13 @@ export interface TimelineFrame {
 - **테스트:** `src/renderer/__tests__/spawnEditLayout.test.ts` A~C(핸들 위치, 돌린 몸체 안 / 비스듬한 헤딩, 잡기: 핸들 우선 · R2 우선 · 빈 곳), `src/ui/__tests__/fieldEdit.test.ts` J~O(연 탭 = SCENARIO · 기억값 · 모드 전환, 끌기: 이동량 · 범위 제한 · 핸들 방향 · 0.1 반올림 · 중심 위 그대로, 놓기: 그 로봇만 · 칸 글자 · 겹침 허용, 되돌리기: 지정 해제 · 칸 글자 · 다른 칸 유지 · 진영 전환 대칭 · 히트맵은 그대로, `DONE` 3종, 장면: 배치 문제 로봇 · GARDEN = 엔진 좌표 · 강조 · BLUE), `src/renderer/__tests__/editScene.test.ts` C(문제 로봇만 빗금 / 빨간 테두리, 잡은 핸들만 주황). 돌연변이 20종 모두 실패 확인 (몸체 안 판정의 오른쪽 축 부호 뒤집기가 축 위 점만으로는 살아남아 비스듬한 헤딩 경우를 추가). 테스트 중 `Math.round(v / 0.1) * 0.1`이 `40.300000000000004`처럼 잔여를 남기는 것을 발견해 `Math.round(v * 10) / 10`으로 수정.
 - **헤드리스 Chromium 점검 (저장소 밖 1회성, 개발 서버 1366 × 768):** SCENARIO 탭 `EDIT ON FIELD` → 필드가 구조물 + GARDEN 기물 + 두 로봇(핸들)으로, 글자 "R1 9.0 in · 36.0 in · 0.0°", R1 몸체 (9, 36) → (40, 50) 끌기 → 칸 40.0 / 50.0, 핸들을 아래로 → 90.0°, R2를 R1 위로 → 두 글자 빨강 + 사유 3개(R1 / R2 HIVE 겹침, 로봇끼리 겹침) + 흰 빗금, `CANCEL` → 두 로봇 "ALLIANCE 기본" 복원, 다시 열어 (30, 40)으로 → `DONE · APPLY` → 적용 · 수정 없음, 다시 열어 끈 뒤 Esc → (30, 40) 복원 · config 창 유지. 벽에 붙은 로봇 글자가 필드 영역 밖으로 잘리던 것을 기준점 이동으로, RED 로봇의 빨간 덧칠이 안 보이던 것을 흰 빗금으로 고침. 콘솔 오류 없음.
 
+### 6.2.43 Step 09-12 (결과 팝업 확정 / 하네스 삭제) 완료 항목 — Step 9 완료
+
+- **결정:** 3.8항 경기 종료와 결과 팝업 "09-12 확정" 참고 (사용자 시안은 없어 09-7a 기본형 기반).
+- **구현:** 3.8항 "구현 (09-12)" 참고.
+- **테스트:** `src/ui/__tests__/resultModel.test.ts` A~B(근거: 텔레옵 / 오토 TIP, 소유 FLOWER만 · 번호 · 보너스 있음 / 없음, GARDEN 수, PARK 로봇 순서, 빈 경우 / RP 카드 조건 · 지금 값 · 달성). 돌연변이 7종 중 6종 실패 확인 (GARDEN 인정 수 ↔ GARDEN 점수 바꾸기는 규칙상 항상 같은 값이라 동등 변이). `src/dev/__tests__/harness.test.ts`는 하네스와 함께 삭제 (앱 컨트롤러 테스트가 같은 흐름을 이미 다룸).
+- **헤드리스 Chromium 점검 (저장소 밖 1회성, 개발 서버 1366 × 768, Playwright 가짜 시계로 120초 경기를 빨리 진행):** 저장값에 R1 팀 `#12345 Bumblebots`, R2 팀명 `Hive Mind`, 오토 TIP 5를 넣고 경기 종료 → 로봇 칩 "R1 #12345 Bumblebots · R2 Hive Mind", `HIVE` 0 "TELEOP TIP 0 × 20 · auto TIP 5 counts for RP only", `FLOWER` 0 "No FLOWER owned", `GARDEN` 4 "POLLEN 4 × 1", `PARK` 5 "R1 parked × 5", `SWARM` "PARK 5 / 10", `POLLINATOR 1` 달성 "TIP 5 / 4", `POLLINATOR 2` "TIP 5 / 7". 한국어 화면도 확인. 콘솔 오류 없음.
+
 ### 6.3 남은 Step (권장 순서)
 
 > 모든 Step은 완료 시 `npm test`(엔진 회귀 테스트)가 통과해야 하며, 새로 추가한 규칙에는 테스트 그룹을 추가한다.
@@ -1626,7 +1636,7 @@ export interface TimelineFrame {
     - ~~08-5: HIVE(아군 셀 상태, 시차 낙하 연출), FLOWER 게이지(필드 밖 9칸, 잼, 가득 참 X), NECTAR 재고 게이지(게이지 틀은 정적 레이어에 추가), 경기 종료 강조.~~ (완료, 6.2.18)
     - ~~08-6: 비행 공(명목 구간 보간 + 높이 보정, 충돌 후 구간, 그림자 / 오프셋 / 크기), 표시 옵션 5종.~~ (완료, 6.2.19)
     - ~~08-7: 개발 하네스(정식 엔진 / 입력 / 루프 + 간이 판정 함수, 시작 회전 후 루프 시작, 옵션 체크박스) + 헤드리스 Chromium 점검.~~ (완료, 6.2.20)
-- **Step 9 — 웹 GUI (React, 상세 규칙 3.8항):** 09-1(명세), 09-2(탄도 사전 준비), 09-3(LUT Worker 풀), 09-4(LUT 캐시), 09-5(배치 검증), 09-6a(GUI 순수 기반), 09-6b(렌더러 전환), 09-6c(앱 컨트롤러), 09-6d(화면 뼈대), 09-7a(경기 흐름), 09-7b(확인창 / 토스트 / 배너 / 타임라인), 09-8a(config 창 틀), 09-7c(경기 종료 연출), 09-8b(SETTINGS / 자동 보관), 09-9a(로봇 탭 1), 09-9b(로봇 탭 2), 09-9c(구역 폭 최소값), 09-10a(스윗스팟 / 명중 확률표 생성 연결), 09-10b(필드 편집 모드 틀 / 히트맵), 09-10c(스윗스팟 모드), 09-11a(시나리오 탭), 09-11b(시작 자세 편집 모드) 완료.
+- **Step 9 — 웹 GUI (React, 상세 규칙 3.8항):** 09-1(명세), 09-2(탄도 사전 준비), 09-3(LUT Worker 풀), 09-4(LUT 캐시), 09-5(배치 검증), 09-6a(GUI 순수 기반), 09-6b(렌더러 전환), 09-6c(앱 컨트롤러), 09-6d(화면 뼈대), 09-7a(경기 흐름), 09-7b(확인창 / 토스트 / 배너 / 타임라인), 09-8a(config 창 틀), 09-7c(경기 종료 연출), 09-8b(SETTINGS / 자동 보관), 09-9a(로봇 탭 1), 09-9b(로봇 탭 2), 09-9c(구역 폭 최소값), 09-10a(스윗스팟 / 명중 확률표 생성 연결), 09-10b(필드 편집 모드 틀 / 히트맵), 09-10c(스윗스팟 모드), 09-11a(시나리오 탭), 09-11b(시작 자세 편집 모드), 09-12(결과 팝업 확정 / 하네스 삭제) 완료 — Step 9 완료.
     - ~~09-1: 웹 GUI 명세 구체화.~~ (완료, 6.2.21)
     - ~~09-2: `ballistics.ts` 사전 준비 — `generateReferenceLUTRows`, `robotLUTSeeds`, `BALLISTICS_MODEL_VERSION`, 스윗스팟 진영 기준 변환 함수 + 분할 / 작업 계획 동일성 테스트.~~ (완료, 6.2.22)
     - ~~09-3: LUT Worker 풀(`src/workers/lutWorker.ts`) + 작업 대기열 + 조립 + 로봇별 상태 머신 / 취소 (React 비의존, 가짜 Worker 테스트).~~ (완료, 6.2.23)
@@ -1655,7 +1665,7 @@ export interface TimelineFrame {
     - 09-11: 시나리오 탭 + 시작 자세 편집 모드 + 시드 `REROLL` + 유효 배지. 2단계로 분할 (3.8항 09-11 확정 ①):
         - ~~09-11a: 시나리오 탭 폼(진영 / `HIVE` / 적재물 / 잔여 기물 / 오토 TIP / 시작 자세 숫자 칸) + 시드 `REROLL` + 유효 배지.~~ (완료, 6.2.41)
         - ~~09-11b: 시작 자세 편집 모드 `EDIT ON FIELD` — 로봇 몸체 드래그 = 위치, 회전 핸들 = 헤딩(스냅 없음), 배치 검증(겹친 로봇 빨간색 + 사유), 좌표 / 헤딩 글자, 필드 = 구조물 + `GARDEN` 기물 + 두 로봇, `DONE · APPLY` / `CANCEL`.~~ (완료, 6.2.42) — 09-11 완료
-    - 09-12: 결과 팝업 세부 디자인 확정(09-7a 기본형 기반, 사용자와 확정), 개발 하네스 삭제(+ 1회성 스크립트 `src/tmp_shots.ts`도 함께 삭제, 09-10b 확정 ③) — Step 9 완료.
+    - ~~09-12: 결과 팝업 세부 디자인 확정(09-7a 기본형 기반, 사용자와 확정), 개발 하네스 삭제(+ 1회성 스크립트 `src/tmp_shots.ts`도 함께 삭제, 09-10b 확정 ③) — Step 9 완료.~~ (완료, 6.2.43)
 - **Step 10 — 분기 타임라인 및 경기 저장/공유:** (09-1 추가) 로봇 프로필 / 시나리오 JSON 내보내기 · 불러오기(SETTINGS 탭 프리셋 관리), 결과 팝업 로그 / JSON 내보내기. 분기 트리(부모 프레임 공유, 분기 이후 프레임만 생성), 저장 레시피(설정 + 시나리오 + 시드 + 양자화 입력 로그 + 탄도 설정 / LUT 시드 / 샘플 수 / `BALLISTICS_MODEL_VERSION` + 엔진 버전 + 상태 체크섬, LUT 자체는 저장하지 않고 캐시 또는 재생성). 레시피 약 50 KB 수준으로 파일/IndexedDB 저장 가능. 입력 로그 형식(로봇별 틱당 4 B, 8비트)은 3.6항, 저장 시 연속 중복 압축.
 
 ### 6.4 보류 / 후속 검토 항목

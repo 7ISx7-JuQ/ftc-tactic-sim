@@ -126,6 +126,8 @@ export interface MatchResult {
   breakdown: DeepReadonly<ScoreBreakdown>;
   rp: RPState;
   tips: number;                 // 오토 + 텔레옵 TIP 횟수 (RP 카드용, 점수에는 오토 미포함)
+  autoTips: number;             // 오토 TIP 횟수 (결과 팝업 근거: RP에만 합산, 09-12)
+  teleopTips: number;           // 텔레옵 TIP 횟수 (HIVE 점수 = × 20)
 }
 
 export interface AppControllerDeps {
@@ -503,7 +505,14 @@ export class AppController {
     const end = this.engine.getFrame(MATCH_TICKS);
     if (!end?.scoreBreakdown) return null;
     const { hive } = end.field;
-    return { total: end.totalScore, breakdown: end.scoreBreakdown, rp: { ...end.rpAchieved }, tips: hive.autoTipCount + hive.tipCount };
+    return {
+      total: end.totalScore,
+      breakdown: end.scoreBreakdown,
+      rp: { ...end.rpAchieved },
+      tips: hive.autoTipCount + hive.tipCount,
+      autoTips: hive.autoTipCount,
+      teleopTips: hive.tipCount,
+    };
   }
 
   /** 그릴 틱: 진행 중에는 엔진 머리, 그 외에는 보는 틱 */

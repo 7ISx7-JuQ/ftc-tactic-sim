@@ -424,7 +424,7 @@
   backdrop-filter: blur(calc(var(--u) * 6));
 }
 .result-popup {
-  width: calc(var(--u) * 420);
+  width: calc(var(--u) * 460);
   padding: calc(var(--u) * 24);
   display: flex;
   flex-direction: column;
@@ -459,6 +459,31 @@
   font-weight: 800;
   letter-spacing: 0.06em;
 }
+.result-robots {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: calc(var(--u) * 6) calc(var(--u) * 14);
+  margin-top: calc(var(--u) * 4);
+  font-size: calc(var(--u) * 13);
+}
+.result-robot {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 6);
+  font-weight: 700;
+}
+.result-robot-slot {
+  padding: calc(var(--u) * 1) calc(var(--u) * 6);
+  border-radius: calc(var(--u) * 4);
+  color: #ffffff;
+  font-size: calc(var(--u) * 11);
+  font-weight: 800;
+}
+.result-robot-name {
+  color: var(--text-muted);
+  font-weight: 600;
+}
 .result-total {
   display: flex;
   align-items: baseline;
@@ -487,6 +512,16 @@
   font-weight: 700;
   padding: calc(var(--u) * 6) 0;
 }
+.result-row-name {
+  display: block;
+}
+.result-row-basis {
+  display: block;
+  margin-top: calc(var(--u) * 2);
+  font-size: calc(var(--u) * 11);
+  font-weight: 600;
+  color: var(--text-muted);
+}
 .result-table td {
   text-align: right;
   font-weight: 800;
@@ -511,17 +546,29 @@
 }
 .result-rp-card {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: calc(var(--u) * 4);
-  min-height: calc(var(--u) * 40);
-  padding: 0 calc(var(--u) * 6);
+  gap: calc(var(--u) * 3);
+  min-height: calc(var(--u) * 48);
+  padding: calc(var(--u) * 6);
   border: 1px solid var(--panel-border);
   border-radius: calc(var(--u) * 8);
   font-size: calc(var(--u) * 11);
   font-weight: 800;
   color: var(--text-muted);
   text-align: center;
+}
+.result-rp-name {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 4);
+}
+.result-rp-progress {
+  font-size: calc(var(--u) * 11);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
 }
 .result-rp-card.is-achieved {
   color: #ffffff;
