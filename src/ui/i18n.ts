@@ -40,7 +40,7 @@ const en = {
   'view.audience': 'Audience view',
 
   // 확인창
-  'confirm.branch': 'Recorded match after {time} ({seconds} s) will be deleted. Drive again from here?',
+  'confirm.branch': 'Start a new branch at {time} and drive again? The current branch ({name}) keeps its record.',
   'confirm.newMatch': 'Discard this match and start a new one with the same settings?',
   'confirm.ok': 'OK',
   'confirm.cancel': 'Cancel',
@@ -213,6 +213,25 @@ const en = {
   'result.exportMatch': 'EXPORT MATCH',
   'result.exportSummary': 'EXPORT SUMMARY',
   'summary.footer': 'SEED {seed} · ENGINE v{engine} · BALLISTICS v{ballistics}',
+
+  // 분기 트리 (10-6)
+  'branch.main': 'Main',
+  'branch.auto': 'Branch {number}',
+  'branch.menu': 'Branches',
+  'branch.locked': 'Switch branches while paused or reviewing',
+  'branch.fork': 'from {time}',
+  'branch.head': 'to {time}',
+  'branch.score': '{score} pts',
+  'branch.current': 'Current branch',
+  'branch.rename': 'Rename',
+  'branch.delete': 'Delete',
+  'branch.markTip': '{name} · from {parent} at {time}',
+  'branch.best': 'Best',
+  'confirm.branchFull': 'All {max} branches are in use. Delete a branch from the branch list before branching.',
+  'confirm.deleteBranch': 'Delete the branch "{name}"?',
+  'confirm.deleteBranchTree': 'Delete the branch "{name}" with its sub-branches ({count})?',
+  'confirm.newMatchBranches': 'Discard this match with all {count} branches and start a new one with the same settings?',
+  'result.branches': 'BRANCHES',
 
   // 경기 종료 연출 (09-7c)
   'end.banner': 'MATCH COMPLETE',
@@ -403,7 +422,7 @@ const ko: Record<MessageKey, string> = {
   'view.driver': '드라이버 시점',
   'view.audience': '관중석 시점',
 
-  'confirm.branch': '{time} 이후 기록 {seconds}초가 삭제됩니다. 여기서부터 다시 조종할까요?',
+  'confirm.branch': '{time}에서 새 가지를 만들어 다시 조종할까요? 지금 가지({name})의 기록은 그대로 남습니다.',
   'confirm.newMatch': '이 경기를 버리고 같은 설정으로 새 경기를 시작할까요?',
   'confirm.ok': '확인',
   'confirm.cancel': '취소',
@@ -572,6 +591,24 @@ const ko: Record<MessageKey, string> = {
   'result.exportMatch': '경기 내보내기',
   'result.exportSummary': '요약 내보내기',
   'summary.footer': '시드 {seed} · 엔진 v{engine} · 탄도 모델 v{ballistics}',
+
+  'branch.main': '원본',
+  'branch.auto': '가지 {number}',
+  'branch.menu': '가지 목록',
+  'branch.locked': '일시정지 / 복기 중에만 가지 전환',
+  'branch.fork': '{time}에서',
+  'branch.head': '{time}까지',
+  'branch.score': '{score}점',
+  'branch.current': '지금 가지',
+  'branch.rename': '이름 바꾸기',
+  'branch.delete': '삭제',
+  'branch.markTip': '{name} · {parent}의 {time}에서',
+  'branch.best': '최고',
+  'confirm.branchFull': '가지가 {max}개로 가득 찼습니다. 가지 목록에서 가지를 삭제한 뒤 분기하세요.',
+  'confirm.deleteBranch': "'{name}' 가지를 삭제할까요?",
+  'confirm.deleteBranchTree': "'{name}' 가지와 그 아래 가지 {count}개를 삭제할까요?",
+  'confirm.newMatchBranches': '이 경기와 가지 {count}개를 모두 버리고 같은 설정으로 새 경기를 시작할까요?',
+  'result.branches': '가지 비교',
 
   'end.banner': '경기 종료',
   'end.skipHint': '클릭 / Space로 결과 바로 보기',

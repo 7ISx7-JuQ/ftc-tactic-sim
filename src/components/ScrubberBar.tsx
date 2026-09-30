@@ -1,5 +1,6 @@
 // 스크러버 줄 (명세서 3.8 화면 구성, 09-7a): 주 버튼(START / PAUSE / RESUME / BRANCH), 1초 · 1틱 이동(길게 누르면 반복),
 // 재생 / 배속, VIEW, NEW, RESULT. 타임라인 막대: 보는 틱 + 기록 구간, 클릭 / 끌기로 보는 틱 이동 (09-7b, 끄는 동안 시간 표시).
+// 10-6: 주 버튼 옆 가지 버튼 + 목록(BranchMenu), 타임라인에 지금 가지와 그 조상의 분기 표식(마우스 올리면 설명).
 import { useEffect, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import { ChevronLeft, ChevronRight, CirclePause, CirclePlay, FastForward, Gamepad2, GitBranch, Pause, Play, Rewind, RotateCcw, SwitchCamera, Trophy } from 'lucide-react';
@@ -10,6 +11,9 @@ import { t } from '../ui/i18n';
 import type { Language, MessageKey } from '../ui/i18n';
 import { formatMatchTime } from '../ui/units';
 import { mainButton, timelineFraction, timelineMarks, timelineTickAt } from '../ui/mainScreenModel';
+import { forkMarks } from '../ui/branchView';
+import BranchMenu from './BranchMenu';
+import type { BranchActions } from './BranchMenu';
 
 export interface ScrubberActions {
   start: () => void;
@@ -87,7 +91,17 @@ function RepeatButton({ label, icon, onStep, disabled }: { label: string; icon: 
   );
 }
 
-export default function ScrubberBar({ status, lang, actions }: { status: AppStatus; lang: Language; actions: ScrubberActions }) {
+export default function ScrubberBar({
+  status,
+  lang,
+  actions,
+  branchMenu,
+}: {
+  status: AppStatus;
+  lang: Language;
+  actions: ScrubberActions;
+  branchMenu: { enabled: boolean; actions: BranchActions };
+}) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
   const seek = (clientX: number) => {
@@ -114,6 +128,7 @@ export default function ScrubberBar({ status, lang, actions }: { status: AppStat
         {spec.icon}
         <span>{t(lang, spec.key)}</span>
       </button>
+      <BranchMenu status={status} lang={lang} enabled={branchMenu.enabled} actions={branchMenu.actions} />
 
       <div className="scrub-group">
         <RepeatButton label={t(lang, 'control.stepBackSecond')} icon={<Rewind />} disabled={scrubDisabled} onStep={() => actions.stepView(-TICKS_PER_SECOND)} />
@@ -151,6 +166,8 @@ export default function ScrubberBar({ status, lang, actions }: { status: AppStat
           {MARKS.map(m => (
             <span key={m.fraction} className={`timeline-mark${m.major ? ' is-major' : ''}`} style={{ left: `${m.fraction * 100}%` }} />
           ))}
+          {status.phase === 'MATCH' &&
+            forkMarks(lang, status).map(m => <span key={m.title} className="timeline-fork" title={m.title} style={{ left: `${m.fraction * 100}%` }} />)}
           <span className="timeline-thumb" style={{ left: `${viewFraction * 100}%` }}>
             {isDragging && <span className="timeline-time">{formatMatchTime((MATCH_TICKS - status.tick) * DT)}</span>}
           </span>

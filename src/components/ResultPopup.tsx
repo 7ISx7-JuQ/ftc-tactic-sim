@@ -2,7 +2,8 @@
 // 값은 종료 프레임(scoreBreakdown / RP / TIP)만 읽는다 (3.2항 실시간 / 확정 분리). 표시 규칙은 src/ui/resultModel.ts.
 // 09-12 확정: 헤더 아래 두 로봇 칩(좌측 패널과 같은 팀 표시), 항목별 점수 + 한 줄 근거, RP 카드 = 조건 + 지금 값.
 // 10-4: 동작 줄 위에 EXPORT MATCH(경기 레시피 .json) / EXPORT SUMMARY(요약 .txt) 줄.
-import { Check, Download, FileText } from 'lucide-react';
+// 10-6: 가지가 2개 이상이면 진영 옆에 지금 가지 이름, 종료한 가지가 2개 이상이면 가지 비교 줄(점수, 지금 가지 강조, 최고 점수 표시).
+import { Check, Download, FileText, GitFork, Trophy } from 'lucide-react';
 import type { MatchResult } from '../app/appController';
 import { ALLIANCE_COLORS } from '../renderer/canvasRenderer';
 import { t } from '../ui/i18n';
@@ -28,6 +29,8 @@ export default function ResultPopup({
   onRestart,
   onExportMatch,
   onExportSummary,
+  branchName,
+  comparison,
 }: {
   result: MatchResult;
   alliance: 'RED' | 'BLUE';
@@ -37,6 +40,8 @@ export default function ResultPopup({
   onRestart: () => void;
   onExportMatch: () => void;   // 경기 파일 (.json, 10-4)
   onExportSummary: () => void; // 요약 (.txt, 10-4)
+  branchName: string | null;    // 지금 가지 이름 (가지 2개 이상일 때만, 10-6)
+  comparison: { id: number; label: string; score: number; current: boolean; best: boolean }[] | null; // 종료한 가지 비교 (2개 이상일 때만)
 }) {
   const colors = ALLIANCE_COLORS[alliance];
 
@@ -46,7 +51,15 @@ export default function ResultPopup({
         <header className="result-header">
           <div className="result-app">{t(lang, 'app.name')}</div>
           <div className="result-title">{t(lang, 'result.title')}</div>
-          <div className="result-alliance" style={{ background: colors.base }}>{alliance} ALLIANCE</div>
+          <div className="result-alliance-row">
+            <div className="result-alliance" style={{ background: colors.base }}>{alliance} ALLIANCE</div>
+            {branchName && (
+              <span className="result-branch">
+                <GitFork />
+                {branchName}
+              </span>
+            )}
+          </div>
           <div className="result-robots">
             {ROBOTS.map(id => {
               const team = teams[id];
@@ -99,6 +112,19 @@ export default function ResultPopup({
             ))}
           </div>
         </div>
+
+        {comparison && (
+          <div className="result-compare">
+            <span className="result-compare-head">{t(lang, 'result.branches')}</span>
+            {comparison.map(c => (
+              <span key={c.id} className={`result-compare-chip${c.current ? ' is-current' : ''}`}>
+                {c.best && <Trophy aria-label={t(lang, 'branch.best')} />}
+                <span className="result-compare-name">{c.label}</span>
+                <b>{c.score}</b>
+              </span>
+            ))}
+          </div>
+        )}
 
         <div className="result-exports">
           <button type="button" className="config-button" onClick={onExportMatch}>

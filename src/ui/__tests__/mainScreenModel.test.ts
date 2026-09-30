@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import { DT, ENDGAME_START_TICK, MATCH_TICKS } from '../../core/simulationEngine';
 import { FONT_FAMILY, canvasFont } from '../../renderer/fonts';
 import {
-  branchConfirmParams,
   DESIGN_HEIGHT_PX,
   DESIGN_WIDTH_PX,
   LAYOUT_U,
@@ -113,12 +112,6 @@ describe('C. 스크러버 줄 / config 띠', () => {
     expect(mainButton({ ...base, phase: 'MATCH', loopState: 'ENDED', tick: MATCH_TICKS, headTick: MATCH_TICKS, matchEnded: true })).toEqual({ kind: 'BRANCH', enabled: false });
     expect(mainButton({ ...base, phase: 'MATCH', loopState: 'ENDED', tick: 3000, headTick: MATCH_TICKS, matchEnded: true })).toEqual({ kind: 'BRANCH', enabled: false });
     expect(mainButton({ ...base, phase: 'MATCH', loopState: 'PAUSED', tick: 900, headTick: 900 })).toEqual({ kind: 'RESUME', enabled: false });
-  });
-
-  it('분기 확인창 문구 값: 보는 틱의 경기 시계, 삭제될 기록 초 (소수 1자리)', () => {
-    expect(branchConfirmParams(1500, 2000, MATCH_TICKS, DT)).toEqual({ time: '1:30', seconds: '10.0' });
-    expect(branchConfirmParams(5700, 6000, MATCH_TICKS, DT)).toEqual({ time: '0:06.0', seconds: '6.0' });
-    expect(branchConfirmParams(1499, 1500, MATCH_TICKS, DT)).toEqual({ time: '1:31', seconds: '0.0' });
   });
 
   it('타임라인: 위치 비율 제한, 10초 눈금 13개, ENDGAME 시작 눈금만 major', () => {

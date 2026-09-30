@@ -1021,7 +1021,11 @@
             - 트리 규칙 `src/app/branchTree.ts`(순수, 가지 자료는 제네릭): `MAX_BRANCHES = 8`, `createBranchTree`(원본 = id / 번호 1, 이름 선택), `forkBranch`(가득 차면 null, 새 가지가 지금 가지), `switchBranch`, `setBranchData`, `renameBranch` / `normalizeName`(앞뒤 공백 제거, 24자, 빈 이름 = 자동), `descendantIds`, `branchDepth`, `removeBranch`(하위 포함, 원본 / 없는 가지 = null, 지금 가지가 지워지면 지운 가지의 부모), `fileBranchName`(파일용 영어 자동 이름 `Main` / `Branch n`). 번호는 경기 안에서 재사용하지 않고, id는 남은 가지 중 최대 + 1.
             - 입력 (`inputLog.ts`): `InputLogChannel.copyFrom`, `MatchInputs.snapshot()` / `restore()`(녹화 로그 + 적용 입력 기록 사본 `BranchInputs`). 입력 허브는 지금 가지의 작업본이고, 떠나는 가지(분기 / 전환)는 사본을 보관한다.
             - 컨트롤러 (`appController.ts`): `branch()` → 가득 찼으면 false(분기 안 함), 아니면 지금 가지에 타임라인 + 입력 사본 보관 → `forkTimeline` → 새 가지에만 3.6항 분기 규칙 → 재개. `switchBranch(id)`(일시정지 / 복기 중, 재생 멈춤, 보는 틱을 머리 이하로, 종료 가지 = `REVIEW` / 미종료 = `NONE`, `endSeq` 불변), `deleteBranch(id)`(지금 가지가 지워지면 먼저 부모로 전환), `renameBranch(id, name)`(경기 중 언제나). 재개 조건에서 "루프 일시정지"를 빼고 "진행 중 아님 + 보는 틱 = 머리 + 미종료"로 (종료 가지에서 미종료 가지로 전환하면 루프가 `ENDED`여도 엔진이 6000틱 전이면 재개 가능). 상태 `branches`(번호 / 이름 / 부모 / 분기 틱 / 깊이 / 머리 / 종료 / 종료 점수), `currentBranchId`, `canFork`, `branchName` = 지금 가지의 사용자 이름. `NEW` / 불러오기 = 새 트리(불러온 경기는 파일 가지 이름의 원본), 내보내기 가지 이름 = `fileBranchName(지금 가지)`.
-            - 화면은 10-6: 그때까지 `BRANCH` 확인창은 옛 문구("이후 기록 삭제")이고, 가득 찬 상태의 `BRANCH`는 확인 후 아무 일도 일어나지 않는다.
+            - 화면은 10-6: 그때까지 `BRANCH` 확인창은 옛 문구("이후 기록 삭제")이고, 가득 찬 상태의 `BRANCH`는 확인 후 아무 일도 일어나지 않는다. → 10-6에서 해결.
+        - **구현 (10-6):**
+            - 화면 규칙 `src/ui/branchView.ts`(순수): `branchLabel`(사용자 이름, 없으면 `Main` / "원본", `Branch n` / "가지 n"), `branchRows`(깊이 / 분기 시각 "from 1:24" · "1:24에서", 원본 "—" / 상태 = 종료 점수 "95 pts" · "95점" 또는 머리 시각 "to 0:50" · "0:50까지" / 지금 가지 / 삭제 가능), `branchMenuEnabled`(경기 중 + 보는 틱 이동 가능 + 재생 아님, 확인창이 떠 있으면 화면이 따로 막음), `forkMarks`(지금 가지 → 원본까지 각 분기 틱, 설명 "Branch 3 · from Main at 1:23" / "가지 3 · 원본의 1:23에서"), 확인창 문구 `branchConfirmText` / `branchFullText` / `deleteConfirmText`(하위 수) / `newMatchConfirmText`(가지 2개 이상이면 수), 결과 팝업 `shownBranchName`(가지 2개 이상이거나 사용자 이름이 있을 때) / `branchComparison`(종료 2개 이상, 동점 최고는 모두 표시), `fileBranchNumber`(원본이 아니면 번호 → 파일 이름 `_b{번호}`). 옛 "삭제될 기록 초" 계산(`branchConfirmParams`)은 삭제.
+            - 화면: 스크러버 줄 주 버튼 바로 옆 가지 버튼(`GitFork` + 지금 가지 이름, 최대 150u 말줄임, 경기 전에도 자리 유지 · 비활성) → 위로 펼치는 목록 `BranchMenu.tsx`(420u, 단계당 10u 들여쓰기, 줄 = 체크 · 이름(누르면 전환 후 닫힘) · 분기 시각 · 상태, 연필 = 줄 안 입력칸(24자, 빈칸 = 자동 이름 안내, Enter / 초점 이동 = 저장, Esc = 취소), 휴지통 = 삭제 확인창(원본 비활성)). 바깥 클릭 / Esc로 닫히고, 열 수 없는 상태(진행 · 재생 · 확인창 등)면 숨었다가 돌아오면 다시 보임(삭제 확인 뒤 목록 유지). 타임라인 분기 표식 = 파란 세로 막대(마우스 올리면 설명). 확인창에 "확인 버튼 하나" 안내창 모드(취소 문구 없음, Esc도 닫기) — 가득 참 안내. 결과 팝업: 진영 배지 옆 가지 이름(`GitFork`), RP 아래 `BRANCHES` / "가지 비교" 줄(가지별 이름 + 점수 칩, 지금 가지 주황 테두리, 최고 점수 트로피). 요약 텍스트의 가지 이름 = `shownBranchName`.
+            - **10-6 세부 결정:** ① 가지 버튼은 주 버튼 옆(분기 관련 조작을 한곳에) ② 한국어 삭제 문구는 조사 문제를 피해 "'{이름}' 가지를 삭제할까요?" / "'{이름}' 가지와 그 아래 가지 {n}개를 삭제할까요?" ③ 영어 하위 가지 문구는 수와 무관한 "with its sub-branches (n)" ④ 한 가지뿐인 경기는 결과 팝업 / 요약에 가지 이름을 쓰지 않음(사용자 이름이 있으면 씀).
     - **프리셋 내보내기 / 불러오기 (SETTINGS 탭 `PRESETS` 구역):**
 
         | 줄 | 파일 종류 `kind` | `EXPORT` | `IMPORT` |
@@ -1399,6 +1403,7 @@ export interface TimelineFrame {
 | 10-3 | 레시피 저장 순수 계층: 적용 입력 기록(`MatchInputs.applied`, 분기 시 자름) + 기록 재생 공급 함수, `ENGINE_VERSION` + 올림 누락 방지 기대값 테스트, 체크섬 / 체크포인트, 입력 RLE + Base64, 레시피 만들기 / 문자열 / 해석 · 검증 · 경고 (아래 6.2.46) | `src/input/inputLog.ts`, `src/core/checksum.ts`, `simulationEngine.ts`, `src/app/matchRecipe.ts`, `appController.ts`, `src/ui/presetFile.ts`, 테스트 `matchRecipe.test.ts` / `engineVersion.test.ts` / `inputLog.test.ts` G |
 | 10-4 | 경기 불러오기 / 내보내기 연결: 컨트롤러 `loadMatch`(재계산 → 회전 → 종료 연출 없이 복기, `REPLAY`) / `recipeSource`, SETTINGS `MATCH` 줄(해석 · 거부 사유 · 확인창 버전 경고 · 명중 확률표 준비 진행 · `CANCEL`), 체크섬 불일치 배너, 결과 팝업 `EXPORT MATCH` / `EXPORT SUMMARY`, 요약 텍스트 / 파일 이름 (아래 6.2.47) | `appController.ts`, `inputLog.ts`, `src/ui/matchFile.ts`, `resultModel.ts`, `MainScreen.tsx`, `SettingsTab.tsx`, `FieldNotices.tsx`, `ResultPopup.tsx`, `i18n.ts`, `MainScreen.css`, 테스트 |
 | 10-5 | 분기 트리 엔진 / 컨트롤러: 엔진 가지 타임라인(분기 = 참조 공유 새 배열, 전환 = 설치), 순수 트리 규칙(8개 상한 / 번호 · 이름 / 하위 포함 삭제 / 원본 보호), 가지별 입력 기록 사본, 컨트롤러 `branch` / `switchBranch` / `deleteBranch` / `renameBranch` · 상태 가지 목록, 헤드리스 Chromium 8개 가지 힙 실측 (아래 6.2.48) | `simulationEngine.ts`, `src/app/branchTree.ts`, `inputLog.ts`, `appController.ts`, `MainScreen.tsx`, 테스트 `engineTimeline.test.ts` / `branchTree.test.ts` / `appController.test.ts` K / `inputLog.test.ts` H |
+| 10-6 | 분기 UI: 가지 버튼 / 목록(전환 · 이름 바꾸기 · 삭제), 타임라인 분기 표식, 분기 확인창 새 문구 / 가득 참 안내창, `NEW` 확인창 가지 수, 결과 팝업 가지 이름 + 가지 비교 줄, 파일 이름 `_b{번호}` (아래 6.2.49) — Step 10 완료 | `src/ui/branchView.ts`, `BranchMenu.tsx`, `ScrubberBar.tsx`, `ResultPopup.tsx`, `ConfirmDialog.tsx`, `MainScreen.tsx`, `matchFile.ts`, `mainScreenModel.ts`, `i18n.ts`, `MainScreen.css`, 테스트 |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
@@ -1772,6 +1777,13 @@ export interface TimelineFrame {
 - **테스트:** `src/core/__tests__/engineTimeline.test.ts` A~C(분기 = 0 ~ T 프레임 같은 객체 · 부모 배열 보존, 같은 입력이면 부모와 같은 결과, 전환 = 머리 복원 · 난수 배열도 교체 · 이어 기록 = 한 번에 진행한 결과 · 중첩 분기 공유), `src/app/__tests__/branchTree.test.ts` A~E(번호 / 상한, 이름 규칙, 하위 포함 삭제 · 부모로 전환(원본이 아닌 부모 포함) · 번호 재사용 없음, 불변 값, 파일 이름), `src/input/__tests__/inputLog.test.ts` H(사본 독립 · 복원), `src/app/__tests__/appController.test.ts` K(분기해도 원본 보존, 전환 시 보는 틱 · 머리 프레임, 원본 이어 기록, 이름, 8개 상한에서 분기 거부, 하위 포함 삭제 후 원본 타임라인 설치, 진행 중 전환 / 삭제 거부, 종료 가지 ↔ 미종료 가지 전환(복기 / `ENDED` 루프에서 재개), 원본 입력 기록만으로 독립 재계산 = 원본 결과, `NEW` = 트리 폐기). 돌연변이 16종 중 12종 실패 → 남은 4종(부모가 원본이 아닌 삭제, 전환 시 난수 배열, 분기 시 원래 가지 입력 사본, 지금 가지 삭제 시 전환)은 테스트 보강으로 모두 실패 확인.
 - **헤드리스 Chromium 측정 (저장소 밖 1회성, 개발 서버 1366 × 768, 가짜 시계, CDP `HeapProfiler.collectGarbage` + `Runtime.getHeapUsage` — 가짜 시계가 `performance`를 바꿔 `performance.memory`는 쓸 수 없음):** 경기 → 끝까지 → `REVIEW` → 타임라인 맨 앞 클릭 → `BRANCH`(확인창 Enter) → 끝까지를 7번 반복해 가지 8개: 힙 16.1 → 38.8 → 60.8 → 82.1 → 103.3 → 124.4 → 145.6 → 166.7 → 187.9 MB, 탭 힙 상한 4096 MB. 9번째 `BRANCH`는 분기하지 않음(주 버튼 그대로). 콘솔 오류 없음.
 
+### 6.2.49 Step 10-6 (분기 UI) 완료 항목 — Step 10 완료
+
+- **결정:** 3.9항 가지 선택 / 전환 / 삭제 / `NEW` / 결과 팝업 규칙 그대로 + "구현 (10-6)"의 세부 결정 ① ~ ④.
+- **구현:** 3.9항 분기 트리 아래 "구현 (10-6)" 참고.
+- **테스트:** `src/ui/__tests__/branchView.test.ts` A~G(가지 이름 영어 / 한국어, 목록 줄 · 0틱 분기도 시각 표시, 목록 열기 조건, 분기 표식 순서 · 설명, 확인창 문구 4종 · 하위 수 · 가지 2개부터 NEW 문구, 결과 팝업 가지 이름 조건 · 비교 줄 · 동점 최고, 파일 이름 `_b{번호}`), `i18n.test.ts` / `mainScreenModel.test.ts` 갱신(새 분기 확인창 문구, 옛 계산 삭제). 돌연변이 12종 중 8종 실패 → 2종(0틱 분기 표시, 가지 2개 NEW 문구)은 테스트 보강으로 실패 확인, 2종(원본 = 번호 1, 종료 = 점수 있음)은 규칙상 같은 뜻인 동등 변이라 조건을 하나로 줄임.
+- **헤드리스 Chromium 점검 (저장소 밖 1회성, 개발 서버 1366 × 768, 가짜 시계):** 경기 끝까지 → 1:24 지점 `BRANCH` → 확인창 "Start a new branch at 1:24 … The current branch (Main) keeps its record." → 끝까지 → 결과 팝업 진영 옆 "Branch 2" + `BRANCHES` Main 9 / Branch 2 9(동점 둘 다 트로피) → `EXPORT MATCH` `…_9pts_b2.json` → 가지 목록 2줄 → 이름 "Fast cycle" → 분기 표식 설명 "Fast cycle · from Main at 1:24" → 원본으로 전환(표식 없음) → 삭제 확인창 → 목록 1줄 · 원본 휴지통 비활성 → 계속 분기해 8개 → 확인 버튼 하나 "All 8 branches are in use …" → `NEW` 확인창 "… with all 8 branches …" → 한국어 목록("원본 — 9점", "가지 3 1:36에서 1:36까지"). 7단계 중첩에서 영어 이름이 잘려 들여쓰기 14u → 10u, 목록 폭 380u → 420u로 고침. 콘솔 오류 없음.
+
 ### 6.3 남은 Step (권장 순서)
 
 > 모든 Step은 완료 시 `npm test`(엔진 회귀 테스트)가 통과해야 하며, 새로 추가한 규칙에는 테스트 그룹을 추가한다.
@@ -1826,14 +1838,14 @@ export interface TimelineFrame {
         - ~~09-11a: 시나리오 탭 폼(진영 / `HIVE` / 적재물 / 잔여 기물 / 오토 TIP / 시작 자세 숫자 칸) + 시드 `REROLL` + 유효 배지.~~ (완료, 6.2.41)
         - ~~09-11b: 시작 자세 편집 모드 `EDIT ON FIELD` — 로봇 몸체 드래그 = 위치, 회전 핸들 = 헤딩(스냅 없음), 배치 검증(겹친 로봇 빨간색 + 사유), 좌표 / 헤딩 글자, 필드 = 구조물 + `GARDEN` 기물 + 두 로봇, `DONE · APPLY` / `CANCEL`.~~ (완료, 6.2.42) — 09-11 완료
     - ~~09-12: 결과 팝업 세부 디자인 확정(09-7a 기본형 기반, 사용자와 확정), 개발 하네스 삭제(+ 1회성 스크립트 `src/tmp_shots.ts`도 함께 삭제, 09-10b 확정 ③) — Step 9 완료.~~ (완료, 6.2.43)
-- **Step 10 — 분기 타임라인 및 경기 저장/공유:** (09-1 추가) 로봇 프로필 / 시나리오 JSON 내보내기 · 불러오기(SETTINGS 탭 프리셋 관리), 결과 팝업 로그 / JSON 내보내기. 분기 트리(부모 프레임 공유, 분기 이후 프레임만 생성), 저장 레시피(설정 + 시나리오 + 시드 + 양자화 입력 로그 + 탄도 설정 / LUT 시드 / 샘플 수 / `BALLISTICS_MODEL_VERSION` + 엔진 버전 + 상태 체크섬, LUT 자체는 저장하지 않고 캐시 또는 재생성). 레시피 약 50 KB 수준으로 파일/IndexedDB 저장 가능 (10-1: v1은 파일만). 입력 로그 형식(로봇별 틱당 4 B, 8비트)은 3.6항, 저장 시 연속 중복 압축.
+- **Step 10 — 분기 타임라인 및 경기 저장/공유:** (09-1 추가) 로봇 프로필 / 시나리오 JSON 내보내기 · 불러오기(SETTINGS 탭 프리셋 관리), 결과 팝업 로그 / JSON 내보내기. 분기 트리(부모 프레임 공유, 분기 이후 프레임만 생성), 저장 레시피(설정 + 시나리오 + 시드 + 양자화 입력 로그 + 탄도 설정 / LUT 시드 / 샘플 수 / `BALLISTICS_MODEL_VERSION` + 엔진 버전 + 상태 체크섬, LUT 자체는 저장하지 않고 캐시 또는 재생성). 레시피 약 50 KB 수준으로 파일/IndexedDB 저장 가능 (10-1: v1은 파일만). 입력 로그 형식(로봇별 틱당 4 B, 8비트)은 3.6항, 저장 시 연속 중복 압축. — **Step 10 완료** (10-1 ~ 10-6).
     - 10-1(명세) 완료. 상세 규칙 3.9항. 하위 Step (각 Step 완료 시 `npm test` / `npx tsc -b` / `npm run build` 통과):
     - ~~10-1: 분기 타임라인 / 경기 저장 · 공유 명세 구체화.~~ (완료, 6.2.44)
     - ~~10-2: 프리셋 파일 — 순수 직렬화 / 해석 / 정리(`ROBOT` / `SCENARIO` / `SETUP`, 자동 보관 정리 함수 재사용) + SETTINGS 탭 `PRESETS` 구역(`R1` / `R2` / `SCENARIO` / `ALL` 줄 `EXPORT` / `IMPORT`, 초안 반영 · 덮어쓰기 확인창 · 거부 사유) + 파일 다운로드 / 선택 도우미 + 테스트 (스크린샷 확인).~~ (완료, 6.2.45)
     - ~~10-3: 레시피 저장 순수 계층 — 적용 입력 기록(`MatchInputs.applied`, 분기 시 자름), `ENGINE_VERSION` / `RECIPE_VERSION`, `frameChecksum` + 체크포인트, 입력 RLE + Base64 부호화 / 해독, 레시피 만들기 / 해석 · 검증(거부 사유 코드) + 재현 테스트(저장 → 해독 → 재계산 체크섬 전부 일치, `REPLAY` → `NONE` 전환 경기, 버전 누락 방지 기대값).~~ (완료, 6.2.46)
     - ~~10-4: 경기 불러오기 / 내보내기 연결 — `IMPORT MATCH`(확인창 + 버전 경고, 적용 값 교체, LUT 준비 · 취소, 재계산, 복기 상태, 체크섬 불일치 배너) + 결과 팝업 `EXPORT MATCH` / `EXPORT SUMMARY`(요약 텍스트 규칙) + 파일 이름 규칙 (스크린샷 확인).~~ (완료, 6.2.47)
     - ~~10-5: 분기 트리 엔진 / 컨트롤러 — 엔진 타임라인 객체 교체 API(분기 = 0 ~ T 참조 공유, 전환 = 교체), 가지 트리 규칙(`MAX_BRANCHES = 8`, 번호 / 이름, 삭제 = 하위 포함, 원본 보호), 가지별 녹화 로그 사본 / 적용 입력 기록, 전환 시 루프 상태(일시정지 / 복기), `endSeq` 규칙, `NEW` = 트리 폐기 + 테스트 + 헤드리스 Chromium 8개 가지 힙 측정.~~ (완료, 6.2.48)
-    - 10-6: 분기 UI — 스크러버 가지 버튼 / 목록(전환 · 이름 바꾸기 · 삭제), 타임라인 분기 표식, 분기 확인창 새 문구 / 가득 참 안내창, `NEW` 확인창 가지 수, 결과 팝업 헤더 가지 이름 + `BRANCHES` 비교 줄 (스크린샷 확인) — Step 10 완료.
+    - ~~10-6: 분기 UI — 스크러버 가지 버튼 / 목록(전환 · 이름 바꾸기 · 삭제), 타임라인 분기 표식, 분기 확인창 새 문구 / 가득 참 안내창, `NEW` 확인창 가지 수, 결과 팝업 헤더 가지 이름 + `BRANCHES` 비교 줄 (스크린샷 확인) — Step 10 완료.~~ (완료, 6.2.49)
 
 ### 6.4 보류 / 후속 검토 항목
 

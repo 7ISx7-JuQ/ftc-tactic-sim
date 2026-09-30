@@ -1,6 +1,6 @@
 // 경기 파일 화면 규칙 (명세서 3.9 경기 불러오기 / 경기 내보내기, 10-4): React / DOM 비의존 순수 함수
 // - 불러오기: 거부 사유 문구, 확인창(설정 교체 안내 + 버전 / LUT 설정 경고 줄), 준비 진행(두 로봇 명중 확률표), 체크섬 불일치 배너.
-// - 내보내기: 경기 / 요약 파일 이름, 요약 텍스트(결과 팝업과 같은 규칙 resultRows / rpCards / resultBasisText, 현재 화면 언어).
+// - 내보내기: 경기 / 요약 파일 이름(원본이 아닌 가지는 _b{번호}, 10-6), 요약 텍스트(결과 팝업과 같은 규칙 resultRows / rpCards / resultBasisText, 현재 화면 언어).
 
 import type { MatchResult } from '../app/appController';
 import type { RecipeError, RecipeWarning } from '../app/matchRecipe';
@@ -77,14 +77,18 @@ export function mismatchBanner(lang: Language, comparison: CheckpointComparison,
 // 2. 내보내기
 // ============================================================
 
-/** 경기 파일 이름: tacticsim-match_{YYYYMMDD-HHmm}_{진영}_{총점}pts.json (원본이 아닌 가지 표시 _b{번호}는 분기 트리 10-6) */
-export function matchFileName(date: Date, alliance: 'RED' | 'BLUE', total: number): string {
-  return safeFileName(`tacticsim-match_${fileTimestamp(date)}_${alliance}_${total}pts.json`);
+/** 파일 이름 뒷부분: {YYYYMMDD-HHmm}_{진영}_{총점}pts, 원본이 아닌 가지는 _b{번호} (10-6) */
+const fileStem = (date: Date, alliance: 'RED' | 'BLUE', total: number, branchNumber: number | null) =>
+  `${fileTimestamp(date)}_${alliance}_${total}pts${branchNumber !== null ? `_b${branchNumber}` : ''}`;
+
+/** 경기 파일 이름: tacticsim-match_{YYYYMMDD-HHmm}_{진영}_{총점}pts[_b{번호}].json */
+export function matchFileName(date: Date, alliance: 'RED' | 'BLUE', total: number, branchNumber: number | null = null): string {
+  return safeFileName(`tacticsim-match_${fileStem(date, alliance, total, branchNumber)}.json`);
 }
 
 /** 요약 파일 이름: 경기 파일과 같은 이름의 tacticsim-summary_….txt */
-export function summaryFileName(date: Date, alliance: 'RED' | 'BLUE', total: number): string {
-  return safeFileName(`tacticsim-summary_${fileTimestamp(date)}_${alliance}_${total}pts.txt`);
+export function summaryFileName(date: Date, alliance: 'RED' | 'BLUE', total: number, branchNumber: number | null = null): string {
+  return safeFileName(`tacticsim-summary_${fileStem(date, alliance, total, branchNumber)}.txt`);
 }
 
 export interface SummaryInput {

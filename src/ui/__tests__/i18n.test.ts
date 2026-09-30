@@ -61,7 +61,7 @@ describe('화면 문구 사전 (09-6a)', () => {
   it('C. 조회 / 자리표시자 치환 / 대체', () => {
     assert(t('en', 'control.start') === 'START' && t('ko', 'control.start') === '시작', 'lookup by language');
     assert(t('ko', 'lut.GENERATING', { percent: 63 }) === '확률표 생성 중 63%', 'number parameter');
-    assert(t('en', 'confirm.branch', { time: '1:12', seconds: '47.9' }) === 'Recorded match after 1:12 (47.9 s) will be deleted. Drive again from here?', 'several parameters');
+    assert(t('en', 'confirm.branch', { time: '1:12', name: 'Main' }) === 'Start a new branch at 1:12 and drive again? The current branch (Main) keeps its record.', 'several parameters');
     assert(t('en', 'issue.PLACEMENT_IN_HIVE') === '{robot} body overlaps the HIVE', 'missing parameter left as is');
     assert(t('en', 'issue.PLACEMENT_IN_HIVE', { other: 1 }) === '{robot} body overlaps the HIVE', 'unrelated parameter ignored');
     assert(t('fr' as Language, 'control.pause') === 'PAUSE', 'unknown language -> English');

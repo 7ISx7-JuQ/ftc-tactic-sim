@@ -1,7 +1,6 @@
 // 메인 화면 표시 규칙 (명세서 3.8 화면 구성, 09-6d): React 컴포넌트가 쓰는 순수 계산. DOM / React 비의존
 import type { AppStatus } from '../app/appController';
 import type { GamepadSlotStatus } from '../input/browserInput';
-import { formatMatchTime } from './units';
 
 // ------------------------------------------------------------
 // 화면 비례 단위 (명세서 3.8 기본 원칙): --u = min(창 폭 / 1366, 창 높이 / 650), 1u = 기준 화면에서 1 px.
@@ -127,11 +126,6 @@ export function mainButton(
   if (status.canResume) return { kind: 'RESUME', enabled: true };
   // 비활성: 되감은 틱이지만 종료 강조 / 결과 팝업 중 → BRANCH, 종료된 경기의 마지막 틱 → BRANCH(되감아야 가능), 그 외 RESUME
   return { kind: status.tick < status.headTick || status.matchEnded ? 'BRANCH' : 'RESUME', enabled: false };
-}
-
-/** 분기 확인창 문구 값: 보는 틱의 경기 시계, 삭제될 기록 길이 (초, 소수 1자리) */
-export function branchConfirmParams(viewTick: number, headTick: number, matchTicks: number, dt: number): { time: string; seconds: string } {
-  return { time: formatMatchTime(Math.max(0, (matchTicks - viewTick) * dt)), seconds: (Math.max(0, headTick - viewTick) * dt).toFixed(1) };
 }
 
 // ------------------------------------------------------------

@@ -21,7 +21,7 @@ import { createBrowserLUTWorker } from '../workers/createLUTWorker';
 import { createBrowserLUTCache } from '../workers/lutCache';
 import { PENDING_LUT_VIEW, lutInputsChanged, startBlocker } from '../ui/lutView';
 import type { RobotLutView } from '../ui/lutView';
-import { DEFAULT_RNG_SEED, DT, MATCH_TICKS } from '../core/simulationEngine';
+import { DEFAULT_RNG_SEED } from '../core/simulationEngine';
 import type { CheckpointComparison } from '../core/checksum';
 import { buildMatchRecipe, parseMatchRecipe, serializeMatchRecipe, verifyRecipe } from '../app/matchRecipe';
 import type { MatchRecipe, RecipeWarning } from '../app/matchRecipe';
@@ -33,7 +33,8 @@ import { buildPresetFile, importOverwriteTabs, importPresetToDrafts, parsePreset
 import type { PresetError, PresetRow } from '../ui/presetFile';
 import { downloadTextFile, pickTextFile } from '../ui/fileTransfer';
 import type { UiSettings } from '../ui/settings';
-import { branchConfirmParams, fieldCanvasSize, layoutCssVars, robotLabel } from '../ui/mainScreenModel';
+import { fieldCanvasSize, layoutCssVars, robotLabel } from '../ui/mainScreenModel';
+import { branchComparison, branchConfirmText, branchFullText, branchMenuEnabled, deleteConfirmText, fileBranchNumber, newMatchConfirmText, shownBranchName } from '../ui/branchView';
 import {
   DRAFT_TABS,
   TAB_LABEL_KEYS,
@@ -464,7 +465,7 @@ export default function MainScreen() {
     if (!src || !result || !status) return;
     const now = new Date();
     const recipe = buildMatchRecipe({ setup: drafts.applied, inputs: src.inputs, timeline: src.timeline, branchName: src.branchName, createdAt: now });
-    downloadTextFile(matchFileName(now, status.alliance, result.total), serializeMatchRecipe(recipe));
+    downloadTextFile(matchFileName(now, status.alliance, result.total, fileBranchNumber(status)), serializeMatchRecipe(recipe));
   };
   const exportSummary = () => {
     const result = status?.result;
@@ -475,11 +476,11 @@ export default function MainScreen() {
       result,
       alliance: status.alliance,
       teams: { robot1: drafts.applied.robot1, robot2: drafts.applied.robot2 },
-      branchName: status.branchName,
+      branchName: shownBranchName(lang, status),
       date: now,
       seed: drafts.applied.scenario.rngSeed ?? DEFAULT_RNG_SEED,
     });
-    downloadTextFile(summaryFileName(now, status.alliance, result.total), text, 'text/plain');
+    downloadTextFile(summaryFileName(now, status.alliance, result.total, fileBranchNumber(status)), text, 'text/plain');
   };
 
   // 화면 언어 (문서 lang 속성도 맞춤)
@@ -677,12 +678,13 @@ export default function MainScreen() {
   };
 
   // 확인창 (09-7b): 필드 영역 중앙의 모달. 떠 있는 동안 컨트롤러 단축키를 끔
-  const ask = (message: string, okLabel: string): Promise<boolean> =>
+  // cancel = false: 확인 버튼 하나인 안내창 (10-6 가지 가득 참)
+  const ask = (message: string, okLabel: string, cancel = true): Promise<boolean> =>
     new Promise(resolve => {
       const rect = areaRef.current?.getBoundingClientRect();
       c()?.setShortcutsEnabled(false);
       setConfirm({
-        request: { message, okLabel, cancelLabel: t(lang, 'confirm.cancel') },
+        request: { message, okLabel, cancelLabel: cancel ? t(lang, 'confirm.cancel') : null },
         anchor: rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : null,
         resolve,
       });
@@ -701,9 +703,26 @@ export default function MainScreen() {
     controller.stopPlayback();
     const s = controller.status();
     if (!s.canBranch) return;
-    void ask(t(lang, 'confirm.branch', branchConfirmParams(s.tick, s.headTick, MATCH_TICKS, DT)), t(lang, 'control.branch')).then(ok => {
+    // 10-6: 가지가 가득 찼으면 안내창만 (분기하지 않음), 아니면 새 가지 확인창
+    if (!s.canFork) {
+      void ask(branchFullText(lang), t(lang, 'confirm.ok'), false);
+      return;
+    }
+    void ask(branchConfirmText(lang, s), t(lang, 'control.branch')).then(ok => {
       if (ok) controller.branch();
     });
+  };
+  // 가지 목록 (10-6): 전환 / 이름 바꾸기는 바로, 삭제는 확인창 (하위 가지 수 포함)
+  const branchActions = {
+    switchBranch: (id: number) => c()?.switchBranch(id),
+    renameBranch: (id: number, name: string) => c()?.renameBranch(id, name),
+    deleteBranch: (id: number) => {
+      const controller = c();
+      if (!controller) return;
+      void ask(deleteConfirmText(lang, controller.status(), id), t(lang, 'branch.delete')).then(ok => {
+        if (ok) controller.deleteBranch(id);
+      });
+    },
   };
 
   // NEW: 진행 중이면 먼저 일시정지하고 확인, 취소하면 일시정지 상태로 남음 (09-7 확정)
@@ -712,7 +731,7 @@ export default function MainScreen() {
     if (!controller) return;
     controller.pause();
     controller.stopPlayback();
-    void ask(t(lang, 'confirm.newMatch'), t(lang, 'control.newMatch')).then(ok => {
+    void ask(newMatchConfirmText(lang, controller.status()), t(lang, 'control.newMatch')).then(ok => {
       if (ok) controller.reset();
     });
   };
@@ -896,12 +915,14 @@ export default function MainScreen() {
         ) : (
           <ConfigRail status={status} lang={lang} statuses={statuses} luts={luts} canOpen={canOpen} onOpen={openConfig} />
         ))}
-      {status && <ScrubberBar status={status} lang={lang} actions={actions} />}
+      {status && <ScrubberBar status={status} lang={lang} actions={actions} branchMenu={{ enabled: branchMenuEnabled(status) && !confirm, actions: branchActions }} />}
       {status?.endStage === 'RESULT' && status.result && (
         <ResultPopup result={status.result} alliance={status.alliance} teams={{ robot1: drafts.applied.robot1, robot2: drafts.applied.robot2 }} lang={lang} onReview={() => c()?.closeResult()}
           onRestart={newMatch}
           onExportMatch={exportMatch}
           onExportSummary={exportSummary}
+          branchName={shownBranchName(lang, status)}
+          comparison={branchComparison(lang, status)}
         />
       )}
       {confirm && <ConfirmDialog request={confirm.request} anchor={confirm.anchor} onClose={closeConfirm} />}
