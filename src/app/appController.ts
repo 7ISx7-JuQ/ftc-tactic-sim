@@ -8,6 +8,7 @@
 //   MATCH 안: 진행(RUNNING) ⇄ 일시정지(PAUSED) / 재생(PLAYBACK, 기록 불변) / 6000틱 → 종료 강조 5초 → 결과 → 복기(REVIEW)
 // 보는 틱(viewTick)과 엔진 머리(headTick)를 구분한다: 일시정지 중 틱 이동 / 재생 / 타임라인은 보는 틱만 바꾸고 그 프레임을 그린다.
 // 기록을 바꾸는 동작은 재개(보는 틱 = 머리, 경기 미종료)와 분기(보는 틱 < 머리 → scrubTo + LIVE 로그 폐기 + 재개)뿐이다.
+// 불러온 경기 (10-4): loadMatch = 입력 기록으로 전체 재계산 → 기본 보기로 회전 → 종료 연출 없이 복기(보는 틱 0, 두 로봇 REPLAY).
 // 다시 그리기: 루프 RUNNING 중에는 onFrame마다, 그 외(일시정지 / 옵션 / 보기 애니메이션 / 재생 / 종료 강조 대기)에는 rAF로.
 // 시계 / 프레임 스케줄러 / 브라우저 환경을 주입받아 Node에서 가짜 시간으로 테스트한다.
 
@@ -24,7 +25,7 @@ import type {
 } from '../core/types';
 import { createAnimationFrameScheduler, createBrowserRealtimeLoop, isEditableTarget } from '../input/browserInput';
 import type { BrowserInputAdapter, BrowserInputEnv, GamepadSlotStatus } from '../input/browserInput';
-import { LOG_RECORD_BYTES, MatchInputs } from '../input/inputLog';
+import { LOG_RECORD_BYTES, MatchInputs, createInputRecordProvider } from '../input/inputLog';
 import type { InputSource } from '../input/inputLog';
 import { DEFAULT_DRIVE_MODE, KEYBOARD_ENABLED } from '../input/inputConfig';
 import type { DriveMode, RobotId } from '../input/inputConfig';
@@ -86,6 +87,7 @@ export interface AppStatus {
   playing: boolean;             // 기록 재생 중
   playbackSpeed: PlaybackSpeed;
   endStage: EndStage;
+  branchName: string | null;    // 가지 이름 (10-4: 불러온 경기의 파일 가지 이름, 없으면 null = 원본 자동 이름)
   endSeq: number;               // 이 경기에서 실제로 6000틱에 도달한 횟수 (종료 연출 트리거: 분기 후 재종료마다 +1, 재생 / 스크러빙으로는 불변)
   result: MatchResult | null;   // 종료 프레임 기준 결과 (경기 종료 후, 결과 팝업용 — 보는 틱과 무관)
   remainingSec: number;
@@ -181,6 +183,8 @@ export class AppController {
   private endStage: EndStage = 'NONE';
   private endStageAt = 0;
   private endSeq = 0;
+  private branchName: string | null = null;
+  private loadedEnd = false;            // 불러온 경기: 회전 뒤 루프가 곧바로 ENDED → 종료 연출 없이 복기 (10-4)
   private shortcutsEnabled = true;
   private autoPauseReason: Exclude<PauseReason, 'USER'> | null = null;
   private lastToastAt: Record<'robot1' | 'robot2', number> = { robot1: -Infinity, robot2: -Infinity };
@@ -279,6 +283,43 @@ export class AppController {
     this.editScene = null; // 편집 중 START = 편집 취소 후 시작 (명세서 3.8)
     this.animator.start(viewAngle(this.matchView, this.alliance), this.now());
     this.changed();
+  }
+
+  /**
+   * 경기 불러오기 (명세서 3.9 경기 불러오기 ④ ⑤, 10-4): 경기 전(SETUP)에만. 주어진 설정으로 새 엔진을 만들어 입력 기록(로봇별 0 ~ 5999틱)으로
+   * 전체를 재계산하고, 기본 보기 방향으로 회전한 뒤 종료 연출 / 결과 팝업 없이 복기 상태(보는 틱 0)로 연다.
+   * 입력 기록은 녹화 로그에도 넣고 두 로봇 출처를 REPLAY로 두어, 되감아 분기하면 녹화 덧입히기로 이어 조종할 수 있다.
+   * 반환 = 재계산한 타임라인 (체크포인트 비교용), 경기 전이 아니면 null
+   */
+  loadMatch(setup: MatchSetup, records: Readonly<Record<RobotId, ArrayLike<number>>>, branchName: string | null): readonly DeepReadonly<TimelineFrame>[] | null {
+    if (this.phase !== 'SETUP') return null;
+    this.setup = setup;
+    this.newMatch();
+    this.inputs.loadRecords(records);
+    this.engine.inputProvider = createInputRecordProvider(records);
+    this.engine.runFullMatch();
+    this.engine.inputProvider = null;
+    this.matchChoices = { robot1: 'REPLAY', robot2: 'REPLAY' };
+    this.applyInputChoices();
+    this.branchName = branchName;
+    this.loadedEnd = true;
+    this.phase = 'ROTATING_IN';
+    this.editScene = null;
+    this.animator.start(viewAngle(this.matchView, this.alliance), this.now());
+    this.changed();
+    return this.engine.timeline;
+  }
+
+  /**
+   * 경기 내보내기 재료 (명세서 3.9 경기 내보내기, 10-4): 경기 종료(6000틱)에 도달했으면 로봇별 적용 입력 기록 0 ~ 5999틱 + 타임라인 + 가지 이름,
+   * 아니면 null. 적용 입력 기록 길이 = 엔진 머리이므로 6000틱이 모두 있으면 종료에 도달한 것 (진행 중 / 분기 직후는 모자람)
+   */
+  recipeSource(): { inputs: Record<RobotId, Int8Array>; timeline: readonly DeepReadonly<TimelineFrame>[]; branchName: string | null } | null {
+    if (this.phase !== 'MATCH') return null;
+    const cut = (robot: RobotId) => this.inputs.applied[robot].data.slice(0, this.inputs.applied[robot].length * LOG_RECORD_BYTES);
+    const inputs = { robot1: cut('robot1'), robot2: cut('robot2') };
+    if (inputs.robot1.length < MATCH_TICKS * LOG_RECORD_BYTES || inputs.robot2.length < MATCH_TICKS * LOG_RECORD_BYTES) return null;
+    return { inputs, timeline: this.engine.timeline, branchName: this.branchName };
   }
 
   pause(): void {
@@ -456,6 +497,7 @@ export class AppController {
       playing: this.playing,
       playbackSpeed: this.playbackSpeed,
       endStage: this.endStage,
+      branchName: this.branchName,
       endSeq: this.endSeq,
       result: head >= MATCH_TICKS ? this.matchResult() : null,
       remainingSec: Math.max(0, (MATCH_TICKS - frame.tick) * DT),
@@ -561,6 +603,8 @@ export class AppController {
     this.playbackLast = null;
     this.endStage = 'NONE';
     this.endSeq = 0;
+    this.branchName = null;
+    this.loadedEnd = false;
     this.autoPauseReason = null;
     this.lastToastAt = { robot1: -Infinity, robot2: -Infinity };
     const created = createBrowserRealtimeLoop(
@@ -572,6 +616,14 @@ export class AppController {
           this.renderNow();
         },
         onStateChange: (state, reason) => {
+          // 불러온 경기: 회전 뒤 시작하자마자 ENDED → 종료 연출 / 결과 팝업 없이 복기 (보는 틱은 newMatch의 0 그대로, endSeq 불변)
+          if (state === 'ENDED' && this.loadedEnd) {
+            this.loadedEnd = false;
+            this.endStage = 'REVIEW';
+            this.emitStatus(true);
+            this.requestRender();
+            return;
+          }
           // 진행이 멈추면 보는 틱 = 멈춘 틱. 6000틱 도달 → 종료 강조 시작
           if (state !== 'RUNNING') this.viewTick = this.engine.currentTick;
           this.autoPauseReason = state === 'PAUSED' && reason !== null && reason !== 'USER' ? reason : null;

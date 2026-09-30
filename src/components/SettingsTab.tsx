@@ -2,7 +2,8 @@
 // 표시 옵션 / 화면(언어 · 단위 · 기본 보기) / 초기화(RESET ALL, 경기 전만). 바꾸는 즉시 적용 (APPLY 없음).
 // 입력 출처 / 조작 모드 / 키보드는 다음 START / RESUME / BRANCH부터 경기에 적용된다 (컨트롤러가 보관).
 // 10-2: 프리셋(PRESETS) — 줄별 EXPORT(적용 값 → 파일, 언제나) / IMPORT(파일 → 초안, 경기 전만), 거부 사유는 그 줄 아래 빨간 글자.
-import { Download, TriangleAlert, Upload } from 'lucide-react';
+// 10-4: MATCH 줄 — IMPORT(경기 파일, 경기 전만), 준비 중에는 진행 글자 + CANCEL. 내보내기는 결과 팝업에서.
+import { Download, TriangleAlert, Upload, X } from 'lucide-react';
 import type { AppStatus } from '../app/appController';
 import { MATCH_SOURCE_CHOICES, SETUP_SOURCE_CHOICES } from '../app/inputPlan';
 import type { SourceChoice } from '../app/inputPlan';
@@ -41,6 +42,9 @@ export default function SettingsTab({
   presetError,
   onPresetExport,
   onPresetImport,
+  matchImport,
+  onMatchImport,
+  onMatchCancel,
 }: {
   status: AppStatus;
   lang: Language;
@@ -52,6 +56,10 @@ export default function SettingsTab({
   presetError: { row: PresetRow; message: string } | null;
   onPresetExport: (row: PresetRow) => void;
   onPresetImport: (row: PresetRow) => void;
+  // 경기 불러오기 줄 상태: 준비 중이면 진행 글자(오류면 빨강), 거부 사유는 error
+  matchImport: { loading: { text: string; error: boolean } | null; error: string | null };
+  onMatchImport: () => void;
+  onMatchCancel: () => void;
 }) {
   const { input } = status;
   const inMatch = status.phase !== 'SETUP';
@@ -206,6 +214,33 @@ export default function SettingsTab({
               )}
             </li>
           ))}
+          <li className="preset-file-row">
+            <span className="preset-file-name">{t(lang, 'preset.row.match')}</span>
+            {matchImport.loading ? (
+              <>
+                <span className={`preset-file-desc preset-file-loading${matchImport.loading.error ? ' is-error' : ''}`} role="status">
+                  {matchImport.loading.text}
+                </span>
+                <button type="button" className="config-button" onClick={onMatchCancel}>
+                  <X />
+                  {t(lang, 'matchImport.cancel')}
+                </button>
+              </>
+            ) : (
+              <>
+                <span className="preset-file-desc">{t(lang, 'preset.row.matchDesc')}</span>
+                <button type="button" className="config-button" disabled={inMatch} title={inMatch ? t(lang, 'preset.importLocked') : undefined} onClick={onMatchImport}>
+                  <Upload />
+                  {t(lang, 'preset.import')}
+                </button>
+              </>
+            )}
+            {matchImport.error && (
+              <span className="form-error preset-file-error" role="alert">
+                {matchImport.error}
+              </span>
+            )}
+          </li>
         </ul>
         {inMatch && <p className="settings-note">{t(lang, 'preset.importLocked')}</p>}
       </Section>

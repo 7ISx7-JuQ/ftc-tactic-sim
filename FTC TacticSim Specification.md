@@ -990,13 +990,19 @@
           2026-09-30 14:32 · RED · Branch 3
           R1 #12345 Bumblebots · R2 Hive Mind
           TOTAL SCORE 38
-          HIVE     20  TELEOP TIP 1 × 20 · auto TIP 5 counts for RP only
-          FLOWER    9  FLOWER 2: 2 × 2 + bottom bonus 5
-          GARDEN    4  POLLEN 4 × 1
-          PARK      5  R1 parked × 5
+          HIVE    20  TELEOP TIP 1 × 20 · auto TIP 5 counts for RP only
+          FLOWER   9  FLOWER 2: 2 × 2 + bottom bonus 5
+          GARDEN   4  POLLEN 4 × 1
+          PARK     5  R1 parked × 5
           RP  SWARM PARK 5 / 10 · POLLINATOR 1 ✓ TIP 5 / 4 · POLLINATOR 2 TIP 5 / 7
           SEED 12194135 · ENGINE v1 · BALLISTICS v1
           ```
+
+        - **구현 (10-4):**
+            - 컨트롤러 (`appController.ts`): `loadMatch(setup, records, branchName)` — 경기 전에만, 새 엔진 + `MatchInputs.loadRecords`(녹화 로그 · 적용 입력 기록 모두) + 기록 재생 공급 함수로 `runFullMatch`, 두 로봇 출처 `REPLAY`, 기본 보기로 회전 → 회전 뒤 루프 `start()`가 곧바로 `ENDED` → 종료 연출 없이 `REVIEW`(보는 틱 0, `endSeq` 불변). 반환 = 재계산 타임라인. `recipeSource()` = 적용 입력 기록이 6000틱 모두 있으면(= 종료 도달) 입력 + 타임라인 + 가지 이름. 상태에 `branchName`(불러온 파일의 가지 이름, 새 경기 = `null`).
+            - 화면 규칙 `src/ui/matchFile.ts`: 거부 사유 문구(`matchImportErrorMessage`, 파일 선택 오류 `TOO_LARGE` / `READ_FAILED` 포함), 확인창(`matchImportConfirmMessage` = 설정 교체 안내 + `⚠` 경고 줄, 확인창 글자 `white-space: pre-line`), 준비 진행(`matchImportProgress` = 두 로봇 명중 확률표 진행률 평균 내림, 준비 완료 = 100%), 불일치 배너(`mismatchBanner`, 구간은 경기 타이머 표시), 파일 이름(`matchFileName` / `summaryFileName`), 요약(`matchSummaryText`). 결과 팝업 근거 문구를 순수 규칙 `resultBasisText`(`resultModel.ts`)로 옮겨 요약과 공유.
+            - 화면 (`MainScreen.tsx`): SETTINGS `PRESETS`의 `MATCH` / "경기" 줄(설명 "경기 내보내기로 저장한 파일", `IMPORT`, 경기 중 비활성). 불러오기 = 파일 선택 → 해석 → 확인창(확인 = `IMPORT`) → 적용 값 · 초안 교체(자동 보관) + 명중 확률표 요청 → 두 로봇 결과가 있으면 바로, 없으면 준비 알림에서 → "재계산 중"을 한 번 그린 뒤 `loadMatch` → 체크포인트 비교 → 불일치면 배너(닫기, 경기 전 화면에서 사라짐). 준비 중에는 줄에 "경기 불러오는 중 · 명중 확률표 N%"(오류면 빨강 "로봇 탭에서 다시 시도하거나 취소") + `CANCEL`. 결과 팝업: 동작 줄 위에 `EXPORT MATCH` / `EXPORT SUMMARY` 줄(460u 폭에 네 버튼이 한 줄로 들어가지 않아 분리), 레시피 설정 = 적용 값(경기 중 잠금), 원본 가지 이름 = `Main`.
+            - **10-4 세부 결정:** ① 불러오기 준비 중 `APPLY` / `REROLL` / `RESET ALL` / 프리셋 불러오기는 불러오기를 취소(설정이 파일과 달라지므로), `CANCEL`도 이미 바뀐 설정은 그대로 ② 명중 확률표 생성 오류는 불러오기를 대기 상태로 두고 로봇 탭 다시 시도 / 취소를 안내 ③ 요약의 가지 이름은 있을 때만(불러온 경기), 파일 이름의 `_b{번호}`와 원본 가지 표시 이름은 분기 트리(10-5 / 10-6)에서.
 
     - **분기 트리 (10-1 확정):**
         - **보존:** `BRANCH`는 기존 기록을 지우지 않고 **새 가지**를 만든다. 가지 = `{ id, 번호, 이름, 부모 가지, 분기 틱 T, 타임라인, 녹화 로그 사본, 적용 입력 기록, 종료 도달 여부 }`. 원본 가지 이름 `Main` / "원본", 새 가지 `Branch {n}` / "가지 {n}"(경기 안에서 번호 재사용 없음). 이름 바꾸기 1 ~ 24자(앞뒤 공백 제거, 비우면 자동 이름).
@@ -1385,6 +1391,7 @@ export interface TimelineFrame {
 | 10-1 | 분기 타임라인 / 경기 저장 · 공유 명세 구체화 (적용 입력 기록, 레시피 형식 · 체크섬 · 버전, 경기 불러오기 / 내보내기, 분기 트리 · 가지 상한 8 · 메모리 측정, 프리셋 파일, 하위 Step 분할) (아래 6.2.44) | 명세서 |
 | 10-2 | 프리셋 파일: 순수 직렬화 / 해석 / 항목별 정리 / 초안 반영 + SETTINGS 탭 `PRESETS` 구역(줄별 `EXPORT` / `IMPORT`, 거부 사유, 덮어쓰기 확인창) + 파일 도우미, 로봇 탭 숫자 칸 저장 값 범위 검사 (아래 6.2.45) | `src/ui/presetFile.ts`, `fileTransfer.ts`, `SettingsTab.tsx`, `MainScreen.tsx`, `RobotTab.tsx`, `FormControls.tsx`, `i18n.ts`, `MainScreen.css`, `src/ui/__tests__/presetFile.test.ts` |
 | 10-3 | 레시피 저장 순수 계층: 적용 입력 기록(`MatchInputs.applied`, 분기 시 자름) + 기록 재생 공급 함수, `ENGINE_VERSION` + 올림 누락 방지 기대값 테스트, 체크섬 / 체크포인트, 입력 RLE + Base64, 레시피 만들기 / 문자열 / 해석 · 검증 · 경고 (아래 6.2.46) | `src/input/inputLog.ts`, `src/core/checksum.ts`, `simulationEngine.ts`, `src/app/matchRecipe.ts`, `appController.ts`, `src/ui/presetFile.ts`, 테스트 `matchRecipe.test.ts` / `engineVersion.test.ts` / `inputLog.test.ts` G |
+| 10-4 | 경기 불러오기 / 내보내기 연결: 컨트롤러 `loadMatch`(재계산 → 회전 → 종료 연출 없이 복기, `REPLAY`) / `recipeSource`, SETTINGS `MATCH` 줄(해석 · 거부 사유 · 확인창 버전 경고 · 명중 확률표 준비 진행 · `CANCEL`), 체크섬 불일치 배너, 결과 팝업 `EXPORT MATCH` / `EXPORT SUMMARY`, 요약 텍스트 / 파일 이름 (아래 6.2.47) | `appController.ts`, `inputLog.ts`, `src/ui/matchFile.ts`, `resultModel.ts`, `MainScreen.tsx`, `SettingsTab.tsx`, `FieldNotices.tsx`, `ResultPopup.tsx`, `i18n.ts`, `MainScreen.css`, 테스트 |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
@@ -1744,6 +1751,13 @@ export interface TimelineFrame {
 - **구현:** 3.9항 "구현 (10-3)" 참고.
 - **테스트:** `src/app/__tests__/matchRecipe.test.ts` A~F(RLE 왕복 · 압축 크기 · 해독 거부 7종, FNV-1a 표준값 · 한글 코드 단위 · 체크포인트 121개 · 비교 결과, 녹화 덧입히기 + `REPLAY` → `NONE` 전환 풀매치 저장 → 파일 → 해석 → 재계산 체크포인트 전부 일치 · 종료 프레임 동일 · 다른 시드는 불일치 검출, 만들기 오류 · 시드 채움 · 시각 형식, 거부 사례 25건, 알아보기 정보 관대 · 경고 3종), `src/core/__tests__/engineVersion.test.ts` A, `src/input/__tests__/inputLog.test.ts` G(출처별 적용 기록, 길이 = 머리, `NONE` 틱은 녹화 로그가 남아도 중립, 적용 기록 재생 = 실제 경기 · 녹화 로그 재생은 어긋남, `NONE`으로 달린 구간을 다시 `REPLAY`로 덮기, 기록 재생 공급 함수). 돌연변이 22종 중 18종 실패 → 남은 4종 중 2종은 테스트 보강(한글 코드 단위 해시, `NONE` 구간 재덧입히기)으로 실패 확인, 1종(틀린 팀 글자 검사)은 뒤의 비교와 중복이라 조건 삭제, 1종(기록 재생 공급 함수의 음수 틱 검사)은 복호화가 없는 값을 0으로 처리하는 동등 변이라 방어 코드로 유지.
 
+### 6.2.47 Step 10-4 (경기 불러오기 / 내보내기 연결) 완료 항목
+
+- **결정:** 3.9항 규칙 그대로 + "구현 (10-4)"의 세부 결정 ① ~ ③.
+- **구현:** 3.9항 경기 내보내기 아래 "구현 (10-4)" 참고.
+- **테스트:** `src/app/__tests__/appController.test.ts` J(불러오기 = 독립 엔진 재계산과 같은 결과, 회전 뒤 0틱 복기 · 종료 연출 / 결과 팝업 / 종료 신호 없음, `REPLAY` 출처, `RESULT`로 열기, 내보내기 재료 = 불러온 기록, 두 로봇 `REPLAY` 분기 → 같은 결과 + 이번에는 종료 연출, 경기 중 불러오기 거부, `NEW` → 가지 이름 초기화, 미종료 경기는 재료 없음), `src/ui/__tests__/matchFile.test.ts` A~F(거부 문구 10종 영어 / 한국어, 확인창 경고 줄, 준비 진행 평균 · 내림, 불일치 배너 처음부터 / 구간 / 버전 사유, 파일 이름, 요약 텍스트 전체 줄 영어 · 한국어). 돌연변이 13종 중 10종 실패 → 1종(진행률 반올림)은 테스트 보강으로 실패 확인, 2종(불러온 경기의 보는 틱 0 설정, 내보내기 재료의 진행 중 / 타임라인 검사)은 앞뒤 규칙과 중복이라 코드 삭제.
+- **헤드리스 Chromium 점검 (저장소 밖 1회성, 개발 서버 1366 × 768, Playwright 가짜 시계로 120초 경기):** 키보드로 R2를 몰아 경기 종료 → 결과 팝업 `EXPORT MATCH`(`tacticsim-match_{시각}_RED_9pts.json`, 약 5 KB) / `EXPORT SUMMARY`(요약 10줄) → `RESTART` → SETTINGS `MATCH` 줄에 요약 `.txt` → "Not a JSON file", 경기 파일 → 확인창 → 같은 명중 확률표라 바로 재계산 → 드라이버 시점 2:00 복기, 배너 · 종료 연출 · 결과 팝업 없음, `RESULT` 총점 9 = 원래 경기. 체크섬 1개를 바꾼 파일 → "Results differ from the file · From between 1:51 and 1:50" 배너(닫기 버튼). 한국어 화면에서 R1 스윗스팟을 바꾼 파일 → 줄에 "경기 불러오는 중 · 명중 확률표 70%" + 취소 → 취소 후 줄 복귀 → 다시 불러와 생성 완료 뒤 복기, 결과 팝업 "경기 내보내기" / "요약 내보내기". 콘솔 오류 없음.
+
 ### 6.3 남은 Step (권장 순서)
 
 > 모든 Step은 완료 시 `npm test`(엔진 회귀 테스트)가 통과해야 하며, 새로 추가한 규칙에는 테스트 그룹을 추가한다.
@@ -1803,7 +1817,7 @@ export interface TimelineFrame {
     - ~~10-1: 분기 타임라인 / 경기 저장 · 공유 명세 구체화.~~ (완료, 6.2.44)
     - ~~10-2: 프리셋 파일 — 순수 직렬화 / 해석 / 정리(`ROBOT` / `SCENARIO` / `SETUP`, 자동 보관 정리 함수 재사용) + SETTINGS 탭 `PRESETS` 구역(`R1` / `R2` / `SCENARIO` / `ALL` 줄 `EXPORT` / `IMPORT`, 초안 반영 · 덮어쓰기 확인창 · 거부 사유) + 파일 다운로드 / 선택 도우미 + 테스트 (스크린샷 확인).~~ (완료, 6.2.45)
     - ~~10-3: 레시피 저장 순수 계층 — 적용 입력 기록(`MatchInputs.applied`, 분기 시 자름), `ENGINE_VERSION` / `RECIPE_VERSION`, `frameChecksum` + 체크포인트, 입력 RLE + Base64 부호화 / 해독, 레시피 만들기 / 해석 · 검증(거부 사유 코드) + 재현 테스트(저장 → 해독 → 재계산 체크섬 전부 일치, `REPLAY` → `NONE` 전환 경기, 버전 누락 방지 기대값).~~ (완료, 6.2.46)
-    - 10-4: 경기 불러오기 / 내보내기 연결 — `IMPORT MATCH`(확인창 + 버전 경고, 적용 값 교체, LUT 준비 · 취소, 재계산, 복기 상태, 체크섬 불일치 배너) + 결과 팝업 `EXPORT MATCH` / `EXPORT SUMMARY`(요약 텍스트 규칙) + 파일 이름 규칙 (스크린샷 확인).
+    - ~~10-4: 경기 불러오기 / 내보내기 연결 — `IMPORT MATCH`(확인창 + 버전 경고, 적용 값 교체, LUT 준비 · 취소, 재계산, 복기 상태, 체크섬 불일치 배너) + 결과 팝업 `EXPORT MATCH` / `EXPORT SUMMARY`(요약 텍스트 규칙) + 파일 이름 규칙 (스크린샷 확인).~~ (완료, 6.2.47)
     - 10-5: 분기 트리 엔진 / 컨트롤러 — 엔진 타임라인 객체 교체 API(분기 = 0 ~ T 참조 공유, 전환 = 교체), 가지 트리 규칙(`MAX_BRANCHES = 8`, 번호 / 이름, 삭제 = 하위 포함, 원본 보호), 가지별 녹화 로그 사본 / 적용 입력 기록, 전환 시 루프 상태(일시정지 / 복기), `endSeq` 규칙, `NEW` = 트리 폐기 + 테스트 + 헤드리스 Chromium 8개 가지 힙 측정.
     - 10-6: 분기 UI — 스크러버 가지 버튼 / 목록(전환 · 이름 바꾸기 · 삭제), 타임라인 분기 표식, 분기 확인창 새 문구 / 가득 참 안내창, `NEW` 확인창 가지 수, 결과 팝업 헤더 가지 이름 + `BRANCHES` 비교 줄 (스크린샷 확인) — Step 10 완료.
 

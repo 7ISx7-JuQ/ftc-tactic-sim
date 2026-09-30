@@ -6,7 +6,11 @@
 
 import type { MatchResult } from '../app/appController';
 import { FLOWER_IDS } from '../core/collision';
+import { t } from './i18n';
+import type { Language } from './i18n';
 import { POLLINATOR_1_TIPS, POLLINATOR_2_TIPS } from './mainScreenModel';
+
+const SHORT: Readonly<Record<'robot1' | 'robot2', string>> = { robot1: 'R1', robot2: 'R2' };
 
 export const FLOWER_PIECE_POINTS = 2;   // FLOWER 소유권: slot[1..N] 기물당 (2.6.4)
 export const SWARM_PARK_POINTS = 10;    // SWARM RP: 두 로봇 주차 = PARK 10점 (2.6.5)
@@ -45,4 +49,24 @@ export function rpCards(result: MatchResult): RpCardView[] {
     { key: 'POLLINATOR 1', achieved: result.rp.pollinator1, unit: 'TIP', current: result.tips, target: POLLINATOR_1_TIPS },
     { key: 'POLLINATOR 2', achieved: result.rp.pollinator2, unit: 'TIP', current: result.tips, target: POLLINATOR_2_TIPS },
   ];
+}
+
+/** 항목 근거 한 줄 (여러 조각은 · 로 이음) */
+export function resultBasisText(row: ResultRow, lang: Language): string {
+  switch (row.key) {
+    case 'HIVE': {
+      const parts = [t(lang, 'result.basis.hive', { count: row.teleopTips })];
+      if (row.autoTips > 0) parts.push(t(lang, 'result.basis.hiveAuto', { count: row.autoTips }));
+      return parts.join(' · ');
+    }
+    case 'FLOWER':
+      if (row.flowers.length === 0) return t(lang, 'result.basis.flowerNone');
+      return row.flowers
+        .map(f => t(lang, 'result.basis.flower', { number: f.number, pieces: f.pieces }) + (f.bonus > 0 ? t(lang, 'result.basis.flowerBonus', { bonus: f.bonus }) : ''))
+        .join(' · ');
+    case 'GARDEN':
+      return t(lang, 'result.basis.garden', { count: row.pieces });
+    case 'PARK':
+      return row.robots.length === 0 ? t(lang, 'result.basis.parkNone') : t(lang, 'result.basis.park', { robots: row.robots.map(r => SHORT[r]).join(' · ') });
+  }
 }

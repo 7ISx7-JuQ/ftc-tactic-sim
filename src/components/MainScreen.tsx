@@ -21,7 +21,12 @@ import { createBrowserLUTWorker } from '../workers/createLUTWorker';
 import { createBrowserLUTCache } from '../workers/lutCache';
 import { PENDING_LUT_VIEW, lutInputsChanged, startBlocker } from '../ui/lutView';
 import type { RobotLutView } from '../ui/lutView';
-import { DT, MATCH_TICKS } from '../core/simulationEngine';
+import { DEFAULT_RNG_SEED, DT, MATCH_TICKS } from '../core/simulationEngine';
+import type { CheckpointComparison } from '../core/checksum';
+import { buildMatchRecipe, parseMatchRecipe, serializeMatchRecipe, verifyRecipe } from '../app/matchRecipe';
+import type { MatchRecipe, RecipeWarning } from '../app/matchRecipe';
+import { matchFileName, matchImportConfirmMessage, matchImportErrorMessage, matchImportProgress, matchSummaryText, mismatchBanner, summaryFileName } from '../ui/matchFile';
+import type { MatchImportError } from '../ui/matchFile';
 import { t } from '../ui/i18n';
 import { DEFAULT_SETTINGS, browserSettingsStorage, loadStoredConfig, saveStoredConfig } from '../ui/settings';
 import { buildPresetFile, importOverwriteTabs, importPresetToDrafts, parsePresetFile, presetErrorMessage, presetFileName, presetLoadedNotice, tabNames } from '../ui/presetFile';
@@ -119,6 +124,12 @@ export default function MainScreen() {
   const [configNotice, setConfigNotice] = useState<string | null>(null);
   // 프리셋 불러오기 거부 사유 (그 줄 아래 빨간 글자, 10-2)
   const [presetError, setPresetError] = useState<{ row: PresetRow; error: PresetError } | null>(null);
+  // 경기 불러오기 (10-4): 명중 확률표 준비 대기 / 재계산 중, 거부 사유, 체크섬 불일치 배너
+  const [matchImport, setMatchImport] = useState<'LUT' | 'COMPUTING' | null>(null);
+  const [matchImportError, setMatchImportError] = useState<MatchImportError | null>(null);
+  const [matchNotice, setMatchNotice] = useState<{ comparison: CheckpointComparison; warnings: RecipeWarning[] } | null>(null);
+  const pendingMatchRef = useRef<{ recipe: MatchRecipe; warnings: RecipeWarning[] } | null>(null);
+  const completeImportRef = useRef<(results: MatchLUTResults) => void>(() => {});
   const initialApplied = useRef(drafts.applied);
   const initialSettings = useRef(settings);
   // 명중 확률표 (09-10a): 추적기 / 경기 설정에 쓴 적용 값 · LUT 결과 / 화면 요약
@@ -177,6 +188,7 @@ export default function MainScreen() {
       setStatus(s);
       if (!configCanOpen(s)) setConfigOpen(false);
       if (s.phase !== 'SETUP') setFieldEdit(null);
+      else setMatchNotice(null); // 불러온 경기의 불일치 배너는 NEW(경기 전 화면)에서 사라짐
     };
     const s0 = initialSettings.current;
     const controller = new AppController({
@@ -203,6 +215,7 @@ export default function MainScreen() {
         if (sameResults(results, lutResultsRef.current)) return;
         lutResultsRef.current = results;
         controller.setSetup(setupOf(appliedRef.current, results));
+        if (results && pendingMatchRef.current) completeImportRef.current(results); // 경기 불러오기: 명중 확률표 준비 → 재계산
       },
     });
     trackerRef.current = tracker;
@@ -259,6 +272,7 @@ export default function MainScreen() {
     if (configTab === 'settings' || locked) return;
     const next = applyTab(drafts, configTab);
     if (next === drafts) return;
+    cancelMatchImport(); // 불러오던 경기의 설정이 바뀌므로 불러오기 취소
     setDrafts(next);
     appliedRef.current = next.applied;
     const tracker = trackerRef.current;
@@ -311,6 +325,7 @@ export default function MainScreen() {
   // REROLL (09-11 확정): APPLY 없이 적용 값 / 초안의 시드만 바꿔 경기 전 설정을 바로 교체하고 저장 (NEW는 시드 유지)
   const rerollScenarioSeed = () => {
     if (locked) return;
+    cancelMatchImport();
     const current = readScenario(drafts.applied.scenario, drafts.applied.robot1.config, drafts.applied.robot2.config).seed;
     const next = rerollSeed(drafts, newSeed(current));
     setDrafts(next);
@@ -342,6 +357,7 @@ export default function MainScreen() {
     if (status?.phase !== 'SETUP') return;
     void ask(t(lang, 'confirm.resetAll'), t(lang, 'config.resetAll')).then(ok => {
       if (!ok) return;
+      cancelMatchImport();
       const next = { ...DEFAULT_SETTINGS, renderOptions: { ...DEFAULT_SETTINGS.renderOptions }, driveModes: { ...DEFAULT_SETTINGS.driveModes } };
       setSettings(next);
       pushSettings(next, null);
@@ -358,6 +374,7 @@ export default function MainScreen() {
   };
   const importPreset = (row: PresetRow) => {
     if (locked) return;
+    cancelMatchImport();
     setPresetError(null);
     void pickTextFile().then(picked => {
       if (!picked) return;
@@ -379,6 +396,92 @@ export default function MainScreen() {
         });
     });
   };
+  // ---------------- 경기 파일 (10-4) ----------------
+  // 불러오기: 파일 → 해석 / 검증(거부 사유) → 확인창(버전 경고) → R1 / R2 / SCENARIO 적용 값 · 초안 교체(자동 보관) + 명중 확률표 준비
+  //   → 준비되면 재계산해 복기 상태로 열고, 체크포인트가 다르면 배너. 준비 중 CANCEL / APPLY / REROLL / RESET ALL / 프리셋 불러오기는 취소
+  const cancelMatchImport = () => {
+    pendingMatchRef.current = null;
+    setMatchImport(null);
+  };
+  const importMatch = () => {
+    if (locked || matchImport) return;
+    setMatchImportError(null);
+    void pickTextFile().then(picked => {
+      if (!picked) return;
+      const parsed = picked.ok ? parseMatchRecipe(picked.text, DEFAULT_DRAFT_VALUES) : { ok: false as const, error: { code: picked.code } };
+      if (!parsed.ok) {
+        setMatchImportError(parsed.error);
+        return;
+      }
+      void ask(matchImportConfirmMessage(lang, parsed.warnings), t(lang, 'preset.import')).then(ok => {
+        if (ok) beginMatchImport(parsed.recipe, parsed.warnings);
+      });
+    });
+  };
+  const beginMatchImport = (recipe: MatchRecipe, warnings: RecipeWarning[]) => {
+    const values = recipe.setup;
+    setFieldEdit(null);
+    setConfigNotice(null);
+    setPresetError(null);
+    setDrafts(initialDrafts(values));
+    appliedRef.current = values;
+    saveStoredConfig(settingsStorage, { settings, applied: values });
+    pendingMatchRef.current = { recipe, warnings };
+    setMatchImport('LUT');
+    const tracker = trackerRef.current;
+    tracker?.request(values);
+    const results = tracker?.results() ?? null;
+    lutResultsRef.current = results;
+    c()?.setSetup(setupOf(values, results));
+    if (results) completeImportRef.current(results); // 같은 명중 확률표가 이미 준비됨
+  };
+  // 재계산은 1 ~ 2초 걸리므로 "재계산 중"을 한 번 그린 뒤 실행
+  useEffect(() => {
+    completeImportRef.current = results => {
+      const pending = pendingMatchRef.current;
+      if (!pending) return;
+      pendingMatchRef.current = null;
+      setMatchImport('COMPUTING');
+      window.setTimeout(() => {
+        const timeline = controllerRef.current?.loadMatch(setupOf(appliedRef.current, results), pending.recipe.inputs, pending.recipe.branchName || null) ?? null;
+        setMatchImport(null);
+        if (!timeline) return;
+        const comparison = verifyRecipe(pending.recipe, timeline);
+        setMatchNotice(comparison.match ? null : { comparison, warnings: pending.warnings });
+      }, 30);
+    };
+  });
+  const matchImportText = (() => {
+    if (!matchImport) return null;
+    if (matchImport === 'COMPUTING') return { text: t(lang, 'matchImport.computing'), error: false };
+    const progress = matchImportProgress(luts);
+    return progress.error ? { text: t(lang, 'matchImport.lutError'), error: true } : { text: t(lang, 'matchImport.loading', { percent: progress.percent }), error: false };
+  })();
+  // 내보내기 (결과 팝업): 경기 레시피(.json) / 요약(.txt). 적용 값 = 이 경기의 설정 (경기 중에는 잠금)
+  const exportMatch = () => {
+    const src = c()?.recipeSource();
+    const result = status?.result;
+    if (!src || !result || !status) return;
+    const now = new Date();
+    const recipe = buildMatchRecipe({ setup: drafts.applied, inputs: src.inputs, timeline: src.timeline, branchName: src.branchName ?? 'Main', createdAt: now });
+    downloadTextFile(matchFileName(now, status.alliance, result.total), serializeMatchRecipe(recipe));
+  };
+  const exportSummary = () => {
+    const result = status?.result;
+    if (!result || !status) return;
+    const now = new Date();
+    const text = matchSummaryText({
+      lang,
+      result,
+      alliance: status.alliance,
+      teams: { robot1: drafts.applied.robot1, robot2: drafts.applied.robot2 },
+      branchName: status.branchName,
+      date: now,
+      seed: drafts.applied.scenario.rngSeed ?? DEFAULT_RNG_SEED,
+    });
+    downloadTextFile(summaryFileName(now, status.alliance, result.total), text, 'text/plain');
+  };
+
   // 화면 언어 (문서 lang 속성도 맞춤)
   useEffect(() => {
     document.documentElement.lang = lang;
@@ -647,7 +750,13 @@ export default function MainScreen() {
         }}
       >
         <canvas ref={canvasRef} className="field-canvas" />
-        <FieldNotices autoPauseReason={status?.autoPauseReason ?? null} toasts={toasts} lang={lang} />
+        <FieldNotices
+          autoPauseReason={status?.autoPauseReason ?? null}
+          toasts={toasts}
+          lang={lang}
+          matchNotice={matchNotice && mismatchBanner(lang, matchNotice.comparison, matchNotice.warnings)}
+          onDismissMatchNotice={() => setMatchNotice(null)}
+        />
         {spawnEdit && (
           <SpawnEditBanner
             issues={scenarioFormIssues(drafts.draft)
@@ -734,6 +843,9 @@ export default function MainScreen() {
                   presetError={presetError && { row: presetError.row, message: presetErrorMessage(lang, presetError.error) }}
                   onPresetExport={exportPreset}
                   onPresetImport={importPreset}
+                  matchImport={{ loading: matchImportText, error: matchImportError && matchImportErrorMessage(lang, matchImportError) }}
+                  onMatchImport={importMatch}
+                  onMatchCancel={cancelMatchImport}
                 />
               ) : configTab === 'robot1' || configTab === 'robot2' ? (
                 <RobotTab
@@ -786,7 +898,11 @@ export default function MainScreen() {
         ))}
       {status && <ScrubberBar status={status} lang={lang} actions={actions} />}
       {status?.endStage === 'RESULT' && status.result && (
-        <ResultPopup result={status.result} alliance={status.alliance} teams={{ robot1: drafts.applied.robot1, robot2: drafts.applied.robot2 }} lang={lang} onReview={() => c()?.closeResult()} onRestart={newMatch} />
+        <ResultPopup result={status.result} alliance={status.alliance} teams={{ robot1: drafts.applied.robot1, robot2: drafts.applied.robot2 }} lang={lang} onReview={() => c()?.closeResult()}
+          onRestart={newMatch}
+          onExportMatch={exportMatch}
+          onExportSummary={exportSummary}
+        />
       )}
       {confirm && <ConfirmDialog request={confirm.request} anchor={confirm.anchor} onClose={closeConfirm} />}
     </div>

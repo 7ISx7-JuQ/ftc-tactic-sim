@@ -6,7 +6,8 @@ import { KEYBOARD_BINDINGS } from '../../input/inputConfig';
 import type { FrameScheduler } from '../../input/realtimeLoop';
 import { DEFAULT_RENDER_OPTIONS } from '../../renderer/renderOptions';
 import { VIEW_ANIMATION_MS, viewAngle } from '../../renderer/viewTransform';
-import { MATCH_TICKS } from '../../core/simulationEngine';
+import { MATCH_TICKS, SimulationEngine } from '../../core/simulationEngine';
+import { createInputRecordProvider } from '../../input/inputLog';
 import { AppController, END_HIGHLIGHT_MS, LIFT_TOAST_COOLDOWN_MS } from '../appController';
 import type { AppStatus, LiftToast, MatchSetup } from '../appController';
 import type { EditScene } from '../../renderer/editSceneRenderer';
@@ -519,6 +520,69 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     assert(editRenders.length === edits, 'ignored during the match');
     backToSetup();
     assert(h.status().phase === 'SETUP' && editRenders.length === edits, 'a scene set during the match is not kept for SETUP');
+    h.dispose();
+  });
+
+  it('J. 경기 불러오기 (10-4): 재계산 → 기본 보기로 회전 → 종료 연출 없이 복기(0틱) / REPLAY 출처 / 결과 다시 열기 / 분기 재현 / 내보내기 재료', () => {
+    // 입력 기록: R1 전진 + 흡입, R2 오른쪽 + 회전 (로봇별 0 ~ 5999틱 × 4 B)
+    const rec = (fn: (t: number) => [number, number, number, number]) => {
+      const data = new Int8Array(MATCH_TICKS * 4);
+      for (let t = 0; t < MATCH_TICKS; t++) data.set(fn(t), t * 4);
+      return data;
+    };
+    const records = {
+      robot1: rec(t => (t < 400 ? [100, 0, 0, t >= 100 ? 1 : 0] : [0, 0, 20, 0])),
+      robot2: rec(t => (t < 600 ? [0, 90, -30, 0] : [-60, 0, 0, t % 300 < 20 ? 2 : 0])),
+    };
+    const loadSetup = makeSetup('BLUE', { rngSeed: 99 });
+    const { h, frames, statuses } = setup();
+    frames.advance(16);
+    const timeline = h.loadMatch(loadSetup, records, 'Branch 3');
+    assert(!!timeline && timeline.length === MATCH_TICKS + 1, 'loadMatch recomputed the whole match');
+    const ref = new SimulationEngine(loadSetup.r1Config, loadSetup.r2Config, loadSetup.shotResolver, 'BLUE', loadSetup.scenario);
+    ref.inputProvider = createInputRecordProvider(records);
+    ref.runFullMatch();
+    assert(JSON.stringify(timeline![MATCH_TICKS]) === JSON.stringify(ref.getFrame(MATCH_TICKS)), 'same result as an independent engine replaying the records');
+    let s = h.status();
+    assert(s.phase === 'ROTATING_IN' && s.alliance === 'BLUE' && s.branchName === 'Branch 3', 'rotating into the match view (file setup / branch name)');
+
+    statuses.length = 0;
+    frames.advance(VIEW_ANIMATION_MS + 50);
+    s = h.status();
+    assert(s.phase === 'MATCH' && s.loopState === 'ENDED' && s.endStage === 'REVIEW' && s.tick === 0 && s.headTick === MATCH_TICKS, 'review state at tick 0 after the rotation');
+    assert(s.viewAngle === viewAngle('DRIVER', 'BLUE'), 'default view (DRIVER) of the file alliance');
+    assert(s.endSeq === 0 && statuses.every(x => x.endStage !== 'HIGHLIGHT' && x.endStage !== 'RESULT'), 'no end highlight / result popup / end signal');
+    assert(!!s.result && s.result.total === ref.getFrame(MATCH_TICKS)!.totalScore && !s.canResume && s.canBranch, 'result available, no RESUME, BRANCH possible');
+    assert(s.input.sources.robot1 === 'REPLAY' && s.input.sources.robot2 === 'REPLAY' && s.input.hasLog.robot1 && s.input.hasLog.robot2, 'both robots REPLAY from the loaded records');
+    h.openResult();
+    assert(h.status().endStage === 'RESULT', 'RESULT opens the popup');
+    h.closeResult();
+
+    // 내보내기 재료 = 불러온 기록 그대로
+    const src = h.recipeSource();
+    assert(!!src && src.branchName === 'Branch 3' && src.timeline.length === MATCH_TICKS + 1, 'recipe source available after the end');
+    assert(Array.from(src!.inputs.robot1).join() === Array.from(records.robot1).join() && Array.from(src!.inputs.robot2).join() === Array.from(records.robot2).join(), 'recipe inputs = loaded records');
+
+    // 분기: 두 로봇 REPLAY로 끝까지 → 같은 결과 (녹화 덧입히기 재료 확인), 이번에는 실제 종료 → 종료 연출
+    h.setViewTick(3000);
+    h.branch();
+    assert(h.status().loopState === 'RUNNING', 'branch from a loaded match');
+    frames.advance(70_000, 100);
+    s = h.status();
+    assert(s.loopState === 'ENDED' && (s.endStage === 'HIGHLIGHT' || s.endStage === 'RESULT') && s.endSeq === 1, `branched run reached the end -> end sequence (${s.endStage})`);
+    assert(JSON.stringify(h.currentFrame()) === JSON.stringify(ref.getFrame(MATCH_TICKS)), 'REPLAY of both robots reproduces the loaded result');
+    assert(Array.from(h.recipeSource()!.inputs.robot1).join() === Array.from(records.robot1).join(), 'applied record after the branch = same inputs');
+
+    // 경기 중에는 불러오기 거부, NEW → 가지 이름 초기화, 진행 중 경기는 내보내기 재료 없음
+    assert(h.loadMatch(loadSetup, records, 'x') === null, 'loadMatch refused during a match');
+    h.reset();
+    frames.advance(VIEW_ANIMATION_MS + 50);
+    assert(h.status().phase === 'SETUP' && h.status().branchName === null && h.recipeSource() === null, 'NEW: branch name cleared, no recipe source');
+    h.start();
+    frames.advance(VIEW_ANIMATION_MS + 50);
+    frames.advance(1000, 20);
+    h.pause();
+    assert(h.recipeSource() === null, 'unfinished match: no recipe source');
     h.dispose();
   });
 });

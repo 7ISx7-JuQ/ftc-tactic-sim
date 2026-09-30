@@ -74,6 +74,24 @@ export class MatchInputs {
   readonly modes: Record<RobotId, DriveMode> = { robot1: DEFAULT_DRIVE_MODE, robot2: DEFAULT_DRIVE_MODE };
 
   /**
+   * 불러온 경기 (10-4): 로봇별 입력 기록(틱당 4 B, 0 ~ ticks − 1)을 녹화 로그와 적용 입력 기록 모두에 채운다.
+   * 녹화 로그에도 넣어 두면 되감아 분기할 때 REPLAY로 이어 조종할 수 있다 (녹화 덧입히기)
+   */
+  loadRecords(records: Readonly<Record<RobotId, ArrayLike<number>>>, ticks = MATCH_TICKS): void {
+    for (const robot of ['robot1', 'robot2'] as const) {
+      const data = records[robot];
+      if (data.length < ticks * LOG_RECORD_BYTES) throw new RangeError(`input record shorter than ${ticks} ticks`);
+      for (const channel of [this.logs[robot], this.applied[robot]]) {
+        channel.clear();
+        for (let t = 0; t < ticks; t++) {
+          const o = t * LOG_RECORD_BYTES;
+          channel.write(t, [data[o], data[o + 1], data[o + 2], data[o + 3]]);
+        }
+      }
+    }
+  }
+
+  /**
    * 엔진 현재 틱(currentTick)의 두 로봇 입력을 결정한다. LIVE 로봇은 그 틱에 조작을 기록한다.
    * live: LIVE 로봇의 틱 조작 (탭 래치 / 장치 합성 결과, 없으면 중립 조작으로 기록)
    */

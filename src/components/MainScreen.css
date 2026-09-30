@@ -718,6 +718,7 @@
   outline: none;
 }
 .confirm-message {
+  white-space: pre-line; /* 경기 불러오기 확인창의 경고 줄 (10-4) */
   margin: 0 0 calc(var(--u) * 18);
   font-size: calc(var(--u) * 15);
   font-weight: 600;
@@ -2015,4 +2016,29 @@
 }
 .preset-file-error {
   flex-basis: 100%;
+}
+
+/* ---------------- 경기 파일 (10-4) ---------------- */
+.preset-file-loading {
+  color: var(--accent);
+  font-weight: 700;
+}
+.preset-file-loading.is-error {
+  color: var(--error);
+}
+.result-exports {
+  display: flex;
+  justify-content: flex-end;
+  gap: calc(var(--u) * 8);
+}
+.match-notice {
+  pointer-events: auto;
+}
+.main-screen .match-notice-close {
+  margin-left: calc(var(--u) * 4);
+}
+.main-screen .match-notice-close svg.lucide {
+  width: calc(var(--u) * 18);
+  height: calc(var(--u) * 18);
+  color: var(--text-muted);
 }
