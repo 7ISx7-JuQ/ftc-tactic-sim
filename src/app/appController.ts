@@ -7,12 +7,15 @@
 //   → NEW(리셋) → ROTATING_OUT(관중석 시점으로 회전, 같은 설정으로 0틱 새 엔진) → SETUP
 //   MATCH 안: 진행(RUNNING) ⇄ 일시정지(PAUSED) / 재생(PLAYBACK, 기록 불변) / 6000틱 → 종료 강조 5초 → 결과 → 복기(REVIEW)
 // 보는 틱(viewTick)과 엔진 머리(headTick)를 구분한다: 일시정지 중 틱 이동 / 재생 / 타임라인은 보는 틱만 바꾸고 그 프레임을 그린다.
-// 기록을 바꾸는 동작은 재개(보는 틱 = 머리, 경기 미종료)와 분기(보는 틱 < 머리 → scrubTo + LIVE 로그 폐기 + 재개)뿐이다.
+// 기록을 바꾸는 동작은 재개(보는 틱 = 머리, 경기 미종료)와 분기(보는 틱 < 머리 → 새 가지에서 재개, 원래 가지는 보존 — 10-5)뿐이다.
+// 분기 트리 (10-5): BRANCH는 기록을 지우지 않고 새 가지를 만든다 (0 ~ 분기 틱 프레임은 부모와 참조 공유). 가지 전환 / 삭제 / 이름 바꾸기,
+//   최대 8개(원본 포함). 입력 허브는 지금 가지의 작업본이고, 떠나는 가지는 입력 기록 사본을 보관한다.
 // 불러온 경기 (10-4): loadMatch = 입력 기록으로 전체 재계산 → 기본 보기로 회전 → 종료 연출 없이 복기(보는 틱 0, 두 로봇 REPLAY).
 // 다시 그리기: 루프 RUNNING 중에는 onFrame마다, 그 외(일시정지 / 옵션 / 보기 애니메이션 / 재생 / 종료 강조 대기)에는 rAF로.
 // 시계 / 프레임 스케줄러 / 브라우저 환경을 주입받아 Node에서 가짜 시간으로 테스트한다.
 
 import { DT, MATCH_TICKS, SimulationEngine } from '../core/simulationEngine';
+import type { EngineTimeline } from '../core/simulationEngine';
 import type {
   DeepReadonly,
   MatchShooterBallistics,
@@ -26,10 +29,12 @@ import type {
 import { createAnimationFrameScheduler, createBrowserRealtimeLoop, isEditableTarget } from '../input/browserInput';
 import type { BrowserInputAdapter, BrowserInputEnv, GamepadSlotStatus } from '../input/browserInput';
 import { LOG_RECORD_BYTES, MatchInputs, createInputRecordProvider } from '../input/inputLog';
-import type { InputSource } from '../input/inputLog';
+import type { BranchInputs, InputSource } from '../input/inputLog';
 import { DEFAULT_DRIVE_MODE, KEYBOARD_ENABLED } from '../input/inputConfig';
 import type { DriveMode, RobotId } from '../input/inputConfig';
 import { autoSource, resolveSource, sourceChoiceAllowed } from './inputPlan';
+import { branchDepth, canFork, createBranchTree, currentBranch, fileBranchName, findBranch, forkBranch, removeBranch, renameBranch, setBranchData, switchBranch } from './branchTree';
+import type { BranchTree } from './branchTree';
 import type { SourceChoice } from './inputPlan';
 import type { FrameScheduler, LoopState, PauseReason, RealtimeLoop } from '../input/realtimeLoop';
 import { DEFAULT_RENDER_OPTIONS, hitProbabilities } from '../renderer/renderOptions';
@@ -87,7 +92,10 @@ export interface AppStatus {
   playing: boolean;             // 기록 재생 중
   playbackSpeed: PlaybackSpeed;
   endStage: EndStage;
-  branchName: string | null;    // 가지 이름 (10-4: 불러온 경기의 파일 가지 이름, 없으면 null = 원본 자동 이름)
+  branchName: string | null;    // 지금 가지의 사용자 이름 (null = 자동 이름, 불러온 경기는 파일의 가지 이름)
+  branches: BranchInfo[];       // 분기 트리 (만든 순서, 10-5)
+  currentBranchId: number;
+  canFork: boolean;             // 가지 수 < 8 (가득 차면 BRANCH는 분기하지 않음, 안내는 화면 10-6)
   endSeq: number;               // 이 경기에서 실제로 6000틱에 도달한 횟수 (종료 연출 트리거: 분기 후 재종료마다 +1, 재생 / 스크러빙으로는 불변)
   result: MatchResult | null;   // 종료 프레임 기준 결과 (경기 종료 후, 결과 팝업용 — 보는 틱과 무관)
   remainingSec: number;
@@ -120,6 +128,25 @@ export interface InputStatus {
 export interface InputSettings {
   keyboardEnabled: boolean;
   driveModes: Record<RobotId, DriveMode>;
+}
+
+/** 가지 자료: 타임라인 + (지금 가지가 아니면) 입력 기록 사본. 지금 가지의 입력은 입력 허브가 작업본 (10-5) */
+interface BranchData {
+  timeline: EngineTimeline;
+  inputs: BranchInputs | null;
+}
+
+/** 상태 알림의 가지 목록 한 줄 (만든 순서, 10-5) */
+export interface BranchInfo {
+  id: number;
+  number: number;            // 표시 번호 (원본 1)
+  name: string | null;       // 사용자 이름 (null = 자동 이름)
+  parentId: number | null;
+  forkTick: number;
+  depth: number;             // 원본 = 0
+  headTick: number;          // 마지막 기록 틱
+  ended: boolean;            // 6000틱 도달
+  totalScore: number | null; // 종료했으면 최종 점수
 }
 
 /** 결과 팝업 값 (종료 프레임 = 6000틱에서 읽음, 명세서 3.8 경기 종료와 결과 팝업) */
@@ -183,7 +210,7 @@ export class AppController {
   private endStage: EndStage = 'NONE';
   private endStageAt = 0;
   private endSeq = 0;
-  private branchName: string | null = null;
+  private tree!: BranchTree<BranchData>;
   private loadedEnd = false;            // 불러온 경기: 회전 뒤 루프가 곧바로 ENDED → 종료 연출 없이 복기 (10-4)
   private shortcutsEnabled = true;
   private autoPauseReason: Exclude<PauseReason, 'USER'> | null = null;
@@ -301,7 +328,7 @@ export class AppController {
     this.engine.inputProvider = null;
     this.matchChoices = { robot1: 'REPLAY', robot2: 'REPLAY' };
     this.applyInputChoices();
-    this.branchName = branchName;
+    this.tree = createBranchTree({ timeline: this.engine.currentTimeline, inputs: null }, branchName); // 불러온 경기 = 원본 가지
     this.loadedEnd = true;
     this.phase = 'ROTATING_IN';
     this.editScene = null;
@@ -314,12 +341,12 @@ export class AppController {
    * 경기 내보내기 재료 (명세서 3.9 경기 내보내기, 10-4): 경기 종료(6000틱)에 도달했으면 로봇별 적용 입력 기록 0 ~ 5999틱 + 타임라인 + 가지 이름,
    * 아니면 null. 적용 입력 기록 길이 = 엔진 머리이므로 6000틱이 모두 있으면 종료에 도달한 것 (진행 중 / 분기 직후는 모자람)
    */
-  recipeSource(): { inputs: Record<RobotId, Int8Array>; timeline: readonly DeepReadonly<TimelineFrame>[]; branchName: string | null } | null {
+  recipeSource(): { inputs: Record<RobotId, Int8Array>; timeline: readonly DeepReadonly<TimelineFrame>[]; branchName: string } | null {
     if (this.phase !== 'MATCH') return null;
     const cut = (robot: RobotId) => this.inputs.applied[robot].data.slice(0, this.inputs.applied[robot].length * LOG_RECORD_BYTES);
     const inputs = { robot1: cut('robot1'), robot2: cut('robot2') };
     if (inputs.robot1.length < MATCH_TICKS * LOG_RECORD_BYTES || inputs.robot2.length < MATCH_TICKS * LOG_RECORD_BYTES) return null;
-    return { inputs, timeline: this.engine.timeline, branchName: this.branchName };
+    return { inputs, timeline: this.engine.timeline, branchName: fileBranchName(currentBranch(this.tree)) };
   }
 
   pause(): void {
@@ -335,14 +362,18 @@ export class AppController {
   }
 
   /**
-   * 분기: 보는 틱 < 마지막 기록 틱일 때 엔진을 보는 틱으로 되감고(scrubTo) LIVE 로봇 입력 기록을 그 틱 이후 폐기한 뒤 재개.
-   * 이후 기록(프레임)은 첫 틱 진행 때 엔진이 폐기한다. 확인창은 화면이 띄운다 (명세서 3.8 분기 확인창)
+   * 분기 (명세서 3.9 분기 트리, 10-5): 보는 틱 < 마지막 기록 틱일 때 보는 틱에서 새 가지를 만들어 재개한다.
+   * 지금 가지는 타임라인과 입력 기록 사본을 그대로 보관하고, 새 가지는 0 ~ 분기 틱 프레임을 참조로 공유한다.
+   * 새 가지의 입력 사본에만 3.6항 분기 규칙(LIVE 로그 · 적용 입력 기록을 분기 틱 이후 폐기, REPLAY 로그 유지)을 적용한다.
+   * 가지가 8개로 가득 찼으면 분기하지 않는다 (false). 확인창 / 가득 참 안내는 화면이 띄운다
    */
-  branch(): void {
-    if (!this.canBranch()) return;
+  branch(): boolean {
+    if (!this.canBranch() || !canFork(this.tree)) return false;
     this.stopPlayback();
     const tick = this.viewTick;
-    this.engine.scrubTo(tick);
+    this.tree = setBranchData(this.tree, this.tree.currentId, { timeline: this.engine.currentTimeline, inputs: this.inputs.snapshot() });
+    const timeline = this.engine.forkTimeline(tick);
+    this.tree = forkBranch(this.tree, tick, { timeline, inputs: null })!;
     this.applyInputChoices(); // 분기부터 새 출처 (REPLAY로 바꾼 로봇은 기록 유지 = 녹화 덧입히기)
     for (const robot of ['robot1', 'robot2'] as const) {
       if (this.inputs.sources[robot] === 'LIVE') this.inputs.logs[robot].truncate(tick);
@@ -350,6 +381,45 @@ export class AppController {
     }
     this.endStage = 'NONE';
     this.loop.resume();
+    return true;
+  }
+
+  /**
+   * 가지 전환 (10-5): 일시정지 / 복기 중에만 (진행 · 종료 강조 · 결과 팝업 중 불가, 재생은 멈춤). 기록을 바꾸지 않으므로 확인창 없음.
+   * 보는 틱은 유지하되 그 가지 머리를 넘으면 머리로. 종료한 가지면 복기, 아니면 일시정지 (보는 틱 = 머리면 RESUME). endSeq 불변
+   */
+  switchBranch(id: number): boolean {
+    const target = findBranch(this.tree, id);
+    if (!this.canScrub() || !target || id === this.tree.currentId) return false;
+    this.stopPlayback();
+    this.tree = setBranchData(this.tree, this.tree.currentId, { timeline: this.engine.currentTimeline, inputs: this.inputs.snapshot() });
+    this.engine.adoptTimeline(target.data.timeline);
+    if (target.data.inputs) this.inputs.restore(target.data.inputs);
+    this.tree = setBranchData(switchBranch(this.tree, id), id, { timeline: target.data.timeline, inputs: null });
+    const head = this.headTick();
+    this.viewTick = Math.min(this.viewTick, head);
+    this.endStage = head >= MATCH_TICKS ? 'REVIEW' : 'NONE';
+    this.autoPauseReason = null;
+    this.changed();
+    return true;
+  }
+
+  /** 가지 삭제 (10-5): 그 가지 + 하위 가지, 원본 불가, 진행 중이 아닐 때만. 지금 가지가 지워지면 지운 가지의 부모로 전환 */
+  deleteBranch(id: number): boolean {
+    const planned = removeBranch(this.tree, id);
+    if (!this.canScrub() || !planned) return false;
+    if (planned.tree.currentId !== this.tree.currentId) this.switchBranch(planned.tree.currentId);
+    this.tree = removeBranch(this.tree, id)!.tree;
+    this.changed();
+    return true;
+  }
+
+  /** 가지 이름 바꾸기 (10-5): 경기 중이면 언제나 (기록과 무관). 앞뒤 공백 제거 24자까지, 비우면 자동 이름 */
+  renameBranch(id: number, name: string | null): boolean {
+    if (this.phase !== 'MATCH' || !findBranch(this.tree, id)) return false;
+    this.tree = renameBranch(this.tree, id, name);
+    this.emitStatus(true);
+    return true;
   }
 
   /** NEW: 루프 정지, 같은 설정으로 새 엔진(0틱), 관중석 시점으로 반대로 회전 → 경기 전 화면 (확인창은 화면이 띄움) */
@@ -497,7 +567,10 @@ export class AppController {
       playing: this.playing,
       playbackSpeed: this.playbackSpeed,
       endStage: this.endStage,
-      branchName: this.branchName,
+      branchName: currentBranch(this.tree).name,
+      branches: this.branchInfos(),
+      currentBranchId: this.tree.currentId,
+      canFork: canFork(this.tree),
       endSeq: this.endSeq,
       result: head >= MATCH_TICKS ? this.matchResult() : null,
       remainingSec: Math.max(0, (MATCH_TICKS - frame.tick) * DT),
@@ -577,9 +650,30 @@ export class AppController {
     return this.phase === 'MATCH' && this.loop.state !== 'RUNNING' && !this.endBusy();
   }
 
+  // 루프는 일시정지 또는 (종료한 가지에서 미종료 가지로 전환한 뒤의) 종료 상태일 수 있다 — 둘 다 엔진이 6000틱 전이면 재개 가능 (10-5)
   private canResume(): boolean {
     const head = this.headTick();
-    return this.canScrub() && this.loop.state === 'PAUSED' && this.viewTick === head && head < MATCH_TICKS;
+    return this.canScrub() && this.viewTick === head && head < MATCH_TICKS;
+  }
+
+  private branchInfos(): BranchInfo[] {
+    return this.tree.nodes.map(n => {
+      const current = n.id === this.tree.currentId;
+      const frames = current ? this.engine.timeline : n.data.timeline.frames;
+      const headTick = current ? this.headTick() : frames.length - 1;
+      const ended = headTick >= MATCH_TICKS;
+      return {
+        id: n.id,
+        number: n.number,
+        name: n.name,
+        parentId: n.parentId,
+        forkTick: n.forkTick,
+        depth: branchDepth(this.tree, n.id),
+        headTick,
+        ended,
+        totalScore: ended ? frames[MATCH_TICKS].totalScore : null,
+      };
+    });
   }
 
   private canBranch(): boolean {
@@ -603,7 +697,7 @@ export class AppController {
     this.playbackLast = null;
     this.endStage = 'NONE';
     this.endSeq = 0;
-    this.branchName = null;
+    this.tree = createBranchTree({ timeline: this.engine.currentTimeline, inputs: null }); // 새 경기 = 원본 가지 하나 (NEW = 트리 폐기)
     this.loadedEnd = false;
     this.autoPauseReason = null;
     this.lastToastAt = { robot1: -Infinity, robot2: -Infinity };

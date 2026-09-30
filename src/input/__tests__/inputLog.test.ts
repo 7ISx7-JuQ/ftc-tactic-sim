@@ -276,4 +276,28 @@ describe('입력 로그 / 입력 출처 / 녹화 덧입히기 (명세서 3.6)', 
     };
     assert(at(0).r1.actionState === 'INTAKING' && at(0).r1.targetVx > 0 && at(1).r1.targetVx === 0 && at(0).r2.targetVx === 0 && at(-1).r1.actionState === 'IDLE', 'record provider: decode / neutral beyond the record');
   }, TEST_TIMEOUT_MS);
+
+  it('H. 가지별 입력 기록 사본 (10-5): 사본은 독립, 복원하면 녹화 로그 / 적용 기록 길이 · 값 그대로', () => {
+    const e = eng();
+    const m = new MatchInputs();
+    while (e.currentTick < 200) m.step(e, both(e.currentTick, 0, 1));
+    const saved = m.snapshot();
+    const r1 = logBytes(m, 'robot1').join();
+    const a2 = Array.from(appliedBytes(m, 'robot2')).join();
+    // 작업본을 바꿔도 사본은 그대로
+    e.scrubTo(50);
+    while (e.currentTick < 120) m.step(e, both(e.currentTick, 9, 9));
+    assert(m.logs.robot1.length === 120 && saved.logs.robot1.length === 200, 'snapshot independent of later recording');
+    assert(Array.from(saved.logs.robot1.data.subarray(0, 800)).join() === r1, 'snapshot keeps the recording log values');
+    m.restore(saved);
+    assert(m.logs.robot1.length === 200 && logBytes(m, 'robot1').join() === r1, 'restore: recording log back');
+    assert(m.applied.robot2.length === 200 && Array.from(appliedBytes(m, 'robot2')).join() === a2, 'restore: applied record back');
+    // 복원 후 작업본을 바꿔도 사본은 그대로 (다시 복원 가능)
+    m.logs.robot1.truncate(10);
+    assert(saved.logs.robot1.length === 200, 'restored hub does not share buffers with the snapshot');
+    const empty = new MatchInputs().snapshot();
+    m.restore(empty);
+    assert(m.logs.robot1.length === 0 && m.applied.robot2.length === 0, 'restore an empty branch');
+  }, TEST_TIMEOUT_MS);
 });
+

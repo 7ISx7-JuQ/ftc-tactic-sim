@@ -493,6 +493,16 @@ function cloneSnapshot(src: SimSnapshot, pieceIndex: ReadonlyMap<string, number>
 // 4. 시뮬레이션 엔진
 // ============================================================
 
+/**
+ * 가지 타임라인 (명세서 3.9 분기 트리, 10-5): 프레임 배열 + 틱별 난수 상태.
+ * 프레임은 기록 후 바뀌지 않으므로(DeepReadonly) 가지 사이에 0 ~ 분기 틱을 참조로 공유한다.
+ * 엔진 밖에서는 보관 / 되돌려 주기만 하고 배열을 고치지 말 것 (엔진이 설치된 타임라인만 자르고 이어 쓴다).
+ */
+export interface EngineTimeline {
+  readonly frames: TimelineFrame[];
+  readonly rngStates: number[];
+}
+
 export class SimulationEngine {
   // 타임라인 프레임 배열 (0번 프레임부터 6000번 프레임까지 순차 축적)
   // 외부에는 읽기 전용으로만 공개 (기록 오염 방지). reset() 시 새 배열로 교체되므로
@@ -501,6 +511,31 @@ export class SimulationEngine {
 
   public get timeline(): readonly DeepReadonly<TimelineFrame>[] {
     return this.frames;
+  }
+
+  /** 지금 설치된 가지 타임라인 (보관용 핸들, 10-5) */
+  public get currentTimeline(): EngineTimeline {
+    return { frames: this.frames, rngStates: this.rngStates };
+  }
+
+  /**
+   * 분기 (10-5): 지금 타임라인의 0 ~ tick 프레임 / 난수 상태를 참조로 공유하는 새 타임라인을 설치하고 tick으로 되감는다.
+   * 원래 타임라인 배열은 건드리지 않으므로 그대로 보존된다 (분기 틱 이후 프레임 포함). 반환 = 새 타임라인
+   */
+  public forkTimeline(tick: number): EngineTimeline {
+    const target = clamp(Math.floor(Number.isFinite(tick) ? tick : 0), 0, this.frames.length - 1);
+    this.frames = this.frames.slice(0, target + 1);
+    this.rngStates = this.rngStates.slice(0, target + 1);
+    this.scrubTo(target);
+    return this.currentTimeline;
+  }
+
+  /** 가지 전환 (10-5): 보관해 둔 타임라인을 설치하고 그 머리(마지막 기록 틱) 상태로 복원 */
+  public adoptTimeline(timeline: EngineTimeline): void {
+    if (timeline.frames.length === 0) return;
+    this.frames = timeline.frames;
+    this.rngStates = timeline.rngStates;
+    this.scrubTo(this.frames.length - 1);
   }
 
   // 현재 시뮬레이션 내부 런타임 상태 (가변 작업본, 프레임에는 복제본만 기록)

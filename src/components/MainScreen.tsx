@@ -463,7 +463,7 @@ export default function MainScreen() {
     const result = status?.result;
     if (!src || !result || !status) return;
     const now = new Date();
-    const recipe = buildMatchRecipe({ setup: drafts.applied, inputs: src.inputs, timeline: src.timeline, branchName: src.branchName ?? 'Main', createdAt: now });
+    const recipe = buildMatchRecipe({ setup: drafts.applied, inputs: src.inputs, timeline: src.timeline, branchName: src.branchName, createdAt: now });
     downloadTextFile(matchFileName(now, status.alliance, result.total), serializeMatchRecipe(recipe));
   };
   const exportSummary = () => {

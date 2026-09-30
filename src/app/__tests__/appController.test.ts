@@ -585,4 +585,123 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     assert(h.recipeSource() === null, 'unfinished match: no recipe source');
     h.dispose();
   });
+
+  it('K. 분기 트리 (10-5): BRANCH = 새 가지(원래 가지 보존), 전환 / 이름 / 삭제, 8개 상한, 종료 가지 전환 = 복기, NEW = 트리 폐기', () => {
+    const { h, frames, win } = setup();
+    h.start();
+    frames.advance(VIEW_ANIMATION_MS + 50);
+    // 원본: R2를 키보드로 몰며 약 3초
+    win.dispatchEvent(key('keydown', KEYBOARD_BINDINGS.forward));
+    frames.advance(3000, 20);
+    win.dispatchEvent(key('keyup', KEYBOARD_BINDINGS.forward));
+    h.pause();
+    let s = h.status();
+    const mainHead = s.headTick;
+    const mainHeadFrame = JSON.stringify(h.currentFrame());
+    const mainR2 = h.currentFrame().r2.x;
+    assert(s.branches.length === 1 && s.currentBranchId === 1 && s.canFork && s.branches[0].headTick === mainHead && !s.branches[0].ended, 'one root branch');
+
+    // 분기: 50틱에서 새 가지 (R2 가만히) → 원본은 그대로 보관
+    h.setViewTick(50);
+    const forkR2 = h.currentFrame().r2.x;
+    assert(h.branch() === true, 'branch -> new branch');
+    s = h.status();
+    assert(s.loopState === 'RUNNING' && s.currentBranchId === 2 && s.branches.length === 2, 'running on branch 2');
+    assert(s.branches[1].parentId === 1 && s.branches[1].forkTick === 50 && s.branches[1].number === 2 && s.branches[1].depth === 1, 'branch 2 info');
+    frames.advance(1000, 20);
+    h.pause();
+    s = h.status();
+    const sideHead = s.headTick;
+    const sideHeadFrame = JSON.stringify(h.currentFrame());
+    assert(s.branches[0].headTick === mainHead && sideHead > 50 && sideHead < mainHead, `root kept its record (${mainHead}), branch 2 head ${sideHead}`);
+    assert(h.currentFrame().r2.x - forkR2 < (mainR2 - forkR2) / 2, `branch 2: R2 stopped driving after the fork (${(h.currentFrame().r2.x - forkR2).toFixed(1)} vs root ${(mainR2 - forkR2).toFixed(1)} in)`);
+
+    // 전환 → 원본: 보는 틱 유지(머리 이하), 머리 프레임 그대로, RESUME으로 원본 이어 기록
+    h.setViewTick(sideHead);
+    assert(h.switchBranch(1), 'switch to the root');
+    s = h.status();
+    assert(s.currentBranchId === 1 && s.tick === sideHead && s.headTick === mainHead && s.endStage === 'NONE', 'switched to root: view tick kept, root head');
+    h.setViewTick(mainHead);
+    assert(JSON.stringify(h.currentFrame()) === mainHeadFrame && h.status().canResume, 'root head frame intact, RESUME available');
+    h.resume();
+    frames.advance(500, 20);
+    h.pause();
+    assert(h.status().headTick > mainHead && h.status().branches[1].headTick === sideHead, 'root continued, branch 2 untouched');
+    const rootHead = h.status().headTick;
+    const rootHeadFrame = JSON.stringify(h.currentFrame());
+    assert(h.switchBranch(2) && h.status().tick === sideHead && JSON.stringify(h.currentFrame()) === sideHeadFrame, 'back to branch 2: head frame intact (view tick clamped to its head)');
+    assert(!h.switchBranch(2) && !h.switchBranch(99), 'switch to the current / unknown branch refused');
+
+    // 이름 바꾸기 / 내보내기 이름
+    assert(h.renameBranch(2, '  Fast cycle ') && h.status().branchName === 'Fast cycle' && h.status().branches[1].name === 'Fast cycle', 'rename');
+    h.renameBranch(2, '');
+    assert(h.status().branchName === null, 'empty name -> auto name');
+
+    // 8개까지: 원본 / 가지 2에서 계속 분기
+    for (let i = 3; i <= 8; i++) {
+      h.setViewTick(10 + i);
+      assert(h.branch(), `branch ${i}`);
+      frames.advance(100, 20);
+      h.pause();
+    }
+    s = h.status();
+    assert(s.branches.length === 8 && !s.canFork && s.branches.map(b => b.number).join() === '1,2,3,4,5,6,7,8', '8 branches, full');
+    h.setViewTick(5);
+    assert(!h.branch() && h.status().branches.length === 8 && h.status().loopState === 'PAUSED', 'full: BRANCH refused, still paused');
+
+    // 삭제: 원본 불가, 가지 2(하위 3 ~ 8 포함, 지금 가지 8도 하위) → 부모(원본)로 전환
+    assert(!h.deleteBranch(1), 'root cannot be deleted');
+    const depth = h.status().branches.find(b => b.id === 8)!.depth;
+    assert(depth === 7, `nested branches (depth ${depth})`);
+    assert(h.deleteBranch(2), 'delete branch 2 with its sub-branches');
+    s = h.status();
+    assert(s.branches.length === 1 && s.currentBranchId === 1 && s.canFork, 'only the root left, current = root');
+    assert(s.headTick === rootHead && s.tick <= rootHead, 'the engine now holds the root timeline');
+    h.setViewTick(rootHead);
+    assert(JSON.stringify(h.currentFrame()) === rootHeadFrame, 'root head frame after deleting the current branch');
+    h.setViewTick(rootHead - 20);
+    assert(h.branch() && h.status().branches[1].number === 9, 'numbers are not reused');
+    const b9 = h.status().branches[1].id;
+    frames.advance(200, 20);
+
+    // 진행 중에는 전환 / 삭제 불가
+    assert(!h.switchBranch(1) && !h.deleteBranch(b9), 'no switch / delete while running');
+    h.pause();
+
+    // 종료한 가지: 원본을 끝까지 → 종료 연출 1회. 가지 9로 전환(미종료, 머리에서 RESUME), 다시 원본 = 복기 (종료 신호 불변)
+    h.switchBranch(1);
+    h.setViewTick(h.status().headTick);
+    h.resume();
+    frames.advance(130_000, 100);
+    s = h.status();
+    assert(s.matchEnded && s.endSeq === 1 && s.branches[0].ended && s.branches[0].totalScore === s.score, 'root ended once');
+    h.skipHighlight();
+    h.closeResult();
+    assert(h.switchBranch(b9), 'switch from the ended root');
+    s = h.status();
+    assert(s.endStage === 'NONE' && !s.matchEnded && s.loopState === 'ENDED' && s.tick === s.headTick && s.canResume, 'unfinished branch: RESUME available though the loop is ENDED');
+    h.resume();
+    frames.advance(300, 20);
+    assert(h.status().loopState === 'RUNNING', 'resumed branch #9 from the ENDED loop');
+    h.pause();
+    assert(h.switchBranch(1), 'back to the ended root');
+    s = h.status();
+    assert(s.endStage === 'REVIEW' && s.matchEnded && !s.canResume && s.endSeq === 1 && !!s.result, 'ended branch -> review, no new end signal');
+    const src = h.recipeSource()!;
+    assert(src.branchName === 'Main', 'recipe name of the root');
+    // 원본 가지의 적용 입력 기록만으로 독립 재계산 = 원본 결과 (가지를 오가도 입력 기록이 섞이지 않음)
+    const base = makeSetup('RED');
+    const ref = new SimulationEngine(base.r1Config, base.r2Config, base.shotResolver, 'RED', base.scenario);
+    ref.inputProvider = createInputRecordProvider(src.inputs);
+    ref.runFullMatch();
+    assert(JSON.stringify(ref.getFrame(MATCH_TICKS)) === JSON.stringify(src.timeline[MATCH_TICKS]), 'root inputs reproduce the root result')
+
+    // NEW: 트리 폐기
+    h.reset();
+    frames.advance(VIEW_ANIMATION_MS + 50);
+    s = h.status();
+    assert(s.branches.length === 1 && s.currentBranchId === 1 && s.branchName === null, 'NEW discards the tree');
+    h.dispose();
+  });
 });
+

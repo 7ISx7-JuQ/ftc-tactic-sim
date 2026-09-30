@@ -59,7 +59,25 @@ export class InputLogChannel {
   clear(): void {
     this.recorded = 0;
   }
+
+  /** 다른 채널의 기록을 그대로 복사 (가지별 보관, 10-5) */
+  copyFrom(other: InputLogChannel): void {
+    this.data.set(other.data.subarray(0, other.length * LOG_RECORD_BYTES));
+    this.recorded = other.length;
+  }
 }
+
+/** 한 가지의 입력 기록 사본 (녹화 로그 + 적용 입력 기록, 10-5). 입력 허브는 지금 가지의 작업본 */
+export interface BranchInputs {
+  logs: Record<RobotId, InputLogChannel>;
+  applied: Record<RobotId, InputLogChannel>;
+}
+
+const copyChannel = (from: InputLogChannel): InputLogChannel => {
+  const c = new InputLogChannel();
+  c.copyFrom(from);
+  return c;
+};
 
 // ============================================================
 // 2. 경기 입력 허브: 로봇별 입력 출처 / 조작 모드 / 로그
@@ -72,6 +90,22 @@ export class MatchInputs {
   readonly applied: Record<RobotId, InputLogChannel> = { robot1: new InputLogChannel(), robot2: new InputLogChannel() };
   readonly sources: Record<RobotId, InputSource> = { robot1: 'LIVE', robot2: 'LIVE' };
   readonly modes: Record<RobotId, DriveMode> = { robot1: DEFAULT_DRIVE_MODE, robot2: DEFAULT_DRIVE_MODE };
+
+  /** 지금 기록의 사본 (가지를 떠나거나 새 가지로 갈라질 때 원래 가지 몫으로 보관, 10-5) */
+  snapshot(): BranchInputs {
+    return {
+      logs: { robot1: copyChannel(this.logs.robot1), robot2: copyChannel(this.logs.robot2) },
+      applied: { robot1: copyChannel(this.applied.robot1), robot2: copyChannel(this.applied.robot2) },
+    };
+  }
+
+  /** 보관한 사본을 작업본으로 (가지 전환, 10-5). 출처 / 조작 모드는 그대로 */
+  restore(saved: BranchInputs): void {
+    for (const robot of ['robot1', 'robot2'] as const) {
+      this.logs[robot].copyFrom(saved.logs[robot]);
+      this.applied[robot].copyFrom(saved.applied[robot]);
+    }
+  }
 
   /**
    * 불러온 경기 (10-4): 로봇별 입력 기록(틱당 4 B, 0 ~ ticks − 1)을 녹화 로그와 적용 입력 기록 모두에 채운다.
