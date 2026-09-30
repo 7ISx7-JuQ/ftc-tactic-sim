@@ -26,6 +26,8 @@ import type { GamePiece, RobotConfig, RobotPose, ScenarioConfig } from '../core/
 import type { RobotId } from '../input/inputConfig';
 import type { ConfigDrafts, DraftValues } from './configDraft';
 import type { NumberFieldSpec } from './robotForm';
+import { t } from './i18n';
+import type { Language, MessageKey } from './i18n';
 
 export type PieceType = GamePiece['type'];
 export type HiveCellChoice = 'AUDIENCE_CELL' | 'OPPOSITE_CELL';
@@ -151,6 +153,12 @@ export function setSpawnAxis(scenario: ScenarioConfig, view: ScenarioView, robot
   return robot === 'robot1' ? { ...scenario, r1Spawn: pose } : { ...scenario, r2Spawn: pose };
 }
 
+/** 시작 자세 전체 (필드 끌기, 09-11b) */
+export function setSpawnPose(scenario: ScenarioConfig, robot: RobotId, pose: RobotPose): ScenarioConfig {
+  const copy = { x: pose.x, y: pose.y, heading: pose.heading };
+  return robot === 'robot1' ? { ...scenario, r1Spawn: copy } : { ...scenario, r2Spawn: copy };
+}
+
 /** 시작 자세 기본값으로 (지정 해제 → 진영 기본 스폰) */
 export function resetSpawn(scenario: ScenarioConfig, robot: RobotId): ScenarioConfig {
   const next = { ...scenario };
@@ -268,6 +276,13 @@ export function scenarioFormIssues(values: DraftValues): ScenarioFormIssue[] {
 
 function isCount(value: number, max: number): boolean {
   return Number.isInteger(value) && value >= 0 && value <= max;
+}
+
+/** 문제 문구: 문구 사전 issue.* ({robot} = R1 / R2). 로봇별 문제인데 문구에 로봇 이름이 없으면(적재물) "R2 · …" */
+export function scenarioIssueText(issue: ScenarioFormIssue, lang: Language): string {
+  const label = issue.robot === 'robot1' ? 'R1' : issue.robot === 'robot2' ? 'R2' : '';
+  const text = t(lang, `issue.${issue.code}` as MessageKey, { robot: label });
+  return issue.robot && !text.includes(label) ? `${label} · ${text}` : text;
 }
 
 /** 빨간 표시할 칸 묶음 모음 */

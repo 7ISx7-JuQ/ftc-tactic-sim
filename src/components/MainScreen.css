@@ -1896,3 +1896,41 @@
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.03em;
 }
+
+/* ---------------- 시작 자세 모드 (09-11b): 커서 / 캔버스와 같은 크기의 글자 층 / 로봇 위 좌표 글자 ---------------- */
+.field-area.is-spawn-edit .field-canvas {
+  touch-action: none;
+}
+.field-area.is-spawn-edit.is-over-body .field-canvas {
+  cursor: move;
+}
+.field-area.is-spawn-edit.is-over-handle .field-canvas {
+  cursor: grab;
+}
+.field-area.is-spawn-edit.is-dragging .field-canvas {
+  cursor: grabbing;
+}
+.field-overlay {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 4;
+}
+.spawn-pose-tag {
+  position: absolute;
+  transform: translate(var(--tx, -50%), calc(-100% - var(--u) * 4));
+  padding: calc(var(--u) * 3) calc(var(--u) * 8);
+  border-radius: calc(var(--u) * 6);
+  border: 1px solid var(--panel-border);
+  background: rgba(21, 23, 28, 0.88);
+  font-size: calc(var(--u) * 11);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.spawn-pose-tag.is-invalid {
+  border-color: var(--error);
+  color: #fca5a5;
+}

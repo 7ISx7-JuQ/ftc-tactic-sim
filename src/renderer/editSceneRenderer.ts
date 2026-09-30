@@ -4,13 +4,22 @@
 // 09-10c = 스윗스팟(SWEET_SPOT) 모드: 같은 바닥 위에 적용한 확률표를 반투명(계산된 행만, 빗금 없음)으로 깔고,
 //   마우스를 올린 격자 강조 + 그 자리에서 조준점을 향해 돌린 로봇 몸체 윤곽(올바르면 초록 / 틀리면 빨강),
 //   초안 스윗스팟의 몸체 윤곽 + 조준 점선 + 표시, 확률표를 만든(적용한) 스윗스팟은 초안과 다를 때 빈 고리로.
-// 로봇 / 기물 / 게이지는 그리지 않는다 (편집 모드의 필드는 비어 있음). 색 / 행 계산은 heatmapView.ts (순수 함수).
+// 09-11b = 시작 자세(SPAWN) 모드: 경기 바닥 그대로(타일 / GARDEN / 로딩 존 / HIVE / FLOWER) + GARDEN 기물 + 두 로봇
+//   (흡입 구역 / 몸체 / 앞 변 / 헤딩 화살표 / 번호) + 회전 핸들. 배치 검증에 걸린 로봇은 빨간 테두리 + 빨간 덧칠.
+//   바닥 산포 공은 그리지 않는다 (09-11 확정 ④: 로봇 자리를 피해 다시 뿌려지므로 끌 때마다 공이 튀는 것 방지).
+// 히트맵 / 스윗스팟 모드는 로봇 / 기물 / 게이지를 그리지 않는다 (편집 모드의 필드는 비어 있음). 색 / 행 계산은 heatmapView.ts (순수 함수).
 
 import { LUT_GRID_SIZE, aimingRobotOBB } from '../core/ballistics';
-import { ALLIANCE_COLORS, COLORS, drawFieldLines, drawHiveBase, hiveCellBox, inchToPx } from './canvasRenderer';
+import { PIECE_PHYSICS, getBumperZoneOBB, getRobotOBB } from '../core/collision';
+import type { RobotConfig, RobotPose } from '../core/types';
+import { ALLIANCE_COLORS, COLORS, drawFieldBackground, drawFieldLines, drawFlowers, drawGardens, drawHiveBase, drawLoadingZones, hiveCellBox, inchToPx } from './canvasRenderer';
+import { canvasFont } from './fonts';
+import { headingArrow, localToField, robotLabelOffset } from './robotLayout';
+import { HANDLE_RADIUS, spawnHandlePoint } from './spawnEditLayout';
+import type { SpawnPart, SpawnRobotId } from './spawnEditLayout';
 import type { Alliance } from './canvasRenderer';
 import { heatmapBasis, heatmapPixels, pendingRowRanges } from './heatmapView';
-import { PX_PER_INCH, SCENE_HEIGHT_PX, SCENE_WIDTH_PX, VIEWPORT_PX, fieldPxMatrix } from './viewTransform';
+import { PX_PER_INCH, SCENE_HEIGHT_PX, SCENE_WIDTH_PX, VIEWPORT_PX, fieldPxMatrix, fieldToCanvas } from './viewTransform';
 import type { Point2, ViewTransform } from './viewTransform';
 
 export interface HeatmapEditScene {
@@ -33,8 +42,22 @@ export interface SweetSpotEditScene {
   hover: (Point2 & { valid: boolean }) | null;   // 마우스를 올린 격자 중심 (진영 기준) + 검증 통과
 }
 
-/** 편집 모드 장면 (09-11 시작 자세 모드가 늘어남) */
-export type EditScene = HeatmapEditScene | SweetSpotEditScene;
+export interface SpawnEditRobot {
+  pose: RobotPose;                                // 초안 시작 자세 (지정 안 했으면 진영 기본 스폰)
+  config: Pick<RobotConfig, 'length' | 'width' | 'intakeZones'>; // 초안 로봇 크기 / 흡입 구역
+  bad: boolean;                                   // 배치 검증에 걸림 (빨간 표시)
+}
+
+export interface SpawnEditScene {
+  mode: 'SPAWN';
+  alliance: Alliance;
+  robots: Record<SpawnRobotId, SpawnEditRobot>;
+  gardenPieces: readonly Point2[];                // GARDEN POLLEN (배치 검증 대상, 엔진 gardenPiecePositions)
+  active: { robot: SpawnRobotId; part: SpawnPart } | null; // 끄는 중 / 마우스를 올린 로봇 부분 (강조)
+}
+
+/** 편집 모드 장면 */
+export type EditScene = HeatmapEditScene | SweetSpotEditScene | SpawnEditScene;
 
 const EDIT_COLORS = {
   pageBg: '#15171c', // 필드 둘레 (경기 장면과 같음)
@@ -49,6 +72,18 @@ const EDIT_COLORS = {
   applied: 'rgba(17, 24, 39, 0.5)',
 };
 const SWEET_SPOT_HEATMAP_ALPHA = 0.5;
+const SPAWN_COLORS = {
+  robot: { RED: ALLIANCE_COLORS.RED.base, BLUE: ALLIANCE_COLORS.BLUE.base } as Record<Alliance, string>,
+  robotStroke: '#111827',
+  heading: '#ffffff',
+  intake: 'rgba(22, 163, 74, 0.25)',
+  intakeStroke: 'rgba(21, 128, 61, 0.6)',
+  bad: '#dc2626',
+  badStripe: 'rgba(255, 255, 255, 0.6)', // 배치 문제 로봇 빗금 (진영색과 무관하게 보이게)
+  handle: '#ffffff',
+  handleActive: '#f59e0b',
+  activeRing: 'rgba(245, 158, 11, 0.9)',
+};
 const HATCH_SPACING_PX = 8;
 const AIM_MARK_INCH = 1.6;
 const SWEET_SPOT_MARK_INCH = 2.2;
@@ -58,7 +93,7 @@ type ImageCanvas = HTMLCanvasElement | OffscreenCanvas;
 let heatmapCanvas: ImageCanvas | null | undefined;
 let heatmapBuffer: Uint8ClampedArray | null = null;
 
-function heatmapImage(scene: EditScene): ImageCanvas | null {
+function heatmapImage(scene: HeatmapEditScene | SweetSpotEditScene): ImageCanvas | null {
   if (heatmapCanvas === undefined) {
     const n = LUT_GRID_SIZE;
     heatmapCanvas =
@@ -176,7 +211,7 @@ function drawSweetSpotEdit(ctx: CanvasRenderingContext2D, scene: SweetSpotEditSc
   drawAimingBody(ctx, scene.sweetSpot, aim, scene.robotSize, scene.sweetSpotValid ? EDIT_COLORS.marker : EDIT_COLORS.invalid, null, false);
 }
 
-function drawMarkers(ctx: CanvasRenderingContext2D, scene: EditScene): void {
+function drawMarkers(ctx: CanvasRenderingContext2D, scene: HeatmapEditScene | SweetSpotEditScene): void {
   const aim = heatmapBasis(scene.alliance).aim;
   ctx.save();
   // 스윗스팟 → 조준점 점선 (정면 조준 방향)
@@ -226,8 +261,144 @@ function drawMarkers(ctx: CanvasRenderingContext2D, scene: EditScene): void {
   ctx.restore();
 }
 
+// ------------------------------------------------------------
+// 시작 자세 모드 (09-11b)
+// ------------------------------------------------------------
+
+function pathCorners(ctx: CanvasRenderingContext2D, pts: readonly Point2[]): void {
+  ctx.beginPath();
+  pts.forEach((p, i) => (i === 0 ? ctx.moveTo(inchToPx(p.x), inchToPx(p.y)) : ctx.lineTo(inchToPx(p.x), inchToPx(p.y))));
+  ctx.closePath();
+}
+
+function obbPoints(obb: ReturnType<typeof getRobotOBB>): Point2[] {
+  const [f, r] = obb.axes;
+  const [hl, hw] = obb.halfExtents;
+  const at = (a: number, b: number) => ({ x: obb.center.x + f.x * a + r.x * b, y: obb.center.y + f.y * a + r.y * b });
+  return [at(hl, -hw), at(hl, hw), at(-hl, hw), at(-hl, -hw)]; // 앞-왼, 앞-오른, 뒤-오른, 뒤-왼
+}
+
+// 로봇 한 대: 흡입 구역 → 몸체(진영색, 문제면 빨간 덧칠 + 빨간 테두리) → 앞 변 굵게 → 헤딩 화살표 → 핸들 막대 / 원
+function drawSpawnRobot(ctx: CanvasRenderingContext2D, robot: SpawnEditRobot, ally: Alliance, active: SpawnPart | null): void {
+  const { pose, config } = robot;
+  const body = getRobotOBB(pose, config);
+  const corners = obbPoints(body);
+  ctx.save();
+  for (const zone of config.intakeZones) {
+    const obb = getBumperZoneOBB(body, zone);
+    if (!obb) continue;
+    pathCorners(ctx, obbPoints(obb));
+    ctx.fillStyle = SPAWN_COLORS.intake;
+    ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = SPAWN_COLORS.intakeStroke;
+    ctx.stroke();
+  }
+  pathCorners(ctx, corners);
+  ctx.fillStyle = SPAWN_COLORS.robot[ally];
+  ctx.fill();
+  if (robot.bad) {
+    // 흰 사선 빗금 (RED 로봇에 빨간 덧칠은 안 보이므로)
+    ctx.save();
+    ctx.clip();
+    const r = Math.hypot(config.length, config.width) / 2;
+    ctx.beginPath();
+    for (let d = -2 * r; d <= 2 * r; d += 3) {
+      ctx.moveTo(inchToPx(pose.x + d - r), inchToPx(pose.y + r));
+      ctx.lineTo(inchToPx(pose.x + d + r), inchToPx(pose.y - r));
+    }
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = SPAWN_COLORS.badStripe;
+    ctx.stroke();
+    ctx.restore();
+    pathCorners(ctx, corners);
+  }
+  ctx.lineWidth = robot.bad ? 3.5 : 2.25;
+  ctx.strokeStyle = robot.bad ? SPAWN_COLORS.bad : SPAWN_COLORS.robotStroke;
+  ctx.stroke();
+  if (active === 'body') {
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 3]);
+    ctx.strokeStyle = SPAWN_COLORS.activeRing;
+    pathCorners(ctx, obbPoints({ ...body, halfExtents: [body.halfExtents[0] + 1.2, body.halfExtents[1] + 1.2] }));
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  // 앞 변 굵게 + 헤딩 화살표
+  ctx.beginPath();
+  ctx.moveTo(inchToPx(corners[0].x), inchToPx(corners[0].y));
+  ctx.lineTo(inchToPx(corners[1].x), inchToPx(corners[1].y));
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = robot.bad ? SPAWN_COLORS.bad : SPAWN_COLORS.robotStroke;
+  ctx.stroke();
+  pathCorners(ctx, headingArrow(config.length).map(p => localToField(pose, p)));
+  ctx.fillStyle = SPAWN_COLORS.heading;
+  ctx.fill();
+  // 회전 핸들: 앞 변 가운데 → 핸들 원
+  const front = { x: pose.x + Math.cos(pose.heading) * (config.length / 2), y: pose.y + Math.sin(pose.heading) * (config.length / 2) };
+  const h = spawnHandlePoint(pose, config);
+  const handleColor = active === 'handle' ? SPAWN_COLORS.handleActive : SPAWN_COLORS.handle;
+  ctx.beginPath();
+  ctx.moveTo(inchToPx(front.x), inchToPx(front.y));
+  ctx.lineTo(inchToPx(h.x), inchToPx(h.y));
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = SPAWN_COLORS.robotStroke;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(inchToPx(h.x), inchToPx(h.y), inchToPx(HANDLE_RADIUS), 0, Math.PI * 2);
+  ctx.fillStyle = handleColor;
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = SPAWN_COLORS.robotStroke;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function renderSpawnField(ctx: CanvasRenderingContext2D, scene: SpawnEditScene): void {
+  const ally = scene.alliance;
+  drawFieldBackground(ctx);
+  drawGardens(ctx, false, ally);
+  drawLoadingZones(ctx, false, ally);
+  drawHiveBase(ctx, ally);
+  drawFlowers(ctx, false);
+  ctx.save();
+  const r = PIECE_PHYSICS.POLLEN.radius;
+  for (const p of scene.gardenPieces) {
+    ctx.beginPath();
+    ctx.arc(inchToPx(p.x), inchToPx(p.y), inchToPx(r), 0, Math.PI * 2);
+    ctx.fillStyle = COLORS.pollenFill;
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = COLORS.pollenStroke;
+    ctx.stroke();
+  }
+  ctx.restore();
+  // 끄는 로봇을 위에 (R1 → R2 순서, 끄는 로봇은 마지막)
+  const order: SpawnRobotId[] = scene.active?.robot === 'robot1' ? ['robot2', 'robot1'] : ['robot1', 'robot2'];
+  for (const id of order) drawSpawnRobot(ctx, scene.robots[id], ally, scene.active?.robot === id ? scene.active.part : null);
+}
+
+// 로봇 번호 (화면 공간, 똑바로)
+function drawSpawnLabels(ctx: CanvasRenderingContext2D, scene: SpawnEditScene, view: ViewTransform): void {
+  ctx.save();
+  ctx.font = canvasFont(12);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const [id, num] of [['robot1', '1'], ['robot2', '2']] as const) {
+    const { pose, config } = scene.robots[id];
+    const p = localToField(pose, robotLabelOffset(config.length));
+    const at = fieldToCanvas(view, p.x, p.y);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = SPAWN_COLORS.robotStroke;
+    ctx.strokeText(num, at.x, at.y);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(num, at.x, at.y);
+  }
+  ctx.restore();
+}
+
 /**
- * 편집 모드 장면 전체 (히트맵 / 스윗스팟 모드). ctx는 경기 장면과 같은 800 × 800 논리 크기 × dpr 버퍼의 캔버스, view는 관중석 시점(경기 전)
+ * 편집 모드 장면 전체 (히트맵 / 스윗스팟 / 시작 자세 모드). ctx는 경기 장면과 같은 800 × 800 논리 크기 × dpr 버퍼의 캔버스, view는 관중석 시점(경기 전)
  * 순서: 둘레 배경 → 바닥 회색 → 히트맵(스윗스팟 모드는 반투명) → 미계산 행 빗금(히트맵 모드만) → 타일 / 벽 → HIVE(기준 셀 강조)
  *       → [스윗스팟 모드: 적용한 스윗스팟 고리 / 마우스 격자 + 윤곽 / 초안 몸체 윤곽] → 스윗스팟 → 조준점 점선 / 표시
  */
@@ -242,6 +413,14 @@ export function renderEditScene(ctx: CanvasRenderingContext2D, scene: EditScene,
   ctx.rect(0, 0, VIEWPORT_PX, VIEWPORT_PX);
   ctx.clip();
   ctx.setTransform(...fieldPxMatrix(view, dpr));
+
+  if (scene.mode === 'SPAWN') {
+    renderSpawnField(ctx, scene);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawSpawnLabels(ctx, scene, view);
+    ctx.restore();
+    return;
+  }
 
   const size = inchToPx(LUT_GRID_SIZE);
   ctx.fillStyle = COLORS.fieldBg;

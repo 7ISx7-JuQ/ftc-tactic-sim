@@ -848,7 +848,12 @@
             - 초안 규칙(`configDraft.ts`): `RESET TAB` / `canResetTab`의 되돌릴 값 = 기본값 + 지금 시나리오 시드.
             - 화면(`ScenarioTab.tsx`): 맨 위 유효 배지(초록 / 빨강 + 문제 수, 틀린 입력 글자 포함) + 문제 목록(로봇 문제는 "R2 · …"), 진영 버튼 묶음(바꾸면 시작 자세 칸의 틀린 글자 지움), `HIVE`(상향 셀 + `POLLEN` / `NECTAR` 개수 조절기 + "NECTAR n개면 CELL이 POLLEN m개에서 TIP" 안내), 로봇 적재물(로봇별 칸 = 기물 색 원, 번호 표시, 적재 한도를 넘는 칸은 빨간 테두리), 잔여 기물(FLOWER 4개 / 아군 · 상대 GARDEN 개수 조절기 + 바닥 산포 요약), 오토 TIP 개수 조절기, 시작 자세(로봇별 카드: X / Y / 헤딩 숫자 칸 + "ALLIANCE 기본" 표시 + `DEFAULT`), 난수 시드(적용 값 표시 + `REROLL`). 검증에 걸린 묶음은 빨간 테두리. 개수는 개수 조절기(`Stepper`, `FormControls.tsx`)라 범위 밖 입력이 없고, 여러 칸이 얽힌 문제만 빨갛게 표시. 경기가 있는 동안 모두 비활성.
             - 연결(`MainScreen.tsx`): 시나리오 초안 편집(틀린 글자 규칙은 로봇 탭과 같음), `REROLL` = `rerollSeed` → 경기 전 설정 교체(`setSetup`) → 자동 보관.
-    - **SETTINGS 탭 (환경 및 조작):**
+        - **구현 (09-11b, 시작 자세 편집 모드 `EDIT ON FIELD`):**
+            - 기하(`src/renderer/spawnEditLayout.ts`, 순수): 회전 핸들 = 앞 변 가운데에서 앞으로 `HANDLE_GAP` 7 in 떨어진 원(반지름 2.2 in, 막대로 연결), `bodyContains`(헤딩으로 돌린 직사각형), `spawnHitTest`(핸들 우선 — 다른 로봇 몸체 위여도 돌릴 수 있게, 나중에 그린 R2 우선, 잡기 여유 1 in). 렌더러와 입력이 같은 계산.
+            - 규칙(`src/ui/fieldEdit.ts`): `SpawnFieldEdit`(들어올 때 진영 / 지정 자세 / 시작 자세 칸 틀린 글자 기억), `editTab`(편집 모드를 연 탭 — 시작 자세 = SCENARIO), `openSpawnEdit`, `dragSpawnPose`(몸체 = 누른 점 대비 이동량, 좌표 칸 범위 0 ~ 144 제한 / 핸들 = 중심 → 포인터 방향, 스냅 없이 표시 자리수 0.1 in · 0.1°로만 반올림 — 칸에 보이는 값 = 보관 값), `placeSpawn`(그 로봇 자세 + 그 로봇 칸 글자 지움, 겹쳐도 놓임), `cancelSpawnEdit`(시작 자세 / 칸 글자만 되돌림, 지정 안 했던 자세는 지정 해제, 모드 중 진영을 바꿨으면 들어오기 전 자세를 좌우 대칭), `cancelFieldEdit`(모드별 되돌리기 공통), `editDoneAction`(스윗스팟 / 시작 자세 공통: `APPLY` / `KEEP_DRAFT` / `CLOSE`), `spawnRobots` / `spawnEditScene`(초안 진영 / 자세 / 제원, `validateRobotPlacement`에 걸린 로봇, GARDEN 기물 = 엔진 `gardenPiecePositions` — 공개만, 동작 변화 없음). `setSpawnPose`(`scenarioForm.ts`), `scenarioIssueText`(탭 / 안내 띠 공용 문구).
+            - 장면(`editSceneRenderer.ts`, `SPAWN`): 경기 바닥(타일 / GARDEN / 로딩 존 / HIVE / FLOWER, 진영 기준 비활성 스타일) + GARDEN 기물 + 두 로봇(흡입 구역 / 진영색 몸체 / 앞 변 / 헤딩 화살표 / 번호 / 핸들). 배치 문제 로봇은 흰 사선 빗금 + 빨간 테두리 (RED 로봇에 빨간 덧칠은 보이지 않아 빗금으로), 마우스를 올린 몸체는 주황 점선, 잡은 핸들은 주황. 끄는 로봇을 위에 그림. 바닥 산포 공은 없음 (09-11 확정 ④).
+            - 화면: 시나리오 탭 시작 자세 구역에 `EDIT ON FIELD`(한국어 "필드에서 편집", 모드 중 "필드에서 편집 중" 강조 · 비활성). 안내 띠 `SpawnEditBanner`: `START POSE` + `CANCEL` / `DONE · APPLY`, 배치 문제 사유(빨강), "로봇을 끌어 옮기기 · 동그란 핸들을 끌어 돌리기" + Esc. 로봇 위 좌표 / 헤딩 글자(`SpawnPoseTag`, 문제면 빨간 테두리)는 캔버스와 같은 크기 / 위치의 글자 층(`field-overlay`, 창 크기 맞춤에서 캔버스와 함께 크기 지정)에 장면 비율(%)로 배치 — 렌더 중 DOM을 읽지 않음. 글자 가로 기준점을 위치 비율만큼 옮겨 벽에 붙은 로봇의 글자가 잘리지 않게. 커서: 몸체 위 `move`, 핸들 위 `grab`, 끄는 중 `grabbing`, 끄는 동안 터치 스크롤 없음.
+            - 입력(`MainScreen.tsx`): 누르기 = `spawnHitTest` → 포인터 캡처 + 시작 자세 / 누른 점 기억, 이동 = `dragSpawnPose` → `placeSpawn`(칸이 실시간으로 따라옴), 놓기 = 캡처 해제. `DONE · APPLY` = SCENARIO 탭 적용(적용할 수 없으면 "시작 자세는 초안에만 남김" 안내), `CANCEL` / Esc / `START` = `cancelFieldEdit`, 다른 탭 / 창 닫기 = 끌어 놓은 초안은 그대로.    - **SETTINGS 탭 (환경 및 조작):**
 
         | 구역 | 항목 | 변경 가능 시점 |
         |---|---|---|
@@ -888,7 +893,7 @@
         | 히트맵 (`HEATMAP`) | 기물 종류 전환 | 진영 기준 셀 LUT (명중률 색 척도, 미계산 행 회색 빗금), 필드 윤곽 / `HIVE` / 조준점 / 스윗스팟. 생성 중이면 행 묶음 도착마다 갱신 (최대 약 10 Hz, 2.6.2항 점진 히트맵) |
 
         - 클릭 / 드래그 좌표는 3.7항 역변환(`cssToCanvas` → `canvasToField`)을 쓴다.
-        - 구현 단계: 09-10b 공통 틀(안내 띠 / 끝나는 경우 / 컨트롤러 `setEditScene`) + `HEATMAP`, 09-10c `SWEET_SPOT`, 09-11 `SPAWN`. 세부는 로봇 제원 탭 "구현 (09-10b)" / "구현 (09-10c)".
+        - 구현 단계: 09-10b 공통 틀(안내 띠 / 끝나는 경우 / 컨트롤러 `setEditScene`) + `HEATMAP`, 09-10c `SWEET_SPOT`, 09-11b `SPAWN`. 세부는 로봇 제원 탭 "구현 (09-10b)" / "구현 (09-10c)", 시나리오 탭 "구현 (09-11b)".
         - 편집 화면을 config 창 안에 따로 두지 않는 이유: 1366 × 768에서 config 창 폭(약 480u)의 캔버스는 1 in 격자가 약 2.5 px라 클릭이 불가능하고, 경기 전 메인 필드는 비어 있으며 보기도 같은 관중석 시점이다.
     - **시작 자세 배치 검증 (`validateRobotPlacement(scenario, r1Config, r2Config) → PlacementIssue[]`):** `collision.ts`의 OBB / SAT를 재사용하는 순수 함수. 시작 자세 미지정 로봇은 진영별 기본 스폰(2.3항)으로 검사.
 
@@ -1264,6 +1269,7 @@ export interface TimelineFrame {
 | 09-10b | 필드 편집 모드 공통 틀(안내 띠 / `DONE` · Esc / 탭 이동 · 창 닫기 · `START`에서 종료, 컨트롤러 편집 장면) + 히트맵 모드 `SHOW HIT MAP`(회색 바닥 + 진영별 파스텔 척도, 미계산 행 빗금, 점진 표시, 기물 전환) (아래 6.2.39) | `src/renderer/heatmapView.ts`, `editSceneRenderer.ts`, `canvasRenderer.ts`, `src/ui/fieldEdit.ts`, `appController.ts`, `lutTracker.ts`, `FieldEditBanner.tsx`, `RobotTab.tsx`, `MainScreen.tsx`, `i18n.ts`, `MainScreen.css`, 테스트 |
 | 09-10c | 스윗스팟 모드 `SET ON FIELD`: 필드 클릭 = 초안 스윗스팟(모드 유지, 틀린 칸도 빨간 오류), 마우스 칸 강조 + 몸체 윤곽 + 말풍선(좌표 / 사유), 적용 확률표 반투명, `DONE · APPLY` / `CANCEL` · Esc · `START` 되돌림 (아래 6.2.40) | `src/ui/fieldEdit.ts`, `editSceneRenderer.ts`, `ballistics.ts`(`aimingRobotOBB` 공개), `FieldEditBanner.tsx`, `RobotTab.tsx`, `MainScreen.tsx`, `i18n.ts`, `MainScreen.css`, 테스트 |
 | 09-11a | 시나리오 탭: 유효 배지 + 문제 목록, 진영(시작 자세 좌우 대칭), `HIVE` / 적재물(칸 순환) / 잔여 기물 / 오토 TIP 개수 조절기, 시작 자세 숫자 칸, 시드 `REROLL`(바로 적용 + 보관), `RESET TAB` 시드 유지 (아래 6.2.41) | `src/ui/scenarioForm.ts`, `configDraft.ts`, `simulationEngine.ts`(기본값 공개), `ScenarioTab.tsx`, `FormControls.tsx`(`Stepper`), `ConfigPanel.tsx`, `MainScreen.tsx`, `i18n.ts`, `MainScreen.css`, 테스트 |
+| 09-11b | 시작 자세 편집 모드 `EDIT ON FIELD`: 몸체 끌기 = 위치, 회전 핸들 = 헤딩(스냅 없음, 0.1 in / 0.1° 반올림), 겹침 흰 빗금 + 사유, 로봇 위 좌표 글자, `DONE · APPLY` / `CANCEL` · Esc · `START` 되돌림 (아래 6.2.42) — 09-11 완료 | `src/renderer/spawnEditLayout.ts`, `editSceneRenderer.ts`, `src/ui/fieldEdit.ts`, `scenarioForm.ts`, `simulationEngine.ts`(GARDEN 좌표 공개), `FieldEditBanner.tsx`, `ScenarioTab.tsx`, `MainScreen.tsx`, `i18n.ts`, `MainScreen.css`, 테스트 |
 
 ### 6.2 Step 05 (메인 루프) 세부 완료 항목
 
@@ -1589,6 +1595,13 @@ export interface TimelineFrame {
 - **테스트:** `src/ui/__tests__/scenarioForm.test.ts` A~G(기본값 읽기 · 기본 시나리오 유효, 진영 전환: 기본 스폰끼리 대칭 · 지정 자세 / 상향 셀 · 지정 안 한 항목 · 두 번 = 원래대로, 적재 칸 순환 · 빈 칸 뒤로, 시작 자세 한 축 / 지정 해제 · 개수 칸, 화면용 검증: 코드 / 로봇 / 빨간 묶음 · `tabIssues`와 같은 문제 종류, 바닥 산포 요약, 시드: `REROLL` · 다른 초안 유지 · `RESET TAB` 시드 유지 · 새 시드는 다름). 돌연변이 17종(상향 셀 기본값 / 대칭식 / 상향 셀 반전 / 지정 자세 대칭 / NECTAR 흡입 불가 순환 / 빈 칸 제거 / 한 축 기본값 / 지정 해제 / 새 시드 다름 / 초안 시드 / 로봇 붙이기 / NECTAR 초과 묶음 / 겹침 로봇 / 바닥 NECTAR / 틀린 FLOWER만 / RESET 시드 / `canResetTab`) 모두 실패 확인.
 - **헤드리스 Chromium 점검 (저장소 밖 1회성, 개발 서버 1366 × 768):** SCENARIO 탭 "Valid scenario", `HIVE` POLLEN +12 → 무효 2개(TIP 임계 / POLLEN 32 초과) + `APPLY` 비활성, `RESET TAB` → 유효, R1 1번 칸 → NECTAR → "HIVE + robot NECTAR exceeds …", 다시 클릭 → 빈 칸이 뒤로, R1 (60, 80) → "R1 body overlaps the HIVE" + 빨간 카드, (60, 30) → 유효, BLUE → R1 (84, 30, 180°) · R2 기본 (135, 108, 180°) · 상향 `OPPOSITE`, `APPLY` → 필드 BLUE, `REROLL` → 시드 바뀜 · 수정 없음 · 저장값 `rngSeed` 반영 · 새로고침 뒤 같은 시드. 콘솔 오류 없음.
 
+### 6.2.42 Step 09-11b (시작 자세 편집 모드) 완료 항목 — 09-11 완료
+
+- **결정:** 3.8항 시나리오 탭 "09-11 확정" ④ 참고 (필드 = 구조물 + GARDEN 기물 + 두 로봇, `DONE` = SCENARIO 탭 `APPLY`). 명세의 "스냅 없음"은 그대로 두고 값만 표시 자리수(0.1 in / 0.1°)로 반올림.
+- **구현:** 3.8항 시나리오 탭 "구현 (09-11b)" 참고.
+- **테스트:** `src/renderer/__tests__/spawnEditLayout.test.ts` A~C(핸들 위치, 돌린 몸체 안 / 비스듬한 헤딩, 잡기: 핸들 우선 · R2 우선 · 빈 곳), `src/ui/__tests__/fieldEdit.test.ts` J~O(연 탭 = SCENARIO · 기억값 · 모드 전환, 끌기: 이동량 · 범위 제한 · 핸들 방향 · 0.1 반올림 · 중심 위 그대로, 놓기: 그 로봇만 · 칸 글자 · 겹침 허용, 되돌리기: 지정 해제 · 칸 글자 · 다른 칸 유지 · 진영 전환 대칭 · 히트맵은 그대로, `DONE` 3종, 장면: 배치 문제 로봇 · GARDEN = 엔진 좌표 · 강조 · BLUE), `src/renderer/__tests__/editScene.test.ts` C(문제 로봇만 빗금 / 빨간 테두리, 잡은 핸들만 주황). 돌연변이 20종 모두 실패 확인 (몸체 안 판정의 오른쪽 축 부호 뒤집기가 축 위 점만으로는 살아남아 비스듬한 헤딩 경우를 추가). 테스트 중 `Math.round(v / 0.1) * 0.1`이 `40.300000000000004`처럼 잔여를 남기는 것을 발견해 `Math.round(v * 10) / 10`으로 수정.
+- **헤드리스 Chromium 점검 (저장소 밖 1회성, 개발 서버 1366 × 768):** SCENARIO 탭 `EDIT ON FIELD` → 필드가 구조물 + GARDEN 기물 + 두 로봇(핸들)으로, 글자 "R1 9.0 in · 36.0 in · 0.0°", R1 몸체 (9, 36) → (40, 50) 끌기 → 칸 40.0 / 50.0, 핸들을 아래로 → 90.0°, R2를 R1 위로 → 두 글자 빨강 + 사유 3개(R1 / R2 HIVE 겹침, 로봇끼리 겹침) + 흰 빗금, `CANCEL` → 두 로봇 "ALLIANCE 기본" 복원, 다시 열어 (30, 40)으로 → `DONE · APPLY` → 적용 · 수정 없음, 다시 열어 끈 뒤 Esc → (30, 40) 복원 · config 창 유지. 벽에 붙은 로봇 글자가 필드 영역 밖으로 잘리던 것을 기준점 이동으로, RED 로봇의 빨간 덧칠이 안 보이던 것을 흰 빗금으로 고침. 콘솔 오류 없음.
+
 ### 6.3 남은 Step (권장 순서)
 
 > 모든 Step은 완료 시 `npm test`(엔진 회귀 테스트)가 통과해야 하며, 새로 추가한 규칙에는 테스트 그룹을 추가한다.
@@ -1613,7 +1626,7 @@ export interface TimelineFrame {
     - ~~08-5: HIVE(아군 셀 상태, 시차 낙하 연출), FLOWER 게이지(필드 밖 9칸, 잼, 가득 참 X), NECTAR 재고 게이지(게이지 틀은 정적 레이어에 추가), 경기 종료 강조.~~ (완료, 6.2.18)
     - ~~08-6: 비행 공(명목 구간 보간 + 높이 보정, 충돌 후 구간, 그림자 / 오프셋 / 크기), 표시 옵션 5종.~~ (완료, 6.2.19)
     - ~~08-7: 개발 하네스(정식 엔진 / 입력 / 루프 + 간이 판정 함수, 시작 회전 후 루프 시작, 옵션 체크박스) + 헤드리스 Chromium 점검.~~ (완료, 6.2.20)
-- **Step 9 — 웹 GUI (React, 상세 규칙 3.8항):** 09-1(명세), 09-2(탄도 사전 준비), 09-3(LUT Worker 풀), 09-4(LUT 캐시), 09-5(배치 검증), 09-6a(GUI 순수 기반), 09-6b(렌더러 전환), 09-6c(앱 컨트롤러), 09-6d(화면 뼈대), 09-7a(경기 흐름), 09-7b(확인창 / 토스트 / 배너 / 타임라인), 09-8a(config 창 틀), 09-7c(경기 종료 연출), 09-8b(SETTINGS / 자동 보관), 09-9a(로봇 탭 1), 09-9b(로봇 탭 2), 09-9c(구역 폭 최소값), 09-10a(스윗스팟 / 명중 확률표 생성 연결), 09-10b(필드 편집 모드 틀 / 히트맵), 09-10c(스윗스팟 모드), 09-11a(시나리오 탭) 완료.
+- **Step 9 — 웹 GUI (React, 상세 규칙 3.8항):** 09-1(명세), 09-2(탄도 사전 준비), 09-3(LUT Worker 풀), 09-4(LUT 캐시), 09-5(배치 검증), 09-6a(GUI 순수 기반), 09-6b(렌더러 전환), 09-6c(앱 컨트롤러), 09-6d(화면 뼈대), 09-7a(경기 흐름), 09-7b(확인창 / 토스트 / 배너 / 타임라인), 09-8a(config 창 틀), 09-7c(경기 종료 연출), 09-8b(SETTINGS / 자동 보관), 09-9a(로봇 탭 1), 09-9b(로봇 탭 2), 09-9c(구역 폭 최소값), 09-10a(스윗스팟 / 명중 확률표 생성 연결), 09-10b(필드 편집 모드 틀 / 히트맵), 09-10c(스윗스팟 모드), 09-11a(시나리오 탭), 09-11b(시작 자세 편집 모드) 완료.
     - ~~09-1: 웹 GUI 명세 구체화.~~ (완료, 6.2.21)
     - ~~09-2: `ballistics.ts` 사전 준비 — `generateReferenceLUTRows`, `robotLUTSeeds`, `BALLISTICS_MODEL_VERSION`, 스윗스팟 진영 기준 변환 함수 + 분할 / 작업 계획 동일성 테스트.~~ (완료, 6.2.22)
     - ~~09-3: LUT Worker 풀(`src/workers/lutWorker.ts`) + 작업 대기열 + 조립 + 로봇별 상태 머신 / 취소 (React 비의존, 가짜 Worker 테스트).~~ (완료, 6.2.23)
@@ -1641,7 +1654,7 @@ export interface TimelineFrame {
         - ~~09-10c: `SET ON FIELD`(스윗스팟 모드) — 클릭 = 격자 중심으로 스윗스팟 초안, 마우스를 올린 격자 강조 + 좌표, 조준점을 향한 로봇 몸체 윤곽, 검증 실패 사유, (LUT가 있으면) 히트맵 반투명, `DONE` / `CANCEL`.~~ (완료, 6.2.40) — 09-10 완료
     - 09-11: 시나리오 탭 + 시작 자세 편집 모드 + 시드 `REROLL` + 유효 배지. 2단계로 분할 (3.8항 09-11 확정 ①):
         - ~~09-11a: 시나리오 탭 폼(진영 / `HIVE` / 적재물 / 잔여 기물 / 오토 TIP / 시작 자세 숫자 칸) + 시드 `REROLL` + 유효 배지.~~ (완료, 6.2.41)
-        - 09-11b: 시작 자세 편집 모드 `EDIT ON FIELD` — 로봇 몸체 드래그 = 위치, 회전 핸들 = 헤딩(스냅 없음), 배치 검증(겹친 로봇 빨간색 + 사유), 좌표 / 헤딩 글자, 필드 = 구조물 + `GARDEN` 기물 + 두 로봇, `DONE · APPLY` / `CANCEL`.
+        - ~~09-11b: 시작 자세 편집 모드 `EDIT ON FIELD` — 로봇 몸체 드래그 = 위치, 회전 핸들 = 헤딩(스냅 없음), 배치 검증(겹친 로봇 빨간색 + 사유), 좌표 / 헤딩 글자, 필드 = 구조물 + `GARDEN` 기물 + 두 로봇, `DONE · APPLY` / `CANCEL`.~~ (완료, 6.2.42) — 09-11 완료
     - 09-12: 결과 팝업 세부 디자인 확정(09-7a 기본형 기반, 사용자와 확정), 개발 하네스 삭제(+ 1회성 스크립트 `src/tmp_shots.ts`도 함께 삭제, 09-10b 확정 ③) — Step 9 완료.
 - **Step 10 — 분기 타임라인 및 경기 저장/공유:** (09-1 추가) 로봇 프로필 / 시나리오 JSON 내보내기 · 불러오기(SETTINGS 탭 프리셋 관리), 결과 팝업 로그 / JSON 내보내기. 분기 트리(부모 프레임 공유, 분기 이후 프레임만 생성), 저장 레시피(설정 + 시나리오 + 시드 + 양자화 입력 로그 + 탄도 설정 / LUT 시드 / 샘플 수 / `BALLISTICS_MODEL_VERSION` + 엔진 버전 + 상태 체크섬, LUT 자체는 저장하지 않고 캐시 또는 재생성). 레시피 약 50 KB 수준으로 파일/IndexedDB 저장 가능. 입력 로그 형식(로봇별 틱당 4 B, 8비트)은 3.6항, 저장 시 연속 중복 압축.
 

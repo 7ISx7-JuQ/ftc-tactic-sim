@@ -3,12 +3,13 @@
 // 히트맵 모드: 기물 종류 전환(POLLEN / NECTAR), 명중률 범례(진영 파스텔 척도), 기준 CELL, 생성 중 / 적용 대기 안내, DONE / Esc = 닫기.
 // 스윗스팟 모드: 같은 범례 + 초안 스윗스팟 좌표 / 검증 사유(빨강) / 반투명 확률표가 적용한 스윗스팟 기준이라는 안내,
 //   CANCEL(Esc) = 들어오기 전 값으로, DONE · APPLY = 그 로봇 탭 적용.
-import { Check, Crosshair, Map as MapIcon, X } from 'lucide-react';
+import { Check, Crosshair, Map as MapIcon, Move, X } from 'lucide-react';
+import type { CSSProperties } from 'react';
 import { sweetSpotBasisCell } from '../core/ballistics';
 import { heatmapGradientCss } from '../renderer/heatmapView';
 import { t } from '../ui/i18n';
 import type { Language, MessageKey } from '../ui/i18n';
-import type { FieldEdit } from '../ui/fieldEdit';
+import type { HeatmapFieldEdit, SweetSpotFieldEdit } from '../ui/fieldEdit';
 import { lutStateText } from '../ui/lutView';
 import type { RobotLutView } from '../ui/lutView';
 import { robotLabel } from '../ui/mainScreenModel';
@@ -37,7 +38,7 @@ export default function FieldEditBanner({
   onDone,
   onCancel,
 }: {
-  edit: FieldEdit;
+  edit: HeatmapFieldEdit | SweetSpotFieldEdit;
   alliance: 'RED' | 'BLUE';
   lut: RobotLutView;
   pendingApply: boolean;
@@ -119,6 +120,53 @@ export function SweetSpotHoverTip({
           {t(lang, `issue.${code}` as MessageKey)}
         </span>
       ))}
+    </div>
+  );
+}
+
+/**
+ * 시작 자세 모드 안내 띠 (09-11b): 모드 이름 + CANCEL / DONE · APPLY, 배치 검증 사유(빨강), 조작 안내 + Esc.
+ * 로봇이 필드 양쪽 벽에 붙어 있어 가운데 위쪽은 비므로 늘 필드 위쪽
+ */
+export function SpawnEditBanner({ issues, lang, onDone, onCancel }: { issues: readonly string[]; lang: Language; onDone: () => void; onCancel: () => void }) {
+  const title = t(lang, 'edit.spawn.title');
+  return (
+    <div className="field-edit-banner" role="region" aria-label={title} onClick={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()}>
+      <div className="field-edit-head">
+        <Move />
+        <span className="field-edit-title">{title}</span>
+        <button type="button" className="config-button" onClick={onCancel}>
+          <X />
+          {t(lang, 'edit.cancel')}
+        </button>
+        <button type="button" className="config-button is-primary" onClick={onDone}>
+          <Check />
+          {t(lang, 'edit.doneApply')}
+        </button>
+      </div>
+      {issues.length > 0 && (
+        <div className="field-edit-spot">
+          {issues.map(text => (
+            <span key={text} className="form-error">
+              {text}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="field-edit-hint">
+        <span>{t(lang, 'edit.spawn.hint')}</span>
+        <span className="field-edit-esc">{t(lang, 'edit.escCancel')}</span>
+      </div>
+    </div>
+  );
+}
+
+/** 시작 자세 모드: 로봇 위 좌표 / 헤딩 글자 (문제면 빨간 테두리) */
+export function SpawnPoseTag({ at, label, pose, bad, unit }: { at: { left: string; top: string }; label: string; pose: { x: number; y: number; heading: number }; bad: boolean; unit: LengthUnit }) {
+  return (
+    // 가로 기준점을 위치 비율만큼 옮겨(왼쪽 벽 = 글자 왼쪽 끝, 가운데 = 가운데) 필드 가장자리에서 잘리지 않게
+    <div className={`spawn-pose-tag${bad ? ' is-invalid' : ''}`} style={{ left: at.left, top: at.top, '--tx': `-${at.left}` } as CSSProperties} aria-hidden>
+      <b>{label}</b> {formatQuantity('coordinate', pose.x, unit)} · {formatQuantity('coordinate', pose.y, unit)} · {formatQuantity('heading', pose.heading, unit)}
     </div>
   );
 }

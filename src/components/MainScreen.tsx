@@ -6,6 +6,7 @@
 // 준비될 때까지 START를 막는다 (Worker 풀 / 캐시는 LUTTracker가 소유, React는 약 10 Hz 요약만 받음).
 // 09-10b: 필드 편집 모드(히트맵) — 로봇 탭 SHOW HIT MAP으로 열고, 그 탭을 떠나거나 창을 닫거나 START하면 끝남. 장면은 컨트롤러가 그림.
 // 09-11a: 시나리오 탭(초안 / APPLY) + 시드 REROLL(바로 적용 + 자동 보관).
+// 09-11b: 시작 자세 모드(EDIT ON FIELD) — 로봇 몸체 / 회전 핸들 끌기(포인터 캡처) = 초안 시작 자세, DONE · APPLY = SCENARIO 탭 적용.
 // 09-10c: 스윗스팟 모드(SET ON FIELD) — 필드 클릭 = 초안 스윗스팟, DONE · APPLY = 그 로봇 탭 적용, CANCEL / Esc / START = 들어오기 전 값으로.
 
 import { useEffect, useRef, useState } from 'react';
@@ -47,7 +48,7 @@ import ConfigRail from './ConfigRail';
 import ConfirmDialog from './ConfirmDialog';
 import type { ConfirmRequest } from './ConfirmDialog';
 import EndOverlay from './EndOverlay';
-import FieldEditBanner, { SweetSpotHoverTip } from './FieldEditBanner';
+import FieldEditBanner, { SpawnEditBanner, SpawnPoseTag, SweetSpotHoverTip } from './FieldEditBanner';
 import FieldNotices from './FieldNotices';
 import type { ToastItem } from './FieldNotices';
 import LeftPanel from './LeftPanel';
@@ -57,18 +58,27 @@ import SettingsTab from './SettingsTab';
 import RobotTab from './RobotTab';
 import ScenarioTab from './ScenarioTab';
 import { readSweetSpot } from '../ui/robotForm';
-import { newSeed, readScenario, rerollSeed, scenarioFormIssues } from '../ui/scenarioForm';
+import { newSeed, readScenario, rerollSeed, scenarioFormIssues, scenarioIssueText } from '../ui/scenarioForm';
+import { spawnHitTest } from '../renderer/spawnEditLayout';
+import type { SpawnPart, SpawnRobotId } from '../renderer/spawnEditLayout';
+import type { RobotPose } from '../core/types';
 import type { ScenarioConfig } from '../core/types';
 import type { RobotProfile } from '../ui/robotForm';
 import {
-  cancelSweetSpotEdit,
+  cancelFieldEdit,
   clickSweetSpot,
+  dragSpawnPose,
+  editDoneAction,
+  editTab,
+  openSpawnEdit,
+  placeSpawn,
+  spawnEditScene,
+  spawnRobots,
   fieldEditStays,
   fieldGridCell,
   heatmapEditScene,
   openSweetSpotEdit,
   sweetSpotCandidateIssues,
-  sweetSpotDoneAction,
   sweetSpotEditScene,
   sweetSpotIssueCodes,
   toggleHeatmapEdit,
@@ -117,6 +127,11 @@ export default function MainScreen() {
   const [spotHover, setSpotHover] = useState<{ cell: { x: number; y: number }; left: number; top: number } | null>(null);
   // 클릭은 마지막 포인터 이동의 칸을 쓴다 (상태는 다음 렌더에야 바뀌므로 이동 직후 클릭에도 맞도록 즉시 갱신되는 ref)
   const spotHoverRef = useRef<typeof spotHover>(null);
+  // 시작 자세 모드: 끄는 중(포인터 캡처) / 마우스를 올린 로봇 부분 (강조 · 커서)
+  const spawnDragRef = useRef<{ robot: SpawnRobotId; part: SpawnPart; pointerStart: { x: number; y: number }; poseStart: RobotPose } | null>(null);
+  const [spawnActive, setSpawnActive] = useState<{ robot: SpawnRobotId; part: SpawnPart } | null>(null);
+  const [spawnDragging, setSpawnDragging] = useState(false);
+  const overlayRef = useRef<HTMLDivElement>(null); // 캔버스와 같은 크기 / 위치의 글자 층 (시작 자세 글자를 장면 비율로 배치)
 
   useEffect(() => {
     const area = areaRef.current;
@@ -130,6 +145,7 @@ export default function MainScreen() {
     const measure = () => {
       const size = fieldCanvasSize(area.clientWidth, area.clientHeight, window.devicePixelRatio || 1);
       canvas.style.width = canvas.style.height = `${size.cssPx}px`;
+      if (overlayRef.current) overlayRef.current.style.width = overlayRef.current.style.height = `${size.cssPx}px`;
       const resized = canvas.width !== size.bufferPx || canvas.height !== size.bufferPx;
       if (resized) canvas.width = canvas.height = size.bufferPx;
       return { scale: size.scale, resized };
@@ -344,6 +360,10 @@ export default function MainScreen() {
       controller.setEditScene(null);
       return;
     }
+    if (activeEdit.mode === 'SPAWN') {
+      controller.setEditScene(spawnEditScene(drafts.draft, spawnActive));
+      return;
+    }
     const robot = activeEdit.robot;
     const heatmap = trackerRef.current?.heatmap(robot, activeEdit.piece) ?? null;
     controller.setEditScene(
@@ -351,7 +371,7 @@ export default function MainScreen() {
         ? heatmapEditScene(editAlliance, drafts.applied[robot], heatmap)
         : sweetSpotEditScene(editAlliance, drafts.draft[robot], drafts.applied[robot], heatmap, spotHover?.cell ?? null),
     );
-  }, [activeEdit, editAlliance, drafts.applied, drafts.draft, lutViews, spotHover]);
+  }, [activeEdit, editAlliance, drafts.applied, drafts.draft, lutViews, spotHover, spawnActive]);
   // 편집 중 Esc = 편집 모드 닫기 / 스윗스팟 모드는 취소 (config 창은 그대로, 확인창이 떠 있으면 확인창이 먼저)
   useEffect(() => {
     if (!activeEdit || confirm) return;
@@ -359,11 +379,13 @@ export default function MainScreen() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
       e.preventDefault();
-      // CANCEL과 같음: 스윗스팟 모드면 들어오기 전 값으로
-      if (edit.mode === 'SWEET_SPOT') setDrafts(d => cancelSweetSpotEdit(d, edit));
+      // CANCEL과 같음: 스윗스팟 / 시작 자세 모드면 들어오기 전 값으로
+      setDrafts(d => cancelFieldEdit(d, edit));
       setFieldEdit(null);
       spotHoverRef.current = null;
       setSpotHover(null);
+      spawnDragRef.current = null;
+      setSpawnActive(null);
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
@@ -383,42 +405,99 @@ export default function MainScreen() {
   }, [configOpen]);
 
   // ---------------- 스윗스팟 모드 (09-10c) ----------------
-  // CANCEL / Esc: 스윗스팟 모드면 들어오기 전 값으로 되돌리고 닫음 (히트맵 모드는 닫기만)
-  const cancelEdit = () => {
-    const edit = fieldEdit;
-    if (edit?.mode === 'SWEET_SPOT') setDrafts(d => cancelSweetSpotEdit(d, edit));
-    setFieldEdit(null);
+  const clearEditPointer = () => {
     spotHoverRef.current = null;
     setSpotHover(null);
+    spawnDragRef.current = null;
+    setSpawnActive(null);
+    setSpawnDragging(false);
   };
-  // DONE: 스윗스팟 모드면 그 로봇 탭 APPLY까지 (09-10c 확정). 적용할 수 없으면(틀린 칸) 초안에만 남기고 안내
+  // CANCEL / Esc: 스윗스팟 / 시작 자세 모드면 들어오기 전 값으로 되돌리고 닫음 (히트맵 모드는 닫기만)
+  const cancelEdit = () => {
+    const edit = fieldEdit;
+    if (edit) setDrafts(d => cancelFieldEdit(d, edit));
+    setFieldEdit(null);
+    clearEditPointer();
+  };
+  // DONE: 스윗스팟 / 시작 자세 모드면 그 탭 APPLY까지 (09-10c · 09-11 확정). 적용할 수 없으면(틀린 칸) 초안에만 남기고 안내
   const doneEdit = () => {
     const edit = activeEdit;
     setFieldEdit(null);
-    spotHoverRef.current = null;
-    setSpotHover(null);
-    if (edit?.mode !== 'SWEET_SPOT') return;
-    const action = sweetSpotDoneAction(drafts, edit.robot);
+    clearEditPointer();
+    if (!edit || edit.mode === 'HEATMAP') return;
+    const action = editDoneAction(drafts, editTab(edit) as DraftTab);
     if (action === 'APPLY') applyCurrentTab();
-    else if (action === 'KEEP_DRAFT') setConfigNotice(t(lang, 'edit.sweetSpot.notApplied'));
+    else if (action === 'KEEP_DRAFT') setConfigNotice(t(lang, edit.mode === 'SPAWN' ? 'edit.spawn.notApplied' : 'edit.sweetSpot.notApplied'));
   };
-  // 필드 CSS 좌표 → 격자 중심 (관중석 시점 역변환) + 말풍선 위치. 필드 밖이면 null
-  const spotAt = (clientX: number, clientY: number) => {
+  // 화면 좌표 → 필드 좌표 (관중석 시점 역변환, 3.7항 cssToCanvas → canvasToField)
+  const fieldPointAt = (clientX: number, clientY: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas || !status) return null;
+    const rect = canvas.getBoundingClientRect();
+    const view = { angle: status.viewAngle, scale: fitScale(status.viewAngle) };
+    const p = cssToCanvas(clientX - rect.left, clientY - rect.top, rect.width, rect.height);
+    return canvasToField(view, p.x, p.y);
+  };
+  // 필드 좌표 → 필드 영역 안 CSS 위치 (말풍선 / 글자 배치)
+  const areaCssAt = (x: number, y: number) => {
     const canvas = canvasRef.current;
     const area = areaRef.current;
     if (!canvas || !area || !status) return null;
     const rect = canvas.getBoundingClientRect();
-    const view = { angle: status.viewAngle, scale: fitScale(status.viewAngle) };
-    const p = cssToCanvas(clientX - rect.left, clientY - rect.top, rect.width, rect.height);
-    const cell = fieldGridCell(canvasToField(view, p.x, p.y));
-    if (!cell) return null;
-    const at = fieldToCanvas(view, cell.x, cell.y);
     const areaRect = area.getBoundingClientRect();
+    const at = fieldToCanvas({ angle: status.viewAngle, scale: fitScale(status.viewAngle) }, x, y);
     const k = rect.width / SCENE_WIDTH_PX;
-    return { cell, left: rect.left - areaRect.left + at.x * k, top: rect.top - areaRect.top + at.y * k };
+    return { left: rect.left - areaRect.left + at.x * k, top: rect.top - areaRect.top + at.y * k };
+  };
+  // 필드 CSS 좌표 → 격자 중심 + 말풍선 위치. 필드 밖이면 null
+  const spotAt = (clientX: number, clientY: number) => {
+    const p = fieldPointAt(clientX, clientY);
+    const cell = p && fieldGridCell(p);
+    const at = cell && areaCssAt(cell.x, cell.y);
+    return cell && at ? { cell, ...at } : null;
   };
   const spotEdit = activeEdit?.mode === 'SWEET_SPOT' ? activeEdit : null;
+  const spawnEdit = activeEdit?.mode === 'SPAWN' ? activeEdit : null;
+  const sameActive = (a: typeof spawnActive, b: typeof spawnActive) => a?.robot === b?.robot && a?.part === b?.part;
+  // 시작 자세 모드: 누른 로봇 부분을 잡고(핸들 우선) 포인터 캡처
+  const onFieldPointerDown = (e: ReactPointerEvent) => {
+    if (!spawnEdit || e.button !== 0) return;
+    const p = fieldPointAt(e.clientX, e.clientY);
+    if (!p) return;
+    const robots = spawnRobots(drafts.draft);
+    const hit = spawnHitTest(robots, p);
+    if (!hit) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    spawnDragRef.current = { ...hit, pointerStart: p, poseStart: robots[hit.robot].pose };
+    setSpawnActive(hit);
+    setSpawnDragging(true);
+    setConfigNotice(null);
+  };
+  const onFieldPointerUp = (e: ReactPointerEvent) => {
+    if (!spawnDragRef.current) return;
+    spawnDragRef.current = null;
+    setSpawnDragging(false);
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    const p = fieldPointAt(e.clientX, e.clientY);
+    const hover = p ? spawnHitTest(spawnRobots(drafts.draft), p) : null;
+    setSpawnActive(hover);
+  };
   const onFieldPointerMove = (e: ReactPointerEvent) => {
+    if (spawnEdit) {
+      const p = fieldPointAt(e.clientX, e.clientY);
+      if (!p) return;
+      const drag = spawnDragRef.current;
+      if (drag) {
+        const pose = dragSpawnPose(drag.poseStart, drag.part, drag.pointerStart, p);
+        setDrafts(d => placeSpawn(d, drag.robot, pose));
+        return;
+      }
+      const overBanner = e.target instanceof Element && e.target.closest('.field-edit-banner');
+      const hover = overBanner ? null : spawnHitTest(spawnRobots(drafts.draft), p);
+      if (!sameActive(hover, spawnActive)) setSpawnActive(hover);
+      return;
+    }
     if (!spotEdit) return;
     const overBanner = e.target instanceof Element && e.target.closest('.field-edit-banner');
     const next = overBanner ? null : spotAt(e.clientX, e.clientY);
@@ -428,6 +507,7 @@ export default function MainScreen() {
     setSpotHover(next);
   };
   const onFieldClick = (e: ReactMouseEvent) => {
+    if (spawnEdit) return;
     if (!spotEdit) {
       c()?.skipHighlight(); // 종료 강조 5초 중 필드를 누르면 건너뛰기
       return;
@@ -443,11 +523,12 @@ export default function MainScreen() {
   const start = () => {
     // 편집 중 START = 편집 취소 후 시작 절차 (명세서 3.8): 스윗스팟 모드면 들어오기 전 값으로 되돌린 초안으로 검사
     let current = drafts;
-    if (fieldEdit?.mode === 'SWEET_SPOT') {
-      current = cancelSweetSpotEdit(drafts, fieldEdit);
+    if (fieldEdit && fieldEdit.mode !== 'HEATMAP') {
+      current = cancelFieldEdit(drafts, fieldEdit);
       setDrafts(current);
     }
     setFieldEdit(null);
+    clearEditPointer();
     const blocking = startBlocker(current, { robot1: luts.robot1.phase, robot2: luts.robot2.phase });
     if (blocking) {
       setConfigTab(blocking.tab);
@@ -519,18 +600,43 @@ export default function MainScreen() {
       {status && <LeftPanel status={status} lang={lang} teams={{ robot1: drafts.applied.robot1, robot2: drafts.applied.robot2 }} />}
       {/* 종료 강조 5초 중 필드를 누르면 건너뛰기 */}
       <div
-        className={`field-area${spotEdit ? ' is-picking' : ''}`}
+        className={`field-area${spotEdit ? ' is-picking' : ''}${spawnEdit ? ` is-spawn-edit${spawnActive ? ` is-over-${spawnActive.part}` : ''}${spawnDragging ? ' is-dragging' : ''}` : ''}`}
         ref={areaRef}
         onClick={onFieldClick}
+        onPointerDown={onFieldPointerDown}
+        onPointerUp={onFieldPointerUp}
+        onPointerCancel={onFieldPointerUp}
         onPointerMove={onFieldPointerMove}
         onPointerLeave={() => {
+          if (!spawnDragging) setSpawnActive(null);
           spotHoverRef.current = null;
           setSpotHover(null);
         }}
       >
         <canvas ref={canvasRef} className="field-canvas" />
         <FieldNotices autoPauseReason={status?.autoPauseReason ?? null} toasts={toasts} lang={lang} />
-        {activeEdit && (
+        {spawnEdit && (
+          <SpawnEditBanner
+            issues={scenarioFormIssues(drafts.draft)
+              .filter(issue => issue.code.startsWith('PLACEMENT_'))
+              .map(issue => scenarioIssueText(issue, lang))}
+            lang={lang}
+            onDone={doneEdit}
+            onCancel={cancelEdit}
+          />
+        )}
+        <div className="field-overlay" ref={overlayRef}>
+          {spawnEdit &&
+            status &&
+            (['robot1', 'robot2'] as const).map(robot => {
+              const { pose, size } = spawnRobots(drafts.draft)[robot];
+              // 몸체 위쪽 (외접원 위) — 장면 논리 px를 캔버스 크기 비율로
+              const at = fieldToCanvas({ angle: status.viewAngle, scale: fitScale(status.viewAngle) }, pose.x, pose.y - Math.hypot(size.length, size.width) / 2);
+              const bad = scenarioFormIssues(drafts.draft).some(i => i.code.startsWith('PLACEMENT_') && i.fields.includes(`spawn.${robot}`));
+              return <SpawnPoseTag key={robot} at={{ left: `${(at.x / SCENE_WIDTH_PX) * 100}%`, top: `${(at.y / SCENE_WIDTH_PX) * 100}%` }} label={robotLabel(robot)} pose={pose} bad={bad} unit={settings.lengthUnit} />;
+            })}
+        </div>
+        {activeEdit && activeEdit.mode !== 'SPAWN' && (
           <FieldEditBanner
             edit={activeEdit}
             alliance={editAlliance}
@@ -545,7 +651,7 @@ export default function MainScreen() {
             }
             unit={settings.lengthUnit}
             lang={lang}
-            onPiece={piece => setFieldEdit({ ...activeEdit, piece })}
+            onPiece={piece => setFieldEdit(activeEdit.mode === 'HEATMAP' ? { ...activeEdit, piece } : { ...activeEdit, piece })}
             onDone={doneEdit}
             onCancel={cancelEdit}
           />
@@ -572,7 +678,10 @@ export default function MainScreen() {
             canReset={configTab !== 'settings' && canResetTab(drafts, configTab, DEFAULT_DRAFT_VALUES)}
             onTab={tab => {
               setConfigTab(tab);
-              if (tab !== fieldEdit?.robot) setFieldEdit(null);
+              if (!fieldEdit || tab !== editTab(fieldEdit)) {
+                setFieldEdit(null);
+                clearEditPointer();
+              }
               setConfigNotice(null);
             }}
             onClose={closeConfig}
@@ -625,6 +734,11 @@ export default function MainScreen() {
                   locked={locked}
                   onEdit={editScenario}
                   onReroll={rerollScenarioSeed}
+                  spawnEditOn={!!spawnEdit}
+                  onEditOnField={() => {
+                    clearEditPointer();
+                    setFieldEdit(current => openSpawnEdit(current, drafts));
+                  }}
                 />
               ) : null
             }

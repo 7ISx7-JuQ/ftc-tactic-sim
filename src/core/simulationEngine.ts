@@ -278,8 +278,8 @@ export interface PlacementIssue {
   message: string;
 }
 
-// GARDEN 기물 배치 좌표 (reset과 배치 검증이 공유): 지정 수를 구역 길이에 균등 배치, 벽 밀착
-function gardenPiecePositions(side: 'RED' | 'BLUE', count: number): Vector2D[] {
+// GARDEN 기물 배치 좌표 (reset과 배치 검증이 공유, GUI 시작 자세 편집 모드 표시도 같은 함수 — 09-11b): 지정 수를 구역 길이에 균등 배치, 벽 밀착
+export function gardenPiecePositions(side: 'RED' | 'BLUE', count: number): Vector2D[] {
   const box = GARDEN_AABB[side];
   const r = PIECE_PHYSICS.POLLEN.radius;
   const spacing = (box.maxX - box.minX) / Math.max(1, count);

@@ -261,6 +261,11 @@ const en = {
   'edit.sweetSpot.heatmapNote': 'Hit map is from the applied sweet spot (dashed ring) — DONE applies and rebuilds it',
   'edit.sweetSpot.notApplied': 'Sweet spot kept in the draft — fix the errors, then APPLY',
   'edit.escCancel': 'Esc to cancel',
+  'edit.spawn.title': 'START POSE',
+  'edit.spawn.hint': 'Drag a robot to move it · drag its round handle to turn it',
+  'edit.spawn.notApplied': 'Start pose kept in the draft — fix the errors, then APPLY',
+  'scenario.editOnField': 'EDIT ON FIELD',
+  'scenario.editingOnField': 'EDITING ON FIELD',
 
   // 시나리오 탭 (09-11a)
   'scenario.valid': 'Valid scenario',
@@ -556,6 +561,11 @@ const ko: Record<MessageKey, string> = {
   'edit.sweetSpot.heatmapNote': '확률표는 적용한 스윗스팟(점선 고리) 기준 — 완료하면 적용해 새로 만듦',
   'edit.sweetSpot.notApplied': '스윗스팟은 초안에만 남김 — 오류를 고친 뒤 적용',
   'edit.escCancel': 'Esc로 취소',
+  'edit.spawn.title': '시작 자세',
+  'edit.spawn.hint': '로봇을 끌어 옮기기 · 동그란 핸들을 끌어 돌리기',
+  'edit.spawn.notApplied': '시작 자세는 초안에만 남김 — 오류를 고친 뒤 적용',
+  'scenario.editOnField': '필드에서 편집',
+  'scenario.editingOnField': '필드에서 편집 중',
 
   // 시나리오 탭 (09-11a)
   'scenario.valid': '유효한 시나리오',
