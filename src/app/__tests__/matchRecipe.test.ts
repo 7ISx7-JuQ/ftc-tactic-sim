@@ -264,8 +264,11 @@ describe('저장 레시피 (10-3)', () => {
     // 시나리오 새 선택 항목: 형식이 맞으면 그대로, 틀리면 거부
     const floor = [{ type: 'POLLEN', x: 70.5, y: 120 }];
     // (PARK는 시작 자세가 LOADING ZONE 안이어야 해서 — 12-5 검증 — 이 경기의 R1 자세로는 NONE)
-    const withNew = parse(edit(['setup.scenario.floorPieces', floor], ['setup.scenario.rpThresholds', { swarmPoints: 14, pollinator1Tips: 3, pollinator2Tips: 6 }], ['setup.scenario.r1AutoMovement', 'NONE']));
+    // (지정 바닥 기물은 바닥 기물 수 안에서만 — 12-6 검증 — 이 경기는 바닥 POLLEN이 0개라 GARDEN을 1개 줄여 1개를 만든다)
+    const withNew = parse(edit(['setup.scenario.gardenPiecesCount', { ally: 3, opponent: 4 }], ['setup.scenario.floorPieces', floor], ['setup.scenario.rpThresholds', { swarmPoints: 14, pollinator1Tips: 3, pollinator2Tips: 6 }], ['setup.scenario.r1AutoMovement', 'NONE']));
     expect(withNew.ok && [withNew.recipe.setup.scenario.floorPieces, withNew.recipe.setup.scenario.rpThresholds?.swarmPoints, withNew.recipe.setup.scenario.r1AutoMovement]).toEqual([floor, 14, 'NONE']);
+    const tooMany = parse(edit(['setup.scenario.floorPieces', floor]));
+    expect(!tooMany.ok && tooMany.error.code === 'INVALID_SETUP' && tooMany.error.issues).toContain('FLOOR_PIECE_COUNT');
     const parkOutside = parse(edit(['setup.scenario.r1AutoMovement', 'PARK']));
     expect(!parkOutside.ok && parkOutside.error.code === 'INVALID_SETUP' && parkOutside.error.issues).toContain('AUTO_PARK_NOT_IN_ZONE');
     expect(code(edit(['setup.scenario.floorPieces', [{ type: 'ROCK', x: 1, y: 2 }]]))).toEqual({ code: 'INVALID_FIELD', field: 'setup.scenario' });

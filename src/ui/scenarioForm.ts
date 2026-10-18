@@ -213,13 +213,14 @@ export const SPAWN_AXES: readonly (keyof RobotPose)[] = ['x', 'y', 'heading'];
 export const spawnFieldKey = (robot: RobotId, axis: keyof RobotPose) => `spawn.${robot}.${axis}`;
 
 /** 빨간 표시 묶음 키 */
-// rp / autoMove.*: RP 기준값 / 오토 이동 칸 (12-5, 입력칸은 14-2)
-export type ScenarioFieldGroup = 'hive' | `loadout.${RobotId}` | `flower.${number}` | 'garden.ally' | 'garden.opponent' | 'autoTip' | `spawn.${RobotId}` | 'rp' | `autoMove.${RobotId}`;
+// rp / autoMove.*: RP 기준값 / 오토 이동 칸 (12-5, 입력칸은 14-2), floor: 지정 바닥 기물 (12-6, 편집 화면은 14-1)
+export type ScenarioFieldGroup = 'hive' | `loadout.${RobotId}` | `flower.${number}` | 'garden.ally' | 'garden.opponent' | 'autoTip' | `spawn.${RobotId}` | 'rp' | `autoMove.${RobotId}` | 'floor';
 
 export interface ScenarioFormIssue {
   code: string;                   // 문구 사전 issue.* 키
   robot?: RobotId;                // 로봇별 문제 (문구의 {robot} / 앞머리)
   fields: ScenarioFieldGroup[];   // 빨간 표시할 칸 묶음
+  floorPieces?: number[];         // 문제가 있는 지정 바닥 기물 번호 (12-6)
 }
 
 /**
@@ -270,6 +271,13 @@ export function scenarioFormIssues(values: DraftValues): ScenarioFormIssue[] {
         break;
       case 'AUTO_PARK_NOT_IN_ZONE':
         for (const robot of issue.robots ?? []) out.push({ code: issue.code, robot, fields: [`autoMove.${robot}`, `spawn.${robot}`] });
+        break;
+      case 'FLOOR_PIECE_COUNT':
+        out.push({ code: issue.code, fields: ['floor', ...counts], floorPieces: issue.floorPieces ?? [] });
+        break;
+      case 'FLOOR_PIECE_POSITION':
+      case 'FLOOR_PIECE_OVERLAP':
+        out.push({ code: issue.code, fields: ['floor'], floorPieces: issue.floorPieces ?? [] });
         break;
     }
     seen.add(issue.code);

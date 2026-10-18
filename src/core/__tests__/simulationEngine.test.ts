@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SimulationEngine, DEFAULT_RNG_SEED, DEFAULT_SPAWN_POSES, validateScenario, validateRobotPlacement, PLACEMENT_TOLERANCE, HIVE_SHOOT_TOLERANCE, isRobotUnderHive, getCarryCapacity, DT, DEFAULT_RP_THRESHOLDS, AUTO_MOVEMENT_POINTS, autoMovementPoints, resolveAutoMovement, resolveRPThresholds, scenarioWarnings } from '../simulationEngine';
+import { SimulationEngine, DEFAULT_RNG_SEED, DEFAULT_SPAWN_POSES, validateScenario, validateRobotPlacement, PLACEMENT_TOLERANCE, HIVE_SHOOT_TOLERANCE, isRobotUnderHive, getCarryCapacity, DT, DEFAULT_RP_THRESHOLDS, AUTO_MOVEMENT_POINTS, autoMovementPoints, resolveAutoMovement, resolveRPThresholds, scenarioWarnings, acceptedFloorPieces, isFloorPiecePositionValid } from '../simulationEngine';
 import type { RobotDriveInput } from '../simulationEngine';
 import type { BumperZone, RobotConfig, RobotPose, ScenarioConfig, ShotProbabilityResolver } from '../types';
 import { createLUTShotResolver, generateRobotLUTs, bearingTo, shooterBallisticsFrom, planShotFlight, intersectHiveBox, DEFAULT_SHOOTER_BALLISTICS } from '../ballistics';
@@ -1388,5 +1388,72 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
     expect(scenarioWarnings({ rpThresholds: { swarmPoints: 21, pollinator1Tips: 4, pollinator2Tips: 7 } })).toEqual(['SWARM_UNREACHABLE']);
     expect(scenarioWarnings({ rpThresholds: { swarmPoints: 20, pollinator1Tips: 4, pollinator2Tips: 7 } })).toEqual([]);
     expect(scenarioWarnings({})).toEqual([]);
+  }, TEST_TIMEOUT_MS);
+
+  it('AA. 바닥 기물 직접 배치 (12-6): 지정 기물은 그 자리, 나머지는 무작위 산포, 빈 목록 = v1, 검증 / 안전장치', () => {
+    // 바닥 POLLEN 4개 (R1 적재 없음), 바닥 NECTAR 2개 (HIVE NECTAR 1개)
+    const FREE: Partial<ScenarioConfig> = { r1Loadout: [], hiveInitialPieces: { pollenCount: 0, nectarCount: 1 } };
+    const onField = (e: SimulationEngine) => e.pieces.filter(p => p.state === 'ON_FIELD');
+    const at = (e: SimulationEngine, x: number, y: number) => e.pieces.find(p => p.state === 'ON_FIELD' && p.x === x && p.y === y);
+
+    // 지정 기물: 그 자리에 정지, 나머지는 산포 (지정 기물을 피함)
+    {
+      const spec = [{ type: 'POLLEN' as const, x: 70, y: 120 }, { type: 'NECTAR' as const, x: 30, y: 60 }, { type: 'POLLEN' as const, x: 72, y: 72 }];
+      const e = eng({ ...FREE, floorPieces: spec });
+      const placed = spec.map(p => at(e, p.x, p.y));
+      assert(placed.every((p, i) => p && p.type === spec[i].type && p.vx === 0 && p.vy === 0), 'placed exactly (incl. the tunnel floor)');
+      assert(placed[1]!.alliance === 'RED', 'NECTAR = our alliance');
+      const field = onField(e);
+      assert(field.length === 6 && field.filter(p => p.type === 'POLLEN').length === 4 && field.filter(p => p.type === 'NECTAR').length === 2, `total floor pieces kept (${field.length})`);
+      const others = field.filter(p => !placed.includes(p));
+      assert(others.every(o => spec.every(p => Math.hypot(o.x - p.x, o.y - p.y) >= PIECE_PHYSICS[o.type].radius + PIECE_PHYSICS[p.type].radius - 1e-9)), 'scatter avoids placed pieces');
+    }
+    // 바닥 기물을 모두 지정하면 무작위 산포가 없어 난수를 쓰지 않음
+    {
+      const all = [
+        ...[20, 40, 60, 80].map(x => ({ type: 'POLLEN' as const, x, y: 120 })),
+        { type: 'NECTAR' as const, x: 30, y: 60 }, { type: 'NECTAR' as const, x: 110, y: 20 },
+      ];
+      const e = eng({ ...FREE, floorPieces: all, rngSeed: 1234 });
+      assert(e.currentTimeline.rngStates[0] === 1234 && onField(e).length === 6 && all.every(p => at(e, p.x, p.y)), 'all placed -> no scatter, no random numbers');
+    }
+    // 빈 목록 = 지정 없음 = v1 (같은 산포 / 난수)
+    {
+      const a = eng(FREE).getFrame(0)!;
+      const b = eng({ ...FREE, floorPieces: [] }).getFrame(0)!;
+      expect(JSON.stringify(b)).toBe(JSON.stringify(a));
+    }
+    // 위치 판정: 필드 안(반지름), HIVE 기둥 / FLOWER / GARDEN 금지, 터널 바닥 / LOADING ZONE 허용, 닿음 허용
+    const ok = (x: number, y: number, type: 'POLLEN' | 'NECTAR' = 'POLLEN') => isFloorPiecePositionValid({ type, x, y });
+    assert(ok(72, 72) && ok(5, 30) && ok(1.4, 1.4) && ok(FLOWER_CIRCLES[0].center.x + 2 + 1.4, FLOWER_CIRCLES[0].center.y), 'tunnel / LOADING ZONE / corner touch / FLOWER touch allowed');
+    assert(!ok(1.3, 70) && !ok(50, 72) && !ok(FLOWER_CIRCLES[0].center.x + 3, FLOWER_CIRCLES[0].center.y) && !ok(10, 142) && !ok(130, 1), 'outside / pillar / FLOWER / GARDEN rejected');
+    assert(!ok(1.6, 70, 'NECTAR') && ok(1.6, 70), 'radius per piece type');
+    assert(!isFloorPiecePositionValid({ type: 'POLLEN', x: Number.NaN, y: 10 }) && !isFloorPiecePositionValid({ type: 'ROCK' as 'POLLEN', x: 10, y: 10 }), 'malformed rejected');
+
+    // 엔진 안전장치: 틀린 위치 / 앞 기물과 겹침 / 수 초과는 빼고 산포로 (총량 유지)
+    {
+      const bad = [
+        { type: 'POLLEN' as const, x: 50, y: 72 },   // 기둥 → 뺌
+        { type: 'POLLEN' as const, x: 70, y: 120 },
+        { type: 'POLLEN' as const, x: 71, y: 120 },  // 앞 기물과 겹침 → 뺌
+        ...[20, 40, 60, 100].map(x => ({ type: 'POLLEN' as const, x, y: 125 })), // 4개 중 마지막은 수 초과 (바닥 POLLEN 4개)
+      ];
+      expect(acceptedFloorPieces(bad, { POLLEN: 4, NECTAR: 0 }).map(p => `${p.x},${p.y}`)).toEqual(['70,120', '20,125', '40,125', '60,125']);
+      const e = eng({ ...FREE, floorPieces: bad });
+      assert(!!at(e, 70, 120) && !!at(e, 60, 125) && !at(e, 100, 125) && !at(e, 50, 72) && !at(e, 71, 120), 'engine keeps only accepted placements');
+      assert(onField(e).length === 6, 'dropped placements go to the scatter');
+    }
+
+    // 검증 (번호 = floorPieces 순서)
+    const issues = (sc: Partial<ScenarioConfig>) => validateScenario({ allianceColor: 'RED', ...FREE, ...sc }, C1, C2).map(i => `${i.code}${i.floorPieces ? ':' + i.floorPieces.join('+') : ''}`).join(',');
+    assert(issues({ floorPieces: [{ type: 'POLLEN', x: 70, y: 120 }, { type: 'NECTAR', x: 5, y: 30 }] }) === '', 'valid placements');
+    const fiveP = [20, 40, 60, 80, 100].map(x => ({ type: 'POLLEN' as const, x, y: 120 }));
+    assert(issues({ floorPieces: fiveP }) === 'FLOOR_PIECE_COUNT:0+1+2+3+4', `more POLLEN than the floor holds (${issues({ floorPieces: fiveP })})`);
+    assert(issues({ floorPieces: [{ type: 'NECTAR', x: 30, y: 60 }], hiveInitialPieces: { pollenCount: 0, nectarCount: 3 } }) === 'FLOOR_PIECE_COUNT:0', 'no floor NECTAR left (all 3 in the HIVE)');
+    assert(issues({ floorPieces: [{ type: 'POLLEN', x: 70, y: 120 }, { type: 'POLLEN', x: 50, y: 72 }, { type: 'POLLEN', x: 10, y: 142 }] }) === 'FLOOR_PIECE_POSITION:1+2', 'pillar / GARDEN positions');
+    assert(issues({ floorPieces: [{ type: 'POLLEN', x: 70, y: 120 }, { type: 'POLLEN', x: 72, y: 120 }, { type: 'POLLEN', x: 90, y: 120 }] }) === 'FLOOR_PIECE_OVERLAP:0+1', 'overlapping placements');
+    // 로봇 시작 자세와 겹침 = 배치 검증 PLACEMENT_PIECE_OVERLAP (기본 R1 (9, 36))
+    const placement = validateRobotPlacement({ allianceColor: 'RED', ...FREE, floorPieces: [{ type: 'POLLEN', x: 12, y: 36 }] }, C1, C2);
+    assert(placement.length === 1 && placement[0].code === 'PLACEMENT_PIECE_OVERLAP' && placement[0].robots.join() === 'robot1', 'placed piece under a start pose');
   }, TEST_TIMEOUT_MS);
 });

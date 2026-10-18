@@ -175,4 +175,15 @@ describe('시나리오 탭 폼 (09-11a)', () => {
     expect(tabIssues(park, 'scenario').map(i => i.code)).toEqual(['AUTO_PARK_NOT_IN_ZONE']);
     expect(scenarioIssueText(scenarioFormIssues(park)[0], 'en')).toBe('R2 auto PARK needs a start pose in the LOADING ZONE');
   });
+
+  it('I. (12-6) 지정 바닥 기물 문제: 칸 묶음 floor + 기물 번호 (수 초과는 개수 칸도)', () => {
+    const free: ScenarioConfig = { allianceColor: 'RED', r1Loadout: [] }; // 바닥 POLLEN 4개
+    const pos = withScenario({ ...free, floorPieces: [{ type: 'POLLEN', x: 70, y: 120 }, { type: 'POLLEN', x: 50, y: 72 }] });
+    expect(scenarioFormIssues(pos)).toEqual([{ code: 'FLOOR_PIECE_POSITION', fields: ['floor'], floorPieces: [1] }]);
+    const many = withScenario({ ...free, floorPieces: [20, 40, 60, 80, 100].map(x => ({ type: 'POLLEN' as const, x, y: 120 })) });
+    const [count] = scenarioFormIssues(many);
+    expect([count.code, count.fields[0], count.fields.includes('loadout.robot1'), count.floorPieces]).toEqual(['FLOOR_PIECE_COUNT', 'floor', true, [0, 1, 2, 3, 4]]);
+    expect(scenarioIssueText(count, 'ko')).toBe('지정한 바닥 기물이 남은 바닥 기물 수보다 많음');
+    expect(tabIssues(withScenario({ ...free, floorPieces: [{ type: 'POLLEN', x: 70, y: 120 }, { type: 'POLLEN', x: 71, y: 120 }] }), 'scenario').map(i => i.code)).toEqual(['FLOOR_PIECE_OVERLAP']);
+  });
 });

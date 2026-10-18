@@ -42,6 +42,7 @@ import type {
   AutoMovement,
   DeepReadonly,
   FieldState,
+  FloorPiecePlacement,
   FlowerState,
   GamePiece,
   MatchShooterBallistics,
@@ -236,9 +237,49 @@ export interface ScenarioIssue {
     | 'POLLEN_TOTAL_EXCEEDED'
     | 'AUTO_TIP_COUNT'
     | 'RP_THRESHOLDS'
-    | 'AUTO_PARK_NOT_IN_ZONE';
+    | 'AUTO_PARK_NOT_IN_ZONE'
+    | 'FLOOR_PIECE_COUNT'
+    | 'FLOOR_PIECE_POSITION'
+    | 'FLOOR_PIECE_OVERLAP';
   message: string;
   robots?: ('robot1' | 'robot2')[]; // 로봇별 문제의 대상 (AUTO_PARK_NOT_IN_ZONE)
+  floorPieces?: number[];           // 문제가 있는 지정 바닥 기물 번호 (floorPieces 순서, FLOOR_PIECE_*)
+}
+
+// ------------------------------------------------------------
+// 바닥 기물 직접 배치 (12-6, 명세서 2.4): 지정한 기물은 그 자리에 정지 상태로, 바닥 기물 수 중 나머지는 무작위 산포
+// ------------------------------------------------------------
+
+/** 지정 바닥 기물 1개의 위치 문제: 필드 밖 / HIVE 기둥 / FLOWER / GARDEN과 겹침 (터널 바닥 · LOADING ZONE은 허용, 닿음 허용) */
+export function isFloorPiecePositionValid(piece: FloorPiecePlacement): boolean {
+  if (piece.type !== 'POLLEN' && piece.type !== 'NECTAR') return false;
+  if (!Number.isFinite(piece.x) || !Number.isFinite(piece.y)) return false;
+  const r = PIECE_PHYSICS[piece.type].radius;
+  if (piece.x < r || piece.x > FIELD_SIZE - r || piece.y < r || piece.y > FIELD_SIZE - r) return false;
+  const circle: Circle = { center: { x: piece.x, y: piece.y }, radius: r };
+  if (HIVE_PILLARS.some(pillar => testCircleVsAABB(circle, pillar).colliding)) return false;
+  if (FLOWER_CIRCLES.some(f => Math.hypot(f.center.x - piece.x, f.center.y - piece.y) < f.radius + r)) return false;
+  return !testCircleVsAABB(circle, GARDEN_AABB.RED).colliding && !testCircleVsAABB(circle, GARDEN_AABB.BLUE).colliding;
+}
+
+/** 두 지정 바닥 기물이 겹치는지 (닿음 허용) */
+function floorPiecesOverlap(a: FloorPiecePlacement, b: FloorPiecePlacement): boolean {
+  return Math.hypot(a.x - b.x, a.y - b.y) < PIECE_PHYSICS[a.type].radius + PIECE_PHYSICS[b.type].radius;
+}
+
+/**
+ * 엔진이 실제로 놓는 지정 바닥 기물 (안전장치): 위치가 틀렸거나 앞서 받은 지정 기물과 겹치는 것은 빼고, 종류별로 바닥 기물 수까지만
+ * (넘는 것은 뒤에서부터 뺌). 빠진 수는 무작위 산포로 간다
+ */
+export function acceptedFloorPieces(placements: readonly FloorPiecePlacement[] | undefined, capacity: Record<GamePiece['type'], number>): FloorPiecePlacement[] {
+  const out: FloorPiecePlacement[] = [];
+  const left = { ...capacity };
+  for (const p of placements ?? []) {
+    if (!isFloorPiecePositionValid(p) || out.some(q => floorPiecesOverlap(p, q)) || left[p.type] <= 0) continue;
+    left[p.type]--;
+    out.push(p);
+  }
+  return out;
 }
 
 /** 시나리오 경고 (적용은 허용): SWARM_UNREACHABLE = 로봇 2대로 도달할 수 없는 SWARM 기준 (> 20점) */
@@ -308,6 +349,28 @@ export function validateScenario(
   const pollenTotal = loadoutPollen + flowerTotal + hivePollen + garden.ally + garden.opponent;
   if (pollenTotal > TOTAL_POLLEN) {
     add('POLLEN_TOTAL_EXCEEDED', `지정된 POLLEN 합계 ${pollenTotal}개가 총량 ${TOTAL_POLLEN}개를 초과`);
+  }
+
+  // 지정 바닥 기물 (12-6): 종류별 수 ≤ 바닥 기물 수 (2.4항 자동 계산), 위치, 서로 겹침
+  const floor = scenario.floorPieces ?? [];
+  if (floor.length > 0) {
+    const capacity = { POLLEN: Math.max(0, TOTAL_POLLEN - pollenTotal), NECTAR: Math.max(0, NECTAR_IN_PLAY - hiveNectar - loadoutNectar) };
+    const over = (['POLLEN', 'NECTAR'] as const).filter(type => floor.filter(p => p.type === type).length > capacity[type]);
+    if (over.length > 0) {
+      issues.push({
+        code: 'FLOOR_PIECE_COUNT',
+        message: `지정 바닥 기물이 바닥 기물 수를 초과 (${over.map(t => `${t} ${floor.filter(p => p.type === t).length} / ${capacity[t]}`).join(', ')})`,
+        floorPieces: floor.flatMap((p, i) => (over.includes(p.type as 'POLLEN' | 'NECTAR') ? [i] : [])),
+      });
+    }
+    const badPosition = floor.flatMap((p, i) => (isFloorPiecePositionValid(p) ? [] : [i]));
+    if (badPosition.length > 0) {
+      issues.push({ code: 'FLOOR_PIECE_POSITION', message: `지정 바닥 기물 ${badPosition.map(i => i + 1).join(', ')}번이 필드 밖 / HIVE 기둥 / FLOWER / GARDEN과 겹침`, floorPieces: badPosition });
+    }
+    const overlapping = floor.flatMap((p, i) => (floor.some((q, j) => j !== i && isFloorPiecePositionValid(p) && isFloorPiecePositionValid(q) && floorPiecesOverlap(p, q)) ? [i] : []));
+    if (overlapping.length > 0) {
+      issues.push({ code: 'FLOOR_PIECE_OVERLAP', message: `지정 바닥 기물 ${overlapping.map(i => i + 1).join(', ')}번이 서로 겹침`, floorPieces: overlapping });
+    }
   }
 
   const autoTips = scenario.autoTipCount ?? 0;
@@ -403,7 +466,8 @@ function placementIssues(robots: readonly RobotPlacement[], fixedPieces: readonl
 
 /**
  * 시작 자세 배치 검증: 시작 자세 미지정 로봇은 진영별 기본 스폰으로 검사.
- * 고정 배치 기물 = 시나리오가 정하는 GARDEN 기물 (바닥 산포 기물 / 오토 팁 NECTAR 슬롯은 이미 로봇을 피해 배치되므로 제외)
+ * 고정 배치 기물 = 시나리오가 정하는 GARDEN 기물 + 지정 바닥 기물(12-6, 위치가 올바른 것)
+ * (바닥 산포 기물 / 오토 팁 NECTAR 슬롯은 이미 로봇을 피해 배치되므로 제외)
  */
 export function validateRobotPlacement(scenario: ScenarioConfig, r1Config: RobotConfig, r2Config: RobotConfig): PlacementIssue[] {
   const alliance = scenario.allianceColor;
@@ -417,7 +481,8 @@ export function validateRobotPlacement(scenario: ScenarioConfig, r1Config: Robot
     ...gardenPiecePositions(alliance, clampCount(scenario.gardenPiecesCount?.ally, DEFAULT_GARDEN_PIECES, GARDEN_MAX_PIECES)),
     ...gardenPiecePositions(opponent, clampCount(scenario.gardenPiecesCount?.opponent, DEFAULT_GARDEN_PIECES, GARDEN_MAX_PIECES)),
   ].map(center => ({ center, radius: r }));
-  return placementIssues(robots, gardenPieces);
+  const floorPieces = (scenario.floorPieces ?? []).filter(isFloorPiecePositionValid).map(p => ({ center: { x: p.x, y: p.y }, radius: PIECE_PHYSICS[p.type].radius }));
+  return placementIssues(robots, [...gardenPieces, ...floorPieces]);
 }
 
 // FLOWER 용량 테이블 판정: 기물 1개를 더 넣은 뒤에도 NECTAR/POLLEN 한도 이내인지 (slot[0] 포함 전체 개수 기준)
@@ -702,7 +767,7 @@ export class SimulationEngine {
     for (let i = 0; i < SPAWN_CORRECTION_ITERATIONS && robotsOverlap(); i++) this.resolveRobotCollisions();
 
     // --- 기물 생성 (POLLEN 32, 아군 NECTAR 8) ---
-    // 배분 순서 (명세서 2.4): 로봇 적재물 → FLOWER → HIVE → GARDEN → 오토 팁 NECTAR(로딩 존) → 나머지 바닥 무작위 산포
+    // 배분 순서 (명세서 2.4): 로봇 적재물 → FLOWER → HIVE → GARDEN → 지정 바닥 기물(12-6) → 오토 팁 NECTAR(로딩 존) → 나머지 바닥 무작위 산포
     // 엔진은 validateScenario를 통과하지 못한 값도 아래 규칙으로 잘라서 수용 (GUI 검증의 안전장치)
     const pollen: GamePiece[] = [];
     for (let i = 0; i < TOTAL_POLLEN; i++) pollen.push(this.makePiece(`pollen-${i + 1}`, 'POLLEN', 'NONE'));
@@ -779,6 +844,16 @@ export class SimulationEngine {
         piece.x = spots[i].x;
         piece.y = spots[i].y;
       });
+    }
+
+    // (4-2) 지정 바닥 기물 (ON_FIELD 정지, 12-6): 남은 바닥 기물에서 종류별로 지정 순서대로 꺼내 놓는다 (난수 미사용).
+    //       위치가 틀렸거나 서로 겹치거나 바닥 기물 수를 넘는 지정은 빼고 무작위 산포로 (엔진 안전장치, 화면은 검증으로 막음)
+    const floorCapacity = { POLLEN: TOTAL_POLLEN - pollenCursor, NECTAR: NECTAR_IN_PLAY - nectarCursor };
+    for (const spot of acceptedFloorPieces(sc?.floorPieces, floorCapacity)) {
+      const [piece] = spot.type === 'POLLEN' ? takePollen(1) : takeNectar(1);
+      piece.state = 'ON_FIELD';
+      piece.x = spot.x;
+      piece.y = spot.y;
     }
 
     this.field = {
