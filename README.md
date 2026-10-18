@@ -40,6 +40,7 @@ Requires Node.js 22.12 or later.
 npm ci
 npm run dev      # development server
 npm test         # tests (Vitest)
+npm run test:browser  # browser tests (real Chromium; first run: npx playwright install chromium)
 npm run build    # production build in dist/
 ```
 
@@ -95,6 +96,7 @@ Node.js 22.12 이상이 필요합니다.
 npm ci
 npm run dev      # 개발 서버
 npm test         # 테스트 (Vitest)
+npm run test:browser  # 브라우저 테스트 (실제 Chromium, 처음 한 번 npx playwright install chromium)
 npm run build    # 배포용 빌드 (dist/)
 ```
 

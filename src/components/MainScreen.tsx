@@ -19,6 +19,8 @@ import type { MatchLUTResults } from '../app/lutTracker';
 import type { RobotId } from '../input/inputConfig';
 import { createBrowserLUTWorker } from '../workers/createLUTWorker';
 import { createBrowserLUTCache } from '../workers/lutCache';
+import type { LUTCache } from '../workers/lutCache';
+import type { LUTWorkerLike } from '../workers/lutManager';
 import { PENDING_LUT_VIEW, lutInputsChanged, startBlocker } from '../ui/lutView';
 import type { RobotLutView } from '../ui/lutView';
 import { DEFAULT_RNG_SEED } from '../core/simulationEngine';
@@ -107,7 +109,14 @@ const TOAST_FADE_MS = 300;
 const settingsStorage = browserSettingsStorage();
 const sameResults = (a: MatchLUTResults | null, b: MatchLUTResults | null) => a?.robot1 === b?.robot1 && a?.robot2 === b?.robot2;
 
-export default function MainScreen() {
+// 명중 확률표 Worker / 캐시 주입 (기본 = 브라우저 Worker 풀 + IndexedDB 캐시). 브라우저 화면 테스트는 바로 준비되는 캐시를 넣는다
+export interface MainScreenServices {
+  createLUTWorker: () => LUTWorkerLike;
+  createLUTCache: () => LUTCache | null;
+}
+const BROWSER_SERVICES: MainScreenServices = { createLUTWorker: createBrowserLUTWorker, createLUTCache: createBrowserLUTCache };
+
+export default function MainScreen({ services = BROWSER_SERVICES }: { services?: MainScreenServices }) {
   const areaRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const controllerRef = useRef<AppController | null>(null);
@@ -152,6 +161,7 @@ export default function MainScreen() {
   const [spawnActive, setSpawnActive] = useState<{ robot: SpawnRobotId; part: SpawnPart } | null>(null);
   const [spawnDragging, setSpawnDragging] = useState(false);
   const overlayRef = useRef<HTMLDivElement>(null); // 캔버스와 같은 크기 / 위치의 글자 층 (시작 자세 글자를 장면 비율로 배치)
+  const servicesRef = useRef(services); // 마운트 때 한 번만 씀 (컨트롤러 / 추적기와 같은 수명)
 
   useEffect(() => {
     const area = areaRef.current;
@@ -211,8 +221,8 @@ export default function MainScreen() {
     // 명중 확률표: 적용 값으로 생성 요청 (캐시 적중이면 곧 READY). 두 로봇 결과가 바뀌면 경기 설정을 LUT 판정으로 교체
     lutResultsRef.current = null;
     const tracker = new LUTTracker({
-      createWorker: createBrowserLUTWorker,
-      cache: createBrowserLUTCache(),
+      createWorker: servicesRef.current.createLUTWorker,
+      cache: servicesRef.current.createLUTCache(),
       onUpdate: () => {
         setLutViews({ robot1: tracker.view('robot1'), robot2: tracker.view('robot2') });
         const results = tracker.results();
