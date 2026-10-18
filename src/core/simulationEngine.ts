@@ -274,6 +274,19 @@ export function validateScenario(
 // 닿음은 허용하고 이 깊이(inch)보다 깊이 파고들 때만 겹침 (벽에 붙은 기본 스폰 / 부동소수점 잔차 허용)
 export const PLACEMENT_TOLERANCE = 1e-6;
 
+/**
+ * 터널 안 발사 금지 판정 허용 오차 (명세서 5.4 HIVE 터널, 12-2): 로봇 몸체 OBB(현재 헤딩)가 HIVE 전체 바닥 면적과
+ * 이 깊이를 넘게 겹치면 "터널 안"(기둥이 막고 있으므로 HIVE 면적과 겹침 = 터널 안). 기둥 앞면에 밀착해 멈춘 로봇의
+ * 부동소수점 잔차로 HIVE 바로 앞 발사가 막히지 않게 하기 위한 여유
+ */
+export const HIVE_SHOOT_TOLERANCE = 0.01;
+
+/** 로봇이 HIVE 터널 안(발사 금지)인지 */
+export function isRobotUnderHive(pose: Pick<RobotState, 'x' | 'y' | 'heading'>, config: Pick<RobotConfig, 'width' | 'length'>): boolean {
+  const hit = testOBBvsAABB(getRobotOBB(pose, config), HIVE_AABB);
+  return hit.colliding && hit.depth > HIVE_SHOOT_TOLERANCE;
+}
+
 export interface PlacementIssue {
   code:
     | 'PLACEMENT_OUT_OF_FIELD'
@@ -1028,7 +1041,8 @@ export class SimulationEngine {
         break;
     }
 
-    if (request === 'SHOOTING' && robot.controlledPieces.length > 0) {
+    // HIVE 터널 안에서는 발사 요청을 받지 않는다 (빈 적재함처럼 조용히 무시 → 아래 IDLE / INTAKING 판정, 12-2)
+    if (request === 'SHOOTING' && robot.controlledPieces.length > 0 && !isRobotUnderHive(robot, config)) {
       return this.enterLock(robot, 'SHOOTING', config.shooterDelay);
     }
     // 리프트 올림은 지금 당장 투입 가능한 경우에만 수락 (불가능하면 요청 거부 → IDLE / INTAKING).
@@ -1241,6 +1255,12 @@ export class SimulationEngine {
 
     switch (robot.actionState) {
       case 'SHOOTING': {
+        // 발사 직전 재확인 (12-2): 제동 중 미끄러져 터널에 들어갔으면 쏘지 않고 기물을 적재함에 둔 채 IDLE (난수 미사용).
+        // 연속 발사도 발사마다 같은 판정
+        if (isRobotUnderHive(robot, config)) {
+          toIdle();
+          return;
+        }
         this.fireShot(robot, slot === 'r1' ? 'robot1' : 'robot2');
         if (input.actionState === 'SHOOTING' && robot.controlledPieces.length > 0) {
           rearm('SHOOTING', config.shooterDelay);

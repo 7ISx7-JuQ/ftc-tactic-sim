@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SimulationEngine, DEFAULT_RNG_SEED, DEFAULT_SPAWN_POSES, validateScenario, validateRobotPlacement, PLACEMENT_TOLERANCE, getCarryCapacity, DT } from '../simulationEngine';
+import { SimulationEngine, DEFAULT_RNG_SEED, DEFAULT_SPAWN_POSES, validateScenario, validateRobotPlacement, PLACEMENT_TOLERANCE, HIVE_SHOOT_TOLERANCE, isRobotUnderHive, getCarryCapacity, DT } from '../simulationEngine';
 import type { RobotDriveInput } from '../simulationEngine';
 import type { BumperZone, RobotConfig, RobotPose, ScenarioConfig, ShotProbabilityResolver } from '../types';
 import { createLUTShotResolver, generateRobotLUTs, bearingTo, shooterBallisticsFrom, planShotFlight, intersectHiveBox, DEFAULT_SHOOTER_BALLISTICS } from '../ballistics';
@@ -1213,6 +1213,63 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       assert(inPillar(pushed, 'r1') < 1e-6, `overlapping start pose is pushed out of the pillar (x ${pushed.r1.x.toFixed(3)})`);
       const kept = eng({ ...EMPTY_R1, r1Spawn: pose(72, 72), r2Spawn: pose(30, 30) });
       assert(kept.r1.x === 72 && kept.r1.y === 72, 'tunnel start pose is kept');
+    }
+  }, TEST_TIMEOUT_MS);
+
+  it('X. HIVE 터널 안 발사 금지 (12-2): 요청 무시 / 제동 중 진입하면 취소(기물 유지, IDLE) / 난수 미사용 / 기둥 앞 밀착은 허용', () => {
+    const P = fixedP(0.5); // 명중 판정에 난수가 실제로 쓰이도록
+    const rng = (e: SimulationEngine) => e.currentTimeline.rngStates;
+    const r1Loaded = (e: SimulationEngine) => e.r1.controlledPieces.length;
+
+    // 판정 함수: HIVE 전체 면적과 0.01 in 넘게 겹치면 터널 안 (닿음 / 잔차는 허용)
+    assert(HIVE_SHOOT_TOLERANCE === 0.01, 'tolerance 0.01 in');
+    assert(isRobotUnderHive(pose(72, 72), C1), 'tunnel center');
+    assert(isRobotUnderHive(pose(72, HIVE_AABB.maxY + 9 - 0.02), C1), '0.02 in under the HIVE edge');
+    assert(!isRobotUnderHive(pose(72, HIVE_AABB.maxY + 9 - 0.005), C1), '0.005 in (within tolerance) is outside');
+    assert(!isRobotUnderHive(pose(72, HIVE_AABB.maxY + 9), C1) && !isRobotUnderHive(pose(HIVE_AABB.minX - 9, 72), C1), 'touching the HIVE is outside');
+
+    // 터널 안 SHOOTING 요청: 조용히 무시 (IDLE 유지, 적재 / 비행 / 난수 불변), INTAKING 중이면 IDLE로 (LT + RT = 흡입 정지)
+    {
+      const e = eng({ r1Spawn: pose(72, 72, Math.PI / 2) }, C1, C2, P);
+      const rng0 = rng(e)[0];
+      for (let i = 0; i < 60; i++) e.step(SHOOT);
+      assert(e.r1.actionState === 'IDLE' && r1Loaded(e) === 4 && e.field.pendingShots.length === 0 && count(e, 'IN_FLIGHT') === 0, `request ignored in the tunnel (${e.r1.actionState}, loaded ${r1Loaded(e)})`);
+      assert(rng(e).every(v => v === rng0), 'ignored request uses no random numbers');
+      e.step(INTAKE);
+      assert(e.r1.actionState === 'INTAKING', 'intake request accepted in the tunnel');
+      e.step(SHOOT);
+      assert(e.r1.actionState === 'IDLE', 'ignored SHOOTING request falls through to IDLE (intake stops, same as an empty loadout)');
+    }
+
+    // 제동 중 미끄러져 터널에 들어감: 발사 완료 틱에 다시 판정 → 쏘지 않고 기물을 둔 채 IDLE, 난수 미사용
+    {
+      const e = eng({ r1Spawn: pose(72, 135, -Math.PI / 2) }, C1, C2, P);
+      const rng0 = rng(e)[0];
+      while (e.r1.y - 9 > HIVE_AABB.maxY + 3) e.step(inp('IDLE', 0, -60)); // 앞 변이 HIVE 3 in 앞일 때 60 in/s로 접근 중
+      assert(e.r1.vy < -59 && !isRobotUnderHive(e.r1, C1), `approaching outside the HIVE (vy ${e.r1.vy.toFixed(1)})`);
+      e.step(SHOOT);
+      assert(e.r1.actionState === 'SHOOTING' && e.r1.isBraking, 'request accepted outside, then brakes (Stationary Lock)');
+      let guard = 0;
+      while (e.r1.actionState === 'SHOOTING' && guard++ < 200) e.step(SHOOT);
+      assert(isRobotUnderHive(e.r1, C1), `slid into the tunnel while braking (front edge y ${(e.r1.y - 9).toFixed(2)})`);
+      assert(e.r1.actionState === 'IDLE' && r1Loaded(e) === 4 && e.field.pendingShots.length === 0, `shot cancelled at completion, piece kept (${e.r1.actionState}, loaded ${r1Loaded(e)})`);
+      assert(rng(e).every(v => v === rng0), 'cancelled shot uses no random numbers');
+      for (let i = 0; i < 30; i++) e.step(SHOOT);
+      assert(e.r1.actionState === 'IDLE' && r1Loaded(e) === 4, 'further requests in the tunnel are ignored');
+    }
+
+    // 기둥 앞면 밀착 / 터널 입구 바로 앞(닿음)은 발사 허용
+    // (기둥 앞면 = 주행으로 밀어붙여 충돌 보정 잔차가 있는 자세, 터널 입구 = 앞 변이 HIVE 가장자리에 정확히 닿은 시작 자세)
+    for (const [name, start, drive] of [['pillar face', pose(50.2, 125, -Math.PI / 2), true], ['tunnel mouth', pose(72, HIVE_AABB.maxY + 9, -Math.PI / 2), false]] as const) {
+      const e = eng({ r1Spawn: start }, C1, C2, P);
+      if (drive) for (let i = 0; i < 150; i++) e.step(inp('IDLE', 0, -40));
+      for (let i = 0; i < 30; i++) e.step(); // 정지
+      assert(!isRobotUnderHive(e.r1, C1) && Math.abs(e.r1.y - (HIVE_AABB.maxY + 9)) < 0.01, `${name}: flush in front of the HIVE (y ${e.r1.y.toFixed(4)})`);
+      const rng0 = rng(e)[e.currentTick];
+      let guard = 0;
+      while (r1Loaded(e) === 4 && guard++ < 100) e.step(SHOOT);
+      assert(r1Loaded(e) === 3 && e.field.pendingShots.length === 1, `${name}: shot fired (loaded ${r1Loaded(e)})`);
+      assert(rng(e)[e.currentTick] !== rng0, `${name}: fired shot uses random numbers`);
     }
   }, TEST_TIMEOUT_MS);
 });
