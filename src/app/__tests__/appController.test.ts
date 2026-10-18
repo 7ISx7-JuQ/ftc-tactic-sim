@@ -413,6 +413,25 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     h.dispose();
   });
 
+  it('G2. (12-8) 리프트 상태 주행이 켜진 로봇은 리프트 중 주행해도 경고 토스트 없음 (움직임)', () => {
+    const { h, frames, win, toasts } = setup({ ...makeSetup('RED'), r2Config: { ...cfg('robot2'), liftMaxSpeed: 30 } });
+    h.start();
+    frames.advance(VIEW_ANIMATION_MS + 50);
+    win.dispatchEvent(key('keydown', KEYBOARD_BINDINGS.lift));
+    frames.advance(60, 20);
+    win.dispatchEvent(key('keyup', KEYBOARD_BINDINGS.lift));
+    frames.advance(200, 20);
+    const lift = h.currentFrame().r2.actionState;
+    assert(lift === 'FLOWER_SETUP' || lift === 'FLOWER_READY', `R2 lift raised (${lift})`);
+    const x0 = h.currentFrame().r2.x;
+    win.dispatchEvent(key('keydown', KEYBOARD_BINDINGS.forward));
+    frames.advance(500, 20);
+    win.dispatchEvent(key('keyup', KEYBOARD_BINDINGS.forward));
+    const f = h.currentFrame().r2;
+    assert(toasts.length === 0 && (f.actionState === 'FLOWER_READY' || f.actionState === 'FLOWER_SETUP') && f.x > x0 + 1, `drives with the lift up, no toast (x ${x0.toFixed(1)} -> ${f.x.toFixed(1)})`);
+    h.dispose();
+  });
+
   it('H. 입력 출처 / 조작 모드 / 키보드 / 기본 보기 (09-8b): 다음 START · RESUME · BRANCH부터, 녹화 덧입히기', () => {
     const { h, frames, win } = setup();
     // 경기 전: AUTO 예상 (패드 없음 + 키보드 켬 → R1 NONE, R2 LIVE), REPLAY / 진행 중 선택 불가

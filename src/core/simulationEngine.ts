@@ -29,7 +29,7 @@ import {
 } from './collision';
 import type { AABB, Circle, OBB, RobotBody, Vector2D } from './collision';
 import { DEFAULT_SHOOTER_BALLISTICS, nextFireablePieceIndex, planShotFlight, planVoidedHitBounce, shooterFor } from './ballistics';
-import { stepRobotKinematics } from './kinematics';
+import { isLiftState, liftDriveRatio, stepRobotKinematics } from './kinematics';
 import {
   FLOWER_DEQ_GRAVITY_COOLDOWN,
   FLOWER_MAX_NECTAR_CAPACITY,
@@ -1221,9 +1221,15 @@ export class SimulationEngine {
   }
 
   private stepRobotMotion(robot: RobotState, input: RobotDriveInput, config: RobotConfig): RobotState {
-    // stepRobotKinematics는 락 액션일 때 목표 속도를 (0, 0, 0)으로 강제 (Slew Rate 감속)
+    // stepRobotKinematics는 락 액션일 때 목표 속도를 (0, 0, 0)으로 강제 (Slew Rate 감속), 리프트 주행이 켜져 있으면 리프트 상태는 × r
     const next = stepRobotKinematics(robot, input.targetVx, input.targetVy, input.targetOmega, config, DT);
     if (!isLockAction(next.actionState)) return next;
+
+    // 리프트 상태 주행 (12-8): 움직이면서 리프트를 올리고 / 투입하고 / 내리므로 정지를 기다리지 않고 바로 타이머 차감 (제동 대기 없음).
+    // 투입 대상은 지금처럼 요청 / 완료 시점에 다시 판정한다
+    if (isLiftState(next.actionState) && liftDriveRatio(config) > 0) {
+      return { ...next, isBraking: false, stateTimer: Math.max(0, next.stateTimer - DT) };
+    }
 
     // 완전 정지 전까지는 제동 대기, 정지 도달 틱부터 액션 타이머 차감
     if (!isRobotStationary(next)) return { ...next, isBraking: true };

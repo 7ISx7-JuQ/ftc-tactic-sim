@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { SimulationEngine, DEFAULT_RNG_SEED, DEFAULT_SPAWN_POSES, validateScenario, validateRobotPlacement, PLACEMENT_TOLERANCE, HIVE_SHOOT_TOLERANCE, isRobotUnderHive, getCarryCapacity, DT, DEFAULT_RP_THRESHOLDS, AUTO_MOVEMENT_POINTS, autoMovementPoints, resolveAutoMovement, resolveRPThresholds, scenarioWarnings, acceptedFloorPieces, isFloorPiecePositionValid } from '../simulationEngine';
 import type { RobotDriveInput } from '../simulationEngine';
-import type { BumperZone, RobotConfig, RobotPose, ScenarioConfig, ShotProbabilityResolver } from '../types';
+import type { BumperZone, RobotConfig, RobotPose, RobotState, ScenarioConfig, ShotProbabilityResolver } from '../types';
+import { liftDriveRatio, stepRobotKinematics } from '../kinematics';
 import { createLUTShotResolver, generateRobotLUTs, bearingTo, shooterBallisticsFrom, planShotFlight, intersectHiveBox, DEFAULT_SHOOTER_BALLISTICS } from '../ballistics';
 import { FLOWER_CIRCLES, GARDEN_AABB, LOADING_ZONE_AABB, testCircleVsAABB, createIntakeZonePreset, getBumperZoneOBB, getRobotOBB, testOBBvsCircle, DEFAULT_PRESET_ZONE_DEPTH, HIVE_AABB, HIVE_PILLARS, HIVE_TUNNEL, testOBBvsAABB, HIVE_HEIGHT, HIVE_OPENING_CENTROID_S, HIVE_RIM_Y, HIVE_RIM_Z, GRAVITY, PIECE_PHYSICS, hiveCellAimPoint } from '../collision';
 
@@ -1484,6 +1485,72 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       const before = e.field.flowers[0].pieces.length;
       for (let i = 0; i < 80; i++) e.step(isLifted(e.r1.actionState) ? DROP : LIFT);
       assert(e.field.flowers[0].pieces.length > before && e.r1.controlledPieces.length < 4, `drops into FLOWER 1 (${before} -> ${e.field.flowers[0].pieces.length})`);
+    }
+  }, TEST_TIMEOUT_MS);
+
+  it('AC. 리프트 상태 주행 (12-8): 비율 r = min(liftMaxSpeed, maxSpeed) / maxSpeed, 정지 대기 없이 타이머, 투입 완료 시점 재확인', () => {
+    // 비율 / 기구학 (maxSpeed 60, maxTurnRate 4)
+    expect([0, 30, 60, 90, -5, Number.NaN].map(v => liftDriveRatio({ maxSpeed: 60, liftMaxSpeed: v }))).toEqual([0, 0.5, 1, 1, 0, 0]);
+    const C = cfg('robot1', { liftMaxSpeed: 30 });
+    const run = (state: RobotState['actionState'], config: RobotConfig, vx: number, w: number, ticks = 100) => {
+      let r: RobotState = { x: 72, y: 120, vx: 0, vy: 0, omega: 0, heading: 0, actionState: state, stateTimer: 1, isBraking: false, intakeContactTimer: 0, intakeTargetPieceId: null, controlledPieces: [] };
+      for (let i = 0; i < ticks; i++) r = stepRobotKinematics(r, vx, 0, w, config, DT);
+      return r;
+    };
+    const ready = run('FLOWER_READY', C, 60, 4);
+    assert(Math.abs(ready.vx - 30) < 1e-9 && Math.abs(ready.omega - 2) < 1e-9, `full input in a lift state -> maxSpeed × r, maxTurnRate × r (${ready.vx}, ${ready.omega})`);
+    assert(Math.abs(run('FLOWER_READY', C, 200, 40).vx - 30) < 1e-9 && Math.abs(run('FLOWER_READY', C, 200, 40).omega - 2) < 1e-9, 'over-range targets clamped to the lift limits');
+    assert(run('FLOWER_READY', cfg('robot1'), 60, 4).vx === 0, 'liftMaxSpeed 0 -> Stationary Lock (v1)');
+    assert(run('SHOOTING', C, 60, 4).vx === 0, 'shooting stays a Stationary Lock');
+    assert(Math.abs(run('IDLE', C, 60, 4).vx - 60) < 1e-9, 'outside the lift states: normal speed');
+    // 빠르게 달리다 리프트 상태가 되면 가속도 한도로 줄어듦 (순간 감속 없음)
+    {
+      let r = run('IDLE', C, 60, 0);
+      r = { ...r, actionState: 'FLOWER_SETUP' };
+      r = stepRobotKinematics(r, 60, 0, 0, C, DT);
+      assert(Math.abs(r.vx - (60 - 120 * DT)) < 1e-9, `decelerates at maxLinearAccel (${r.vx})`);
+    }
+
+    // 엔진: FLOWER 1 (2, 96) 옆에서 리프트 올림 → 움직이면서 올라가고 (타이머 바로 차감), 대기 중에도 주행
+    const F = FLOWER_CIRCLES[0];
+    const atFlower = pose(F.center.x + F.radius + 9, F.center.y, Math.PI); // 앞면이 FLOWER에 닿음 (13, 96)
+    const liftInput = (vy: number, action: RobotDriveInput['actionState']) => inp(action, 0, vy);
+    {
+      const e = eng({ r1Spawn: atFlower, r2Spawn: pose(30, 30) }, C);
+      e.step(LIFT);
+      assert(e.r1.actionState === 'FLOWER_SETUP', 'lift accepted at the FLOWER');
+      let moved = 0;
+      for (let i = 0; i < 25; i++) { e.step(liftInput(20, 'FLOWER_SETUP')); moved = e.r1.y - atFlower.y; }
+      assert(e.r1.actionState === 'FLOWER_READY' && !e.r1.isBraking && moved > 1, `raised while driving in 500 ms (${e.r1.actionState}, moved ${moved.toFixed(2)} in)`);
+      // FLOWER에서 멀어진 채 투입 요청 → 대상 없음 → 대기 유지, 돌아오면 투입
+      for (let i = 0; i < 75; i++) e.step(liftInput(20, 'FLOWER_SETUP'));
+      for (let i = 0; i < 20; i++) e.step(liftInput(0, 'FLOWER_SETUP'));
+      e.step(DROP);
+      assert(e.r1.actionState === 'FLOWER_READY', `drop request away from the FLOWER is ignored (y ${e.r1.y.toFixed(1)})`);
+      for (let i = 0; i < 200 && Math.abs(e.r1.y - atFlower.y) > 0.05; i++) e.step(liftInput(Math.max(-20, Math.min(20, (atFlower.y - e.r1.y) / DT / 4)), 'FLOWER_SETUP'));
+      for (let i = 0; i < 20; i++) e.step(liftInput(0, 'FLOWER_SETUP'));
+      const before = e.field.flowers[0].pieces.length;
+      for (let i = 0; i < 12; i++) e.step(DROP);
+      assert(e.field.flowers[0].pieces.length === before + 1, 'back at the FLOWER -> drops');
+    }
+    // 투입 중 이동: 투입 간격(200 ms) 동안 FLOWER에서 벗어나면 완료 시점 재확인으로 투입 안 함 (기물 유지, 대기)
+    {
+      const e = eng({ r1Spawn: atFlower, r2Spawn: pose(30, 30) }, C);
+      e.step(LIFT);
+      for (let i = 0; i < 30; i++) e.step(liftInput(0, 'FLOWER_SETUP'));
+      assert(e.r1.actionState === 'FLOWER_READY', 'ready');
+      e.step(DROP);
+      assert(e.r1.actionState === 'FLOWER_DROPPING', 'dropping');
+      const before = e.field.flowers[0].pieces.length;
+      for (let i = 0; i < 10; i++) e.step(inp('FLOWER_DROPPING', 30, 0)); // FLOWER 반대쪽(+x)으로
+      assert(e.field.flowers[0].pieces.length === before && e.r1.controlledPieces.length === 4 && e.r1.actionState === 'FLOWER_READY', `moved away during the drop -> not dropped (x ${e.r1.x.toFixed(2)})`);
+    }
+    // liftMaxSpeed 0 = v1: 리프트 중 주행 입력이 있어도 움직이지 않음
+    {
+      const e = eng({ r1Spawn: atFlower, r2Spawn: pose(30, 30) });
+      e.step(LIFT);
+      for (let i = 0; i < 25; i++) e.step(liftInput(20, 'FLOWER_SETUP'));
+      assert(e.r1.y === atFlower.y && e.r1.x === atFlower.x, 'locked in the lift states (v1)');
     }
   }, TEST_TIMEOUT_MS);
 });

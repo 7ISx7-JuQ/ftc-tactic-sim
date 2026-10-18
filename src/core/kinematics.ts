@@ -96,6 +96,23 @@ export function applyAngularSlewRate(
   return Math.abs(next) < EPSILON ? 0 : next;
 }
 
+// 리프트 상태 (FLOWER 리프트 FSM, 명세서 2.6.3)
+const LIFT_STATES: ReadonlySet<RobotState['actionState']> = new Set(['FLOWER_SETUP', 'FLOWER_READY', 'FLOWER_DROPPING', 'FLOWER_LOWERING']);
+export function isLiftState(state: RobotState['actionState']): boolean {
+  return LIFT_STATES.has(state);
+}
+
+/**
+ * 리프트 상태 주행 비율 r = min(liftMaxSpeed, maxSpeed) / maxSpeed (12-8, 명세서 3.4): 리프트 상태의 최고 속도 = maxSpeed × r,
+ * 최고 각속도 = maxTurnRate × r. 0 = Stationary Lock (v1). 값이 비유한 / 0 이하면 0
+ */
+export function liftDriveRatio(config: Pick<RobotConfig, 'liftMaxSpeed' | 'maxSpeed'>): number {
+  const lift = finiteOr0(config.liftMaxSpeed ?? 0);
+  const max = finiteOr0(config.maxSpeed);
+  if (!(lift > 0) || !(max > 0)) return 0;
+  return Math.min(1, lift / max);
+}
+
 // 한 틱 동안의 로봇 기구학 갱신 (오일러 적분, 불변 객체 반환)
 export function stepRobotKinematics(
   current: RobotState,
@@ -106,11 +123,25 @@ export function stepRobotKinematics(
   dt: number,
 ): RobotState {
   // IDLE / INTAKING(Mobile Intake)은 주행 입력 유지,
-  // Stationary Lock 액션(SHOOTING / FLOWER_*)은 구동 목표를 0으로 강제하여 감속 정지 유도
+  // Stationary Lock 액션(SHOOTING / FLOWER_*)은 구동 목표를 0으로 강제하여 감속 정지 유도.
+  // 12-8: 리프트 상태 주행 비율 r > 0이면 리프트 상태(FLOWER_*)는 목표 속도 × r (최고 속도 / 각속도도 × r 이내).
+  //       목표만 줄이고 가속도는 그대로라, 빠르게 달리다 리프트를 올리면 가속도 한도로 줄어든다 (순간 감속 없음)
   const canDrive = current.actionState === 'IDLE' || current.actionState === 'INTAKING';
-  const tVx = canDrive ? targetVx : 0;
-  const tVy = canDrive ? targetVy : 0;
-  const tOmega = canDrive ? targetOmega : 0;
+  const liftRatio = !canDrive && isLiftState(current.actionState) ? liftDriveRatio(config) : 0;
+  let tVx = 0;
+  let tVy = 0;
+  let tOmega = 0;
+  if (canDrive) {
+    tVx = targetVx;
+    tVy = targetVy;
+    tOmega = targetOmega;
+  } else if (liftRatio > 0) {
+    const limited = limitLinearVelocity(finiteOr0(targetVx) * liftRatio, finiteOr0(targetVy) * liftRatio, finiteOr0(config.maxSpeed) * liftRatio);
+    const turnLimit = Math.max(0, finiteOr0(config.maxTurnRate)) * liftRatio;
+    tVx = limited.vx;
+    tVy = limited.vy;
+    tOmega = clamp(finiteOr0(targetOmega) * liftRatio, -turnLimit, turnLimit);
+  }
 
   const step = Math.max(0, finiteOr0(dt));
 

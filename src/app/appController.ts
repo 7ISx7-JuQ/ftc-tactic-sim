@@ -14,6 +14,7 @@
 // 다시 그리기: 루프 RUNNING 중에는 onFrame마다, 그 외(일시정지 / 옵션 / 보기 애니메이션 / 재생 / 종료 강조 대기)에는 rAF로.
 // 시계 / 프레임 스케줄러 / 브라우저 환경을 주입받아 Node에서 가짜 시간으로 테스트한다.
 
+import { liftDriveRatio } from '../core/kinematics';
 import { DT, MATCH_TICKS, SimulationEngine } from '../core/simulationEngine';
 import type { EngineTimeline } from '../core/simulationEngine';
 import type {
@@ -782,7 +783,8 @@ export class AppController {
 
   /**
    * 이번 프레임에 진행한 틱마다: 그 틱 시작 상태가 리프트 상태인데 LIVE 입력 기록의 주행 축(qx, qy, qω)이 0이 아니면 경고 토스트.
-   * 입력 기록(양자화 후, 데드존 적용 뒤)을 읽으므로 스틱 떨림은 경고하지 않는다. 같은 로봇은 LIFT_TOAST_COOLDOWN_MS에 한 번
+   * 입력 기록(양자화 후, 데드존 적용 뒤)을 읽으므로 스틱 떨림은 경고하지 않는다. 같은 로봇은 LIFT_TOAST_COOLDOWN_MS에 한 번.
+   * 12-8: 리프트 상태 주행이 켜진 로봇(liftMaxSpeed > 0)은 리프트 상태에서도 움직이므로 경고하지 않는다
    */
   private checkLiftToasts(stepped: number): void {
     if (stepped <= 0) return;
@@ -790,6 +792,7 @@ export class AppController {
     const end = this.engine.currentTick;
     for (const robot of ['robot1', 'robot2'] as const) {
       if (this.inputs.sources[robot] !== 'LIVE' || now - this.lastToastAt[robot] < LIFT_TOAST_COOLDOWN_MS) continue;
+      if (liftDriveRatio(robot === 'robot1' ? this.setup.r1Config : this.setup.r2Config) > 0) continue;
       const log = this.inputs.logs[robot];
       for (let tick = Math.max(0, end - stepped); tick < end; tick++) {
         const state = this.engine.getFrame(tick)?.[robot === 'robot1' ? 'r1' : 'r2'].actionState;
