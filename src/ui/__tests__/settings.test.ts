@@ -89,7 +89,7 @@ describe('SETTINGS / 자동 보관 (09-8b)', () => {
     expect(parseStoredConfig(wrap({ ...defaults, robot1: { ...defaults.robot1, teamNumber: '12345678' } }), defaults).applied).toBeNull();
     expect(parseStoredConfig(wrap({ ...defaults, scenario: { allianceColor: 'GREEN' } }), defaults).applied).toBeNull();
     expect(parseStoredConfig(wrap({ ...defaults, scenario: { allianceColor: 'RED', flowerPiecesCount: [9, 4, 4, 4] } }), defaults).applied).toBeNull();
-    expect(parseStoredConfig(wrap({ ...defaults, scenario: { allianceColor: 'RED', r1Spawn: { x: 72, y: 72, heading: 0 } } }), defaults).applied).toBeNull();
+    expect(parseStoredConfig(wrap({ ...defaults, scenario: { allianceColor: 'RED', r1Spawn: { x: 50, y: 72, heading: 0 } } }), defaults).applied).toBeNull(); // HIVE 기둥과 겹침
     expect(parseStoredConfig(wrap({ ...defaults, scenario: { allianceColor: 'RED', gardenPiecesCount: 'many' } }), defaults).applied).toBeNull();
     expect(parseStoredConfig(wrap(defaults), defaults).applied).toEqual(defaults);
     // 없는 항목 채우기: 팀명이 없던 저장값 → 기본값(빈 팀명)으로 채우고 나머지 유지, 슬롯 id 강제

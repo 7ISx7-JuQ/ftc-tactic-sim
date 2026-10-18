@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { SimulationEngine, DEFAULT_RNG_SEED, DEFAULT_SPAWN_POSES, validateScenario, validateRobotPlacement, PLACEMENT_TOLERANCE, getCarryCapacity, DT } from '../simulationEngine';
 import type { RobotDriveInput } from '../simulationEngine';
 import type { BumperZone, RobotConfig, RobotPose, ScenarioConfig, ShotProbabilityResolver } from '../types';
-import { createLUTShotResolver, generateRobotLUTs, bearingTo, shooterBallisticsFrom, planShotFlight, DEFAULT_SHOOTER_BALLISTICS } from '../ballistics';
-import { FLOWER_CIRCLES, GARDEN_AABB, LOADING_ZONE_AABB, testCircleVsAABB, createIntakeZonePreset, getBumperZoneOBB, getRobotOBB, testOBBvsCircle, DEFAULT_PRESET_ZONE_DEPTH, HIVE_AABB, HIVE_HEIGHT, HIVE_OPENING_CENTROID_S, HIVE_RIM_Y, GRAVITY, PIECE_PHYSICS, hiveCellAimPoint } from '../collision';
+import { createLUTShotResolver, generateRobotLUTs, bearingTo, shooterBallisticsFrom, planShotFlight, intersectHiveBox, DEFAULT_SHOOTER_BALLISTICS } from '../ballistics';
+import { FLOWER_CIRCLES, GARDEN_AABB, LOADING_ZONE_AABB, testCircleVsAABB, createIntakeZonePreset, getBumperZoneOBB, getRobotOBB, testOBBvsCircle, DEFAULT_PRESET_ZONE_DEPTH, HIVE_AABB, HIVE_PILLARS, HIVE_TUNNEL, testOBBvsAABB, HIVE_HEIGHT, HIVE_OPENING_CENTROID_S, HIVE_RIM_Y, GRAVITY, PIECE_PHYSICS, hiveCellAimPoint } from '../collision';
 
 const cfg = (id: 'robot1' | 'robot2', over: Partial<RobotConfig> = {}): RobotConfig => ({
   id, name: id, width: 18, length: 18, maxSpeed: 60, maxTurnRate: 4, maxLinearAccel: 120, maxAngularAccel: 10,
@@ -431,14 +431,14 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
         for (let i = 0; i < 75; i++) { e.step(inp('IDLE', -25, 30)); maxPen = Math.max(maxPen, pen(e, ball.id)); }
         assert(x0 - e.r1.x > 20 && maxPen < 0.05 && e.r1.y > 134.99, `slides along wall past the ball, then reaches wall (dx ${(e.r1.x - x0).toFixed(1)}in, robot y ${e.r1.y.toFixed(2)})`);
       }
-      // HIVE에 밀어붙임 (HIVE 하단 y=91.475, 로봇이 위로 전진)
+      // HIVE 왼쪽 기둥에 밀어붙임 (기둥 x 47.27 ~ 53.18, 하단 y=91.475, 로봇이 위로 전진, 12-1)
       {
-        const e = eng({ ...EMPTY_R1, r1Spawn: pose(60, 125, -Math.PI / 2), r2Spawn: pose(30, 30) });
+        const e = eng({ ...EMPTY_R1, r1Spawn: pose(50.2, 125, -Math.PI / 2), r2Spawn: pose(30, 30) });
         const ball = e.pieces.find(p => p.state === 'IN_GARDEN')!;
-        Object.assign(ball, { state: 'ON_FIELD', x: 60, y: 112 });
+        Object.assign(ball, { state: 'ON_FIELD', x: 50.2, y: 112 });
         let maxPen = 0;
         for (let i = 0; i < 150; i++) { e.step(inp('IDLE', 0, -30)); maxPen = Math.max(maxPen, pen(e, ball.id)); }
-        assert(maxPen < 0.05 && Math.abs(e.r1.y - (91.475 + 2.8 + 9)) < 0.1, `pinned against HIVE: robot stops (y=${e.r1.y.toFixed(2)})`);
+        assert(maxPen < 0.05 && Math.abs(e.r1.y - (91.475 + 2.8 + 9)) < 0.1, `pinned against HIVE pillar: robot stops (y=${e.r1.y.toFixed(2)})`);
       }
       // 인테이크 면으로 밀어붙이면 겹침 없이 멈췄다가 흡입
       {
@@ -1131,6 +1131,88 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       // GARDEN 기물 겹침은 보정 대상이 아님 (로봇은 그대로, 다음 틱 충돌 처리에서 기물이 밀림)
       const g = eng({ r1Spawn: pose(12, 135) }).getFrame(0)!;
       assert(g.r1.x === 12 && g.r1.y === 135, 'piece overlap does not move the robot');
+    }
+  }, TEST_TIMEOUT_MS);
+
+  it('W. HIVE 터널 (12-1): 기둥 2개만 막고 로봇 / 바닥 공은 y 방향으로 HIVE 아래를 지나감', () => {
+    // 기하: 사다리꼴(아랫변 49.46, 윗변 25.5, 높이 43.95)의 높이 18 in 폭 − 양쪽 여유 1 in
+    expect(HIVE_TUNNEL.minX).toBeCloseTo(53.176, 3);
+    expect(HIVE_TUNNEL.maxX).toBeCloseTo(90.824, 3);
+    expect(HIVE_TUNNEL.maxX - HIVE_TUNNEL.minX).toBeCloseTo(37.647, 3);
+    expect(HIVE_TUNNEL.maxX - HIVE_TUNNEL.minX).toBeGreaterThan(2 * 18); // 18 in 로봇 2대가 나란히
+    expect([HIVE_TUNNEL.minY, HIVE_TUNNEL.maxY]).toEqual([HIVE_AABB.minY, HIVE_AABB.maxY]);
+    expect(HIVE_PILLARS).toHaveLength(2);
+    expect([HIVE_PILLARS[0].minX, HIVE_PILLARS[0].maxX, HIVE_PILLARS[1].minX, HIVE_PILLARS[1].maxX]).toEqual([HIVE_AABB.minX, HIVE_TUNNEL.minX, HIVE_TUNNEL.maxX, HIVE_AABB.maxX]);
+    expect(HIVE_PILLARS[0].maxX - HIVE_PILLARS[0].minX).toBeCloseTo(5.906, 3);
+    expect(HIVE_PILLARS[1].maxX - HIVE_PILLARS[1].minX).toBeCloseTo(5.906, 3);
+    const inPillar = (e: SimulationEngine, r: 'r1' | 'r2', c = C1) =>
+      HIVE_PILLARS.reduce((d, pillar) => Math.max(d, testOBBvsAABB(getRobotOBB(e[r], c), pillar).depth), 0);
+
+    // 로봇: y 방향 통과 (관중석 쪽 → 반대쪽 벽까지)
+    {
+      const e = eng({ ...EMPTY_R1, r1Spawn: pose(72, 125, -Math.PI / 2), r2Spawn: pose(30, 30) });
+      let maxPen = 0;
+      for (let i = 0; i < 250; i++) { e.step(inp('IDLE', 0, -40)); maxPen = Math.max(maxPen, inPillar(e, 'r1')); }
+      assert(Math.abs(e.r1.y - 9) < 0.01 && Math.abs(e.r1.x - 72) < 1e-6 && maxPen === 0, `drives through the tunnel to the far wall (x ${e.r1.x.toFixed(3)}, y ${e.r1.y.toFixed(3)})`);
+    }
+    // 18 in 로봇 2대가 나란히 통과
+    {
+      const e = eng({ ...EMPTY_R1, ...EMPTY_R2, gardenPiecesCount: { ally: 8, opponent: 8 }, r1Spawn: pose(63, 125, -Math.PI / 2), r2Spawn: pose(81.5, 125, -Math.PI / 2) });
+      for (let i = 0; i < 150; i++) e.step(inp('IDLE', 0, -40), inp('IDLE', 0, -40));
+      assert(e.r1.y < HIVE_AABB.minY - 9 && e.r2.y < HIVE_AABB.minY - 9 && Math.abs(e.r1.x - 63) < 1e-6 && Math.abs(e.r2.x - 81.5) < 1e-6, `two robots side by side pass (r1 ${e.r1.x.toFixed(2)}, ${e.r1.y.toFixed(2)} / r2 ${e.r2.x.toFixed(2)}, ${e.r2.y.toFixed(2)})`);
+    }
+    // x 방향: 바깥에서 기둥 옆면에 막힘 / 터널 안에서 기둥 안쪽 면에 막힘
+    {
+      const outside = eng({ ...EMPTY_R1, r1Spawn: pose(25, 72), r2Spawn: pose(30, 30) });
+      for (let i = 0; i < 100; i++) outside.step(inp('IDLE', 40, 0));
+      assert(Math.abs(outside.r1.x - (HIVE_AABB.minX - 9)) < 0.01 && Math.abs(outside.r1.y - 72) < 1e-6, `blocked by the left pillar from outside (x ${outside.r1.x.toFixed(3)})`);
+      const inside = eng({ ...EMPTY_R1, r1Spawn: pose(72, 72), r2Spawn: pose(30, 30) });
+      for (let i = 0; i < 100; i++) inside.step(inp('IDLE', -40, 0));
+      assert(Math.abs(inside.r1.x - (HIVE_TUNNEL.minX + 9)) < 0.01, `blocked by the pillar's inner face from inside the tunnel (x ${inside.r1.x.toFixed(3)})`);
+    }
+    // 기둥 앞면 밀착 (y 방향으로 기둥 위치를 지나려 하면 기둥 앞면에서 멈춤)
+    {
+      const e = eng({ ...EMPTY_R1, r1Spawn: pose(50.2, 125, -Math.PI / 2), r2Spawn: pose(30, 30) });
+      for (let i = 0; i < 150; i++) e.step(inp('IDLE', 0, -40));
+      assert(Math.abs(e.r1.y - (HIVE_AABB.maxY + 9)) < 0.01 && inPillar(e, 'r1') < 0.01, `stops flush against the pillar face (y ${e.r1.y.toFixed(3)})`);
+    }
+    // 바닥 공: 터널로 굴러 지나감 / 기둥 앞면에서 튕김
+    {
+      const roll = (x: number) => {
+        const e = eng({ ...EMPTY_R1, r1Spawn: pose(9, 36), r2Spawn: pose(9, 108) });
+        const ball = e.pieces.find(p => p.state === 'IN_GARDEN')!;
+        Object.assign(ball, { state: 'ON_FIELD', x, y: 110, vx: 0, vy: -100 });
+        for (let i = 0; i < 150; i++) e.step();
+        return e.pieces.find(p => p.id === ball.id)!;
+      };
+      const through = roll(72);
+      assert(through.y < HIVE_AABB.minY && Math.abs(through.x - 72) < 1e-6, `ball rolls through the tunnel (y ${through.y.toFixed(2)})`);
+      const blocked = roll(50.2);
+      assert(blocked.y >= HIVE_AABB.maxY + PIECE_PHYSICS.POLLEN.radius - 1e-6, `ball bounces off the pillar face (y ${blocked.y.toFixed(2)})`);
+    }
+    // 비행 공은 HIVE 직육면체 그대로: 터널 자리(x = 72)로 낮게 날아온 공도 HIVE 옆면에 부딪힘
+    {
+      const r = PIECE_PHYSICS.POLLEN.radius;
+      const hit = intersectHiveBox({ x: 72, y: 130, z: 12, heading: -Math.PI / 2, v0: 200, pitch: 0.3 }, r);
+      assert(hit !== null && hit.face === 'SIDE' && Math.abs(hit.y - (HIVE_AABB.maxY + r)) < 1e-6 && hit.z < HIVE_HEIGHT, `flight still hits the HIVE box over the tunnel (${hit?.face}, y ${hit?.y.toFixed(3)})`);
+    }
+    // 배치 검증: 터널 안 시작 자세 허용, 기둥 겹침 거부, 기둥 안쪽 면 닿음 허용
+    {
+      const codes = (sc: Partial<ScenarioConfig>) => validateRobotPlacement({ allianceColor: 'RED', ...sc }, C1, C2).map(i => `${i.code}:${i.robots.join('+')}`).join(',');
+      assert(codes({ r1Spawn: pose(72, 72) }) === '', 'start pose inside the tunnel is allowed');
+      assert(codes({ r1Spawn: pose(72, 72, Math.PI / 4) }) === '', 'diagonal start pose inside the tunnel is allowed');
+      assert(codes({ r1Spawn: pose(HIVE_TUNNEL.minX + 9, 72) }) === '', 'touching the inner pillar face is allowed');
+      assert(codes({ r1Spawn: pose(HIVE_TUNNEL.minX + 8.99, 72) }) === 'PLACEMENT_IN_HIVE:robot1', 'into the left pillar from the tunnel');
+      assert(codes({ r2Spawn: pose(HIVE_TUNNEL.maxX + 3, 72) }) === 'PLACEMENT_IN_HIVE:robot2', 'over the right pillar');
+      const issue = validateRobotPlacement({ allianceColor: 'RED', r1Spawn: pose(50, 72) }, C1, C2)[0];
+      assert(issue?.code === 'PLACEMENT_IN_HIVE' && /기둥/.test(issue.message), `pillar overlap message (${issue?.message})`);
+    }
+    // reset() 사전 보정: 기둥과 겹친 시작 자세는 밀려나고, 터널 안 시작 자세는 그대로
+    {
+      const pushed = eng({ ...EMPTY_R1, r1Spawn: pose(50, 72), r2Spawn: pose(30, 30) });
+      assert(inPillar(pushed, 'r1') < 1e-6, `overlapping start pose is pushed out of the pillar (x ${pushed.r1.x.toFixed(3)})`);
+      const kept = eng({ ...EMPTY_R1, r1Spawn: pose(72, 72), r2Spawn: pose(30, 30) });
+      assert(kept.r1.x === 72 && kept.r1.y === 72, 'tunnel start pose is kept');
     }
   }, TEST_TIMEOUT_MS);
 });

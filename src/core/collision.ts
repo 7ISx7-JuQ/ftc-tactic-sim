@@ -26,6 +26,35 @@ export const HIVE_AABB: AABB = {
   maxY: 91.475,
 };
 
+// HIVE 터널 (명세서 2.2, 12-1): A자 프레임 2개 + 꼭대기 가로대라 로봇 / 바닥 공은 HIVE 아래를 y 방향으로 지나간다.
+//   y 방향으로 본 단면(x–z) = 등변사다리꼴 (아랫변 = Frame Width 49.46, 윗변 25.5 = HIVE Center to Center, 높이 43.95 = Pivot Height).
+//   통과 기준 = 18 in 정육면체 (FTC 로봇 최대 크기): 높이 18 in에서의 사다리꼴 폭 안이면 헤딩과 무관하게 지나간다.
+//   다리 두께 여유 한쪽 1.0 in (고정값, 실측 갱신하지 않음 — 바꾸면 ENGINE_VERSION을 올려야 함).
+//   HIVE_AABB는 HIVE 전체 바닥 면적으로 그대로 둔다 (비행 판정 / TIP 낙하 데드존 / 바닥 산포 / 스윗스팟 검증).
+export const HIVE_FRAME_TOP_WIDTH = 25.5;
+export const HIVE_PIVOT_HEIGHT = 43.95;
+export const HIVE_TUNNEL_CLEARANCE_HEIGHT = 18;
+export const HIVE_TUNNEL_LEG_MARGIN = 1.0;
+// 높이 18 in에서의 사다리꼴 폭 (≈ 39.647 in) − 양쪽 여유 → 터널 폭 ≈ 37.647 in (18 in 로봇 2대가 나란히 통과)
+const HIVE_FRAME_WIDTH = HIVE_AABB.maxX - HIVE_AABB.minX;
+const HIVE_TUNNEL_HALF_WIDTH =
+  (HIVE_FRAME_WIDTH - (HIVE_TUNNEL_CLEARANCE_HEIGHT * (HIVE_FRAME_WIDTH - HIVE_FRAME_TOP_WIDTH)) / HIVE_PIVOT_HEIGHT) / 2 - HIVE_TUNNEL_LEG_MARGIN;
+const HIVE_MID_X = (HIVE_AABB.minX + HIVE_AABB.maxX) / 2;
+
+// 터널 (x ≈ 53.176 ~ 90.824, y = HIVE 깊이 전체): 로봇 / 바닥 공이 지나가는 영역
+export const HIVE_TUNNEL: AABB = {
+  minX: HIVE_MID_X - HIVE_TUNNEL_HALF_WIDTH,
+  maxX: HIVE_MID_X + HIVE_TUNNEL_HALF_WIDTH,
+  minY: HIVE_AABB.minY,
+  maxY: HIVE_AABB.maxY,
+};
+
+// 기둥 2개 (왼쪽 47.27 ~ 53.176, 오른쪽 90.824 ~ 96.73): 로봇 / 바닥 공 / 시작 자세 배치가 쓰는 HIVE 모양
+export const HIVE_PILLARS: readonly AABB[] = [
+  { minX: HIVE_AABB.minX, maxX: HIVE_TUNNEL.minX, minY: HIVE_AABB.minY, maxY: HIVE_AABB.maxY },
+  { minX: HIVE_TUNNEL.maxX, maxX: HIVE_AABB.maxX, minY: HIVE_AABB.minY, maxY: HIVE_AABB.maxY },
+];
+
 // 진영별 HIVE 중심선 X (Lip_X)
 export const HIVE_CENTER_X = {
   RED: 59.25,
@@ -464,7 +493,10 @@ export function resolveRobotEnvironmentCollisions(
   };
 
   for (let iter = 0; iter < ROBOT_ENV_ITERATIONS; iter++) {
-    applyStatic(testOBBvsAABB(getRobotOBB({ ...robot, x, y }, config), HIVE_AABB));
+    // HIVE: 기둥 2개만 막고 가운데 터널은 지나간다 (12-1)
+    for (const pillar of HIVE_PILLARS) {
+      applyStatic(testOBBvsAABB(getRobotOBB({ ...robot, x, y }, config), pillar));
+    }
 
     for (const flower of FLOWER_CIRCLES) {
       applyStatic(testOBBvsCircle(getRobotOBB({ ...robot, x, y }, config), flower));
@@ -743,9 +775,11 @@ export function resolvePiecesCollisions(
         }
       }
 
-      // (3) 공 vs HIVE / FLOWER: 정적 장애물
-      const hiveHit = testCircleVsAABB({ center: { x: piece.x, y: piece.y }, radius }, HIVE_AABB);
-      if (hiveHit.colliding) reflectPiece(piece, hiveHit, e);
+      // (3) 공 vs HIVE 기둥 / FLOWER: 정적 장애물 (구르는 공은 HIVE 터널로 지나간다, 12-1)
+      for (const pillar of HIVE_PILLARS) {
+        const hit = testCircleVsAABB({ center: { x: piece.x, y: piece.y }, radius }, pillar);
+        if (hit.colliding) reflectPiece(piece, hit, e);
+      }
 
       for (const flower of FLOWER_CIRCLES) {
         const hit = testCircleVsCircle({ center: { x: piece.x, y: piece.y }, radius }, flower);

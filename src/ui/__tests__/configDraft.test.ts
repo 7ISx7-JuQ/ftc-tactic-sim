@@ -58,7 +58,7 @@ describe('config 창 초안 / 적용 (09-8a)', () => {
     expect(applyTab(badScenario, 'scenario')).toBe(badScenario);
     expect(firstBlockingTab(badScenario)).toBe('scenario');
     // 배치 검증도 시나리오 탭 문제 (R1 시작 자세가 HIVE 안)
-    const inHive = editDraft(s0, 'scenario', { ...defaults.scenario, r1Spawn: { x: 72, y: 72, heading: 0 } });
+    const inHive = editDraft(s0, 'scenario', { ...defaults.scenario, r1Spawn: { x: 50, y: 72, heading: 0 } }); // HIVE 왼쪽 기둥 (가운데는 터널이라 허용, 12-1)
     expect(tabIssues(inHive.draft, 'scenario').map(i => i.code)).toContain('PLACEMENT_IN_HIVE');
     // 순서: R2 수정 + 시나리오 오류 → R2가 먼저
     const both = editDraft(badScenario, 'robot2', robot('robot2', { maxSpeed: 50 }));

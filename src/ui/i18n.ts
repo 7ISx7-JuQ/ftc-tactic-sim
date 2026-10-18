@@ -425,7 +425,7 @@ const en = {
   'issue.AUTO_TIP_COUNT': 'Auto TIP count must be an integer from 0 to 5',
   // 시작 자세 배치 검증 (validateRobotPlacement, 3.8)
   'issue.PLACEMENT_OUT_OF_FIELD': '{robot} body is outside the field',
-  'issue.PLACEMENT_IN_HIVE': '{robot} body overlaps the HIVE',
+  'issue.PLACEMENT_IN_HIVE': '{robot} body overlaps a HIVE pillar',
   'issue.PLACEMENT_IN_FLOWER': '{robot} body overlaps a FLOWER',
   'issue.PLACEMENT_ROBOT_OVERLAP': 'R1 and R2 bodies overlap',
   'issue.PLACEMENT_PIECE_OVERLAP': '{robot} body overlaps GARDEN POLLEN',
@@ -831,7 +831,7 @@ const ko: Record<MessageKey, string> = {
   'issue.POLLEN_TOTAL_EXCEEDED': '지정한 POLLEN이 총 32개 초과',
   'issue.AUTO_TIP_COUNT': '오토 TIP 횟수는 0 ~ 5 정수',
   'issue.PLACEMENT_OUT_OF_FIELD': '{robot} 몸체가 필드 밖으로 나감',
-  'issue.PLACEMENT_IN_HIVE': '{robot} 몸체가 HIVE와 겹침',
+  'issue.PLACEMENT_IN_HIVE': '{robot} 몸체가 HIVE 기둥과 겹침',
   'issue.PLACEMENT_IN_FLOWER': '{robot} 몸체가 FLOWER와 겹침',
   'issue.PLACEMENT_ROBOT_OVERLAP': 'R1과 R2 몸체가 겹침',
   'issue.PLACEMENT_PIECE_OVERLAP': '{robot} 몸체가 GARDEN POLLEN과 겹침',
