@@ -1456,4 +1456,34 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
     const placement = validateRobotPlacement({ allianceColor: 'RED', ...FREE, floorPieces: [{ type: 'POLLEN', x: 12, y: 36 }] }, C1, C2);
     assert(placement.length === 1 && placement[0].code === 'PLACEMENT_PIECE_OVERLAP' && placement[0].robots.join() === 'robot1', 'placed piece under a start pose');
   }, TEST_TIMEOUT_MS);
+
+  it('AB. FLOWER 투입 방향 구역 (12-7): 구역이 있으면 FLOWER 원과 구역 겹침으로 대상 판정, 빈 목록 = v1 (방향 무관 1 in)', () => {
+    const F = FLOWER_CIRCLES[0]; // (2, 96)
+    const zone = (side: BumperZone['side'], depth: number): BumperZone => ({ side, offset: 0, width: 18, depth });
+    // R1을 FLOWER 1 오른쪽에 두고 리프트 올림 요청 → 받아지면 FLOWER_SETUP
+    const lift = (x: number, heading: number, flowerDropZones: BumperZone[]) => {
+      const e = eng({ r1Spawn: pose(x, F.center.y, heading), r2Spawn: pose(30, 30) }, cfg('robot1', { flowerDropZones }));
+      e.step(LIFT);
+      return { e, accepted: e.r1.actionState === 'FLOWER_SETUP' };
+    };
+    const touchX = F.center.x + F.radius + 9; // 몸체 변이 FLOWER에 닿는 중심 x (= 13)
+    // v1 (빈 목록): 방향 무관, 1 in 이내
+    assert(lift(touchX, 0, []).accepted && lift(touchX, Math.PI, []).accepted && lift(touchX + 0.9, 0, []).accepted && !lift(touchX + 1.1, 0, []).accepted, 'empty list = v1 reach (any side, 1 in)');
+    // 앞 구역만: 앞이 FLOWER를 향할 때만
+    const front = [zone('FRONT', 3)];
+    assert(lift(touchX, Math.PI, front).accepted, 'front zone facing the FLOWER -> accepted');
+    assert(!lift(touchX, 0, front).accepted, 'back face at the FLOWER, no back zone -> rejected');
+    assert(!lift(touchX, Math.PI / 2, front).accepted, 'side face at the FLOWER -> rejected');
+    // 구역 깊이만큼 멀리서도 (v1의 1 in보다 멀리)
+    assert(lift(touchX + 2.5, Math.PI, front).accepted && !lift(touchX + 3.5, Math.PI, front).accepted, 'zone depth sets the reach (3 in)');
+    // 뒤 구역 / 여러 구역
+    assert(lift(touchX, 0, [zone('BACK', 1)]).accepted && lift(touchX, 0, [zone('FRONT', 3), zone('BACK', 1)]).accepted, 'back zone / any of several zones');
+    // 구역 방향이 맞으면 실제 투입까지 (완료 시점 재확인도 같은 판정)
+    {
+      const { e } = lift(touchX, Math.PI, front);
+      const before = e.field.flowers[0].pieces.length;
+      for (let i = 0; i < 80; i++) e.step(isLifted(e.r1.actionState) ? DROP : LIFT);
+      assert(e.field.flowers[0].pieces.length > before && e.r1.controlledPieces.length < 4, `drops into FLOWER 1 (${before} -> ${e.field.flowers[0].pieces.length})`);
+    }
+  }, TEST_TIMEOUT_MS);
 });

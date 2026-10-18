@@ -542,8 +542,13 @@ function distancePointToOBB(obb: OBB, p: Vector2D): number {
 
 // 가상 Intake Zone (명세서 3.3): RobotConfig.intakeZones를 필드 좌표 OBB 목록으로 변환
 function getIntakeZoneOBBs(body: OBB, config: RobotConfig): OBB[] {
+  return bumperZoneOBBs(body, config.intakeZones);
+}
+
+// 범퍼 구역 목록 → 필드 좌표 OBB (흡입 구역 / FLOWER 투입 방향 구역 공용)
+function bumperZoneOBBs(body: OBB, list: readonly RobotConfig['intakeZones'][number][] | undefined): OBB[] {
   const zones: OBB[] = [];
-  for (const zone of config.intakeZones) {
+  for (const zone of list ?? []) {
     const obb = getBumperZoneOBB(body, zone);
     if (obb) zones.push(obb);
   }
@@ -1437,15 +1442,19 @@ export class SimulationEngine {
     }
   }
 
-  // FLOWER 상단 투입 대상 선정: 차체 외곽에서 FLOWER_DROP_REACH 이내의 가장 가까운 FLOWER 인덱스 (없으면 -1)
-  // 투입 방향 구역(flowerDropZones)을 도입할 경우 이 함수만 BumperZone 겹침 판정으로 교체
+  // FLOWER 상단 투입 대상 선정 (없으면 -1). 여러 FLOWER가 걸리면 차체에 가장 가까운 것
+  //   - 투입 방향 구역이 없으면 (v1): 차체 외곽에서 FLOWER_DROP_REACH 이내 (방향 무관)
+  //   - 투입 방향 구역이 있으면 (12-7): FLOWER 원통 정사영 원이 구역 중 하나와 겹침 (흡입 구역 / 하단 추출과 같은 판정)
   private findDropTargetFlower(robot: RobotState, config: RobotConfig): number {
     const body = getRobotOBB(robot, config);
+    const dropZones = config.flowerDropZones?.length ? bumperZoneOBBs(body, config.flowerDropZones) : null;
     let targetIndex = -1;
     let best = Infinity;
     for (let i = 0; i < FLOWER_CIRCLES.length; i++) {
-      const distance = distancePointToOBB(body, FLOWER_CIRCLES[i].center) - FLOWER_RADIUS;
-      if (distance <= FLOWER_DROP_REACH && distance < best) {
+      const circle = FLOWER_CIRCLES[i];
+      const distance = distancePointToOBB(body, circle.center) - FLOWER_RADIUS;
+      const reachable = dropZones ? circleOverlapsAnyZone(dropZones, circle.center, circle.radius) : distance <= FLOWER_DROP_REACH;
+      if (reachable && distance < best) {
         best = distance;
         targetIndex = i;
       }
