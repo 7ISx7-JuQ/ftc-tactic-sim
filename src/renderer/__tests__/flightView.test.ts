@@ -39,8 +39,8 @@ describe('비행 공 표시 (명세서 3.7, 08-6)', () => {
     // 명중 + 탐색 v0 가정 (닫힌 해의 1.15배): 명목 포물선은 조준점을 비껴가지만 보정으로 끝점이 조준점과 일치
     const spawn = facingAim(60.5, 130.5);
     const closed = solveAimLaunchSpeed(spawn.x, spawn.y, aim, DEFAULT_SHOOTER_BALLISTICS)!;
-    const fast = { ...DEFAULT_SHOOTER_BALLISTICS, v0: { POLLEN: closed * 1.15 } };
-    const hit = recordedShot(1, spawn, { robot1: fast, robot2: DEFAULT_SHOOTER_BALLISTICS });
+    const fast = { ...DEFAULT_SHOOTER_BALLISTICS, v0: closed * 1.15 };
+    const hit = recordedShot(1, spawn, { robot1: { POLLEN: fast, NECTAR: fast }, robot2: { POLLEN: DEFAULT_SHOOTER_BALLISTICS, NECTAR: DEFAULT_SHOOTER_BALLISTICS } });
     const D = Math.hypot(hit.toX - hit.fromX, hit.toY - hit.fromY);
     const zNomEnd = heightAtDistance({ x: hit.fromX, y: hit.fromY, z: hit.fromZ, heading: hit.heading, v0: hit.v0, pitch: hit.pitch }, D);
     assert(hit.result === 'HIT' && Math.abs(zNomEnd - hit.toZ) > 1, `nominal parabola misses the aim height by ${(zNomEnd - hit.toZ).toFixed(1)} in (correction needed)`);

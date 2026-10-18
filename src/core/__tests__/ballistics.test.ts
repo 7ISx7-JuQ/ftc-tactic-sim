@@ -13,6 +13,11 @@ import {
   generateReferenceLUTRows,
   generateRobotLUTs,
   heightAtDistance,
+  isPieceFireable,
+  nextFireablePieceIndex,
+  shooterAimHeading,
+  shooterFor,
+  aimingRobotOBB,
   hiveCellKey,
   intersectHiveBox,
   isAimWithinShooterRange,
@@ -518,9 +523,9 @@ describe('발사 비행 계획 (06-6)', () => {
       assert(near(p.v0, solveAimLaunchSpeed(60.5, 130.5, aim, { ...DEFAULT_SHOOTER_BALLISTICS })!, 1e-9) && near(p.from.z, HIVE_RIM_Z - DEFAULT_SHOOTER_BALLISTICS.dz, 1e-12), 'auto shooter v0 = closed form to the aim point');
       const traj = { ...p.from, heading: p.heading, v0: p.v0, pitch: p.pitch };
       assert(near(heightAtDistance(traj, D), aim.z, 1e-9), 'nominal trajectory passes the aim point');
-      // v0 우선순위: 기물별 지정값 > 닫힌 해 > 평지 사거리 = 조준점 거리
-      assert(plan(60.5, 130.5, h, true, { ...DEFAULT_SHOOTER_BALLISTICS, v0: { POLLEN: 321 } }).v0 === 321, 'given v0 used');
-      assert(near(plan(60.5, 130.5, h, true, { ...DEFAULT_SHOOTER_BALLISTICS, v0: { NECTAR: 321 } }).v0, p.v0, 1e-9), 'v0 of the other piece type ignored');
+      // v0 우선순위: 지정값(그 기물 슈터의 탐색 v0) > 닫힌 해 > 평지 사거리 = 조준점 거리 (12-3: 슈터 탄도가 기물별이라 v0는 숫자 하나)
+      assert(plan(60.5, 130.5, h, true, { ...DEFAULT_SHOOTER_BALLISTICS, v0: 321 }).v0 === 321, 'given v0 used');
+      assert(near(plan(60.5, 130.5, h, true, { ...DEFAULT_SHOOTER_BALLISTICS, v0: Number.NaN }).v0, p.v0, 1e-9), 'invalid given v0 ignored');
       const low = plan(59.5, 101.5, onAim(59.5, 101.5), true, { dz: 39.5, shooterPitch: deg(20), shooterOffset: 0 });
       const dLow = Math.hypot(aim.x - low.from.x, aim.y - low.from.y);
       assert(near(low.v0, Math.sqrt((GRAVITY * dLow) / Math.sin(2 * deg(20))), 1e-9), 'no closed form -> range-matched v0');
@@ -560,7 +565,7 @@ describe('발사 비행 계획 (06-6)', () => {
     // 생성 결과 → 엔진 슈터 탄도
     {
       const s = shooterBallisticsFrom(MC, { v0: { POLLEN: 200, NECTAR: null } } as Parameters<typeof shooterBallisticsFrom>[1]);
-      assert(s.dz === MC.dz && s.shooterPitch === MC.shooterPitch && s.shooterOffset === MC.shooterOffset && s.v0?.POLLEN === 200 && s.v0?.NECTAR === undefined, 'shooterBallisticsFrom copies config and found v0');
+      assert(s.POLLEN.dz === MC.dz && s.POLLEN.shooterPitch === MC.shooterPitch && s.POLLEN.shooterOffset === MC.shooterOffset && s.POLLEN.v0 === 200 && s.NECTAR.v0 === undefined && s.NECTAR.dz === MC.dz, 'shooterBallisticsFrom copies config (both pieces, shared shooter) and found v0');
     }
   });
 });
@@ -781,4 +786,152 @@ describe('LUT 병렬 생성 사전 준비 (09-2)', () => {
         'BLUE basis sweet spot grid in BLUE_OPPOSITE LUT = reference sweet spot value');
     }
   }, 120_000);
+});
+
+describe('슈터 구성 / 좌우 오프셋 (12-3)', () => {
+  const aim = hiveCellAimPoint('RED', 'AUDIENCE_CELL');
+  const right = (h: number) => ({ x: -Math.sin(h), y: Math.cos(h) }); // 캔버스 y-down에서 발사 방향 기준 오른쪽
+  const FAST = { samples: 20, searchSamples: 200 }; // 기물별 분기 / 동일성 확인용 저정밀
+
+  it('R. 조준 보정 ψ = β − asin(b / D), 사출구 → 조준점 거리 = √(D² − b²) − 앞뒤 오프셋, b = 0이면 v1 계산 그대로', () => {
+    const x = 60.5, y = 130.5;
+    const beta = bearingTo(x, y, aim.x, aim.y);
+    const D = Math.hypot(aim.x - x, aim.y - y);
+    assert(shooterAimHeading(x, y, aim) === beta && shooterAimHeading(x, y, aim, 0) === beta, 'b = 0 -> bearing exactly');
+    for (const b of [4, -4, 9]) {
+      const psi = shooterAimHeading(x, y, aim, b)!;
+      assert(near(psi, beta - Math.asin(b / D), 1e-12), `ψ formula (b = ${b})`);
+      const f = 3;
+      const exit = launchPoint(x, y, psi, { dz: 39.5, shooterOffset: f, shooterLateralOffset: b });
+      const r = right(psi);
+      assert(near((exit.x - x) * r.x + (exit.y - y) * r.y, b, 1e-9), `exit is b to the right of the shooting direction (b = ${b})`);
+      // 사출구에서 발사 방향 직선이 조준점을 지남 (수직 거리 0), 거리 = √(D² − b²) − f
+      const along = (aim.x - exit.x) * Math.cos(psi) + (aim.y - exit.y) * Math.sin(psi);
+      const across = (aim.x - exit.x) * r.x + (aim.y - exit.y) * r.y;
+      assert(near(across, 0, 1e-9) && near(along, Math.sqrt(D * D - b * b) - f, 1e-9), `line through the aim point (b = ${b}: across ${across.toExponential(1)}, along ${along.toFixed(3)})`);
+      // 닫힌 해도 그 거리 기준
+      const cfg = { dz: 39.5, shooterOffset: f, shooterLateralOffset: b, shooterPitch: deg(60) };
+      assert(near(solveAimLaunchSpeed(x, y, aim, cfg)!, solveLaunchSpeed(Math.sqrt(D * D - b * b) - f, aim.z - launchHeight(cfg), cfg.shooterPitch)!, 1e-9), `closed form uses the corrected distance (b = ${b})`);
+    }
+    // 오른쪽 사출구 → 왼쪽으로 돌려 조준 (ψ < β)
+    assert(shooterAimHeading(x, y, aim, 4)! < beta && shooterAimHeading(x, y, aim, -4)! > beta, 'right exit turns left, left exit turns right');
+    // D ≤ |b| / 비유한값 → 조준 불가
+    assert(shooterAimHeading(aim.x + 3, aim.y + 3, aim, 5) === null && shooterAimHeading(x, y, aim, Number.NaN) === null, 'no aim when D ≤ |b| or b is not finite');
+    assert(solveAimLaunchSpeed(aim.x + 3, aim.y + 3, aim, { dz: 39.5, shooterOffset: 0, shooterLateralOffset: 5, shooterPitch: deg(60) }) === null, 'no closed form when D ≤ |b|');
+    // 좌우 오프셋 미지정 / 0은 v1 사출구와 비트 단위로 같음
+    const h = 1.234;
+    const v1 = { x: x + 6 * Math.cos(h), y: y + 6 * Math.sin(h) };
+    for (const lp of [launchPoint(x, y, h, { dz: 39.5, shooterOffset: 6 }), launchPoint(x, y, h, { dz: 39.5, shooterOffset: 6, shooterLateralOffset: 0 })]) {
+      assert(lp.x === v1.x && lp.y === v1.y, 'lateral 0 / undefined = v1 launch point bit for bit');
+    }
+    // 조준한 로봇 몸체도 ψ를 바라봄
+    const body = aimingRobotOBB(x, y, aim, SIZE, 6);
+    assert(near(Math.atan2(body.axes[0].y, body.axes[0].x), shooterAimHeading(x, y, aim, 6)!, 1e-12), 'aiming body faces ψ');
+    // 몬테카를로: 조준 불가 자리는 0 (난수 미사용)
+    let draws = 0;
+    const counting = () => { draws++; return 0.5; };
+    assert(estimateHitRate(aim.x + 3, aim.y + 3, 300, { ...MC, shooterLateralOffset: 5 }, 'POLLEN', 10, counting) === 0 && draws === 0, 'no aim -> hit rate 0 without random draws');
+    // 검증: 좌우 오프셋 비유한값 / 조준 불가 스윗스팟
+    assert(validateBallisticsConfig({ ...MC, shooterLateralOffset: Number.NaN }, SIZE).some(i => i.code === 'PARAM_INVALID'), 'non-finite lateral offset -> PARAM_INVALID');
+    assert(validateBallisticsConfig({ ...MC, sweetSpot: { x: 59.5, y: 101.5 }, shooterLateralOffset: 18 }, SIZE).some(i => i.code === 'SWEET_SPOT_NO_SOLUTION'), 'D ≤ |lateral| -> SWEET_SPOT_NO_SOLUTION');
+  });
+
+  it('S. 슈터 구성: 발사 가능 기물 / 기물별 슈터 / 다음 발사 기물 (첫 발사 가능 기물)', () => {
+    const base = { shooterDelay: 300, turretType: 'FIXED' as const, turretRange: [0, 0] as [number, number], aimTolerance: deg(3) };
+    const nectar = { shooterDelay: 450, turretType: 'TURRET' as const, turretRange: [-1, 1] as [number, number], aimTolerance: deg(5) };
+    const fire = (setup: 'NONE' | 'POLLEN_ONLY' | 'SHARED' | 'PER_PIECE' | undefined) => [isPieceFireable({ shooterSetup: setup }, 'POLLEN'), isPieceFireable({ shooterSetup: setup }, 'NECTAR')];
+    expect([fire('NONE'), fire('POLLEN_ONLY'), fire('SHARED'), fire('PER_PIECE'), fire(undefined)]).toEqual([[false, false], [true, false], [true, true], [true, true], [true, true]]);
+    expect(shooterFor({ ...base, shooterSetup: 'PER_PIECE', nectarShooter: nectar }, 'NECTAR')).toBe(nectar);
+    expect(shooterFor({ ...base, shooterSetup: 'PER_PIECE', nectarShooter: nectar }, 'POLLEN')).toEqual(base);
+    expect(shooterFor({ ...base, shooterSetup: 'SHARED', nectarShooter: nectar }, 'NECTAR')).toEqual(base); // SHARED는 NECTAR 슈터 값을 쓰지 않음
+    const N = { type: 'NECTAR' as const }, P = { type: 'POLLEN' as const };
+    expect(nextFireablePieceIndex({ shooterSetup: 'POLLEN_ONLY' }, [N, N, P, N])).toBe(2);
+    expect(nextFireablePieceIndex({ shooterSetup: 'POLLEN_ONLY' }, [N, N])).toBe(-1);
+    expect(nextFireablePieceIndex({ shooterSetup: 'SHARED' }, [N, P])).toBe(0);
+    expect(nextFireablePieceIndex({ shooterSetup: 'NONE' }, [P])).toBe(-1);
+    expect(nextFireablePieceIndex({ shooterSetup: 'PER_PIECE' }, [])).toBe(-1);
+  });
+
+  it('T. 확률표: 기물마다 그 기물 슈터 설정으로 계산, 발사 불가 기물은 0, 단일 설정 = 두 기물 공용(v1과 같음), 검증 문제에 기물 표시', () => {
+    const MC2: BallisticsConfig = { ...MC, dz: 37.5, shooterPitch: deg(62) };
+    const shared = generateRobotLUTs(MC, SIZE, FAST);
+    const same = (a: Float32Array, b: Float32Array) => a.length === b.length && a.every((v, i) => v === b[i]);
+    // 단일 설정 = { POLLEN: c, NECTAR: c } = 좌우 0 명시
+    const perPieceSame = generateRobotLUTs({ POLLEN: MC, NECTAR: MC }, SIZE, FAST);
+    const lateral0 = generateRobotLUTs({ ...MC, shooterLateralOffset: 0 }, SIZE, FAST);
+    for (const r of [perPieceSame, lateral0]) {
+      assert(same(r.luts.POLLEN.RED_AUDIENCE, shared.luts.POLLEN.RED_AUDIENCE) && same(r.luts.NECTAR.RED_AUDIENCE, shared.luts.NECTAR.RED_AUDIENCE) && r.v0.POLLEN === shared.v0.POLLEN && r.v0.NECTAR === shared.v0.NECTAR, 'same as the shared (v1) result bit for bit');
+    }
+    // 기물별: NECTAR는 NECTAR 슈터 설정의 결과와 같고 POLLEN은 그대로
+    const per = generateRobotLUTs({ POLLEN: MC, NECTAR: MC2 }, SIZE, FAST);
+    const nectarOnly = generateRobotLUTs(MC2, SIZE, FAST);
+    assert(same(per.luts.POLLEN.RED_AUDIENCE, shared.luts.POLLEN.RED_AUDIENCE) && same(per.luts.NECTAR.RED_AUDIENCE, nectarOnly.luts.NECTAR.RED_AUDIENCE), 'each piece uses its own shooter');
+    assert(per.v0.NECTAR === nectarOnly.v0.NECTAR && per.v0.NECTAR !== shared.v0.NECTAR, 'NECTAR v0 from the NECTAR shooter');
+    // 발사 불가 기물: 계산하지 않고 0, v0 null
+    const pollenOnly = generateRobotLUTs({ POLLEN: MC }, SIZE, FAST);
+    assert(pollenOnly.v0.NECTAR === null && pollenOnly.sweetSpotHitRate.NECTAR === 0 && pollenOnly.luts.NECTAR.RED_AUDIENCE.every(v => v === 0), 'non-fireable piece -> zero LUT, no v0');
+    assert(same(pollenOnly.luts.POLLEN.RED_AUDIENCE, shared.luts.POLLEN.RED_AUDIENCE), 'fireable piece unchanged');
+    const none = generateRobotLUTs({}, SIZE, FAST);
+    assert(none.issues.length === 0 && none.v0.POLLEN === null && none.v0.NECTAR === null, 'no shooter -> nothing to generate');
+    // 검증: 두 설정이 다르면 문제 슈터의 기물을 붙이고 LUT 전부 0, 같으면 v1처럼 표시 없음
+    const bad: BallisticsConfig = { ...MC, shooterPitch: 0 };
+    const badNectar = generateRobotLUTs({ POLLEN: MC, NECTAR: bad }, SIZE, FAST);
+    assert(badNectar.issues.length > 0 && badNectar.issues.every(i => i.pieceType === 'NECTAR') && badNectar.v0.POLLEN === null, 'invalid NECTAR shooter -> tagged issue, nothing generated');
+    assert(generateRobotLUTs(bad, SIZE, FAST).issues.every(i => i.pieceType === undefined), 'shared shooter issues are not tagged');
+    // 좌우 오프셋 보정: 오프셋을 줘도 스윗스팟에서 조준점을 맞춰 명중률이 유지됨
+    // (MC 스윗스팟 y 134.5는 몸체가 ψ로 돌면 모서리가 벽 밖 → SWEET_SPOT_OUT_OF_FIELD라 벽에서 띄운 자리)
+    const away: BallisticsConfig = { ...MC, sweetSpot: { x: 60.5, y: 130.5 } };
+    assert(validateBallisticsConfig({ ...MC, shooterLateralOffset: 5 }, SIZE).some(i => i.code === 'SWEET_SPOT_OUT_OF_FIELD'), 'rotated body at a wall-side sweet spot leaves the field');
+    const offset = generateRobotLUTs({ ...away, shooterLateralOffset: 5 }, SIZE, FAST);
+    const noOffset = generateRobotLUTs(away, SIZE, FAST);
+    assert(offset.issues.length === 0 && offset.sweetSpotHitRate.POLLEN > 0.5 && !same(offset.luts.POLLEN.RED_AUDIENCE, noOffset.luts.POLLEN.RED_AUDIENCE), `lateral offset is aimed (sweet spot ${offset.sweetSpotHitRate.POLLEN.toFixed(2)}, issues ${offset.issues.map(i => i.code).join()})`);
+    // 엔진 슈터 탄도: 기물별 (발사 불가 기물은 다른 기물의 값, v0 없음)
+    const sb = shooterBallisticsFrom({ POLLEN: MC, NECTAR: MC2 }, per);
+    assert(sb.POLLEN.dz === MC.dz && sb.NECTAR.dz === MC2.dz && sb.NECTAR.v0 === per.v0.NECTAR!, 'per-piece engine ballistics');
+    const sbOnly = shooterBallisticsFrom({ POLLEN: { ...MC, shooterLateralOffset: 2 } }, pollenOnly);
+    assert(sbOnly.NECTAR.dz === MC.dz && sbOnly.NECTAR.v0 === undefined && sbOnly.POLLEN.shooterLateralOffset === 2, 'non-fireable piece borrows the other shooter without v0');
+  }, 120_000);
+
+  it('U. 판정 함수 / 비행 계획: 기물별 조준 범위 · 좌우 오프셋, 발사 불가 기물 0', () => {
+    const n = LUT_GRID_SIZE;
+    const KEYS: HiveCellKey[] = ['RED_AUDIENCE', 'RED_OPPOSITE', 'BLUE_AUDIENCE', 'BLUE_OPPOSITE'];
+    const constSet = (v: number) => Object.fromEntries(KEYS.map(k => [k, new Float32Array(n * n).fill(v)])) as HeatmapLUTSet;
+    const luts: MatchHeatmapLUTs = { robot1: { POLLEN: constSet(0.4), NECTAR: constSet(0.6) }, robot2: { POLLEN: constSet(0.4), NECTAR: constSet(0.6) } };
+    const FIXED = { shooterDelay: 300, turretType: 'FIXED' as const, turretRange: [0, 0] as [number, number], aimTolerance: deg(3) };
+    const TURRET360 = { ...FIXED, turretType: 'TURRET' as const, turretRange: [-Math.PI, Math.PI] as [number, number] };
+    const x = 60.5, y = 130.5;
+    const beta = bearingTo(x, y, aim.x, aim.y);
+    // PER_PIECE: POLLEN = 고정형, NECTAR = 360° 터렛
+    const perPiece = createLUTShotResolver(luts, { ...FIXED, shooterSetup: 'PER_PIECE', nectarShooter: TURRET360 }, FIXED);
+    expect([perPiece('robot1', 'POLLEN', x, y, beta + 0.5, 'RED', 'AUDIENCE_CELL'), perPiece('robot1', 'NECTAR', x, y, beta + 0.5, 'RED', 'AUDIENCE_CELL')].map(v => +v.toFixed(6))).toEqual([0, 0.6]);
+    // SHARED는 NECTAR 슈터 값을 쓰지 않음 / POLLEN_ONLY · NONE의 발사 불가 기물은 0
+    const sharedR = createLUTShotResolver(luts, { ...FIXED, shooterSetup: 'SHARED', nectarShooter: TURRET360 }, { ...FIXED, shooterSetup: 'POLLEN_ONLY' });
+    expect(sharedR('robot1', 'NECTAR', x, y, beta + 0.5, 'RED', 'AUDIENCE_CELL')).toBe(0);
+    expect([sharedR('robot2', 'POLLEN', x, y, beta, 'RED', 'AUDIENCE_CELL'), sharedR('robot2', 'NECTAR', x, y, beta, 'RED', 'AUDIENCE_CELL')].map(v => +v.toFixed(6))).toEqual([0.4, 0]);
+    expect(createLUTShotResolver(luts, { ...FIXED, shooterSetup: 'NONE' }, FIXED)('robot1', 'POLLEN', x, y, beta, 'RED', 'AUDIENCE_CELL')).toBe(0);
+    // 좌우 오프셋: 고정형은 보정한 ψ를 바라볼 때 조준 가능, 방위 β를 바라보면 허용 오차(3°) 밖
+    const b = 6;
+    const psi = shooterAimHeading(x, y, aim, b)!;
+    assert(Math.abs(psi - beta) > deg(3), `correction exceeds the tolerance (${((beta - psi) * 180 / Math.PI).toFixed(1)}°)`);
+    const offsetR = createLUTShotResolver(luts, FIXED, FIXED, { robot1: { POLLEN: { shooterLateralOffset: b }, NECTAR: { shooterLateralOffset: b } } });
+    expect([offsetR('robot1', 'POLLEN', x, y, psi, 'RED', 'AUDIENCE_CELL'), offsetR('robot1', 'POLLEN', x, y, beta, 'RED', 'AUDIENCE_CELL'), offsetR('robot2', 'POLLEN', x, y, beta, 'RED', 'AUDIENCE_CELL')].map(v => +v.toFixed(6))).toEqual([0.4, 0, 0.4]);
+    expect(offsetR('robot1', 'POLLEN', aim.x + 3, aim.y + 3, 0, 'RED', 'AUDIENCE_CELL')).toBe(0); // 조준 불가 자리
+
+    // 비행 계획: 사출구 = 발사 방향 오른쪽 b, 명중은 조준점 도착, 명목 궤적이 조준점 높이를 지남
+    const ballistics = { ...DEFAULT_SHOOTER_BALLISTICS, shooterOffset: 2, shooterLateralOffset: b };
+    for (const [name, shooter, heading] of [['fixed facing ψ', FIXED, psi], ['360° turret', TURRET360, beta + 1]] as const) {
+      const p = planShotFlight({ robotX: x, robotY: y, robotHeading: heading, shooter, ballistics, pieceType: 'POLLEN', alliance: 'RED', upwardCell: 'AUDIENCE_CELL', hit: true });
+      const r = right(p.heading);
+      assert(near(p.heading, psi, 1e-12), `${name}: launches along ψ`);
+      assert(near((p.from.x - x) * r.x + (p.from.y - y) * r.y, b, 1e-9), `${name}: exit is b to the right`);
+      const d = Math.hypot(aim.x - p.from.x, aim.y - p.from.y);
+      const D = Math.hypot(aim.x - x, aim.y - y);
+      assert(near(d, Math.sqrt(D * D - b * b) - 2, 1e-9), `${name}: exit → aim distance`);
+      assert(near(heightAtDistance({ ...p.from, heading: p.heading, v0: p.v0, pitch: p.pitch }, d), aim.z, 1e-9), `${name}: closed-form v0 passes the aim point`);
+    }
+    // 좌우 오프셋 0 / 미지정은 v1 비행과 같음
+    const v1 = planShotFlight({ robotX: x, robotY: y, robotHeading: beta, shooter: FIXED, ballistics: DEFAULT_SHOOTER_BALLISTICS, pieceType: 'POLLEN', alliance: 'RED', upwardCell: 'AUDIENCE_CELL', hit: false });
+    const zero = planShotFlight({ robotX: x, robotY: y, robotHeading: beta, shooter: FIXED, ballistics: { ...DEFAULT_SHOOTER_BALLISTICS, shooterLateralOffset: 0 }, pieceType: 'POLLEN', alliance: 'RED', upwardCell: 'AUDIENCE_CELL', hit: false });
+    expect(zero).toEqual(v1);
+  });
 });

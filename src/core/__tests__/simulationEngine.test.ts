@@ -3,7 +3,7 @@ import { SimulationEngine, DEFAULT_RNG_SEED, DEFAULT_SPAWN_POSES, validateScenar
 import type { RobotDriveInput } from '../simulationEngine';
 import type { BumperZone, RobotConfig, RobotPose, ScenarioConfig, ShotProbabilityResolver } from '../types';
 import { createLUTShotResolver, generateRobotLUTs, bearingTo, shooterBallisticsFrom, planShotFlight, intersectHiveBox, DEFAULT_SHOOTER_BALLISTICS } from '../ballistics';
-import { FLOWER_CIRCLES, GARDEN_AABB, LOADING_ZONE_AABB, testCircleVsAABB, createIntakeZonePreset, getBumperZoneOBB, getRobotOBB, testOBBvsCircle, DEFAULT_PRESET_ZONE_DEPTH, HIVE_AABB, HIVE_PILLARS, HIVE_TUNNEL, testOBBvsAABB, HIVE_HEIGHT, HIVE_OPENING_CENTROID_S, HIVE_RIM_Y, GRAVITY, PIECE_PHYSICS, hiveCellAimPoint } from '../collision';
+import { FLOWER_CIRCLES, GARDEN_AABB, LOADING_ZONE_AABB, testCircleVsAABB, createIntakeZonePreset, getBumperZoneOBB, getRobotOBB, testOBBvsCircle, DEFAULT_PRESET_ZONE_DEPTH, HIVE_AABB, HIVE_PILLARS, HIVE_TUNNEL, testOBBvsAABB, HIVE_HEIGHT, HIVE_OPENING_CENTROID_S, HIVE_RIM_Y, HIVE_RIM_Z, GRAVITY, PIECE_PHYSICS, hiveCellAimPoint } from '../collision';
 
 const cfg = (id: 'robot1' | 'robot2', over: Partial<RobotConfig> = {}): RobotConfig => ({
   id, name: id, width: 18, length: 18, maxSpeed: 60, maxTurnRate: 4, maxLinearAccel: 120, maxAngularAccel: 10,
@@ -1270,6 +1270,70 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       while (r1Loaded(e) === 4 && guard++ < 100) e.step(SHOOT);
       assert(r1Loaded(e) === 3 && e.field.pendingShots.length === 1, `${name}: shot fired (loaded ${r1Loaded(e)})`);
       assert(rng(e)[e.currentTick] !== rng0, `${name}: fired shot uses random numbers`);
+    }
+  }, TEST_TIMEOUT_MS);
+
+  it('Y. 슈터 구성 (12-3): 발사 대기열 = 첫 발사 가능 기물, 발사 딜레이 / 비행은 그 기물 슈터, 발사 불가면 요청 무시', () => {
+    const rng = (e: SimulationEngine) => e.currentTimeline.rngStates;
+    const loaded = (e: SimulationEngine) => e.r1.controlledPieces.map(p => p.type).join(',');
+    const shots = (e: SimulationEngine) => e.field.pendingShots.map(s => s.pieceType).join(',');
+    // 발사 요청을 받은 틱부터 첫 발사까지 틱 수 (정지 상태라 제동 없음)
+    const fireTicks = (e: SimulationEngine) => {
+      const start = e.currentTick;
+      let guard = 0;
+      const before = e.field.pendingShots.length;
+      while (e.field.pendingShots.length === before && guard++ < 200) e.step(SHOOT);
+      return e.currentTick - start;
+    };
+    const ALL: Partial<ScenarioConfig> = { r1Loadout: ['NECTAR', 'POLLEN', 'NECTAR', 'POLLEN'], gardenPiecesCount: { ally: 4, opponent: 4 } };
+
+    // SHARED (= v1): 맨 앞 기물부터
+    {
+      const e = eng(ALL);
+      fireTicks(e);
+      assert(shots(e) === 'NECTAR' && loaded(e) === 'POLLEN,NECTAR,POLLEN', `SHARED fires the front piece (${shots(e)} / ${loaded(e)})`);
+    }
+    // POLLEN_ONLY: NECTAR는 건너뛰고 첫 POLLEN, 나머지 순서 유지. 연속 발사는 남은 POLLEN까지만, NECTAR만 남으면 요청 무시
+    {
+      const c1 = cfg('robot1', { shooterSetup: 'POLLEN_ONLY' });
+      const e = eng(ALL, c1);
+      fireTicks(e);
+      assert(shots(e) === 'POLLEN' && loaded(e) === 'NECTAR,NECTAR,POLLEN', `POLLEN_ONLY skips NECTAR (${loaded(e)})`);
+      fireTicks(e);
+      assert(shots(e) === 'POLLEN,POLLEN' && loaded(e) === 'NECTAR,NECTAR', `continuous fire takes the next POLLEN (${loaded(e)})`);
+      for (let i = 0; i < 30; i++) e.step(SHOOT);
+      const rng0 = rng(e)[e.currentTick];
+      for (let i = 0; i < 30; i++) e.step(SHOOT);
+      assert(e.r1.actionState === 'IDLE' && loaded(e) === 'NECTAR,NECTAR' && e.field.pendingShots.length <= 2 && rng(e)[e.currentTick] === rng0, 'only NECTAR left -> request ignored (no random numbers)');
+    }
+    // NONE: 아무것도 쏘지 않음 (적재함이 차 있어도 요청 무시)
+    {
+      const e = eng({ r1Spawn: pose(30, 72) }, cfg('robot1', { shooterSetup: 'NONE' }));
+      const rng0 = rng(e)[0];
+      for (let i = 0; i < 60; i++) e.step(SHOOT);
+      assert(e.r1.actionState === 'IDLE' && e.r1.controlledPieces.length === 4 && e.field.pendingShots.length === 0 && rng(e).every(v => v === rng0), 'NONE never shoots');
+    }
+    // PER_PIECE: 발사 딜레이 = 다음에 쏠 기물의 슈터, 비행 = 그 기물의 슈터 탄도
+    {
+      const c1 = cfg('robot1', { shooterSetup: 'PER_PIECE', shooterDelay: 200, nectarShooter: { shooterDelay: 500, turretType: 'FIXED', turretRange: [0, 0], aimTolerance: 0.05 } });
+      const shooters = {
+        robot1: { POLLEN: { ...DEFAULT_SHOOTER_BALLISTICS, dz: HIVE_RIM_Z - 10 }, NECTAR: { ...DEFAULT_SHOOTER_BALLISTICS, dz: HIVE_RIM_Z - 20 } },
+      };
+      const e = new SimulationEngine(c1, C2, ALWAYS_HIT, 'RED', { allianceColor: 'RED', ...ALL }, shooters);
+      const t1 = fireTicks(e); // NECTAR (500 ms)
+      const t2 = fireTicks(e); // POLLEN (200 ms, 연속 발사 재장전)
+      const [s1, s2] = e.field.pendingShots;
+      assert(s1.pieceType === 'NECTAR' && s2.pieceType === 'POLLEN', `PER_PIECE fires in FIFO order (${shots(e)})`);
+      assert(t1 === 500 / 1000 / DT && t2 === 200 / 1000 / DT, `shooter delay per piece (NECTAR ${t1} ticks, POLLEN ${t2} ticks)`);
+      assert(Math.abs(s1.fromZ - 20) < 1e-9 && Math.abs(s2.fromZ - 10) < 1e-9, `flight uses the piece's shooter (z ${s1.fromZ.toFixed(2)} / ${s2.fromZ.toFixed(2)})`);
+    }
+    // 판정 함수에는 실제로 발사한 기물 종류가 간다
+    {
+      const seen: string[] = [];
+      const spy: ShotProbabilityResolver = (_id, type) => { seen.push(type); return 0.5; };
+      const e = eng(ALL, cfg('robot1', { shooterSetup: 'POLLEN_ONLY' }), C2, spy);
+      fireTicks(e);
+      assert(seen.join() === 'POLLEN', `resolver receives the fired piece type (${seen.join()})`);
     }
   }, TEST_TIMEOUT_MS);
 });

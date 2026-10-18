@@ -212,6 +212,12 @@ export function writeSweetSpot(profile: RobotProfile, alliance: 'RED' | 'BLUE', 
   return { ...profile, ballistics: { ...profile.ballistics, sweetSpot: sweetSpotFromBasis(basis, alliance) } };
 }
 
+/** 그 기물을 쏘는 슈터의 탄도 (12-3): PER_PIECE + NECTAR → NECTAR 슈터, 그 외 → 주 슈터 (엔진 shooterFor와 같은 규칙) */
+export function profileShooterBallistics(profile: RobotProfile, pieceType: 'POLLEN' | 'NECTAR'): ProfileShooterBallistics {
+  const b = profile.ballistics;
+  return profile.config.shooterSetup === 'PER_PIECE' && pieceType === 'NECTAR' ? b.nectarShooter : b;
+}
+
 /** 프로필 → 엔진 탄도 설정 (LUT 요청 / 검증) */
 export function profileBallisticsConfig(profile: RobotProfile): BallisticsConfig {
   const b = profile.ballistics;

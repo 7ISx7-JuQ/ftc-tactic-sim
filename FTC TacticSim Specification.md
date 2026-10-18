@@ -216,7 +216,14 @@ FTC BioBuzz TELEOP 2D 전술 시뮬레이터의 게임 규칙, 물리 모델, �
     - **이유:** 명중 확률은 이미 0(LUT)이지만, 발사구가 HIVE 직육면체 안이면 빗맞음 비행이 거리 0에서 옆면 충돌로 처리되고 착지점이 HIVE 밖으로 밀려 순간이동처럼 보인다.
 - **판정 함수는 엔진 필수 인자:** `SimulationEngine(r1Config, r2Config, shotResolver, alliance?, scenario?, shooters?)`. 실제 경기는 LUT 기반 `createLUTShotResolver`를, 테스트는 고정 확률 함수를 넣는다.
 - **물리 가정:** 공기 저항 · 공 회전 무시, 중력 `GRAVITY` ≈ 386.09 in/s² (2.5항).
-- **발사구 위치:** 높이 `z0 = HIVE_RIM_Z − dz` (림 z = 53.5가 고정이므로 `BallisticsConfig.dz`로 역산). 수평 위치는 로봇 중심에서 조준 방향으로 `shooterOffset`만큼 떨어진 점. 터렛 회전축은 차체 중심으로 가정하므로 고정형(정면 조준 시)과 터렛형의 발사구 위치가 같다.
+- **발사구 위치 (`launchPoint`):** 높이 `z0 = HIVE_RIM_Z − dz` (림 z = 53.5가 고정이므로 `BallisticsConfig.dz`로 역산). 수평 위치는 로봇 중심에서 조준(발사) 방향으로 `shooterOffset`(앞뒤), 그 오른쪽으로 `shooterLateralOffset`(좌우, + = 오른쪽, 기본 0)만큼 떨어진 점. 터렛 회전축은 차체 중심으로 가정하므로 고정형(조준 시)과 터렛형의 발사구 위치가 같다.
+- **좌우 오프셋 조준 보정 (`shooterAimHeading`, 12-3):** 드라이버(또는 자동 조준)가 그 사출구를 기준으로 맞춘다고 본다. 조준 방향 ψ = β − asin(b / D) (β = 로봇 중심 → 조준점 방위, b = 좌우 오프셋, D = 로봇 중심 → 조준점 수평 거리, D ≤ |b|면 조준 불가). 사출구 → 조준점 수평 거리 = √(D² − b²) − 앞뒤 오프셋. 부호는 캔버스 y-down 기준 오른쪽 = (−sin ψ, cos ψ)이고, 오른쪽 사출구는 왼쪽(ψ < β)으로 돌려 맞춘다. b = 0이면 ψ = β와 계산이 v1과 비트 단위로 같다 (`BALLISTICS_MODEL_VERSION` 유지).
+    - 같은 ψ를 쓰는 곳: 닫힌 해(`solveAimLaunchSpeed`), 몬테카를로 명중률(`estimateHitRate`, 조준 불가 자리 = 0, 난수 미사용) / 도달 가능성 판정, LUT의 몸체 방향(`aimingRobotOBB`) / 발사구, 스윗스팟 검증(조준 불가 = `SWEET_SPOT_NO_SOLUTION`), 경기 중 판정 함수의 조준 오차, 발사 비행 계획. (조준선 표시 / 로봇 미리보기는 13-2 / 13-3)
+- **슈터 구성 (`RobotConfig.shooterSetup`, 12-3):** 기물별 슈터를 고르는 규칙은 `ballistics.ts` 한곳에 둔다 (엔진 / 판정 함수 / 비행 계획 / 앱 연결이 같은 함수를 씀).
+    - **발사 가능 기물 (`isPieceFireable`):** `NONE` 없음, `POLLEN_ONLY` POLLEN, `SHARED` · `PER_PIECE` 둘 다 (구성 미지정 = `SHARED`).
+    - **기물별 슈터 (`shooterFor(config, pieceType)`):** `PER_PIECE` + NECTAR → `nectarShooter`(발사 딜레이 / 형식 / 허용 오차 / 터렛 범위), 그 외 → 주 슈터(`RobotConfig`의 v1 항목). 탄도는 프로필에서 같은 규칙(`profileShooterBallistics`: `PER_PIECE` + NECTAR → `ballistics.nectarShooter`)으로 골라 엔진 / 판정 함수에 기물별로 넘긴다.
+    - **발사 대기열 = 발사 가능 기물만의 FIFO (`nextFireablePieceIndex`):** 적재함의 **첫 번째 발사 가능 기물**을 꺼내고 나머지 순서는 유지한다. `SHOOTING` 요청은 발사 가능 기물이 하나라도 있을 때만 받고(없으면 빈 적재함처럼 조용히 무시, 토스트 없음), 연속 발사도 남은 발사 가능 기물이 있을 때만 이어 간다. 발사 딜레이는 다음에 쏠 기물을 쏘는 슈터의 값이다. `SHARED` / `PER_PIECE`는 모든 기물이 발사 가능이라 v1과 똑같이 맨 앞 기물을 쏜다. FLOWER 투입은 그대로 맨 앞 기물(FIFO, 2.6.3항)이다.
+    - (표시: 적재물 강조 테두리 / 좌측 패널 명중 확률 밝은 줄을 다음 발사 기물 기준으로, 조준선 / 비행 공을 기물별 사출구로 — 13-2 / 13-3, 5.2항)
 - **조준점:** 목표 셀 투입구 오각형의 면적 중심 (2.2항 표, `hiveCellAimPoint`). 조준 오차, v0 역산, 명중 기물 배치의 기준이다.
 - **v0 닫힌 해:** 발사구 → 조준점 수평 거리 $D$, 높이차 $\Delta z = z_{\text{aim}} - z_0$, 발사각 $\theta$일 때
 
@@ -249,7 +256,7 @@ FTC BioBuzz TELEOP 2D 전술 시뮬레이터의 게임 규칙, 물리 모델, �
 - **샘플 편차 (`estimateHitRate`):** 속도 $v_0(1 + N(0, \text{v0NoisePercent}))$, 방위 $+N(0, \text{headingNoiseRad})$, 발사각 $+N(0, \text{pitchNoiseRad})$ (기본 0.02 / 0.02 rad / 0.006 rad). 발사구 위치는 명목 조준 방향 기준이고 편차는 공의 방향에만 적용한다.
 - **결정론:** Mulberry32 시드 PRNG(`createRng`, 엔진과 같은 알고리즘의 독립 스트림). 기준 시드(`RobotLUTOptions.seed`, 기본 `DEFAULT_BALLISTICS_SEED`)에서 기물 종류 × 용도(탐색 / LUT)별 시드를 파생하고(`robotLUTSeeds`), LUT는 그 안에서 격자별 구간을 쓰므로 같은 설정 + 같은 시드 = 같은 LUT.
 - 준난수(Sobol / Halton) 샘플링은 쓰지 않는다 (얻는 정확도에 비해 변경 범위가 큼).
-- **통합 함수:** `generateRobotLUTs(config, robotSize, options)` → `{luts, v0, sweetSpotHitRate, issues}` (로봇 1대분 8장). 검증에 실패하면 LUT 전부 0, v0 null (판정 함수가 항상 0).
+- **통합 함수:** `generateRobotLUTs(configs, robotSize, options)` → `{luts, v0, sweetSpotHitRate, issues}` (로봇 1대분 8장). `configs` = `BallisticsConfig` 하나(두 기물 공용 = v1) 또는 기물별 `RobotLUTShooters { POLLEN?, NECTAR? }`(12-3): 기물마다 그 기물 슈터 설정으로 v0 탐색 / LUT를 만들고(기물별 몬테카를로는 원래 따로라 계산량 불변), 설정이 없는 기물(발사 불가)은 계산하지 않고 0 / v0 null. 검증(`validateLUTShooters`)은 발사 가능 기물의 슈터만 하며, 두 설정이 다르면 문제에 기물 종류(`issue.pieceType`)를 붙인다. 검증에 실패하면 LUT 전부 0, v0 null (판정 함수가 항상 0).
 
 ##### 몬테카를로 명중 판정 (샘플 1개, LUT 생성 전용)
 
@@ -320,9 +327,9 @@ FTC BioBuzz TELEOP 2D 전술 시뮬레이터의 게임 규칙, 물리 모델, �
 
 엔진 생성자에 넣는 `ShotProbabilityResolver`. 엔진은 발사 완료 틱에 `(robotId, pieceType, robot.x, robot.y, robot.heading, alliance, upwardCell)`로 호출하고, 받은 확률과 시드 난수 1회로 명중을 정한다.
 
-- **입력:** `luts: MatchHeatmapLUTs`(로봇 슬롯별 `RobotHeatmapLUTs`), `r1Config` / `r2Config`의 `turretType` / `turretRange` / `aimTolerance`. 슈터 설정은 만들 때 복사해 고정한다 (이후 원본 객체를 바꿔도 경기 중 판정에 새지 않음 → 결정론).
+- **입력:** `createLUTShotResolver(luts, r1Config, r2Config, shooters?)` — `luts: MatchHeatmapLUTs`(로봇 슬롯별 `RobotHeatmapLUTs`), 로봇 제원의 슈터 구성 / 슈터 항목(기물별 `shooterFor`), 선택 인자 `shooters`의 기물별 `shooterLateralOffset`(미지정 0). 발사 불가 기물은 0. 슈터 설정은 만들 때 복사해 고정한다 (이후 원본 객체를 바꿔도 경기 중 판정에 새지 않음 → 결정론).
 - **$P_{\text{spatial}}$:** `luts[robotId][pieceType][hiveCellKey(alliance, upwardCell)]`를 로봇 중심 좌표에서 **쌍선형 보간**(`sampleLUT`)으로 조회한다. 둘러싼 격자 중심 4개 값을 거리 비례로 섞고, 필드 가장자리 격자 중심 바깥은 가장자리 값. 셀 키 = `${alliance}_${AUDIENCE | OPPOSITE}`. TIP으로 상향 셀이 바뀌면 다음 발사부터 새 셀의 LUT와 조준점을 쓴다.
-- **조준 오차:** $\Delta\psi$ = `angleDifference(조준점 방위, heading)` = 조준점 방위 − 헤딩, [−π, π]. 조준점 방위는 로봇 중심 → 상향 셀 조준점. 부호: + = 로봇 오른쪽 (캔버스 y-down에서 각도가 커지는 방향).
+- **조준 오차:** $\Delta\psi$ = `angleDifference(조준 방향, heading)` = 조준 방향 − 헤딩, [−π, π]. 조준 방향은 로봇 중심 → 상향 셀 조준점 방위를 그 기물 슈터의 좌우 오프셋으로 보정한 ψ (위 좌우 오프셋 조준 보정, 0이면 조준점 방위 그대로, 조준 불가면 확률 0). 부호: + = 로봇 오른쪽 (캔버스 y-down에서 각도가 커지는 방향). 고정형 허용 오차 / 터렛 범위도 그 기물 슈터의 값이다.
 - **조준 판정 (`isAimWithinShooterRange`):**
     - **고정형(`FIXED`):** $|\Delta\psi| \le$ `aimTolerance`(기본 3° ≈ 0.0524 rad, 경계 포함)이면 $P_{\text{final}} = P_{\text{spatial}}$, 아니면 0. 허용 오차가 비유한값 / 음수면 0으로 본다 (정확히 정렬될 때만).
     - **터렛형(`TURRET`):** `turretRange` $[\alpha, \beta]$를 [−π, π]로 정규화한다 (`normalizeAngle`은 ±π를 보존하므로 360° 터렛 [−π, π] 유지). $\alpha \le \beta$면 $\alpha \le \Delta\psi \le \beta$, $\alpha > \beta$면 ±π를 가로지르는 구간 ($\Delta\psi \ge \alpha$ 또는 $\Delta\psi \le \beta$, 예: 후방 터렛 [2.5, −2.5]). 범위가 비유한값이면 조준 불가.
@@ -334,12 +341,12 @@ FTC BioBuzz TELEOP 2D 전술 시뮬레이터의 게임 규칙, 물리 모델, �
 - **목표:** 발사 순간 공이 HIVE로 순간이동하는 부자연스러움을 없애되, 결과(명중 여부)는 LUT 판정을 그대로 따르고, 3D 물리 엔진 없이 닫힌 해로 계산한다.
 - **범위 분리:** 엔진은 궤도 결과(충돌 / 도착 지점, 충돌 후 낙하 구간, 최종 착지 지점 / 시점 / 속도)를 발사 시점에 계산해 비행 대기열에 기록하고 도착 틱에 반영한다. 이 기록을 보간해 그리는 것은 렌더러다 (3.7항).
 - **충돌 후 낙하도 비행의 일부:** HIVE / 벽에 공중에서 닿은 공은 그 자리에서 바닥으로 옮기지 않고 반사 포물선으로 바닥까지 떨어뜨린다 (최대 약 66 in 높이에서 한 프레임 만에 바닥으로 옮겨지는 부자연스러움 방지). 낙하 중에는 `IN_FLIGHT`라 흡입 / 충돌 대상이 아니다 (현실과 일치).
-- **슈터 탄도 입력:** 엔진 생성자 선택 인자 `shooters?: MatchShooterBallistics`. 로봇별 `ShooterBallistics {dz, shooterPitch, shooterOffset, v0?: {POLLEN?, NECTAR?}}`는 LUT 생성 결과에서 `shooterBallisticsFrom(config, generateRobotLUTs 결과)`로 만든다 (판정 LUT와 같은 발사구 / 발사각 / 탐색 v0). 지정하지 않으면 기본 자동 슈터 `DEFAULT_SHOOTER_BALLISTICS`(발사구 14 in, 발사각 60°, 오프셋 0, v0는 발사마다 조준점 닫힌 해). 만들 때 복사해 고정한다.
+- **슈터 탄도 입력:** 엔진 생성자 선택 인자 `shooters?: MatchShooterBallistics` — 로봇별 · **기물별**(12-3) `ShooterBallistics {dz, shooterPitch, shooterOffset, shooterLateralOffset?, v0?}`(그 기물을 쏘는 슈터의 값, `SHARED`면 두 기물이 같음). LUT 생성 입력 + 결과에서 `shooterBallisticsFrom(configs, generateRobotLUTs 결과)`로 만든다 (판정 LUT와 같은 발사구 / 발사각 / 탐색 v0, 발사 불가 기물은 다른 기물의 값 · v0 없음). 지정하지 않은 로봇 / 기물은 기본 자동 슈터 `DEFAULT_SHOOTER_BALLISTICS`(발사구 14 in, 발사각 60°, 오프셋 0, v0는 발사마다 조준점 닫힌 해). 만들 때 복사해 고정한다.
 - **결과 선확정 / 난수:** 발사 완료 틱에 판정 함수 확률과 시드 PRNG 난수로 명중을 확정한다. 난수는 발사마다 **항상 3회**(명중 판정, 반사 세기 산포 `bounceRestitutionRoll`, 반사 방향 산포 `bounceAngleRoll`) 쓰고 도착 시점에는 쓰지 않는다 (무효 명중의 반사도 발사 때 뽑아 둔 값을 씀). 그래서 결과와 무관하게 난수 순서가 일정해 결정론이 유지된다. TIP 진행 중 발사는 발사 시점에 빗맞음.
 - **명목 궤적 (`planShotFlight`, 편차 없는 포물선, 발사 1회당 상수 시간):**
-    - 발사 방향 (`shotLaunchHeading`): 고정형 = 로봇 헤딩, 터렛형 = 조준점 방위 (터렛 범위 밖이면 가까운 한계각으로 제한).
-    - 발사구 = 로봇 중심 + 발사 방향 × `shooterOffset`, 높이 53.5 − dz. 발사각이 (0, π/2) 밖이면 기본값.
-    - v0 우선순위: 탄도 설정의 기물별 v0 → 조준점 닫힌 해 → (해가 없으면) 평지 사거리 = 조준점 거리인 속도 $\sqrt{g D / \sin 2\theta}$.
+    - 발사 방향 (`shotLaunchHeading`): 고정형 = 로봇 헤딩, 터렛형 = 좌우 오프셋으로 보정한 조준 방향 ψ (터렛 범위 밖이면 가까운 한계각으로 제한, 조준 불가 자리면 조준점 방위). 터렛 범위는 그 기물 슈터의 값.
+    - 발사구 = 로봇 중심 + 발사 방향 × `shooterOffset` + 발사 방향 오른쪽 × `shooterLateralOffset`, 높이 53.5 − dz. 발사각이 (0, π/2) 밖이면 기본값.
+    - v0 우선순위: 그 기물 슈터 탄도의 v0(탐색 값) → 조준점 닫힌 해(좌우 오프셋 보정) → (해가 없으면) 평지 사거리 = 조준점 거리인 속도 $\sqrt{g D / \sin 2\theta}$.
 - **도착 규칙:**
     - **명중:** 궤적과 무관하게 조준점에 도착한다 (LUT 결과 우선). 비행 시간 $T = D / (v_0\cos\theta)$ (D = 발사구 → 조준점 수평 거리).
     - **빗맞음 + HIVE 충돌 (`intersectHiveBox`):** HIVE 직육면체를 기물 반지름만큼 넓히고(xy 경계 ± r, 높이 `HIVE_HEIGHT` + r, 공 표면 접촉 기준), 지면 직선이 넓힌 AABB 안에 있는 구간(착지 전까지)에서 공 중심 높이가 넓힌 높이 이하가 되는 첫 지점을 찾는다. 들어오는 순간 이미 낮으면 옆면 `SIDE`, 위로 들어와 구간 안에서 내려오면 윗면 `TOP`. 그 접촉점에서 아래 **충돌 후 낙하** 규칙으로 튕겨 바닥까지 떨어진다.
@@ -933,7 +940,7 @@ PAUSED / REVIEW ──BRANCH(보는 틱 < 머리, 확인창)──▶ RUNNING  (
 #### 명중 확률표 생성 연결
 
 - **생성 시작:** 로봇 탭 `APPLY`에서 LUT 입력이 바뀌었을 때, 그리고 앱 시작 때 자동 보관 / 기본 프리셋 설정으로 (캐시에 있으면 바로 `READY`). 연결 모듈 `src/app/lutTracker.ts`(React 비의존)가 관리자의 잦은 진행 알림을 100 ms로 모으고 단계 변화는 바로 알리며, 로봇별 생성 시작 시각을 보관하고 `retry`를 제공한다. 브라우저 Worker / IndexedDB 캐시는 `MainScreen`이 주입한다.
-- **경기 설정:** 두 로봇 결과가 모두 있으면 판정 함수 = `createLUTShotResolver`, 엔진 `shooters`에 기물별 사출 속도(`v0`, 못 찾은 기물은 엔진 기본 계산)를 넣고, 결과가 바뀔 때마다 경기 전 설정을 바꾼다(`setupFromDrafts` → `setSetup`). 결과가 없는 동안은 간이 판정 함수가 자리를 채우지만 `START`가 막혀 있으므로 경기에 쓰이지 않는다.
+- **경기 설정:** 두 로봇 결과가 모두 있으면 판정 함수 = `createLUTShotResolver`(기물별 슈터 / 좌우 오프셋), 엔진 `shooters`에 기물별 슈터 탄도(그 기물을 쏘는 슈터의 발사구 / 발사각 / 앞뒤 · 좌우 오프셋, 12-3) + 사출 속도(`v0`, 못 찾은 기물은 엔진 기본 계산)를 넣고, 결과가 바뀔 때마다 경기 전 설정을 바꾼다(`setupFromDrafts` → `setSetup`). 결과가 없는 동안은 간이 판정 함수가 자리를 채우지만 `START`가 막혀 있으므로 경기에 쓰이지 않는다.
 - **첫 실행 등 확률표가 준비될 때까지 `START`를 막고 기다린다** (간이 판정으로 먼저 시작하지 않음). 생성 오류는 로봇 아이콘 빨간 느낌표 + 로봇 탭 오류 문구와 `RETRY`.
 - **측정:** 헤드리스 Chromium, 4코어(Worker 3개), 기본 프리셋에서 첫 실행 약 13 ~ 18초(R1 = R2라 한 번 생성), 새로고침 = 캐시 적중 약 0.3 ~ 0.9초, 한 로봇만 다른 설정으로 적용하면 약 13초. 남은 시간 추정은 가운데 행(명중 띠 근처)이 무거워 중간에 조금 늘었다 줄어든다.
 
@@ -1401,14 +1408,16 @@ export type HeatmapLUTSet = Record<HiveCellKey, HeatmapLUT>;
 export type RobotHeatmapLUTs = Record<'POLLEN' | 'NECTAR', HeatmapLUTSet>; // 로봇당 8장, 합계 16장
 export type MatchHeatmapLUTs = Record<'robot1' | 'robot2', RobotHeatmapLUTs>; // 경기 1회분 (createLUTShotResolver 입력)
 
-// 엔진 발사 비행 처리용 슈터 탄도 (로봇별). v0 미지정 기물은 발사마다 조준점 닫힌 해
+// 엔진 발사 비행 처리용 슈터 탄도 (로봇별 · 기물별, 12-3): 그 기물을 쏘는 슈터의 값. v0 미지정이면 발사마다 조준점 닫힌 해
 export interface ShooterBallistics {
   dz: number; // 림 높이(53.5) - 발사구 지상고 (in)
   shooterPitch: number; // 발사각 (rad)
-  shooterOffset: number; // 차체 중심 기준 발사구 오프셋 (in, 발사 방향)
-  v0?: Partial<Record<'POLLEN' | 'NECTAR', number>>; // 기물별 사출 속도 (generateRobotLUTs 결과)
+  shooterOffset: number; // 차체 중심 기준 발사구 앞뒤 오프셋 (in, 발사 방향)
+  shooterLateralOffset?: number; // 좌우 오프셋 (in, + = 발사 방향 오른쪽, 기본 0)
+  v0?: number; // 이 기물의 사출 속도 (generateRobotLUTs 결과)
 }
-export type MatchShooterBallistics = Record<'robot1' | 'robot2', ShooterBallistics>;
+export type RobotShooterBallistics = Record<'POLLEN' | 'NECTAR', ShooterBallistics>;
+export type MatchShooterBallistics = Record<'robot1' | 'robot2', RobotShooterBallistics>;
 
 // HIVE 시차 낙하 예약 대기열
 export interface PendingDrop {
@@ -1597,7 +1606,7 @@ v1.0.0 이후 구현하기로 정한 항목이다. v2.0.0 항목은 아래 "v2.0
 | 미종료 가지 / 트리 전체 저장 | 중 | v1 경기 파일은 끝난 가지 하나만 저장한다 (3.9항). 가지마다 {부모, 분기 틱, 이름, 분기 이후 적용 입력 기록, 체크섬}을 저장해 트리 전체와 미종료 가지를 내보내고 불러온다 (`RECIPE_VERSION` 2). v1 경기 파일(가지 하나)도 계속 불러온다. 불러올 가지 수가 그 앱의 가지 상한을 넘으면 거부한다 |
 | 리프트 상태 주행 | 중 | v1은 리프트 상태 전체를 Stationary Lock으로 둔다 (3.4항). `RobotConfig.liftMaxSpeed`(리프트 상태 최고 속도, 0 = 잠금 = v1 동작, 형식은 4장, 회전 한계 규칙은 5.4항 v2.0.0 항목 규칙)를 추가한다. 제동 / 타이머 규칙, 투입 중 이동 시 투입 조건 재확인, "리프트를 내려야 이동" 토스트(3.8항)를 옵션에 따라 띄우기를 함께 정한다. 실제 로봇이 리프트를 올린 채 움직이는지 자료 확인이 필요하다 |
 | FLOWER 투입 방향 구역 | 하~중 | v1은 방향 무관(도달 거리 1.0 in, 2.6.3항). `RobotConfig.flowerDropZones`(인테이크 구역과 같은 `BumperZone[]`, 빈 배열 = 방향 무관 = v1 동작)를 추가한다. 엔진은 대상 판정 함수(`findDropTargetFlower`)만 교체하고, 편집 화면은 흡입 구역 편집기를 재사용한다 |
-| 슈터 구성 (없음 / POLLEN 전용 / 공용 1개 / 기물별 2개) | 중 | 상위 팀 상당수가 POLLEN / NECTAR를 서로 다른 슈터로 쏘고, NECTAR는 쏘지 않고 FLOWER용으로 보관만 하는 로봇도 있다. "어떤 기물을 쏠 수 있는가"는 슈터 하나하나의 성질이 아니라 **로봇의 슈터 구성**이므로 기물별 토글 대신 구성 하나로 받는다 (기물별 토글로 두면 "슈터 2개인데 NECTAR 발사 불가" 같은 말이 안 되는 조합이 생김).<br>· **`RobotConfig.shooterSetup`:** `NONE` 슈터 없음(FLOWER 전용) / `POLLEN_ONLY` POLLEN만 발사, NECTAR는 FLOWER용 보관 / `SHARED` 한 슈터로 두 기물 발사 (기본 = v1) / `PER_PIECE` 기물별 슈터 2개. 로봇 탭 슈터 구역 맨 위 선택 + 한 줄 설명. `canIntakeNectar = false`면 NECTAR를 다루지 않으므로 `NONE` / `SHARED`만 고를 수 있다 (`POLLEN_ONLY` · `PER_PIECE`는 `SHARED`와 같아짐)<br>· **발사 가능 기물:** `NONE` 없음, `POLLEN_ONLY` POLLEN, `SHARED` · `PER_PIECE` 둘 다<br>· **발사 대기열 = 발사 가능 기물만의 FIFO:** v1은 적재함 맨 앞 기물(`controlledPieces[0]`)을 쏜다. 그대로 두면 발사할 수 없는 기물(예: `POLLEN_ONLY` 로봇의 NECTAR)이 맨 앞에 있을 때 뒤의 POLLEN까지 영영 못 쏜다. 그래서 발사는 적재함에서 **첫 번째 발사 가능 기물**을 꺼내고(나머지 기물 순서는 유지), `SHOOTING` 요청은 발사 가능 기물이 하나라도 있을 때만 받는다 (없으면 빈 적재함처럼 조용히 무시, 토스트 없음). 연속 발사도 남은 발사 가능 기물이 있을 때만 이어 간다. 실제로 NECTAR를 따로 보관하는 로봇은 저장 경로가 슈터와 분리돼 있으므로 이 모델이 맞다. `SHARED` / `PER_PIECE`는 모든 기물이 발사 가능이라 v1과 똑같이 맨 앞 기물을 쏜다<br>· **FLOWER 투입은 그대로 맨 앞 기물(FIFO, 2.6.3항):** ENDGAME 전 NECTAR가 맨 앞이면 뒤 POLLEN 투입이 막히는 것은 v1 규칙 그대로다 (발사 대기열과 달리 바꾸지 않음)<br>· **기물별 슈터(`PER_PIECE`):** 발사구 지상고, 발사각, 앞뒤 오프셋, **좌우 오프셋**(신규, + = 로봇 오른쪽), 발사 편차 3종, 슈터 형식 / 허용 조준 오차 / 터렛 범위, 발사 딜레이, 스윗스팟을 기물별로 받는다 (기물별 슈터 카드). v0 탐색과 LUT 생성은 이미 기물별로 따로 돌므로(2.6.2항) 각 몬테카를로가 자기 슈터 설정으로 돌 뿐 **계산량 불변**. 좌우 오프셋은 `SHARED` / `POLLEN_ONLY`의 단일 슈터에도 쓸 수 있다<br>· **좌우 오프셋 조준 보정:** 드라이버(또는 자동 조준)가 그 사출구를 기준으로 맞춘다고 본다. 고정형의 조준 헤딩 ψ = β − asin(b / D) (β = 로봇 중심 → 조준점 방위, b = 좌우 오프셋, D = 로봇 중심 → 조준점 수평 거리, D ≤ |b|면 조준 불가). 사출구 → 조준점 수평 거리 = √(D² − b²) − 앞뒤 오프셋. LUT의 몸체 방향 / 발사구, 경기 중 고정형 허용 오차 · 터렛 범위 판정, 발사 비행 계획, 조준선 표시, 로봇 미리보기에 같은 식을 쓴다 (부호 규약은 테스트로 고정). 터렛 회전축은 지금처럼 차체 중심<br>· **확률표:** 발사 가능 기물만 v0 탐색 / LUT를 만들고 스윗스팟을 검증한다 (`POLLEN_ONLY`는 POLLEN만 → 생성 시간 절반). `NONE`은 생성 없이 바로 준비 완료. 발사 불가 기물의 판정 확률은 0 (엔진이 쏘지 않으므로 쓰이지 않음)<br>· **표시:** 로봇 몸체 적재물의 강조 테두리(3.7항, v1 = 0번)와 좌측 패널 명중 확률의 밝은 줄(3.8항, v1 = 0번 종류)은 **다음에 발사할 기물**(첫 발사 가능 기물) 기준으로 바꾼다. 로봇 미리보기는 사출구 수만큼 점을 그린다<br>· **버전 / 캐시:** `SHARED` + 좌우 0이면 계산 결과가 v1과 같으므로 `BALLISTICS_MODEL_VERSION`은 올리지 않는다. 확률표 캐시 키(`lutRequestKey`)는 기본값과 같은 새 항목을 키에 넣지 않아 v1 캐시가 그대로 쓰이게 한다. 캐시 레코드는 지금처럼 로봇 단위다 (`PER_PIECE` 로봇은 한 기물만 고쳐도 두 기물을 다시 만듦 — 단순함을 위해 수용) |
+| 슈터 구성 (없음 / POLLEN 전용 / 공용 1개 / 기물별 2개) | 중 | 상위 팀 상당수가 POLLEN / NECTAR를 서로 다른 슈터로 쏘고, NECTAR는 쏘지 않고 FLOWER용으로 보관만 하는 로봇도 있다. "어떤 기물을 쏠 수 있는가"는 슈터 하나하나의 성질이 아니라 **로봇의 슈터 구성**이므로 기물별 토글 대신 구성 하나로 받는다 (기물별 토글로 두면 "슈터 2개인데 NECTAR 발사 불가" 같은 말이 안 되는 조합이 생김).<br>· **`RobotConfig.shooterSetup`:** `NONE` 슈터 없음(FLOWER 전용) / `POLLEN_ONLY` POLLEN만 발사, NECTAR는 FLOWER용 보관 / `SHARED` 한 슈터로 두 기물 발사 (기본 = v1) / `PER_PIECE` 기물별 슈터 2개. 로봇 탭 슈터 구역 맨 위 선택 + 한 줄 설명. `canIntakeNectar = false`면 NECTAR를 다루지 않으므로 `NONE` / `SHARED`만 고를 수 있다 (`POLLEN_ONLY` · `PER_PIECE`는 `SHARED`와 같아짐)<br>· **발사 가능 기물:** `NONE` 없음, `POLLEN_ONLY` POLLEN, `SHARED` · `PER_PIECE` 둘 다<br>· **발사 대기열 = 발사 가능 기물만의 FIFO:** v1은 적재함 맨 앞 기물(`controlledPieces[0]`)을 쏜다. 그대로 두면 발사할 수 없는 기물(예: `POLLEN_ONLY` 로봇의 NECTAR)이 맨 앞에 있을 때 뒤의 POLLEN까지 영영 못 쏜다. 그래서 발사는 적재함에서 **첫 번째 발사 가능 기물**을 꺼내고(나머지 기물 순서는 유지), `SHOOTING` 요청은 발사 가능 기물이 하나라도 있을 때만 받는다 (없으면 빈 적재함처럼 조용히 무시, 토스트 없음). 연속 발사도 남은 발사 가능 기물이 있을 때만 이어 간다. 실제로 NECTAR를 따로 보관하는 로봇은 저장 경로가 슈터와 분리돼 있으므로 이 모델이 맞다. `SHARED` / `PER_PIECE`는 모든 기물이 발사 가능이라 v1과 똑같이 맨 앞 기물을 쏜다<br>· **FLOWER 투입은 그대로 맨 앞 기물(FIFO, 2.6.3항):** ENDGAME 전 NECTAR가 맨 앞이면 뒤 POLLEN 투입이 막히는 것은 v1 규칙 그대로다 (발사 대기열과 달리 바꾸지 않음)<br>· **기물별 슈터(`PER_PIECE`):** 발사구 지상고, 발사각, 앞뒤 오프셋, **좌우 오프셋**(신규, + = 로봇 오른쪽), 발사 편차 3종, 슈터 형식 / 허용 조준 오차 / 터렛 범위, 발사 딜레이, 스윗스팟을 기물별로 받는다 (기물별 슈터 카드). v0 탐색과 LUT 생성은 이미 기물별로 따로 돌므로(2.6.2항) 각 몬테카를로가 자기 슈터 설정으로 돌 뿐 **계산량 불변**. 좌우 오프셋은 `SHARED` / `POLLEN_ONLY`의 단일 슈터에도 쓸 수 있다<br>· **좌우 오프셋 조준 보정:** 드라이버(또는 자동 조준)가 그 사출구를 기준으로 맞춘다고 본다. 고정형의 조준 헤딩 ψ = β − asin(b / D) (β = 로봇 중심 → 조준점 방위, b = 좌우 오프셋, D = 로봇 중심 → 조준점 수평 거리, D ≤ |b|면 조준 불가). 사출구 → 조준점 수평 거리 = √(D² − b²) − 앞뒤 오프셋. LUT의 몸체 방향 / 발사구, 경기 중 고정형 허용 오차 · 터렛 범위 판정, 발사 비행 계획, 조준선 표시, 로봇 미리보기에 같은 식을 쓴다 (부호 규약은 테스트로 고정). 터렛 회전축은 지금처럼 차체 중심<br>· **확률표:** 발사 가능 기물만 v0 탐색 / LUT를 만들고 스윗스팟을 검증한다 (`POLLEN_ONLY`는 POLLEN만 → 생성 시간 절반). `NONE`은 생성 없이 바로 준비 완료. 발사 불가 기물의 판정 확률은 0 (엔진이 쏘지 않으므로 쓰이지 않음)<br>· **표시:** 로봇 몸체 적재물의 강조 테두리(3.7항, v1 = 0번)와 좌측 패널 명중 확률의 밝은 줄(3.8항, v1 = 0번 종류)은 **다음에 발사할 기물**(첫 발사 가능 기물) 기준으로 바꾼다. 로봇 미리보기는 사출구 수만큼 점을 그린다<br>· **버전 / 캐시:** `SHARED` + 좌우 0이면 계산 결과가 v1과 같으므로 `BALLISTICS_MODEL_VERSION`은 올리지 않는다. 확률표 캐시 키(`lutRequestKey`)는 기본값과 같은 새 항목을 키에 넣지 않아 v1 캐시가 그대로 쓰이게 한다. 캐시 레코드는 지금처럼 로봇 단위다 (`PER_PIECE` 로봇은 한 기물만 고쳐도 두 기물을 다시 만듦 — 단순함을 위해 수용)<br>· **진행:** 슈터 고르기 / 발사 대기열 / 좌우 오프셋 조준 보정 / 확률표 · 판정 함수 · 발사 비행의 기물별 설정은 12-3에서 구현 (2.6.2항). 남은 것: 확률표 생성 관리자 / 캐시(12-4), 렌더러 표시(13-2), 로봇 탭(13-3) |
 | 필드 벽 반사 | 중 | v1은 공중에서 벽에 닿은 공을 높이 무한 · 반발 0 벽으로 본다 (2.6.2항). 반발 계수 > 0 반사로 바꾸고(비행 구간 구조는 그대로), 반사 뒤 HIVE나 반대쪽 벽에 다시 닿는 경우를 처리한다. 벽을 넘어 필드 밖으로 나가는 공은 계속 구현하지 않는다 |
 | 착지 겹침 보정 | 하 | v1은 HIVE TIP 낙하 / 발사 비행의 착지 지점이 그 사이 움직인 로봇이나 기물 위일 수 있다 (다음 틱 충돌 처리로 밀려남). 착지 틱에 겹치면 가까운 빈 자리로 결정론적으로 옮긴다. 비행 중 충돌은 넣지 않는다 (5.3항) |
 
@@ -1613,7 +1622,7 @@ CLAUDE.md의 작은 단계 원칙에 따라 v1 Step 01 ~ 10에 이어 Step 11 ~ 
 |---|---|---|
 | (선행, 완료) | 브라우저 자동 테스트 편입 (개발 도구, 3.7항 테스트) | v2.0.0의 큰 화면 변경(터널 지붕, 시나리오 필드 편집 화면) 전에 화면 회귀를 잡을 장치. 사용자 릴리스가 아니므로 버전 변경 없음 |
 | 11 형식 / 호환 기반 | 11-1 명세: v2.0.0 데이터 형식 확정 (완료 — `RobotConfig` / 탄도 설정의 슈터 구성(`shooterSetup`) · NECTAR 슈터(`nectarShooter`) · 좌우 오프셋(`shooterLateralOffset`), `liftMaxSpeed`, `flowerDropZones`, `ScenarioConfig` `floorPieces` · `rpThresholds` · `r1AutoMovement` / `r2AutoMovement`, 검증 코드, 이전 형식 변환). 11-2 타입 + 프리셋 / 자동 보관 정리 함수 + 경기 파일 엄격 해석의 v1 변환 규칙 (`PRESET_VERSION` 2), 형식을 4장 · 3.8항 · 3.9항으로 이관 (완료) | 이후 모든 Step이 새 항목을 쓰므로 먼저 확정. 변환 규칙을 한 번에 작성 |
-| 12 엔진 / 탄도 규칙 | 12-1 HIVE 터널 충돌 / 배치 검증 (완료, 2.2항). 12-2 터널 안 발사 금지 (완료, 2.6.2항). 12-3 슈터 구성 탄도: 좌우 오프셋 조준 보정, LUT 생성 / 판정 함수 / 발사 비행 계획에 기물별 설정, 엔진 발사 대기열(첫 발사 가능 기물) (`ballistics.ts`, 엔진 발사). 12-4 확률표 생성 관리자 / 캐시: 기물별 작업 설정, 발사 불가 기물 생략, v1 캐시 키 호환 (`src/workers/`). 12-5 RP 기준값 + 오토 이동 점수. 12-6 바닥 기물 직접 배치 (`reset`). 12-7 FLOWER 투입 방향 구역. 12-8 리프트 상태 주행 (+ 입력 계층 토스트 조건). 12-9 필드 벽 반사 (발사 비행 계획). 12-10 착지 겹침 보정 | 렌더러 / 화면이 이 규칙에 의존. 12-1은 13-1이 의존하고 `ENGINE_VERSION`을 올리는 첫 커밋이라 맨 앞. 12-3 / 12-4는 슈터 설정 구조를 바꾸는 작업이라 같은 발사 비행 계획을 고치는 12-9보다 먼저 (구조를 바꾼 뒤 벽 반사를 얹어 두 번 고치지 않음). 나머지는 서로 독립 |
+| 12 엔진 / 탄도 규칙 | 12-1 HIVE 터널 충돌 / 배치 검증 (완료, 2.2항). 12-2 터널 안 발사 금지 (완료, 2.6.2항). 12-3 슈터 구성 탄도 (완료, 2.6.2항 슈터 구성 / 좌우 오프셋 조준 보정): 좌우 오프셋 조준 보정, LUT 생성 / 판정 함수 / 발사 비행 계획에 기물별 설정, 엔진 발사 대기열(첫 발사 가능 기물) (`ballistics.ts`, 엔진 발사). 12-4 확률표 생성 관리자 / 캐시: 기물별 작업 설정, 발사 불가 기물 생략, v1 캐시 키 호환 (`src/workers/`). 12-5 RP 기준값 + 오토 이동 점수. 12-6 바닥 기물 직접 배치 (`reset`). 12-7 FLOWER 투입 방향 구역. 12-8 리프트 상태 주행 (+ 입력 계층 토스트 조건). 12-9 필드 벽 반사 (발사 비행 계획). 12-10 착지 겹침 보정 | 렌더러 / 화면이 이 규칙에 의존. 12-1은 13-1이 의존하고 `ENGINE_VERSION`을 올리는 첫 커밋이라 맨 앞. 12-3 / 12-4는 슈터 설정 구조를 바꾸는 작업이라 같은 발사 비행 계획을 고치는 12-9보다 먼저 (구조를 바꾼 뒤 벽 반사를 얹어 두 번 고치지 않음). 나머지는 서로 독립 |
 | 13 렌더러 / 로봇 탭 | 13-1 터널 지붕 렌더링 + 기둥 표시 (5.4항). 13-2 렌더러: 조준선 / 비행 공을 기물별 사출구 기준으로, 적재물 강조를 다음 발사 기물 기준으로. 13-3 로봇 탭: 슈터 구역(슈터 구성 선택, 기물별 슈터 카드, 좌우 오프셋), 좌측 패널 명중 확률 밝은 줄 기준, 리프트 주행 속도 칸, 투입 방향 구역 편집기(흡입 구역 편집기 재사용), 미리보기(사출구 2개, 투입 방향 구역). 13-4 스윗스팟 편집 모드 / 히트맵 / 확률표 상태 상자 기물별 | 12-1 / 12-3 / 12-4 / 12-7 / 12-8 |
 | 14 시나리오 화면 | 14-1 시나리오 필드 편집 화면 (바닥 기물 · 로봇 · FLOWER · GARDEN · HIVE · 적재물 · 오토 TIP, 시작 자세 편집 모드 흡수). 14-2 시나리오 탭: RP 기준값 / 오토 이동 입력. 14-3 TIP 진행 표시 · 결과 팝업 RP 카드 · 요약 텍스트 | 12-5 / 12-6, 13-1(지붕 규칙을 편집 장면에도 적용) |
 | 15 가지 트리 저장 | 15-1 트리 / 미종료 가지 경기 파일 형식 + 해석 (`RECIPE_VERSION` 2, v1 경기 파일 계속 불러오기). 15-2 화면: 트리 내보내기 / 불러오기 | 11과 독립. 다른 Step과 병행 가능 |
@@ -1673,9 +1682,9 @@ v2.0.0 항목의 저장 형식은 11-1에서 확정해 11-2에서 구현했다 �
 **로봇 항목의 뜻**
 
 - **주 슈터 항목을 옮기지 않은 이유:** v1 슈터 항목 4개(`RobotConfig`)와 탄도(`ProfileBallistics`)를 그대로 "주 슈터"로 두고 NECTAR 슈터만 덧붙이면, `SHARED` / `POLLEN_ONLY` / `NONE` 로봇과 v1 파일은 항목 위치가 바뀌지 않는다 (변환 = 새 항목 추가뿐). NECTAR 슈터는 v1의 주 슈터와 같은 방식으로 런타임 값(`config.nectarShooter`)과 탄도(`ballistics.nectarShooter`)로 나뉘어 저장된다.
-- **슈터 고르기 (12-3):** 엔진 / 판정 함수 / 렌더러는 기물별 슈터를 고르는 함수 하나(`shooterFor(config, pieceType)`, 이름은 12-3에서 확정)로 읽는다: `PER_PIECE` + NECTAR → `nectarShooter`, 그 외 → 주 슈터.
+- **슈터 고르기:** 12-3에서 구현 (2.6.2항 슈터 구성 — `shooterFor` / `isPieceFireable` / `nextFireablePieceIndex`). 렌더러 / 화면(13-2 / 13-3)도 같은 함수를 쓴다.
 - **쓰지 않는 슈터 값도 보관:** v1의 숨는 칸 규칙(고정형일 때 터렛 범위 보관 등, 3.8항)과 같다. 구성을 바꿔 봤다가 되돌려도 값이 남는다.
-- **`BallisticsConfig.shooterLateralOffset`은 선택 항목:** v1 호출부 / 테스트가 그대로 동작하고, 0이면 계산이 v1과 비트 단위로 같다 (`BALLISTICS_MODEL_VERSION` 유지). 프로필 → 확률표 입력 변환(`profileBallisticsConfig`)은 12-3 / 12-4에서 좌우 오프셋 / NECTAR 슈터를 넘기도록 넓힌다 (지금은 주 슈터의 v1 항목만).
+- **`BallisticsConfig.shooterLateralOffset`은 선택 항목:** v1 호출부 / 테스트가 그대로 동작하고, 0이면 계산이 v1과 비트 단위로 같다 (`BALLISTICS_MODEL_VERSION` 유지, 12-3에서 확인). 탄도 계산 / 엔진 / 경기 설정은 12-3에서 좌우 오프셋 / NECTAR 슈터를 쓴다. 프로필 → **확률표 생성 요청**(`profileBallisticsConfig`, `src/workers/` 작업 설정)은 12-4에서 기물별로 넓힌다 — 그때까지 앱의 확률표는 주 슈터 설정으로 두 기물을 만들므로, `PER_PIECE` / 좌우 오프셋 로봇은 확률표와 비행이 어긋날 수 있다 (화면에서 고를 수 없는 값이라 13-3 전에는 파일로만 들어옴).
 - **`liftMaxSpeed` (12-8):** 항목 하나만 둔다. 회전 한계는 따로 받지 않고 평상시 최고 속도 대비 비율을 그대로 쓴다:
     - 비율 r = min(`liftMaxSpeed`, `maxSpeed`) / `maxSpeed`
     - 리프트 상태 최고 속도 = `maxSpeed` × r (= `liftMaxSpeed`, 단 `maxSpeed` 이하), 최고 각속도 = `maxTurnRate` × r
@@ -1722,10 +1731,10 @@ v2.0.0 항목의 저장 형식은 11-1에서 확정해 11-2에서 구현했다 �
 - `AUTO_PARK_NOT_IN_ZONE` — 오토 이동 `PARK`인 로봇의 시작 자세(지정하지 않으면 진영 기본값) OBB가 우리 LOADING ZONE과 겹치지 않음. (오토 PARK 판정 구역은 룰북 확인 후 12-5에서 확정)
 - 엔진은 화면을 거치지 않은 값에 대비해 v1과 같이 잘라서 받는다: 바닥 기물 수 초과분과 위치가 틀린 지정 기물은 지정에서 빼고(남은 수는 무작위 산포로), 기준값은 기본값, 모르는 오토 이동 값은 `LEAVE`.
 
-**엔진 내부 입력 방향 (저장되지 않음, 12-3 / 12-4에서 확정)**
+**엔진 내부 입력 / 확률표 생성 관리자 (12-4)**
 
-- 비행 처리용 슈터 탄도(`MatchShooterBallistics`)는 로봇별 · **기물별**로 바꾼다 (`SHARED`면 두 기물이 같은 값). 엔진 / 비행 계획이 항상 발사 기물로 조회하게 해 구성별 분기를 한곳(설정 → 엔진 입력 변환)에 모은다.
-- 확률표 생성은 발사 가능 기물의 슈터 설정만 받는다 (`NONE` = 생성 없이 준비 완료, `POLLEN_ONLY` = POLLEN만).
+- 비행 처리용 슈터 탄도는 로봇별 · 기물별로 바꿨다 (12-3, 2.6.2항 / 4장).
+- 확률표 생성 관리자(`src/workers/`)는 발사 가능 기물의 슈터 설정만 작업으로 만든다 (`NONE` = 생성 없이 준비 완료, `POLLEN_ONLY` = POLLEN만 → 생성 시간 절반). 단일 스레드 함수 `generateRobotLUTs`는 12-3에서 기물별 설정을 받는다.
 - **확률표 캐시 키 (`lutRequestKey`):** v1 키 항목은 그대로 두고, 기본값과 다른 새 항목만 넣는다 — 좌우 오프셋이 0이 아니면 `shooterLateralOffset`, 구성이 `SHARED`가 아니면 `shooterSetup`, `PER_PIECE`면 NECTAR 슈터의 탄도 항목. `SHARED` + 좌우 0은 v1과 같은 키라 사용자의 v1 캐시가 그대로 쓰인다. `PER_PIECE`인데 두 슈터의 확률표 입력이 같으면 `SHARED`와 같은 키로 본다 (결과가 같으므로 캐시 / 로봇 간 공유 유지). 확률표 입력이 아닌 런타임 값(발사 딜레이, 형식, 허용 오차, 터렛 범위)은 v1처럼 키에 넣지 않는다.
 
 **버전 정리**

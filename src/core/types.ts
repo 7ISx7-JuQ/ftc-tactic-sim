@@ -159,15 +159,18 @@ export type RobotHeatmapLUTs = Record<GamePiece['type'], HeatmapLUTSet>;
 // 경기 1회분 LUT: 로봇 슬롯별 (createLUTShotResolver 입력)
 export type MatchHeatmapLUTs = Record<'robot1' | 'robot2', RobotHeatmapLUTs>;
 
-// 엔진 발사 비행 처리용 슈터 탄도 (로봇별, 명세서 2.6.2 발사 비행 처리)
-// v0 미지정 기물은 발사마다 조준점을 향한 닫힌 해로 결정 (자동 슈터, 해가 없으면 사거리 = 조준점 거리인 속도)
+// 엔진 발사 비행 처리용 슈터 탄도 (로봇별 · 기물별, 명세서 2.6.2 발사 비행 처리, 12-3)
+// 그 기물을 쏘는 슈터의 값 (SHARED면 두 기물이 같은 값, PER_PIECE면 NECTAR = NECTAR 슈터).
+// v0 미지정이면 발사마다 조준점을 향한 닫힌 해로 결정 (자동 슈터, 해가 없으면 사거리 = 조준점 거리인 속도)
 export interface ShooterBallistics {
   dz: number;               // 림 높이(53.5) - 발사구 지상고 (inch)
   shooterPitch: number;     // 발사각 (rad, (0, π/2) 밖이면 엔진 기본값)
-  shooterOffset: number;    // 차체 중심 기준 발사구 오프셋 (inch, 발사 방향)
-  v0?: Partial<Record<GamePiece['type'], number>>; // 기물별 사출 속도 (generateRobotLUTs 결과)
+  shooterOffset: number;    // 차체 중심 기준 발사구 앞뒤 오프셋 (inch, 발사 방향)
+  shooterLateralOffset?: number; // 좌우 오프셋 (inch, + = 발사 방향 기준 오른쪽, 기본 0)
+  v0?: number;              // 이 기물의 사출 속도 (generateRobotLUTs 결과)
 }
-export type MatchShooterBallistics = Record<'robot1' | 'robot2', ShooterBallistics>;
+export type RobotShooterBallistics = Record<GamePiece['type'], ShooterBallistics>;
+export type MatchShooterBallistics = Record<'robot1' | 'robot2', RobotShooterBallistics>;
 
 // HIVE 시차 낙하 예약 대기열
 export interface PendingDrop {

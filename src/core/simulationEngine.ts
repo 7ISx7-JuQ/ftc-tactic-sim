@@ -28,7 +28,7 @@ import {
   testOBBvsOBB,
 } from './collision';
 import type { AABB, Circle, OBB, RobotBody, Vector2D } from './collision';
-import { DEFAULT_SHOOTER_BALLISTICS, planShotFlight, planVoidedHitBounce } from './ballistics';
+import { DEFAULT_SHOOTER_BALLISTICS, nextFireablePieceIndex, planShotFlight, planVoidedHitBounce, shooterFor } from './ballistics';
 import { stepRobotKinematics } from './kinematics';
 import {
   FLOWER_DEQ_GRAVITY_COOLDOWN,
@@ -566,7 +566,7 @@ export class SimulationEngine {
   // 외부 주입 슈터 명중률 해결자 (필수: 실제 경기는 탄도 LUT 기반, 테스트는 고정 확률)
   public shotResolver: ShotProbabilityResolver;
 
-  // 발사 비행 처리용 슈터 탄도 (미주입 시 기본 자동 슈터: 발사마다 조준점 닫힌 해 v0)
+  // 발사 비행 처리용 슈터 탄도 (로봇별 · 기물별, 미주입 시 기본 자동 슈터: 발사마다 조준점 닫힌 해 v0)
   public shooters: MatchShooterBallistics;
 
   // runFullMatch()가 사용하는 틱별 입력 스케줄 (없으면 정지 + IDLE)
@@ -587,7 +587,7 @@ export class SimulationEngine {
     shotResolver: ShotProbabilityResolver,
     allianceColor: 'RED' | 'BLUE' = 'RED',
     scenario?: ScenarioConfig,
-    shooters?: MatchShooterBallistics,
+    shooters?: Partial<Record<'robot1' | 'robot2', Partial<MatchShooterBallistics['robot1']>>>,
   ) {
     // 로봇 식별자는 슬롯으로 고정 (사용자 입력 id와 무관하게 r1 = 'robot1', r2 = 'robot2')
     this.r1Config = { ...r1Config, id: 'robot1' };
@@ -595,11 +595,11 @@ export class SimulationEngine {
     this.defaultAlliance = allianceColor;
     this.scenario = scenario;
     this.shotResolver = shotResolver;
-    // 생성 시점 복사 (경기 중 원본 변경이 판정에 새지 않도록)
-    const copyShooter = (b: MatchShooterBallistics['robot1'] | undefined) => {
-      const src = b ?? DEFAULT_SHOOTER_BALLISTICS;
-      return { ...src, v0: src.v0 ? { ...src.v0 } : undefined };
-    };
+    // 생성 시점 복사 (경기 중 원본 변경이 판정에 새지 않도록). 기물별 (12-3), 없는 기물은 기본 자동 슈터
+    const copyShooter = (b: Partial<MatchShooterBallistics['robot1']> | undefined): MatchShooterBallistics['robot1'] => ({
+      POLLEN: { ...(b?.POLLEN ?? DEFAULT_SHOOTER_BALLISTICS) },
+      NECTAR: { ...(b?.NECTAR ?? DEFAULT_SHOOTER_BALLISTICS) },
+    });
     this.shooters = { robot1: copyShooter(shooters?.robot1), robot2: copyShooter(shooters?.robot2) };
     this.reset();
   }
@@ -1041,9 +1041,11 @@ export class SimulationEngine {
         break;
     }
 
-    // HIVE 터널 안에서는 발사 요청을 받지 않는다 (빈 적재함처럼 조용히 무시 → 아래 IDLE / INTAKING 판정, 12-2)
-    if (request === 'SHOOTING' && robot.controlledPieces.length > 0 && !isRobotUnderHive(robot, config)) {
-      return this.enterLock(robot, 'SHOOTING', config.shooterDelay);
+    // 발사는 발사 가능 기물(슈터 구성, 12-3)이 있을 때만, HIVE 터널 안에서는 받지 않는다 (빈 적재함처럼 조용히 무시 →
+    // 아래 IDLE / INTAKING 판정, 12-2). 딜레이 = 다음에 발사할 기물을 쏘는 슈터의 발사 딜레이
+    const next = nextFireablePieceIndex(config, robot.controlledPieces);
+    if (request === 'SHOOTING' && next >= 0 && !isRobotUnderHive(robot, config)) {
+      return this.enterLock(robot, 'SHOOTING', shooterFor(config, robot.controlledPieces[next].type).shooterDelay);
     }
     // 리프트 올림은 지금 당장 투입 가능한 경우에만 수락 (불가능하면 요청 거부 → IDLE / INTAKING).
     // FLOWER_DROPPING 요청은 리프트가 올라가 있지 않으므로 무효
@@ -1051,9 +1053,9 @@ export class SimulationEngine {
       return this.enterLock(robot, 'FLOWER_SETUP', config.flowerSetupDelay);
     }
 
-    const next: RobotState['actionState'] = request === 'INTAKING' ? 'INTAKING' : 'IDLE';
-    if (next === robot.actionState) return robot;
-    return { ...robot, actionState: next, stateTimer: 0, isBraking: false, intakeContactTimer: 0, intakeTargetPieceId: null };
+    const nextState: RobotState['actionState'] = request === 'INTAKING' ? 'INTAKING' : 'IDLE';
+    if (nextState === robot.actionState) return robot;
+    return { ...robot, actionState: nextState, stateTimer: 0, isBraking: false, intakeContactTimer: 0, intakeTargetPieceId: null };
   }
 
   private toIdleState(robot: RobotState): RobotState {
@@ -1262,8 +1264,10 @@ export class SimulationEngine {
           return;
         }
         this.fireShot(robot, slot === 'r1' ? 'robot1' : 'robot2');
-        if (input.actionState === 'SHOOTING' && robot.controlledPieces.length > 0) {
-          rearm('SHOOTING', config.shooterDelay);
+        // 연속 발사는 남은 발사 가능 기물이 있을 때만 (딜레이 = 그 기물을 쏘는 슈터의 값)
+        const next = nextFireablePieceIndex(config, robot.controlledPieces);
+        if (input.actionState === 'SHOOTING' && next >= 0) {
+          rearm('SHOOTING', shooterFor(config, robot.controlledPieces[next].type).shooterDelay);
         } else {
           toIdle();
         }
@@ -1341,8 +1345,12 @@ export class SimulationEngine {
 
   // 발사: 명중 여부와 비행 궤적을 발사 시점에 확정하고 비행 대기열에 등록 (도착은 stepShotArrivals)
   private fireShot(robot: RobotState, robotId: 'robot1' | 'robot2'): void {
-    const piece = robot.controlledPieces.shift(); // FIFO: 가장 먼저 적재된 기물부터 발사
-    if (!piece) return;
+    const config = robotId === 'robot1' ? this.r1Config : this.r2Config;
+    // 발사 대기열 = 발사 가능 기물만의 FIFO (12-3): 적재함의 첫 번째 발사 가능 기물을 꺼내고 나머지 순서는 유지.
+    // SHARED / PER_PIECE는 모든 기물이 발사 가능이라 0번 (v1과 같음)
+    const index = nextFireablePieceIndex(config, robot.controlledPieces);
+    if (index < 0) return;
+    const [piece] = robot.controlledPieces.splice(index, 1);
 
     const hive = this.field.hive;
     const alliance = this.field.allianceColor;
@@ -1357,13 +1365,12 @@ export class SimulationEngine {
     // 전복 진행 중(낙하 대기열 방출 전)에는 새 득점을 수용하지 않음
     const hit = !hive.isTipping && roll < p;
 
-    const config = robotId === 'robot1' ? this.r1Config : this.r2Config;
     const plan = planShotFlight({
       robotX: robot.x,
       robotY: robot.y,
       robotHeading: robot.heading,
-      shooter: config,
-      ballistics: this.shooters[robotId],
+      shooter: shooterFor(config, piece.type),
+      ballistics: this.shooters[robotId][piece.type],
       pieceType: piece.type,
       alliance,
       upwardCell: hive.upwardCell,

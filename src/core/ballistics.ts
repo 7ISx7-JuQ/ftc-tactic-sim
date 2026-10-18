@@ -33,6 +33,8 @@ import type {
   MatchHeatmapLUTs,
   RobotConfig,
   RobotHeatmapLUTs,
+  RobotShooterBallistics,
+  ShooterAimConfig,
   ShooterBallistics,
   ShotProbabilityResolver,
 } from './types';
@@ -86,18 +88,36 @@ export function bearingTo(fromX: number, fromY: number, toX: number, toY: number
 }
 
 /**
- * 발사구 위치: 로봇 중심에서 조준 방향으로 shooterOffset만큼 이동한 점, 높이는 launchHeight
- * (터렛 회전축은 차체 중심으로 가정 → 고정형 / 터렛형 공통)
+ * 슈터 조준 방향 (12-3, 명세서 2.6.2 좌우 오프셋 조준 보정): 사출구가 슈터 방향 기준 오른쪽으로 b(좌우 오프셋)만큼
+ * 떨어져 있으면, 그 사출구에서 나간 공이 조준점을 지나도록 ψ = β − asin(b / D)로 돌린다
+ * (β = 로봇 중심 → 조준점 방위, D = 로봇 중심 → 조준점 수평 거리). D ≤ |b|면 조준 불가 → null.
+ * b = 0이면 β 그대로 (v1과 같은 계산). 부호: + = 로봇 오른쪽 (캔버스 y-down, 오른쪽 = (−sinψ, cosψ))
+ */
+export function shooterAimHeading(robotX: number, robotY: number, target: { x: number; y: number }, lateralOffset = 0): number | null {
+  const bearing = bearingTo(robotX, robotY, target.x, target.y);
+  if (lateralOffset === 0) return bearing;
+  if (!Number.isFinite(lateralOffset)) return null;
+  const distance = Math.hypot(target.x - robotX, target.y - robotY);
+  if (!(distance > Math.abs(lateralOffset))) return null;
+  return normalizeAngle(bearing - Math.asin(lateralOffset / distance));
+}
+
+/**
+ * 발사구 위치: 로봇 중심에서 조준(발사) 방향으로 shooterOffset, 그 오른쪽으로 shooterLateralOffset만큼 이동한 점,
+ * 높이는 launchHeight (터렛 회전축은 차체 중심으로 가정 → 고정형 / 터렛형 공통). 좌우 오프셋 0이면 v1과 같은 계산
  */
 export function launchPoint(
   robotX: number,
   robotY: number,
   aimHeading: number,
-  config: Pick<BallisticsConfig, 'dz' | 'shooterOffset'>,
+  config: Pick<BallisticsConfig, 'dz' | 'shooterOffset' | 'shooterLateralOffset'>,
 ): Vector3D {
+  const cos = Math.cos(aimHeading);
+  const sin = Math.sin(aimHeading);
+  const lateral = config.shooterLateralOffset ?? 0;
   return {
-    x: robotX + config.shooterOffset * Math.cos(aimHeading),
-    y: robotY + config.shooterOffset * Math.sin(aimHeading),
+    x: robotX + config.shooterOffset * cos - lateral * sin,
+    y: robotY + config.shooterOffset * sin + lateral * cos,
     z: launchHeight(config),
   };
 }
@@ -126,16 +146,17 @@ export function solveLaunchSpeed(distance: number, heightDiff: number, pitch: nu
 }
 
 /**
- * 조준점을 향한 명목 궤적의 닫힌 해 v0: 로봇 중심 (robotX, robotY)에서 목표점을 정면 조준
- * 해가 없으면 null
+ * 조준점을 향한 명목 궤적의 닫힌 해 v0: 로봇 중심 (robotX, robotY)에서 목표점을 조준 (좌우 오프셋 보정 포함)
+ * 해가 없으면 (좌우 오프셋으로 조준 불가 포함) null
  */
 export function solveAimLaunchSpeed(
   robotX: number,
   robotY: number,
   target: Vector3D,
-  config: Pick<BallisticsConfig, 'dz' | 'shooterOffset' | 'shooterPitch'>,
+  config: Pick<BallisticsConfig, 'dz' | 'shooterOffset' | 'shooterLateralOffset' | 'shooterPitch'>,
 ): number | null {
-  const heading = bearingTo(robotX, robotY, target.x, target.y);
+  const heading = shooterAimHeading(robotX, robotY, target, config.shooterLateralOffset);
+  if (heading === null) return null;
   const origin = launchPoint(robotX, robotY, heading, config);
   const distance = Math.hypot(target.x - origin.x, target.y - origin.y);
   return solveLaunchSpeed(distance, target.z - origin.z, config.shooterPitch);
@@ -149,15 +170,15 @@ export function sweetSpotLaunchSpeed(config: BallisticsConfig): number | null {
   return solveAimLaunchSpeed(config.sweetSpot.x, config.sweetSpot.y, hiveCellAimPoint('RED', 'AUDIENCE_CELL'), config);
 }
 
-/** 조준점을 향한 명목 궤적 생성 (로봇 중심에서 정면 조준, 사출 속도 v0) */
+/** 조준점을 향한 명목 궤적 생성 (로봇 중심에서 조준, 좌우 오프셋 보정 — 조준 불가면 방위 그대로, 사출 속도 v0) */
 export function createAimTrajectory(
   robotX: number,
   robotY: number,
   target: Pick<Vector3D, 'x' | 'y'>,
   v0: number,
-  config: Pick<BallisticsConfig, 'dz' | 'shooterOffset' | 'shooterPitch'>,
+  config: Pick<BallisticsConfig, 'dz' | 'shooterOffset' | 'shooterLateralOffset' | 'shooterPitch'>,
 ): Trajectory {
-  const heading = bearingTo(robotX, robotY, target.x, target.y);
+  const heading = shooterAimHeading(robotX, robotY, target, config.shooterLateralOffset) ?? bearingTo(robotX, robotY, target.x, target.y);
   const origin = launchPoint(robotX, robotY, heading, config);
   return { ...origin, heading, v0, pitch: config.shooterPitch };
 }
@@ -511,9 +532,9 @@ export function createRng(seed: number, skip = 0): () => number {
 }
 
 /**
- * 로봇 중심 (robotX, robotY)에서 셀 조준점을 정면 조준해 사출 속도 v0로 쏠 때의 몬테카를로 명중률
+ * 로봇 중심 (robotX, robotY)에서 셀 조준점을 조준해(좌우 오프셋 보정) 사출 속도 v0로 쏠 때의 몬테카를로 명중률
  * 샘플 편차: 속도 v0·(1 + N(0, v0NoisePercent)), 방위 + N(0, headingNoiseRad), 발사각 + N(0, pitchNoiseRad)
- * 발사구는 명목 조준 방향 기준 (편차는 공의 방향에만 적용)
+ * 발사구는 명목 조준 방향 기준 (편차는 공의 방향에만 적용). 좌우 오프셋으로 조준할 수 없는 자리는 0 (난수 미사용)
  */
 export function estimateHitRate(
   robotX: number,
@@ -528,7 +549,8 @@ export function estimateHitRate(
 ): number {
   const n = Math.max(1, Math.floor(samples));
   const aim = hiveCellAimPoint(alliance, cell);
-  const aimHeading = bearingTo(robotX, robotY, aim.x, aim.y);
+  const aimHeading = shooterAimHeading(robotX, robotY, aim, config.shooterLateralOffset);
+  if (aimHeading === null) return 0;
   const origin = launchPoint(robotX, robotY, aimHeading, config);
   const radius = PIECE_PHYSICS[pieceType].radius;
   const v0Noise = config.v0NoisePercent ?? DEFAULT_V0_NOISE_PERCENT;
@@ -654,13 +676,15 @@ export function sweetSpotToBasis(p: { x: number; y: number }, alliance: 'RED' | 
 export interface BallisticsIssue {
   code: 'PARAM_INVALID' | 'SWEET_SPOT_OUT_OF_FIELD' | 'SWEET_SPOT_IN_HIVE' | 'SWEET_SPOT_NO_SOLUTION';
   message: string;
+  pieceType?: PieceType; // 기물별 슈터 검증의 문제 슈터 (두 기물 설정이 다를 때만, 12-3)
 }
 
 type RobotSize = Pick<RobotConfig, 'length' | 'width'>;
 
-// 조준점을 정면으로 바라보는 로봇 몸체 OBB (axes[0] = 로봇 앞쪽). 스윗스팟 검증과 GUI 스윗스팟 편집 모드 윤곽(09-10c)이 같이 씀
-export function aimingRobotOBB(x: number, y: number, target: { x: number; y: number }, size: RobotSize): OBB {
-  const heading = bearingTo(x, y, target.x, target.y);
+// 조준점을 조준한 로봇 몸체 OBB (axes[0] = 로봇 앞쪽). 스윗스팟 검증과 GUI 스윗스팟 편집 모드 윤곽(09-10c)이 같이 씀.
+// 좌우 오프셋이 있으면 몸체도 보정한 조준 방향 ψ를 바라본다 (고정형 기준, 조준 불가면 방위 그대로)
+export function aimingRobotOBB(x: number, y: number, target: { x: number; y: number }, size: RobotSize, lateralOffset = 0): OBB {
+  const heading = shooterAimHeading(x, y, target, lateralOffset) ?? bearingTo(x, y, target.x, target.y);
   const cos = Math.cos(heading);
   const sin = Math.sin(heading);
   return {
@@ -683,8 +707,8 @@ export function validateBallisticsConfig(config: BallisticsConfig, robotSize: Ro
   const finite = (v: number | undefined) => v === undefined || Number.isFinite(v);
   const nonNegative = (v: number | undefined) => v === undefined || (Number.isFinite(v) && v >= 0);
 
-  if (!Number.isFinite(config.dz) || !Number.isFinite(config.shooterOffset) || !finite(config.sweetSpot.x) || !finite(config.sweetSpot.y)) {
-    add('PARAM_INVALID', 'dz / shooterOffset / sweetSpot must be finite numbers');
+  if (!Number.isFinite(config.dz) || !Number.isFinite(config.shooterOffset) || !finite(config.shooterLateralOffset) || !finite(config.sweetSpot.x) || !finite(config.sweetSpot.y)) {
+    add('PARAM_INVALID', 'dz / shooterOffset / shooterLateralOffset / sweetSpot must be finite numbers');
   }
   if (!(config.shooterPitch > 0 && config.shooterPitch < Math.PI / 2)) {
     add('PARAM_INVALID', 'shooterPitch must be in (0, π/2) rad');
@@ -699,10 +723,11 @@ export function validateBallisticsConfig(config: BallisticsConfig, robotSize: Ro
 
   const sweetSpot = snapSweetSpot(config.sweetSpot);
   const aim = hiveCellAimPoint('RED', 'AUDIENCE_CELL');
-  const body = aimingRobotOBB(sweetSpot.x, sweetSpot.y, aim, robotSize);
+  const body = aimingRobotOBB(sweetSpot.x, sweetSpot.y, aim, robotSize, config.shooterLateralOffset);
   if (testOBBvsFieldBounds(body).colliding) add('SWEET_SPOT_OUT_OF_FIELD', 'robot body at sweet spot must be inside the field');
   if (testOBBvsAABB(body, HIVE_AABB).colliding) add('SWEET_SPOT_IN_HIVE', 'robot body at sweet spot overlaps HIVE');
-  if (sweetSpotLaunchSpeed({ ...config, sweetSpot }) === null) add('SWEET_SPOT_NO_SOLUTION', 'no launch speed reaches the aim point from the sweet spot (D·tanθ ≤ Δz)');
+  // 좌우 오프셋으로 조준할 수 없는 자리(D ≤ |좌우 오프셋|)도 해가 없음
+  if (sweetSpotLaunchSpeed({ ...config, sweetSpot }) === null) add('SWEET_SPOT_NO_SOLUTION', 'no launch speed reaches the aim point from the sweet spot (D·tanθ ≤ Δz, or D ≤ |lateral offset|)');
   return issues;
 }
 
@@ -816,7 +841,9 @@ export function canPossiblyHit(
   cell: HiveCell = 'AUDIENCE_CELL',
 ): boolean {
   const aim = hiveCellAimPoint(alliance, cell);
-  const origin = launchPoint(robotX, robotY, bearingTo(robotX, robotY, aim.x, aim.y), config);
+  const aimHeading = shooterAimHeading(robotX, robotY, aim, config.shooterLateralOffset);
+  if (aimHeading === null) return false; // 조준 불가 (estimateHitRate도 0)
+  const origin = launchPoint(robotX, robotY, aimHeading, config);
   const k = REACH_NOISE_SIGMA;
   const dv = k * (config.v0NoisePercent ?? DEFAULT_V0_NOISE_PERCENT);
   const dp = k * (config.pitchNoiseRad ?? DEFAULT_PITCH_NOISE_RAD);
@@ -857,8 +884,8 @@ export interface ReferenceLUTOptions {
 }
 
 /**
- * 기준 셀 RED_AUDIENCE LUT (144 × 144): 격자 중심에서 조준점을 정면 조준한 몬테카를로 명중률
- * - 조준점을 바라보는 로봇 몸체가 HIVE AABB와 겹치는 격자는 0
+ * 기준 셀 RED_AUDIENCE LUT (144 × 144): 격자 중심에서 조준점을 조준한(좌우 오프셋 보정) 몬테카를로 명중률
+ * - 조준한 로봇 몸체가 HIVE AABB와 겹치는 격자 / 좌우 오프셋으로 조준할 수 없는 격자는 0
  * - 격자마다 독립 난수 구간: 격자 i는 스트림의 [i · samples · 6, (i + 1) · samples · 6) 구간을 사용 (겹침 없음).
  *   따라서 도달 불가 격자를 건너뛰어도, 계산 순서나 병렬 분할이 달라도 각 격자 값은 같다.
  *   (144² 격자 × 샘플 × 6이 2³²를 넘지 않아야 구간이 겹치지 않음: 샘플 수 ≤ 약 34,000)
@@ -904,7 +931,7 @@ export function generateReferenceLUTRows(
     for (let gx = 0; gx < LUT_GRID_SIZE; gx++) {
       const x = lutCellCenter(gx);
       const y = lutCellCenter(gy);
-      if (testOBBvsAABB(aimingRobotOBB(x, y, aim, robotSize), HIVE_AABB).colliding) continue;
+      if (testOBBvsAABB(aimingRobotOBB(x, y, aim, robotSize, config.shooterLateralOffset), HIVE_AABB).colliding) continue;
       if (skipUnreachable && !canPossiblyHit(x, y, v0, config)) continue;
       const index = lutIndex(gx, gy);
       const rng = createRng(seed, index * n * RNG_DRAWS_PER_SAMPLE);
@@ -945,9 +972,32 @@ export interface RobotLUTOptions extends ReferenceLUTOptions {
 
 export interface RobotBallisticsResult {
   luts: RobotHeatmapLUTs;                          // 기물 종류별 4셀 LUT (로봇당 8장)
-  v0: Record<PieceType, number | null>;            // 채택한 사출 속도 (검증 실패 시 null)
+  v0: Record<PieceType, number | null>;            // 채택한 사출 속도 (검증 실패 / 발사 불가 기물은 null)
   sweetSpotHitRate: Record<PieceType, number>;     // 스윗스팟 명중률 (0이면 GUI 경고)
   issues: BallisticsIssue[];                       // 검증 실패 목록 (비어 있지 않으면 LUT 전부 0)
+}
+
+/**
+ * 로봇 1대의 기물별 슈터 탄도 (12-3): 발사 가능 기물만 키가 있다 (없는 기물 = 발사 불가 → LUT 0, v0 null).
+ * BallisticsConfig 하나를 주면 두 기물이 같은 슈터 (SHARED, v1과 같은 계산)
+ */
+export type RobotLUTShooters = Partial<Record<PieceType, BallisticsConfig>>;
+
+const isSingleConfig = (v: BallisticsConfig | RobotLUTShooters): v is BallisticsConfig => 'dz' in v;
+
+/** 단일 설정 → 두 기물 공용, 기물별 설정 → 그대로 */
+export function lutShooters(configs: BallisticsConfig | RobotLUTShooters): RobotLUTShooters {
+  return isSingleConfig(configs) ? { POLLEN: configs, NECTAR: configs } : configs;
+}
+
+/**
+ * 기물별 슈터 검증 (발사 가능 기물만). 두 기물이 같은 설정이면 한 번만 검사하고 기물 종류를 붙이지 않는다 (SHARED = v1과 같은 결과)
+ */
+export function validateLUTShooters(shooters: RobotLUTShooters, robotSize: RobotSize): BallisticsIssue[] {
+  const { POLLEN, NECTAR } = shooters;
+  if (POLLEN && NECTAR && (POLLEN === NECTAR || JSON.stringify(POLLEN) === JSON.stringify(NECTAR))) return validateBallisticsConfig(POLLEN, robotSize);
+  const tagged = PIECE_TYPES.filter(type => shooters[type]);
+  return tagged.flatMap(type => validateBallisticsConfig(shooters[type]!, robotSize).map(issue => (tagged.length > 1 ? { ...issue, pieceType: type } : issue)));
 }
 
 function emptyLUTSet(): HeatmapLUTSet {
@@ -963,15 +1013,18 @@ function emptyLUTSet(): HeatmapLUTSet {
 /**
  * 로봇 1대의 LUT 8장 생성 (2단계 몬테카를로): 기물 종류별 v0 탐색 → 기준 셀 LUT → 4셀 대칭 복사
  * 스윗스팟은 격자 중심으로 스냅하여 검증 / 탐색. 같은 설정 + 같은 시드 = 같은 LUT.
- * 검증 실패 시 LUT 전부 0 (판정 함수가 항상 0을 반환)
+ * 12-3: 기물마다 그 기물을 쏘는 슈터 설정으로 계산 (기물별 몬테카를로는 원래 따로라 계산량 불변). 설정이 없는 기물(발사 불가)은
+ * 계산하지 않고 0. 검증은 발사 가능 기물의 슈터만 하며, 하나라도 실패하면 LUT 전부 0 (판정 함수가 항상 0을 반환).
+ * 두 기물의 설정이 다르면 검증 문제에 기물 종류를 붙인다
  */
 export function generateRobotLUTs(
-  config: BallisticsConfig,
+  configs: BallisticsConfig | RobotLUTShooters,
   robotSize: RobotSize,
   options: RobotLUTOptions = {},
 ): RobotBallisticsResult {
   const seed = options.seed ?? DEFAULT_BALLISTICS_SEED;
-  const issues = validateBallisticsConfig(config, robotSize);
+  const shooters = lutShooters(configs);
+  const issues = validateLUTShooters(shooters, robotSize);
   const result: RobotBallisticsResult = {
     luts: { POLLEN: emptyLUTSet(), NECTAR: emptyLUTSet() },
     v0: { POLLEN: null, NECTAR: null },
@@ -980,9 +1033,11 @@ export function generateRobotLUTs(
   };
   if (issues.length > 0) return result;
 
-  const snapped: BallisticsConfig = { ...config, sweetSpot: snapSweetSpot(config.sweetSpot) };
   const seeds = robotLUTSeeds(seed);
   PIECE_TYPES.forEach(type => {
+    const config = shooters[type];
+    if (!config) return; // 발사 불가 기물
+    const snapped: BallisticsConfig = { ...config, sweetSpot: snapSweetSpot(config.sweetSpot) };
     const found = searchLaunchSpeed(snapped, type, options.searchSamples, seeds[type].search);
     if (!found) return;
     result.v0[type] = found.v0;
@@ -996,6 +1051,29 @@ export function generateRobotLUTs(
 // ============================================================
 // 8. 런타임 명중 확률 판정 함수 (엔진 주입용, 명세서 2.6.2)
 // ============================================================
+
+// 슈터 구성 (12-3, 명세서 5.4 v2.0.0 항목 규칙): 로봇 제원에서 기물별 슈터를 고르는 규칙의 단일 출처.
+// 엔진 발사 대기열 / 판정 함수 / 비행 계획 / (13-x) 렌더러 · 화면이 같은 함수를 쓴다
+// (판정 함수는 발사 딜레이가 필요 없으므로 shooterDelay는 선택, 없으면 0)
+type ShooterSetupSource = Pick<RobotConfig, 'turretType' | 'turretRange' | 'aimTolerance'> & Partial<Pick<RobotConfig, 'shooterDelay' | 'shooterSetup' | 'nectarShooter'>>;
+
+/** 그 기물을 쏠 수 있는지: NONE 없음 / POLLEN_ONLY POLLEN / SHARED · PER_PIECE 둘 다 (구성 미지정 = SHARED) */
+export function isPieceFireable(config: Partial<Pick<RobotConfig, 'shooterSetup'>>, pieceType: PieceType): boolean {
+  const setup = config.shooterSetup ?? 'SHARED';
+  if (setup === 'NONE') return false;
+  return setup !== 'POLLEN_ONLY' || pieceType === 'POLLEN';
+}
+
+/** 그 기물을 쏘는 슈터의 조준 / 발사 런타임 제원: PER_PIECE + NECTAR → nectarShooter, 그 외 → 주 슈터 */
+export function shooterFor(config: ShooterSetupSource, pieceType: PieceType): ShooterAimConfig {
+  if (config.shooterSetup === 'PER_PIECE' && pieceType === 'NECTAR' && config.nectarShooter) return config.nectarShooter;
+  return { shooterDelay: config.shooterDelay ?? 0, turretType: config.turretType, turretRange: config.turretRange, aimTolerance: config.aimTolerance };
+}
+
+/** 적재함에서 다음에 발사할 기물의 위치 = 첫 번째 발사 가능 기물 (없으면 −1). SHARED / PER_PIECE는 항상 0번 (v1과 같음) */
+export function nextFireablePieceIndex(config: Partial<Pick<RobotConfig, 'shooterSetup'>>, pieces: readonly Pick<GamePiece, 'type'>[]): number {
+  return pieces.findIndex(piece => isPieceFireable(config, piece.type));
+}
 
 /** 진영 + 상향 셀 → LUT 셀 키 */
 export function hiveCellKey(alliance: 'RED' | 'BLUE', cell: HiveCell): HiveCellKey {
@@ -1027,21 +1105,37 @@ export function isAimWithinShooterRange(
 /**
  * LUT 기반 명중 확률 판정 함수 (SimulationEngine 생성자에 주입, 엔진 수정 불필요)
  * P_final = (조준 가능 ? P_spatial : 0), P_spatial = 발사 로봇 · 기물 종류 · 아군 상향 셀 LUT를 로봇 중심에서 쌍선형 보간
- * 조준점 방위는 로봇 중심 → 상향 셀 조준점(투입구 오각형 면적 중심). 설정값은 생성 시점에 복사해 고정 (결정론)
+ * 조준 방향은 로봇 중심 → 상향 셀 조준점(투입구 오각형 면적 중심) 방위를 그 기물 슈터의 좌우 오프셋으로 보정한 값
+ * (shooterAimHeading, 오프셋은 shooters의 기물별 shooterLateralOffset, 미지정 0). 조준 범위(고정형 허용 오차 / 터렛 범위)도
+ * 그 기물 슈터의 값(shooterFor). 발사 불가 기물 / 조준 불가 자리는 0. 설정값은 생성 시점에 복사해 고정 (결정론)
  */
 export function createLUTShotResolver(
   luts: MatchHeatmapLUTs,
-  r1Config: Pick<RobotConfig, 'turretType' | 'turretRange' | 'aimTolerance'>,
-  r2Config: Pick<RobotConfig, 'turretType' | 'turretRange' | 'aimTolerance'>,
+  r1Config: ShooterSetupSource,
+  r2Config: ShooterSetupSource,
+  shooters?: Partial<Record<'robot1' | 'robot2', Partial<Record<PieceType, Pick<ShooterBallistics, 'shooterLateralOffset'>>>>>,
 ): ShotProbabilityResolver {
-  const shooters = {
-    robot1: { turretType: r1Config.turretType, turretRange: [...r1Config.turretRange] as [number, number], aimTolerance: r1Config.aimTolerance },
-    robot2: { turretType: r2Config.turretType, turretRange: [...r2Config.turretRange] as [number, number], aimTolerance: r2Config.aimTolerance },
+  const spec = (config: ShooterSetupSource, robotId: 'robot1' | 'robot2') => {
+    const out = {} as Record<PieceType, { fireable: boolean; aim: ShooterAimConfig; lateral: number }>;
+    for (const type of PIECE_TYPES) {
+      const aim = shooterFor(config, type);
+      out[type] = {
+        fireable: isPieceFireable(config, type),
+        aim: { ...aim, turretRange: [aim.turretRange[0], aim.turretRange[1]] },
+        lateral: shooters?.[robotId]?.[type]?.shooterLateralOffset ?? 0,
+      };
+    }
+    return out;
   };
+  const specs = { robot1: spec(r1Config, 'robot1'), robot2: spec(r2Config, 'robot2') };
   return (robotId, pieceType, robotX, robotY, heading, alliance, upwardCell) => {
+    const shooter = specs[robotId][pieceType];
+    if (!shooter.fireable) return 0;
     const aim = hiveCellAimPoint(alliance, upwardCell);
-    const deltaPsi = angleDifference(bearingTo(robotX, robotY, aim.x, aim.y), heading);
-    if (!isAimWithinShooterRange(deltaPsi, shooters[robotId])) return 0;
+    const aimHeading = shooterAimHeading(robotX, robotY, aim, shooter.lateral);
+    if (aimHeading === null) return 0;
+    const deltaPsi = angleDifference(aimHeading, heading);
+    if (!isAimWithinShooterRange(deltaPsi, shooter.aim)) return 0;
     const p = sampleLUT(luts[robotId][pieceType][hiveCellKey(alliance, upwardCell)], robotX, robotY);
     return Number.isFinite(p) ? Math.min(1, Math.max(0, p)) : 0;
   };
@@ -1054,21 +1148,32 @@ export function createLUTShotResolver(
 // 엔진 기본 슈터 (탄도 설정 미주입 시): 발사구 14 in, 발사각 60°, 오프셋 0, v0는 발사마다 조준점 닫힌 해
 export const DEFAULT_SHOOTER_BALLISTICS: ShooterBallistics = { dz: HIVE_RIM_Z - 14, shooterPitch: Math.PI / 3, shooterOffset: 0 };
 
-/** generateRobotLUTs 결과 → 엔진 슈터 탄도 (탐색한 기물별 v0 포함) */
-export function shooterBallisticsFrom(config: BallisticsConfig, result: RobotBallisticsResult): ShooterBallistics {
-  const v0: Partial<Record<PieceType, number>> = {};
+/**
+ * generateRobotLUTs 입력 + 결과 → 엔진 슈터 탄도 (기물별, 탐색한 v0 포함). 발사 불가 기물(설정 없음)은 다른 기물의 슈터 값
+ * (엔진이 쏘지 않으므로 쓰이지 않음, 둘 다 없으면 엔진 기본 슈터)
+ */
+export function shooterBallisticsFrom(configs: BallisticsConfig | RobotLUTShooters, result: RobotBallisticsResult): RobotShooterBallistics {
+  const shooters = lutShooters(configs);
+  const out = {} as RobotShooterBallistics;
   for (const type of PIECE_TYPES) {
+    const config = shooters[type] ?? shooters.POLLEN ?? shooters.NECTAR ?? DEFAULT_SHOOTER_BALLISTICS;
     const v = result.v0[type];
-    if (v !== null) v0[type] = v;
+    out[type] = {
+      dz: config.dz,
+      shooterPitch: config.shooterPitch,
+      shooterOffset: config.shooterOffset,
+      shooterLateralOffset: config.shooterLateralOffset ?? 0,
+      ...(v !== null && shooters[type] ? { v0: v } : {}),
+    };
   }
-  return { dz: config.dz, shooterPitch: config.shooterPitch, shooterOffset: config.shooterOffset, v0 };
+  return out;
 }
 
 /**
- * 명목 발사 방향: 고정형은 로봇 헤딩, 터렛형은 조준점 방위 (터렛 범위 밖이면 가까운 한계각으로 제한, [-π, π])
+ * 명목 발사 방향: 고정형은 로봇 헤딩, 터렛형은 조준 방향 aimBearing (좌우 오프셋 보정한 ψ, 터렛 범위 밖이면 가까운 한계각으로 제한, [-π, π])
  */
 export function shotLaunchHeading(
-  shooter: Pick<RobotConfig, 'turretType' | 'turretRange'>,
+  shooter: Pick<ShooterAimConfig, 'turretType' | 'turretRange'>,
   robotHeading: number,
   aimBearing: number,
 ): number {
@@ -1104,8 +1209,8 @@ export interface ShotFlightInput {
   robotX: number;
   robotY: number;
   robotHeading: number;
-  shooter: Pick<RobotConfig, 'turretType' | 'turretRange'>;
-  ballistics: ShooterBallistics;
+  shooter: Pick<ShooterAimConfig, 'turretType' | 'turretRange'>; // 그 기물을 쏘는 슈터 (shooterFor)
+  ballistics: ShooterBallistics;                                // 그 기물을 쏘는 슈터의 탄도 (기물별)
   pieceType: PieceType;
   alliance: 'RED' | 'BLUE';
   upwardCell: HiveCell;
@@ -1119,13 +1224,16 @@ export interface ShotFlightInput {
  * - 빗맞음 + HIVE 직육면체 충돌 (intersectHiveBox, 반지름 확장): 첫 접촉점에서 반사 포물선 (planHiveBounce) → 바닥 착지
  * - 빗맞음 + HIVE를 넘어가거나 닿지 않음: 공 중심 높이 = 반지름인 사거리 지점 착지, 착지 속도 = 발사 방향 v0·cosθ × landingSpeedRetention.
  *   지면 직선이 착지 전에 필드 벽(반지름 여유)에 닿으면 벽 접촉점에서 수평 이동을 멈추고 수직 낙하 (착지 속도 0)
- * - v0: 탄도 설정의 기물별 값 → 없으면 조준점 닫힌 해 → 그것도 없으면 평지 사거리 = 조준점 거리인 속도
+ * - v0: 탄도 설정의 값(그 기물 슈터의 탐색 v0) → 없으면 조준점 닫힌 해 → 그것도 없으면 평지 사거리 = 조준점 거리인 속도
+ * - 좌우 오프셋 (12-3): 사출구 = 발사 방향 기준 오른쪽으로 shooterLateralOffset. 터렛형은 보정한 조준 방향 ψ(shooterAimHeading)로 돌린다
+ *   (조준 불가 자리면 조준점 방위). 0이면 v1과 같은 계산
  */
 export function planShotFlight(input: ShotFlightInput): ShotFlightPlan {
   const { robotX, robotY, ballistics, pieceType } = input;
   const aim = hiveCellAimPoint(input.alliance, input.upwardCell);
-  const bearing = bearingTo(robotX, robotY, aim.x, aim.y);
-  const heading = shotLaunchHeading(input.shooter, input.robotHeading, bearing);
+  const lateral = Number.isFinite(ballistics.shooterLateralOffset) ? (ballistics.shooterLateralOffset as number) : 0;
+  const aimHeading = shooterAimHeading(robotX, robotY, aim, lateral) ?? bearingTo(robotX, robotY, aim.x, aim.y);
+  const heading = shotLaunchHeading(input.shooter, input.robotHeading, aimHeading);
   const pitch =
     Number.isFinite(ballistics.shooterPitch) && ballistics.shooterPitch > 0 && ballistics.shooterPitch < Math.PI / 2
       ? ballistics.shooterPitch
@@ -1133,12 +1241,13 @@ export function planShotFlight(input: ShotFlightInput): ShotFlightPlan {
   const cfg = {
     dz: Number.isFinite(ballistics.dz) ? ballistics.dz : DEFAULT_SHOOTER_BALLISTICS.dz,
     shooterOffset: Number.isFinite(ballistics.shooterOffset) ? ballistics.shooterOffset : 0,
+    shooterLateralOffset: lateral,
     shooterPitch: pitch,
   };
   const origin = launchPoint(robotX, robotY, heading, cfg);
   const aimDistance = Math.max(EPSILON, Math.hypot(aim.x - origin.x, aim.y - origin.y));
 
-  const given = ballistics.v0?.[pieceType];
+  const given = ballistics.v0;
   const v0 =
     given !== undefined && Number.isFinite(given) && given > 0
       ? given
