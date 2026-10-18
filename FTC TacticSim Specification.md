@@ -1590,7 +1590,12 @@ export interface RobotConfig {
 
 - **주 슈터 항목을 옮기지 않는 이유:** v1 항목 4개를 그대로 "주 슈터"로 두고 NECTAR 슈터만 덧붙이면, `SHARED` / `POLLEN_ONLY` / `NONE` 로봇과 v1 파일은 항목 위치가 바뀌지 않는다 (변환 = 새 항목 추가뿐). 엔진 / 판정 함수 / 렌더러는 기물별 슈터를 고르는 함수 하나(`shooterFor(config, pieceType)`, 이름은 12-3에서 확정)로 읽는다: `PER_PIECE` + NECTAR → `nectarShooter`, 그 외 → 주 슈터.
 - **쓰지 않는 슈터 값도 보관:** v1의 숨는 칸 규칙(고정형일 때 터렛 범위 보관 등, 3.8항)과 같다. 구성을 바꿔 봤다가 되돌려도 값이 남는다.
-- `liftMaxSpeed`는 항목 하나만 둔다. 리프트 상태의 각속도 한계를 이 값에서 어떻게 정할지(예: `maxTurnRate × liftMaxSpeed / maxSpeed`)와 제동 / 타이머 규칙은 12-8에서 정하며 항목을 더하지 않는다. 실제 한계 = min(`liftMaxSpeed`, `maxSpeed`)라 `maxSpeed`보다 큰 값도 오류가 아니다 (최고 속도를 낮출 때 다른 칸이 빨개지지 않게).
+- `liftMaxSpeed`는 항목 하나만 둔다. 회전 한계는 따로 받지 않고 평상시 최고 속도 대비 비율을 그대로 쓴다:
+    - 비율 r = min(`liftMaxSpeed`, `maxSpeed`) / `maxSpeed`
+    - 리프트 상태 최고 속도 = `maxSpeed` × r (= `liftMaxSpeed`, 단 `maxSpeed` 이하), 최고 각속도 = `maxTurnRate` × r
+    - `liftMaxSpeed` = 0이면 r = 0이라 이동 / 회전 모두 막힌다 (= v1 Stationary Lock).
+    - `maxSpeed`보다 큰 값도 오류가 아니다 (r = 1로 제한, 최고 속도를 낮출 때 다른 칸이 빨개지지 않게).
+    - 가속도(`maxLinearAccel` / `maxAngularAccel`)는 바꾸지 않는 안이며, 제동 / 타이머 규칙과 함께 12-8에서 확정한다 (항목은 더하지 않음).
 - `flowerDropZones`의 판정(FLOWER 원통 정사영 원과 구역 겹침)은 12-7에서 정한다.
 
 **슈터 탄도 (`RobotProfile.ballistics` = `ProfileBallistics`, 확률표 입력 `BallisticsConfig`)**
