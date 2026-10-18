@@ -14,7 +14,7 @@ const assert = (c: boolean, m: string) => {
 // 타입이 모든 코드 / 상태를 나열하도록 강제 (새 코드가 생기면 여기서 컴파일 오류 → 문구 추가)
 const ISSUE_CODES: Record<ScenarioIssue['code'] | PlacementIssue['code'] | BallisticsIssue['code'], true> = {
   FLOWER_COUNT: true, GARDEN_COUNT: true, HIVE_COUNT: true, HIVE_OVER_THRESHOLD: true, LOADOUT_OVER_CAPACITY: true,
-  LOADOUT_NECTAR_NOT_ALLOWED: true, NECTAR_IN_PLAY_EXCEEDED: true, POLLEN_TOTAL_EXCEEDED: true, AUTO_TIP_COUNT: true,
+  LOADOUT_NECTAR_NOT_ALLOWED: true, NECTAR_IN_PLAY_EXCEEDED: true, POLLEN_TOTAL_EXCEEDED: true, AUTO_TIP_COUNT: true, RP_THRESHOLDS: true, AUTO_PARK_NOT_IN_ZONE: true,
   PLACEMENT_OUT_OF_FIELD: true, PLACEMENT_IN_HIVE: true, PLACEMENT_IN_FLOWER: true, PLACEMENT_ROBOT_OVERLAP: true, PLACEMENT_PIECE_OVERLAP: true,
   PARAM_INVALID: true, SWEET_SPOT_OUT_OF_FIELD: true, SWEET_SPOT_IN_HIVE: true, SWEET_SPOT_NO_SOLUTION: true,
 };

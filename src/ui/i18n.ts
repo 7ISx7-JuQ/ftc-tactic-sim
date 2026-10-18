@@ -423,6 +423,8 @@ const en = {
   'issue.NECTAR_IN_PLAY_EXCEEDED': 'HIVE + robot NECTAR exceeds the 3 NECTAR in play',
   'issue.POLLEN_TOTAL_EXCEEDED': 'Specified POLLEN exceeds the 32 in total',
   'issue.AUTO_TIP_COUNT': 'Auto TIP count must be an integer from 0 to 5',
+  'issue.RP_THRESHOLDS': 'RP thresholds must be integers from 1 to 99, POLLINATOR 1 ≤ POLLINATOR 2',
+  'issue.AUTO_PARK_NOT_IN_ZONE': '{robot} auto PARK needs a start pose in the LOADING ZONE',
   // 시작 자세 배치 검증 (validateRobotPlacement, 3.8)
   'issue.PLACEMENT_OUT_OF_FIELD': '{robot} body is outside the field',
   'issue.PLACEMENT_IN_HIVE': '{robot} body overlaps a HIVE pillar',
@@ -830,6 +832,8 @@ const ko: Record<MessageKey, string> = {
   'issue.NECTAR_IN_PLAY_EXCEEDED': 'HIVE + 로봇 NECTAR가 필드의 NECTAR 3개 초과',
   'issue.POLLEN_TOTAL_EXCEEDED': '지정한 POLLEN이 총 32개 초과',
   'issue.AUTO_TIP_COUNT': '오토 TIP 횟수는 0 ~ 5 정수',
+  'issue.RP_THRESHOLDS': 'RP 기준값은 1 ~ 99 정수, POLLINATOR 1 ≤ POLLINATOR 2',
+  'issue.AUTO_PARK_NOT_IN_ZONE': '{robot} 오토 PARK는 시작 자세가 LOADING ZONE 안이어야 함',
   'issue.PLACEMENT_OUT_OF_FIELD': '{robot} 몸체가 필드 밖으로 나감',
   'issue.PLACEMENT_IN_HIVE': '{robot} 몸체가 HIVE 기둥과 겹침',
   'issue.PLACEMENT_IN_FLOWER': '{robot} 몸체가 FLOWER와 겹침',

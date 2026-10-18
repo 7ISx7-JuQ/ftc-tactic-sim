@@ -16,6 +16,7 @@ import {
   rerollSeed,
   resetSpawn,
   scenarioFormIssues,
+  scenarioIssueText,
   setAlliance,
   setFlowerCount,
   setHivePieces,
@@ -163,5 +164,15 @@ describe('시나리오 탭 폼 (09-11a)', () => {
     expect(newSeed(fixed, () => seq.shift()!)).toBe(Math.floor(0.25 * 2 ** 32));
     expect(newSeed(7, () => 0.999999999)).toBeLessThan(2 ** 32);
     expect(newSeed(0, () => 0)).toBe(1);
+  });
+
+  it('H. (12-5) RP 기준값 / 오토 PARK 문제: 칸 묶음 rp / 로봇별 autoMove · spawn, tabIssues에도 포함', () => {
+    const rp = withScenario({ allianceColor: 'RED', rpThresholds: { swarmPoints: 16, pollinator1Tips: 9, pollinator2Tips: 7 } });
+    expect(scenarioFormIssues(rp)).toEqual([{ code: 'RP_THRESHOLDS', fields: ['rp'] }]);
+    const park = withScenario({ allianceColor: 'RED', r1AutoMovement: 'PARK', r2AutoMovement: 'PARK' });
+    expect(scenarioFormIssues(park)).toEqual([{ code: 'AUTO_PARK_NOT_IN_ZONE', robot: 'robot2', fields: ['autoMove.robot2', 'spawn.robot2'] }]);
+    expect(codes(park)).toEqual(['AUTO_PARK_NOT_IN_ZONE@robot2']);
+    expect(tabIssues(park, 'scenario').map(i => i.code)).toEqual(['AUTO_PARK_NOT_IN_ZONE']);
+    expect(scenarioIssueText(scenarioFormIssues(park)[0], 'en')).toBe('R2 auto PARK needs a start pose in the LOADING ZONE');
   });
 });

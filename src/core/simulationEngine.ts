@@ -39,6 +39,7 @@ import {
 } from './types';
 import type {
   ActionRequest,
+  AutoMovement,
   DeepReadonly,
   FieldState,
   FlowerState,
@@ -50,6 +51,7 @@ import type {
   RobotPose,
   RobotState,
   RPState,
+  RPThresholds,
   ScenarioConfig,
   ScoreBreakdown,
   ShotProbabilityResolver,
@@ -97,6 +99,45 @@ const PIECE_COLLISION_PASSES = 2;
 
 const HIVE_TIP_POINTS = 20;
 const PARK_POINTS = 5;
+
+// ------------------------------------------------------------
+// RP 기준값 / 오토 이동 (12-5, 명세서 2.6.5): 대회마다 바뀔 수 있는 기준 숫자는 시나리오 값(ScenarioConfig.rpThresholds),
+// SWARM = 오토 이동 점수(LEAVE / PARK) + TELEOP PARK 점수 ≥ swarmPoints. 오토 이동 점수는 RP에만 쓰고 totalScore에는 넣지 않는다
+// ------------------------------------------------------------
+
+/** RP 기준 기본값 (v1 판정과 같은 결과: 기본 오토 이동 LEAVE · LEAVE 6점 + TELEOP 두 로봇 PARK 10점 = 16) */
+export const DEFAULT_RP_THRESHOLDS: Readonly<RPThresholds> = { swarmPoints: 16, pollinator1Tips: 4, pollinator2Tips: 7 };
+/** RP 기준값 입력 범위 (정수) */
+export const RP_THRESHOLD_MAX = 99;
+/** 로봇 2대가 얻을 수 있는 SWARM 최대 점수 (오토 PARK 5 × 2 + TELEOP PARK 5 × 2): 넘는 기준은 경고 */
+export const SWARM_MAX_POINTS = 20;
+/** 오토 이동 점수 (룰북: LEAVE 3 / PARK 5) */
+export const AUTO_MOVEMENT_POINTS: Readonly<Record<AutoMovement, number>> = { NONE: 0, LEAVE: 3, PARK: 5 };
+/** 오토 이동 기본값 (v1 판정과 같은 결과) */
+export const DEFAULT_AUTO_MOVEMENT: AutoMovement = 'LEAVE';
+
+const isThreshold = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 1 && (v as number) <= RP_THRESHOLD_MAX;
+
+/** 기준값이 올바른지: 세 값이 정수 1 ~ 99, POLLINATOR 1 ≤ POLLINATOR 2 */
+export function isValidRPThresholds(t: RPThresholds): boolean {
+  return isThreshold(t.swarmPoints) && isThreshold(t.pollinator1Tips) && isThreshold(t.pollinator2Tips) && t.pollinator1Tips <= t.pollinator2Tips;
+}
+
+/** 시나리오의 RP 기준값 (없거나 틀리면 기본값 — 엔진 안전장치, 화면은 검증으로 막음) */
+export function resolveRPThresholds(scenario: Pick<ScenarioConfig, 'rpThresholds'> | undefined): RPThresholds {
+  const t = scenario?.rpThresholds;
+  return t && isValidRPThresholds(t) ? { ...t } : { ...DEFAULT_RP_THRESHOLDS };
+}
+
+/** 로봇별 오토 이동 (없거나 모르는 값이면 LEAVE) */
+export function resolveAutoMovement(value: unknown): AutoMovement {
+  return value === 'NONE' || value === 'LEAVE' || value === 'PARK' ? value : DEFAULT_AUTO_MOVEMENT;
+}
+
+/** 오토 이동 점수 = 두 로봇의 LEAVE 3 / PARK 5 / NONE 0 합 (RP 판정에만 사용) */
+export function autoMovementPoints(scenario: Pick<ScenarioConfig, 'r1AutoMovement' | 'r2AutoMovement'> | undefined): number {
+  return AUTO_MOVEMENT_POINTS[resolveAutoMovement(scenario?.r1AutoMovement)] + AUTO_MOVEMENT_POINTS[resolveAutoMovement(scenario?.r2AutoMovement)];
+}
 const FLOWER_POINTS_PER_PIECE = 2;
 const FLOWER_BOTTOM_BONUS = 5;
 
@@ -193,8 +234,18 @@ export interface ScenarioIssue {
     | 'LOADOUT_NECTAR_NOT_ALLOWED'
     | 'NECTAR_IN_PLAY_EXCEEDED'
     | 'POLLEN_TOTAL_EXCEEDED'
-    | 'AUTO_TIP_COUNT';
+    | 'AUTO_TIP_COUNT'
+    | 'RP_THRESHOLDS'
+    | 'AUTO_PARK_NOT_IN_ZONE';
   message: string;
+  robots?: ('robot1' | 'robot2')[]; // 로봇별 문제의 대상 (AUTO_PARK_NOT_IN_ZONE)
+}
+
+/** 시나리오 경고 (적용은 허용): SWARM_UNREACHABLE = 로봇 2대로 도달할 수 없는 SWARM 기준 (> 20점) */
+export type ScenarioWarning = 'SWARM_UNREACHABLE';
+export function scenarioWarnings(scenario: Pick<ScenarioConfig, 'rpThresholds'>): ScenarioWarning[] {
+  const t = scenario.rpThresholds;
+  return t && isValidRPThresholds(t) && t.swarmPoints > SWARM_MAX_POINTS ? ['SWARM_UNREACHABLE'] : [];
 }
 
 function isCount(value: number, max: number): boolean {
@@ -262,6 +313,22 @@ export function validateScenario(
   const autoTips = scenario.autoTipCount ?? 0;
   if (!isCount(autoTips, INITIAL_HUMAN_NECTAR_STOCK)) {
     add('AUTO_TIP_COUNT', `오토 팁 횟수는 0 ~ ${INITIAL_HUMAN_NECTAR_STOCK} 정수여야 함 (입력 ${autoTips})`);
+  }
+
+  // RP 기준값 (12-5): 지정했으면 정수 1 ~ 99, POLLINATOR 1 ≤ POLLINATOR 2
+  if (scenario.rpThresholds !== undefined && !isValidRPThresholds(scenario.rpThresholds)) {
+    add('RP_THRESHOLDS', `RP 기준값은 정수 1 ~ ${RP_THRESHOLD_MAX}, POLLINATOR 1 ≤ POLLINATOR 2여야 함`);
+  }
+
+  // 오토 PARK (12-5, 룰북: LOADING ZONE에 일부라도 들어가 있으면 PARK): 오토 종료 위치 = TELEOP 시작 자세가 우리 LOADING ZONE과 겹쳐야 함
+  const alliance = scenario.allianceColor === 'BLUE' ? 'BLUE' : 'RED';
+  const zone = LOADING_ZONE_AABB[alliance];
+  const parkers = ([['robot1', scenario.r1AutoMovement, scenario.r1Spawn, r1Config], ['robot2', scenario.r2AutoMovement, scenario.r2Spawn, r2Config]] as const)
+    .filter(([id, movement, spawn, config]) => resolveAutoMovement(movement) === 'PARK'
+      && !testOBBvsAABB(getRobotOBB(resolveSpawnPose(spawn, DEFAULT_SPAWN_POSES[alliance][id]), config), zone).colliding)
+    .map(([id]) => id);
+  if (parkers.length > 0) {
+    issues.push({ code: 'AUTO_PARK_NOT_IN_ZONE', message: `오토 PARK 로봇(${parkers.join(', ')})의 시작 자세가 LOADING ZONE과 겹치지 않음`, robots: parkers });
   }
 
   return issues;
@@ -1570,11 +1637,13 @@ export class SimulationEngine {
       gardenPieceIds,
       parkedRobots,
     };
+    // RP (12-5): 기준값은 시나리오 값. SWARM = 오토 이동 점수 + TELEOP PARK 점수, POLLINATOR = 오토 + 텔레옵 팁 합산 (점수는 텔레옵 팁만)
+    const rp = resolveRPThresholds(this.scenario);
+    const tips = this.field.hive.autoTipCount + this.field.hive.tipCount;
     this.rpAchieved = {
-      swarm: parked === 2,
-      // POLLINATOR: 오토 + 텔레옵 팁 합산 (점수는 텔레옵 팁만)
-      pollinator1: this.field.hive.autoTipCount + this.field.hive.tipCount >= 4,
-      pollinator2: this.field.hive.autoTipCount + this.field.hive.tipCount >= 7,
+      swarm: autoMovementPoints(this.scenario) + parkScore >= rp.swarmPoints,
+      pollinator1: tips >= rp.pollinator1Tips,
+      pollinator2: tips >= rp.pollinator2Tips,
     };
   }
 

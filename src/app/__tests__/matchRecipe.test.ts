@@ -263,8 +263,11 @@ describe('저장 레시피 (10-3)', () => {
     expect(code(edit(['setup.robot1.ballistics.shooterLateralOffset', '3']))).toEqual({ code: 'INVALID_FIELD', field: 'setup.robot1' });
     // 시나리오 새 선택 항목: 형식이 맞으면 그대로, 틀리면 거부
     const floor = [{ type: 'POLLEN', x: 70.5, y: 120 }];
-    const withNew = parse(edit(['setup.scenario.floorPieces', floor], ['setup.scenario.rpThresholds', { swarmPoints: 14, pollinator1Tips: 3, pollinator2Tips: 6 }], ['setup.scenario.r1AutoMovement', 'PARK']));
-    expect(withNew.ok && [withNew.recipe.setup.scenario.floorPieces, withNew.recipe.setup.scenario.rpThresholds?.swarmPoints, withNew.recipe.setup.scenario.r1AutoMovement]).toEqual([floor, 14, 'PARK']);
+    // (PARK는 시작 자세가 LOADING ZONE 안이어야 해서 — 12-5 검증 — 이 경기의 R1 자세로는 NONE)
+    const withNew = parse(edit(['setup.scenario.floorPieces', floor], ['setup.scenario.rpThresholds', { swarmPoints: 14, pollinator1Tips: 3, pollinator2Tips: 6 }], ['setup.scenario.r1AutoMovement', 'NONE']));
+    expect(withNew.ok && [withNew.recipe.setup.scenario.floorPieces, withNew.recipe.setup.scenario.rpThresholds?.swarmPoints, withNew.recipe.setup.scenario.r1AutoMovement]).toEqual([floor, 14, 'NONE']);
+    const parkOutside = parse(edit(['setup.scenario.r1AutoMovement', 'PARK']));
+    expect(!parkOutside.ok && parkOutside.error.code === 'INVALID_SETUP' && parkOutside.error.issues).toContain('AUTO_PARK_NOT_IN_ZONE');
     expect(code(edit(['setup.scenario.floorPieces', [{ type: 'ROCK', x: 1, y: 2 }]]))).toEqual({ code: 'INVALID_FIELD', field: 'setup.scenario' });
     expect(code(edit(['setup.scenario.rpThresholds', { swarmPoints: 16 }]))).toEqual({ code: 'INVALID_FIELD', field: 'setup.scenario' });
     expect(code(edit(['setup.scenario.r2AutoMovement', 'FLY']))).toEqual({ code: 'INVALID_FIELD', field: 'setup.scenario' });

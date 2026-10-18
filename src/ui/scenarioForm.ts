@@ -213,7 +213,8 @@ export const SPAWN_AXES: readonly (keyof RobotPose)[] = ['x', 'y', 'heading'];
 export const spawnFieldKey = (robot: RobotId, axis: keyof RobotPose) => `spawn.${robot}.${axis}`;
 
 /** 빨간 표시 묶음 키 */
-export type ScenarioFieldGroup = 'hive' | `loadout.${RobotId}` | `flower.${number}` | 'garden.ally' | 'garden.opponent' | 'autoTip' | `spawn.${RobotId}`;
+// rp / autoMove.*: RP 기준값 / 오토 이동 칸 (12-5, 입력칸은 14-2)
+export type ScenarioFieldGroup = 'hive' | `loadout.${RobotId}` | `flower.${number}` | 'garden.ally' | 'garden.opponent' | 'autoTip' | `spawn.${RobotId}` | 'rp' | `autoMove.${RobotId}`;
 
 export interface ScenarioFormIssue {
   code: string;                   // 문구 사전 issue.* 키
@@ -263,6 +264,12 @@ export function scenarioFormIssues(values: DraftValues): ScenarioFormIssue[] {
         break;
       case 'AUTO_TIP_COUNT':
         out.push({ code: issue.code, fields: ['autoTip'] });
+        break;
+      case 'RP_THRESHOLDS':
+        out.push({ code: issue.code, fields: ['rp'] });
+        break;
+      case 'AUTO_PARK_NOT_IN_ZONE':
+        for (const robot of issue.robots ?? []) out.push({ code: issue.code, robot, fields: [`autoMove.${robot}`, `spawn.${robot}`] });
         break;
     }
     seen.add(issue.code);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SimulationEngine, DEFAULT_RNG_SEED, DEFAULT_SPAWN_POSES, validateScenario, validateRobotPlacement, PLACEMENT_TOLERANCE, HIVE_SHOOT_TOLERANCE, isRobotUnderHive, getCarryCapacity, DT } from '../simulationEngine';
+import { SimulationEngine, DEFAULT_RNG_SEED, DEFAULT_SPAWN_POSES, validateScenario, validateRobotPlacement, PLACEMENT_TOLERANCE, HIVE_SHOOT_TOLERANCE, isRobotUnderHive, getCarryCapacity, DT, DEFAULT_RP_THRESHOLDS, AUTO_MOVEMENT_POINTS, autoMovementPoints, resolveAutoMovement, resolveRPThresholds, scenarioWarnings } from '../simulationEngine';
 import type { RobotDriveInput } from '../simulationEngine';
 import type { BumperZone, RobotConfig, RobotPose, ScenarioConfig, ShotProbabilityResolver } from '../types';
 import { createLUTShotResolver, generateRobotLUTs, bearingTo, shooterBallisticsFrom, planShotFlight, intersectHiveBox, DEFAULT_SHOOTER_BALLISTICS } from '../ballistics';
@@ -1335,5 +1335,58 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       fireTicks(e);
       assert(seen.join() === 'POLLEN', `resolver receives the fired piece type (${seen.join()})`);
     }
+  }, TEST_TIMEOUT_MS);
+
+  it('Z. RP 기준값 + 오토 이동 (12-5): SWARM = 오토 이동 점수 + TELEOP PARK ≥ 기준, POLLINATOR = TIP 합 ≥ 기준, 검증 / 안전장치', () => {
+    // 상수 / 해석
+    expect(DEFAULT_RP_THRESHOLDS).toEqual({ swarmPoints: 16, pollinator1Tips: 4, pollinator2Tips: 7 });
+    expect(AUTO_MOVEMENT_POINTS).toEqual({ NONE: 0, LEAVE: 3, PARK: 5 });
+    expect([resolveAutoMovement(undefined), resolveAutoMovement('FLY'), resolveAutoMovement('PARK')]).toEqual(['LEAVE', 'LEAVE', 'PARK']);
+    expect([autoMovementPoints(undefined), autoMovementPoints({ r1AutoMovement: 'PARK' }), autoMovementPoints({ r1AutoMovement: 'NONE', r2AutoMovement: 'PARK' })]).toEqual([6, 8, 5]);
+    expect(resolveRPThresholds({ rpThresholds: { swarmPoints: 0, pollinator1Tips: 4, pollinator2Tips: 7 } })).toEqual(DEFAULT_RP_THRESHOLDS); // 틀린 값 → 기본값
+    expect(resolveRPThresholds({ rpThresholds: { swarmPoints: 12, pollinator1Tips: 3, pollinator2Tips: 3 } })).toEqual({ swarmPoints: 12, pollinator1Tips: 3, pollinator2Tips: 3 });
+
+    // 경기 끝까지 (입력 없음): 두 로봇 모두 / R1만 LOADING ZONE에 주차
+    const BOTH: Partial<ScenarioConfig> = { r1Spawn: pose(9, 27), r2Spawn: pose(9, 46) };
+    const ONE: Partial<ScenarioConfig> = {};
+    const end = (sc: Partial<ScenarioConfig>) => {
+      const e = eng(sc);
+      e.runFullMatch();
+      const f = e.getFrame(6000)!;
+      return { rp: f.rpAchieved, total: f.totalScore, park: f.scoreBreakdown!.park };
+    };
+    const both = end(BOTH);
+    const one = end(ONE);
+    assert(both.park === 10 && one.park === 5, `parked robots (${both.park} / ${one.park})`);
+    assert(both.rp.swarm && !one.rp.swarm, 'default LEAVE · LEAVE (6): 6 + 10 ≥ 16, 6 + 5 < 16 (= v1 judgment)');
+    const parkPark = end({ ...ONE, r2Spawn: pose(9, 46), r1AutoMovement: 'PARK', r2AutoMovement: 'PARK', r1Spawn: pose(9, 27) });
+    assert(parkPark.rp.swarm && parkPark.total === both.total, 'auto PARK · PARK (10) + TELEOP 10: RP only, total score unchanged');
+    const noneNone = end({ ...BOTH, r1AutoMovement: 'NONE', r2AutoMovement: 'NONE' });
+    assert(!noneNone.rp.swarm && noneNone.total === both.total, 'auto NONE · NONE: 0 + 10 < 16');
+    const oneParked = end({ ...ONE, r1AutoMovement: 'PARK' }); // 5 + 3 + 5 = 13
+    assert(!oneParked.rp.swarm && end({ ...ONE, r1AutoMovement: 'PARK', rpThresholds: { swarmPoints: 13, pollinator1Tips: 4, pollinator2Tips: 7 } }).rp.swarm, 'custom SWARM threshold (13 / 13)');
+    // POLLINATOR: 오토 TIP 3 + TELEOP 0
+    const tips = (rpThresholds?: ScenarioConfig['rpThresholds']) => end({ autoTipCount: 3, ...(rpThresholds ? { rpThresholds } : {}) }).rp;
+    const def = tips();
+    const custom = tips({ swarmPoints: 16, pollinator1Tips: 3, pollinator2Tips: 4 });
+    assert(!def.pollinator1 && custom.pollinator1 && !custom.pollinator2, 'POLLINATOR thresholds from the scenario');
+    const invalid = tips({ swarmPoints: 16, pollinator1Tips: 3, pollinator2Tips: 2 });
+    assert(!invalid.pollinator1, 'invalid thresholds -> engine falls back to defaults');
+
+    // 검증
+    const codes = (sc: Partial<ScenarioConfig>) => validateScenario({ allianceColor: 'RED', ...sc }, C1, C2).map(i => `${i.code}${i.robots ? ':' + i.robots.join('+') : ''}`).join(',');
+    assert(codes({ rpThresholds: { swarmPoints: 20, pollinator1Tips: 1, pollinator2Tips: 99 } }) === '', 'valid thresholds');
+    for (const bad of [{ swarmPoints: 0, pollinator1Tips: 4, pollinator2Tips: 7 }, { swarmPoints: 16, pollinator1Tips: 4.5, pollinator2Tips: 7 }, { swarmPoints: 16, pollinator1Tips: 4, pollinator2Tips: 100 }, { swarmPoints: 16, pollinator1Tips: 8, pollinator2Tips: 7 }]) {
+      assert(codes({ rpThresholds: bad }) === 'RP_THRESHOLDS', `invalid thresholds ${JSON.stringify(bad)}`);
+    }
+    assert(codes({ r1AutoMovement: 'PARK' }) === '', 'RED R1 default start pose touches the LOADING ZONE -> PARK allowed');
+    assert(codes({ r2AutoMovement: 'PARK' }) === 'AUTO_PARK_NOT_IN_ZONE:robot2', 'RED R2 default start pose is outside the LOADING ZONE');
+    assert(codes({ allianceColor: 'BLUE', r1AutoMovement: 'PARK', r2AutoMovement: 'PARK' }) === 'AUTO_PARK_NOT_IN_ZONE:robot1', 'BLUE: zone is the BLUE LOADING ZONE');
+    assert(codes({ r2AutoMovement: 'PARK', r2Spawn: pose(9, 46) }) === '', 'start pose partly in the zone is enough');
+    assert(codes({ r2AutoMovement: 'LEAVE' }) === '' && codes({ r2AutoMovement: 'NONE' }) === '', 'LEAVE / NONE need no zone');
+    // 경고: 로봇 2대로 도달할 수 없는 SWARM 기준
+    expect(scenarioWarnings({ rpThresholds: { swarmPoints: 21, pollinator1Tips: 4, pollinator2Tips: 7 } })).toEqual(['SWARM_UNREACHABLE']);
+    expect(scenarioWarnings({ rpThresholds: { swarmPoints: 20, pollinator1Tips: 4, pollinator2Tips: 7 } })).toEqual([]);
+    expect(scenarioWarnings({})).toEqual([]);
   }, TEST_TIMEOUT_MS);
 });
