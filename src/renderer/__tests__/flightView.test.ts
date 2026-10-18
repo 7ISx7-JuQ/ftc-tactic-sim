@@ -16,7 +16,8 @@ const cfg = (id: 'robot1' | 'robot2'): RobotConfig => ({
   id, name: id, width: 18, length: 18, maxSpeed: 60, maxTurnRate: 4, maxLinearAccel: 120, maxAngularAccel: 10,
   intakeDelay: 100, canIntakeNectar: true, intakeZones: createIntakeZonePreset('FRONT', { length: 18, width: 18 }, 3),
   shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0], aimTolerance: 0.05,
-  flowerSetupDelay: 500, flowerDropDelay: 200, maxControlledPieces: 4,
+  flowerSetupDelay: 500, flowerDropDelay: 200,
+  shooterSetup: 'SHARED', nectarShooter: { shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0], aimTolerance: 0.05 }, flowerDropZones: [], liftMaxSpeed: 0, maxControlledPieces: 4,
 });
 const SHOOT: RobotDriveInput = { targetVx: 0, targetVy: 0, targetOmega: 0, actionState: 'SHOOTING' };
 const aim = hiveCellAimPoint('RED', 'AUDIENCE_CELL');

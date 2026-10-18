@@ -105,6 +105,27 @@ describe('SETTINGS / 자동 보관 (09-8b)', () => {
     expect(mergeWithDefaults('x', { a: 1 })).toBeNull();
   });
 
+  it('G. (11-2) v2.0.0 이전에 보관한 로봇: 새 항목은 v1 동작 값, NECTAR 슈터 = 보관된 주 슈터 복사 (SETTINGS_VERSION 유지)', () => {
+    expect(SETTINGS_VERSION).toBe(1);
+    const wrap = (applied: unknown) => JSON.stringify({ version: SETTINGS_VERSION, settings: custom, applied });
+    const omit = (o: object, keys: readonly string[]): Record<string, unknown> => Object.fromEntries(Object.entries(o).filter(([k]) => !keys.includes(k)));
+    const oldConfig = omit(defaults.robot1.config, ['shooterSetup', 'nectarShooter', 'flowerDropZones', 'liftMaxSpeed']);
+    const oldBallistics = omit(defaults.robot1.ballistics, ['shooterLateralOffset', 'nectarShooter']);
+    const stored = { ...defaults.robot1, config: { ...oldConfig, shooterDelay: 400, turretType: 'TURRET', turretRange: [-1, 1] }, ballistics: { ...oldBallistics, dz: 41 } };
+    const back = parseStoredConfig(wrap({ ...defaults, robot1: stored }), defaults).applied;
+    expect(back?.robot1.config).toEqual({
+      ...defaults.robot1.config,
+      shooterDelay: 400,
+      turretType: 'TURRET',
+      turretRange: [-1, 1],
+      nectarShooter: { ...defaults.robot1.config.nectarShooter, shooterDelay: 400, turretType: 'TURRET', turretRange: [-1, 1] },
+    });
+    expect(back?.robot1.ballistics).toEqual({ ...defaults.robot1.ballistics, dz: 41, nectarShooter: { ...defaults.robot1.ballistics.nectarShooter, dz: 41 } });
+    // v2.0.0 항목이 있는 보관값은 그대로
+    const v2 = { ...defaults.robot1, config: { ...defaults.robot1.config, shooterSetup: 'POLLEN_ONLY', liftMaxSpeed: 15 } };
+    expect(parseStoredConfig(wrap({ ...defaults, robot1: v2 }), defaults).applied?.robot1).toEqual(v2);
+  });
+
   it('E. 저장소: 메모리 저장 / 불러오기, 저장소 없음 / 오류는 기본값 · 저장 실패(false)', () => {
     const { storage, data } = memory();
     expect(saveStoredConfig(storage, { settings: custom, applied: null })).toBe(true);

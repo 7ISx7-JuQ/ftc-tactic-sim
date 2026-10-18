@@ -15,7 +15,7 @@ import { LOG_RECORD_BYTES } from '../input/inputLog';
 import type { MatchInputs } from '../input/inputLog';
 import { tabIssues } from '../ui/configDraft';
 import type { DraftTab, DraftValues } from '../ui/configDraft';
-import { MATCH_FORMAT, PRESET_FORMAT, robotPresetData, sanitizeRobotPreset, sanitizeScenarioPreset } from '../ui/presetFile';
+import { MATCH_FORMAT, PRESET_FORMAT, robotPresetData, sanitizeRobotPreset, sanitizeScenarioPreset, upgradeRobotProfileData } from '../ui/presetFile';
 import type { RobotProfile } from '../ui/robotForm';
 
 export const RECIPE_FORMAT = MATCH_FORMAT;
@@ -204,19 +204,22 @@ function containedIn(a: unknown, b: unknown): boolean {
 
 /**
  * 로봇 프로필 엄격 해석: 프리셋 정리 함수가 아무것도 바꾸지 않아야 통과 (없는 항목 / 형식 틀림 → null).
- * 틀린 팀 번호 / 팀명은 정리 함수가 빈 값으로 바꾸므로 같은 비교에서 걸린다
+ * 틀린 팀 번호 / 팀명은 정리 함수가 빈 값으로 바꾸므로 같은 비교에서 걸린다.
+ * 11-2: v2.0.0 새 로봇 항목은 없으면 이전 형식 변환(upgradeRobotProfileData)으로 채우고, 있으면 같은 엄격 비교 (명세서 3.9)
  */
 function strictRobot(raw: unknown, def: RobotProfile, id: RobotId): RobotProfile | null {
   if (!isRecord(raw)) return null;
-  const { profile } = sanitizeRobotPreset(raw, def, id);
+  const upgraded = upgradeRobotProfileData(raw);
+  const { profile } = sanitizeRobotPreset(upgraded, def, id);
   const config: Partial<RobotProfile['config']> = { ...profile.config };
   delete config.id; // 슬롯 id는 파일에 없음
-  return containedIn({ ...profile, config }, raw) ? profile : null;
+  return containedIn({ ...profile, config }, upgraded) ? profile : null;
 }
 
 const SCENARIO_KEYS: readonly (keyof ScenarioConfig)[] = [
   'allianceColor', 'r1Spawn', 'r2Spawn', 'hiveUpwardCell', 'hiveInitialPieces', 'r1Loadout', 'r2Loadout',
   'flowerPiecesCount', 'gardenPiecesCount', 'autoTipCount', 'rngSeed',
+  'floorPieces', 'rpThresholds', 'r1AutoMovement', 'r2AutoMovement',
 ];
 
 /** 시나리오 엄격 해석: 진영 + 시드 필수, 파일에 있는 항목은 모두 형식이 맞아야 함 */

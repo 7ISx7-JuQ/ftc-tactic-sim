@@ -11,7 +11,7 @@ import { DEFAULT_PROFILE_BALLISTICS } from '../ui/robotForm';
 import type { MatchSetup } from './appController';
 import type { DraftValues } from '../ui/configDraft';
 
-// 고정 기본 로봇 제원 (18 in 정사각, 앞면 흡입, 고정형 슈터 ±3°)
+// 고정 기본 로봇 제원 (18 in 정사각, 앞면 흡입, 고정형 슈터 ±3°). v2.0.0 새 항목은 v1 동작 값 (NECTAR 슈터 = 주 슈터와 같은 값)
 const base = (id: 'robot1' | 'robot2', name: string): RobotConfig => ({
   id,
   name,
@@ -25,12 +25,16 @@ const base = (id: 'robot1' | 'robot2', name: string): RobotConfig => ({
   canIntakeNectar: true,
   maxControlledPieces: 4,
   intakeZones: createIntakeZonePreset('FRONT', { length: 18, width: 18 }),
+  shooterSetup: 'SHARED',
   shooterDelay: 300,
   turretType: 'FIXED',
   turretRange: [0, 0],
   aimTolerance: (3 * Math.PI) / 180,
+  nectarShooter: { shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0], aimTolerance: (3 * Math.PI) / 180 },
   flowerSetupDelay: 500,
   flowerDropDelay: 200,
+  flowerDropZones: [],
+  liftMaxSpeed: 0,
 });
 
 export const DEFAULT_ROBOT_CONFIGS: Readonly<Record<'robot1' | 'robot2', RobotConfig>> = {

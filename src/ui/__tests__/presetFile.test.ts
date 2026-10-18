@@ -17,6 +17,7 @@ import {
   presetLoadedNotice,
   sanitizeRobotPreset,
   sanitizeScenarioPreset,
+  upgradeRobotProfileData,
 } from '../presetFile';
 import type { PresetRow } from '../presetFile';
 
@@ -47,7 +48,7 @@ describe('프리셋 파일 (10-2)', () => {
     }
     // 파일 머리 / 종류 / 로봇 데이터에 슬롯 id 없음
     const robot = JSON.parse(buildPresetFile('robot1', custom));
-    expect(robot).toMatchObject({ format: 'ftc-tactic-sim/preset', presetVersion: 1, kind: 'ROBOT' });
+    expect(robot).toMatchObject({ format: 'ftc-tactic-sim/preset', presetVersion: 2, kind: 'ROBOT' });
     expect(robot.data.config.id).toBeUndefined();
     expect(JSON.parse(buildPresetFile('all', custom)).kind).toBe('SETUP');
     expect(JSON.parse(buildPresetFile('scenario', custom)).kind).toBe('SCENARIO');
@@ -105,7 +106,9 @@ describe('프리셋 파일 (10-2)', () => {
     expect(profile.config.intakeZones[0]).toEqual({ side: 'LEFT', offset: 0, width: 5, depth: 2 });
     expect('extra' in profile.config).toBe(false);
     expect(profile.config.id).toBe('robot1');
-    expect(profile.ballistics).toEqual({ ...def.ballistics, dz: 30, sweetSpot: { x: 10, y: def.ballistics.sweetSpot.y } });
+    // NECTAR 슈터가 없으면 그 파일의 주 슈터 값 복사 (이전 형식 변환) → 없는 항목은 기본값
+    const spot = { x: 10, y: def.ballistics.sweetSpot.y };
+    expect(profile.ballistics).toEqual({ ...def.ballistics, dz: 30, sweetSpot: spot, nectarShooter: { ...def.ballistics.nectarShooter, dz: 30, sweetSpot: spot } });
     // 구역 목록이 배열이 아니면 기본 구역, 빈 배열은 그대로(흡입 불가 로봇)
     expect(sanitizeRobotPreset({ config: { intakeZones: 'FRONT' } }, def, 'robot1').profile.config.intakeZones).toEqual(def.config.intakeZones);
     expect(sanitizeRobotPreset({ config: { intakeZones: [] } }, def, 'robot1').profile.config.intakeZones).toEqual([]);
@@ -214,5 +217,114 @@ describe('프리셋 파일 (10-2)', () => {
     expect(presetLoadedNotice('en', 'robot2')).toBe('Loaded into the R2 draft — APPLY it on the R2 tab');
     expect(presetLoadedNotice('ko', 'scenario')).toBe('시나리오 초안에 불러옴 — 시나리오 탭에서 적용');
     expect(presetLoadedNotice('en', 'all')).toContain('R1, R2 and SCENARIO');
+  });
+
+  // ------------------------------------------------------------
+  // 11-2: v2.0.0 형식 (명세서 3.9 프리셋 파일)
+  // ------------------------------------------------------------
+
+  // v2.0.0 항목을 지운 v1 형식 로봇 데이터 (v1 앱이 내보낸 모양)
+  const omit = (o: object, keys: readonly string[]): Record<string, unknown> => Object.fromEntries(Object.entries(o).filter(([k]) => !keys.includes(k)));
+  const v1Robot = (profile: DraftValues['robot1']) => ({
+    teamNumber: profile.teamNumber,
+    teamName: profile.teamName,
+    config: omit(profile.config, ['shooterSetup', 'nectarShooter', 'flowerDropZones', 'liftMaxSpeed', 'id']),
+    ballistics: omit(profile.ballistics, ['shooterLateralOffset', 'nectarShooter']),
+  });
+  // v2.0.0 항목을 모두 바꾼 로봇
+  const v2: DraftValues['robot1'] = {
+    ...custom.robot1,
+    config: {
+      ...custom.robot1.config,
+      shooterSetup: 'PER_PIECE',
+      nectarShooter: { shooterDelay: 450, turretType: 'TURRET', turretRange: [-2, 2], aimTolerance: 0.1 },
+      flowerDropZones: [{ side: 'LEFT', offset: 2, width: 6, depth: 1.5 }],
+      liftMaxSpeed: 20,
+    },
+    ballistics: {
+      ...custom.robot1.ballistics,
+      shooterLateralOffset: 3,
+      nectarShooter: { ...custom.robot1.ballistics.nectarShooter, dz: 37, shooterLateralOffset: -3, sweetSpot: { x: 40.5, y: 110.5 } },
+    },
+  };
+
+  it('J. (11-2) presetVersion 2: v2.0.0 로봇 / 시나리오 항목 왕복, v1 파일(버전 1)도 읽음', () => {
+    expect(PRESET_VERSION).toBe(2);
+    const values: DraftValues = {
+      ...custom,
+      robot1: v2,
+      scenario: { ...custom.scenario, floorPieces: [{ type: 'POLLEN', x: 70.5, y: 120 }, { type: 'NECTAR', x: 30, y: 60 }], rpThresholds: { swarmPoints: 14, pollinator1Tips: 3, pollinator2Tips: 6 }, r1AutoMovement: 'PARK', r2AutoMovement: 'NONE' },
+    };
+    const r = parse(buildPresetFile('all', values), 'all');
+    expect(r.ok && r.preset.values).toEqual(values);
+    // v1 파일 (presetVersion 1, 새 항목 없음)
+    const old = parse(file('ROBOT', v1Robot(custom.robot1), { presetVersion: 1 }), 'robot1');
+    expect(old.ok).toBe(true);
+    expect(old.ok && old.preset.values.robot1?.config.shooterSetup).toBe('SHARED');
+  });
+
+  it('K. (11-2) 이전 형식 변환: 없는 새 항목 = v1 동작 값, NECTAR 슈터 = 그 데이터의 주 슈터 복사, 있는 항목은 그대로, 원본 불변', () => {
+    const raw = v1Robot(custom.robot1); // 주 슈터: 터렛 [-1, 1], 발사구 dz 40, 스윗스팟 (50.5, 120.5)
+    const snapshot = JSON.stringify(raw);
+    const { profile } = sanitizeRobotPreset(raw, defaults.robot1, 'robot1');
+    expect(JSON.stringify(raw)).toBe(snapshot);
+    const c = custom.robot1.config;
+    expect(profile.config).toEqual({
+      ...c,
+      shooterSetup: 'SHARED',
+      nectarShooter: { shooterDelay: c.shooterDelay, turretType: 'TURRET', turretRange: [-1, 1], aimTolerance: c.aimTolerance },
+      flowerDropZones: [],
+      liftMaxSpeed: 0,
+    });
+    const primary = omit(custom.robot1.ballistics, ['nectarShooter']);
+    expect(profile.ballistics).toEqual({ ...primary, shooterLateralOffset: 0, nectarShooter: { ...primary, shooterLateralOffset: 0 } });
+    // NECTAR 슈터는 앱 기본값이 아니라 주 슈터 복사 (기본 탄도와 다름)
+    expect(profile.ballistics.nectarShooter.dz).toBe(40);
+    expect(defaults.robot1.ballistics.nectarShooter.dz).not.toBe(40);
+    // 있는 항목은 바꾸지 않음
+    expect(upgradeRobotProfileData(v1Robot(v2))).not.toEqual(v1Robot(v2));
+    const full = { teamNumber: v2.teamNumber, teamName: v2.teamName, config: { ...v2.config }, ballistics: v2.ballistics };
+    expect(upgradeRobotProfileData(full)).toEqual(full);
+    // 레코드가 아니면 그대로
+    expect(upgradeRobotProfileData(null)).toBeNull();
+    expect(upgradeRobotProfileData({ config: 'x' })).toEqual({ config: 'x' });
+  });
+
+  it('L. (11-2) 새 항목의 형식이 틀리면 그 항목만 기본값 (로봇) / 버림 (시나리오 선택 항목)', () => {
+    const def = defaults.robot1;
+    const { profile } = sanitizeRobotPreset(
+      {
+        config: {
+          shooterSetup: 'TRIPLE',
+          nectarShooter: { shooterDelay: 'slow', turretType: 'LASER', turretRange: [1], aimTolerance: 0.2 },
+          flowerDropZones: [{ side: 'TOP', offset: 0, width: 5, depth: 1 }, { side: 'BACK', offset: 0, width: 5, depth: 1 }],
+          liftMaxSpeed: 'fast',
+        },
+        ballistics: { shooterLateralOffset: Number.NaN, nectarShooter: 'same' },
+      },
+      def,
+      'robot1',
+    );
+    expect(profile.config.shooterSetup).toBe('SHARED');
+    expect(profile.config.nectarShooter).toEqual({ ...def.config.nectarShooter, aimTolerance: 0.2 });
+    expect(profile.config.flowerDropZones).toEqual([{ side: 'BACK', offset: 0, width: 5, depth: 1 }]);
+    expect(profile.config.liftMaxSpeed).toBe(0);
+    expect(profile.ballistics.shooterLateralOffset).toBe(0);
+    expect(profile.ballistics.nectarShooter).toEqual(def.ballistics.nectarShooter);
+    expect(sanitizeRobotPreset({ config: { flowerDropZones: 'ANY' } }, def, 'robot1').profile.config.flowerDropZones).toEqual([]);
+
+    const scenario = sanitizeScenarioPreset(
+      {
+        allianceColor: 'RED',
+        floorPieces: [{ type: 'POLLEN', x: 1, y: 2 }, { type: 'ROCK', x: 1, y: 2 }],
+        rpThresholds: { swarmPoints: 16, pollinator1Tips: 4 },
+        r1AutoMovement: 'FLY',
+        r2AutoMovement: 'PARK',
+      },
+      { allianceColor: 'BLUE' },
+    );
+    expect(scenario).toEqual({ allianceColor: 'RED', r2AutoMovement: 'PARK' });
+    // 형식이 맞는 지정 바닥 기물은 모르는 항목을 버리고 복사
+    expect(sanitizeScenarioPreset({ floorPieces: [{ type: 'NECTAR', x: 5, y: 6, vx: 1 }] }, { allianceColor: 'RED' }).floorPieces).toEqual([{ type: 'NECTAR', x: 5, y: 6 }]);
   });
 });

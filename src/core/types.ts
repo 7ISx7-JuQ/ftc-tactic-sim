@@ -10,6 +10,18 @@ export interface BumperZone {
   depth: number;            // 변에서 바깥 수직으로 뻗는 깊이 (inch, > 0)
 }
 
+// 슈터 구성 (명세서 4장 / 5.4 v2.0.0 항목 규칙): 발사 가능 기물 = NONE 없음 / POLLEN_ONLY POLLEN / SHARED · PER_PIECE 둘 다
+// SHARED = 한 슈터로 두 기물 (v1 동작), PER_PIECE = 기물별 슈터 2개 (NECTAR 슈터 = nectarShooter)
+export type ShooterSetup = 'NONE' | 'POLLEN_ONLY' | 'SHARED' | 'PER_PIECE';
+
+// 슈터 1개의 조준 / 발사 런타임 제원 (RobotConfig 주 슈터 항목 4개와 같은 의미)
+export interface ShooterAimConfig {
+  shooterDelay: number;     // 한 발 발사 딜레이 (ms)
+  turretType: 'FIXED' | 'TURRET';
+  turretRange: [number, number]; // 터렛 회전 한계 (rad, RobotConfig.turretRange와 같은 규약)
+  aimTolerance: number;     // 고정형 슈터 허용 조준 오차 (rad)
+}
+
 // 1. 로봇 하드웨어 제원 (UI 입력값, RoadRunner 튜닝 상수 호환)
 export interface RobotConfig {
   id: 'robot1' | 'robot2';  // 엔진이 슬롯에 따라 강제 (r1 = 'robot1', r2 = 'robot2'), 사용자 입력 아님
@@ -31,16 +43,23 @@ export interface RobotConfig {
 
   // HIVE 득점 (슈터) 런타임 제원
   // 명중률은 로봇 제원이 아니라 탄도 LUT(ShotProbabilityResolver)가 결정 (명세서 2.6.2)
+  shooterSetup: ShooterSetup; // 슈터 구성 (기본 SHARED = v1)
+  // 아래 4개 = 주 슈터: SHARED / POLLEN_ONLY = 유일한 슈터, PER_PIECE = POLLEN 슈터, NONE = 쓰지 않음 (값은 보관)
   shooterDelay: number;     // 한 발 발사 딜레이 (ms)
   turretType: 'FIXED' | 'TURRET';
   // 터렛 회전 한계 [α, β] (rad, 차체 헤딩 기준 상대각 Δψ = 목표 방위 − 헤딩, + = 로봇 오른쪽(캔버스 y-down), [-π, π] 정규화)
   // α ≤ β: α ~ β 구간, α > β: ±π를 가로지르는 구간 (예: 후방 터렛 [2.5, -2.5]), 360° 터렛 = [-π, π]
   turretRange: [number, number];
   aimTolerance: number;     // 고정형 슈터 허용 조준 오차 (rad, 차체 헤딩 기준 ±, 기본 3° ≈ 0.0524)
+  nectarShooter: ShooterAimConfig; // PER_PIECE의 NECTAR 슈터. 다른 구성에서는 쓰지 않고 값만 보관
 
   // FLOWER 득점 옵션
   flowerSetupDelay: number; // 초기 리프트/경사로 전개 준비 시간 (ms)
   flowerDropDelay: number;  // 연속으로 기물을 떨어뜨리는 간격 (ms)
+  flowerDropZones: BumperZone[]; // 투입 방향 구역 (인테이크 구역과 같은 형식). 빈 배열 = 방향 무관 (v1)
+  // 리프트 상태 최고 속도 (inch/s). 0 = Stationary Lock (v1). 비율 r = min(이 값, maxSpeed) / maxSpeed를
+  // 최고 속도 / 최고 각속도에 함께 적용 (명세서 4장 / 5.4 v2.0.0 항목 규칙)
+  liftMaxSpeed: number;
 }
 
 // 로봇 자세 (필드 좌표계 위치 + 헤딩)
@@ -48,6 +67,23 @@ export interface RobotPose {
   x: number;                // inch
   y: number;                // inch
   heading: number;          // 라디안
+}
+
+// 오토 이동 (SWARM 판정에만 사용): LEAVE 3점 / PARK 5점 / NONE 0점
+export type AutoMovement = 'NONE' | 'LEAVE' | 'PARK';
+
+// 바닥 기물 직접 배치 1개 (필드 좌표, 정지 상태 ON_FIELD로 놓임). NECTAR = 우리 진영 NECTAR
+export interface FloorPiecePlacement {
+  type: GamePiece['type'];
+  x: number;
+  y: number;
+}
+
+// RP 기준값 (기본 SWARM 16점 / POLLINATOR 1 TIP 4회 / POLLINATOR 2 TIP 7회)
+export interface RPThresholds {
+  swarmPoints: number;
+  pollinator1Tips: number;
+  pollinator2Tips: number;
 }
 
 // 텔레옵 시작 조건 (자율주행 결과 반영 시나리오 설정)
@@ -83,7 +119,17 @@ export interface ScenarioConfig {
   // POLLINATOR RP 팁 횟수에 합산 (텔레옵 점수에는 미포함)
   autoTipCount?: number;
 
+  // 바닥 기물 직접 배치 (기본 없음 = 빈 배열 = 무작위 산포). 지정하지 않은 나머지 바닥 기물은 무작위 산포
+  floorPieces?: FloorPiecePlacement[];
+
   // ※ 위에서 지정되지 않은 나머지 POLLEN / NECTAR는 모두 바닥에 무작위 산포 (지정 수량으로부터 자동 계산)
+
+  // RP 기준값 (미지정 시 기본값)
+  rpThresholds?: RPThresholds;
+
+  // 오토 이동 (미지정 시 LEAVE = v1 판정과 같은 결과). 오토 이동 점수는 RP에만 쓰고 totalScore에는 넣지 않음
+  r1AutoMovement?: AutoMovement;
+  r2AutoMovement?: AutoMovement;
 
   // 결정론적 난수 시드 (미지정 시 엔진 기본 시드). 동일 시드 + 동일 입력 = 동일 경기
   rngSeed?: number;
@@ -97,6 +143,7 @@ export interface BallisticsConfig {
   // 이 점에서 기물 종류별로 명중률이 최대인 v0를 탐색하고, 나머지 3셀은 대칭 변환으로 매핑
   sweetSpot: { x: number; y: number };
   shooterOffset: number;    // 차체 중심 기준 발사구 오프셋 (inch, 조준 방향)
+  shooterLateralOffset?: number; // 좌우 오프셋 (inch, + = 로봇 오른쪽, 기본 0 = v1 계산)
   v0NoisePercent?: number;  // 속도 편차 (기본 0.02)
   headingNoiseRad?: number; // 방위각 편차 (기본 0.02 rad)
   pitchNoiseRad?: number;   // 피치각 편차 (기본 0.006 rad)

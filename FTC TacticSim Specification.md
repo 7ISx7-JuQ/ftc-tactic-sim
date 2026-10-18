@@ -862,7 +862,8 @@ PAUSED / REVIEW ──BRANCH(보는 틱 < 머리, 확인창)──▶ RUNNING  (
 | 스윗스팟 → 명중 확률표 | 기준 CELL 라벨, 스윗스팟 X / Y, 검증 사유(빨간 글자), `SET ON FIELD`(필드 편집 모드), 명중 확률표 상태 상자, `SHOW HIT MAP`(히트맵 모드) |
 | 복사 | `COPY TO R2`(R1 탭) / `COPY TO R1`(R2 탭) |
 
-- **프로필 (`src/ui/robotForm.ts`):** 화면의 로봇 값은 `RobotProfile { teamNumber, teamName, config: RobotConfig, ballistics: ProfileBallistics }`다. 팀 번호 / 팀명은 화면 전용이고 `RobotConfig` 타입은 바꾸지 않는다 (`RobotConfig.name`은 엔진용 `R1` / `R2` 그대로, config 탭 이름 / 결과 팝업 / 캔버스 로봇 번호도 `R1` / `R2`). `ProfileBallistics` = 발사구(`dz`) / 발사각 / 오프셋 + 편차 3종 + 스윗스팟(`RED_AUDIENCE` 기준 좌표).
+- **프로필 (`src/ui/robotForm.ts`):** 화면의 로봇 값은 `RobotProfile { teamNumber, teamName, config: RobotConfig, ballistics: ProfileBallistics }`다. 팀 번호 / 팀명은 화면 전용이고 `RobotConfig` 타입은 바꾸지 않는다 (`RobotConfig.name`은 엔진용 `R1` / `R2` 그대로, config 탭 이름 / 결과 팝업 / 캔버스 로봇 번호도 `R1` / `R2`). `ProfileBallistics` = 주 슈터 탄도(`ProfileShooterBallistics`: 발사구 `dz` / 발사각 / 앞뒤 오프셋 / 좌우 오프셋 + 편차 3종 + 스윗스팟(`RED_AUDIENCE` 기준 좌표)) + NECTAR 슈터 탄도(`nectarShooter`, 같은 항목).
+    - v2.0.0 항목(슈터 구성, NECTAR 슈터, 좌우 오프셋, 투입 방향 구역, 리프트 주행 속도, 4장)은 형식만 들어와 있고 로봇 탭 입력칸 / 범위 검사는 13-3에서 만든다. 그때까지는 기본값 또는 불러온 값을 그대로 보관하고 복사(`COPY TO`) / 내보내기에 함께 실린다.
 - **입력칸 규칙 (`FormControls.tsx`):** 숫자 칸은 단위를 표시하고 칠 때마다 검사한다. 올바르면 그 칸 값만 엔진 단위로 초안에 반영하고(**고친 칸만 변환** — 표시 반올림으로 다른 칸 값이 바뀌지 않게), 틀리면 친 글자를 보관한 채 빨간 테두리 + 빨간 설명("6.00 – 18.00 in 사이", "정수만 입력", "숫자를 입력"). 틀린 글자가 남아 있는 동안 탭은 `INVALID`이고 적용할 수 없으며, 탭 이동 / 창 닫기에도 남고 `RESET TAB` · 복사 대상에서는 지운다. 초점이 있는 동안은 친 글자 그대로, 초점을 잃거나 Enter면 표시 형식으로 바꾼다. 저장 값이 범위 밖이면(파일로 들어온 값 등) 그 칸도 빨갛게 표시한다(`checkValue`).
 - **입력 허용 범위:**
 
@@ -939,6 +940,7 @@ PAUSED / REVIEW ──BRANCH(보는 틱 < 머리, 확인창)──▶ RUNNING  (
 - **설정 자동 보관 (`localStorage`, `src/ui/settings.ts`):** 마지막으로 적용한 로봇 프로필 / 시나리오(시드 포함)와 화면 설정(언어, 단위, 기본 보기, 표시 옵션, 키보드 토글, 로봇별 조작 모드)을 보관해 새로고침 뒤 복원한다. 입력 출처는 보관하지 않는다 (앱을 켤 때마다 `AUTO`). 경기 기록도 보관하지 않는다 (새로고침하면 경기는 사라짐, 3.6항).
     - 키 `ftc-tactic-sim/settings` + `SETTINGS_VERSION` = 1. 없음 · JSON 손상 · 버전 다름 → 전부 기본값, 항목별 형식 오류 → 그 항목만 기본값.
     - 적용 값 복원: 기본 프로필 모양에 맞추고(`mergeWithDefaults`: 없는 항목은 기본값으로 채움 → 이후 항목이 늘어도 저장한 로봇 유지, 종류가 다르면 버림) 숫자는 유한값, 진영 유효, 로봇 폼 · 시나리오 · 배치 검증을 통과할 때만 쓴다 (슬롯 id는 강제).
+    - v2.0.0 이전에 보관한 로봇: `mergeWithDefaults` 전에 이전 형식 변환(`upgradeRobotProfileData`, 3.9항 프리셋 파일)을 거쳐 NECTAR 슈터를 앱 기본값이 아니라 보관된 주 슈터 복사로 채운다. `SETTINGS_VERSION`은 올리지 않는다 (올리면 사용자 설정이 전부 기본값으로 돌아감).
     - 저장소를 쓸 수 없으면 기본값으로 시작하고 오류 없이 동작한다. 문서 `lang` 속성은 언어와 동기화한다.
 - **키보드 단축키 (상태별 키 공유):** 주행 키는 루프 `RUNNING`에서만, 스크러빙 단축키는 일시정지 / 복기 중에만 쓰이므로 같은 키를 겹쳐 쓴다. 키보드 주행을 꺼도 단축키는 항상 동작한다. 컨트롤러가 창 `keydown`을 직접 처리한다 (주행 키는 입력 어댑터).
 
@@ -1048,7 +1050,7 @@ config 창의 편집 버튼을 누르면 메인 필드가 그 편집 모드로 �
 | `ENGINE_VERSION` (현재 1) | `simulationEngine.ts` | 같은 시나리오 / 시드 / 입력에 대해 프레임 결과가 달라지는 커밋 (엔진 규칙, 충돌 / 동역학 상수, 시나리오 초기화, 난수 사용 순서, 프레임 형식) |
 | `BALLISTICS_MODEL_VERSION` (현재 1) | `ballistics.ts` | 명중 판정 / LUT 생성 규칙 / 투입구 기하가 바뀌는 커밋 (2.6.2항) |
 | `RECIPE_VERSION` (현재 1) | `src/app/matchRecipe.ts` | 경기 파일 구조 변경 |
-| `PRESET_VERSION` (현재 1) | `src/ui/presetFile.ts` | 프리셋 파일 구조 변경 |
+| `PRESET_VERSION` (현재 2) | `src/ui/presetFile.ts` | 프리셋 파일 구조 변경 (2 = v2.0.0 로봇 항목, 11-2) |
 
 - **`ENGINE_VERSION` 올림 누락 방지:** `src/core/__tests__/engineVersion.test.ts`가 고정 제원 · 시나리오 · 시드 · 입력으로 흡입 / 발사 / HIVE TIP 3회 / 리프트 전 단계 / GARDEN 득점이 나오는 경기를 돌리고, 버전 + 종료 체크섬 + 체크포인트 121개를 이은 해시를 기대값으로 박아 둔다. 결과가 바뀌면 테스트가 실패하므로 그 커밋에서 버전을 올리고 기대값을 갱신한다.
 
@@ -1089,6 +1091,7 @@ config 창의 편집 버튼을 누르면 메인 필드가 그 편집 모드로 �
     - `INVALID_CHECKSUMS` (개수 ≠ 121 등)
     - `INVALID_SETUP` (`issues` = 로봇 폼 / `validateScenario` / `validateRobotPlacement` 문제 코드)
     - 로봇 / 시나리오는 "프리셋 정리 함수가 아무것도 바꾸지 않아야 통과"로 엄격히 해석한다 (없는 항목 · 형식 틀림 · 틀린 팀 글자는 모두 값이 달라져 거부). 시나리오는 진영 + 시드가 필수. 파일의 모르는 항목은 무시하고, 알아보기 정보(`createdAt` / `branch` / `result`)는 틀려도 빈 값으로 받는다.
+    - **이전 형식 변환 (11-2):** 로봇의 v2.0.0 항목(`shooterSetup` / `nectarShooter` 두 곳 / `flowerDropZones` / `liftMaxSpeed` / `shooterLateralOffset`)이 **없으면** 엄격 비교 전에 이전 형식 변환(아래 프리셋 파일)으로 채우고(= v1 경기 파일), **있으면** 같은 엄격 규칙으로 검사한다 (일부만 없으면 그 항목만 채움). 시나리오 새 선택 항목(`floorPieces` / `rpThresholds` / `r1AutoMovement` / `r2AutoMovement`)은 있으면 형식이 맞아야 한다. 15-1에서 `RECIPE_VERSION` 2가 되면 버전 2 파일은 새 로봇 항목이 모두 있어야 한다.
 
 #### 경기 불러오기 (`IMPORT MATCH`, SETTINGS 탭 `PRESETS` 구역의 `MATCH` 줄, 경기 전에만)
 
@@ -1146,12 +1149,44 @@ config 창의 편집 버튼을 누르면 메인 필드가 그 편집 모드로 �
 | `ALL` | `SETUP` (R1 + R2 + 시나리오) | 세 탭의 적용 값 | → 세 탭 초안 모두 |
 | `MATCH` | 경기 레시피 | (결과 팝업에서) | 위 "경기 불러오기" |
 
-- 파일 형식: `{ "format": "ftc-tactic-sim/preset", "presetVersion": 1, "kind": "ROBOT" | "SCENARIO" | "SETUP", "data": ... }` (`SETUP`의 `data` = `{ robot1, robot2, scenario }`, 2칸 들여쓴 JSON, 로봇 데이터에 슬롯 id 없음).
+- 파일 형식: `{ "format": "ftc-tactic-sim/preset", "presetVersion": 2, "kind": "ROBOT" | "SCENARIO" | "SETUP", "data": ... }` (`SETUP`의 `data` = `{ robot1, robot2, scenario }`, 2칸 들여쓴 JSON, 로봇 데이터에 슬롯 id 없음). 버전 1(v1.0.0) 파일도 읽는다. 버전을 2로 올린 이유는 v1 앱이 v2 프리셋의 새 항목을 조용히 버리지 않고 `NEWER_VERSION`으로 거부하게 하기 위해서다.
+- 로봇 데이터 예 (경기 파일 `setup.robot1`도 같은 형식):
+
+    ```
+    {
+      "teamNumber": "12345", "teamName": "Bumblebots",
+      "config": {
+        "name": "R1", "width": 18, "length": 18, …,
+        "shooterSetup": "PER_PIECE",
+        "shooterDelay": 300, "turretType": "FIXED", "turretRange": [0, 0], "aimTolerance": 0.0524,
+        "nectarShooter": { "shooterDelay": 400, "turretType": "FIXED", "turretRange": [0, 0], "aimTolerance": 0.0524 },
+        "flowerSetupDelay": 500, "flowerDropDelay": 200, "flowerDropZones": [], "liftMaxSpeed": 0
+      },
+      "ballistics": {
+        "dz": 39.5, "shooterPitch": 1.0472, "shooterOffset": 0, "shooterLateralOffset": 3,
+        "sweetSpot": { "x": 59.5, "y": 131.5 }, "v0NoisePercent": 0.02, "headingNoiseRad": 0.02, "pitchNoiseRad": 0.006,
+        "nectarShooter": { "dz": 41.5, "shooterPitch": 0.9599, "shooterOffset": 0, "shooterLateralOffset": -3, "sweetSpot": { … }, … }
+      }
+    }
+    ```
+
+- **이전 형식 변환 (`upgradeRobotProfileData`, 11-2):** 로봇 데이터는 정리 전에 없는 v2.0.0 항목을 v1 동작 값으로 채운다. 프리셋(버전 무관) / 경기 파일 / 설정 자동 보관이 같은 함수를 쓰고, 있는 항목은 그대로 두며 원본을 바꾸지 않는다.
+
+    | 없는 항목 | 채우는 값 |
+    |---|---|
+    | `config.shooterSetup` | `SHARED` |
+    | `config.nectarShooter` | 그 데이터의 주 슈터 값 복사 (`shooterDelay` / `turretType` / `turretRange` / `aimTolerance`) |
+    | `ballistics.shooterLateralOffset` | 0 |
+    | `ballistics.nectarShooter` | 그 데이터의 주 슈터 탄도 복사 (좌우 오프셋 0) |
+    | `config.flowerDropZones` | `[]` |
+    | `config.liftMaxSpeed` | 0 |
+
+    - NECTAR 슈터를 앱 기본값이 아니라 **주 슈터 복사**로 채우는 이유: 나중에 `PER_PIECE`로 바꿨을 때 NECTAR 카드가 자기 로봇 값에서 시작한다. 결과는 어느 쪽이든 v1과 같다 (`SHARED`에서는 쓰지 않음). 주 슈터 항목 중 없는 것은 복사하지 않아 정리 함수가 기본값으로 채운다.
 - 줄 설명: 로봇 = 적용된 `#팀 번호 팀명`, 전체 = `R1 + R2 + SCENARIO`, 경기 = "경기 내보내기로 저장한 파일".
 - `EXPORT`는 SETTINGS 탭을 볼 수 있으면 언제나 (적용 값이라 경기에 영향 없음). `IMPORT`는 경기 전에만 (초안은 경기 전에만 편집 가능).
 - **불러오기 규칙:**
     - 파일 자체가 틀리면 거부하고 줄 아래 빨간 글자로 사유를 보인다 — `NOT_JSON` / `NOT_PRESET`(형식 · 버전 · 종류 값 · `data` 틀림) / `MATCH_FILE`(경기 파일을 넣음) / `NEWER_VERSION`(`presetVersion`이 지금보다 큼) / `WRONG_KIND`(그 줄과 종류가 다름), 파일 선택 쪽 `TOO_LARGE`(1 MB 초과) / `READ_FAILED`. 사유는 오류 코드로 보관해 지금 언어로 그리고, 탭을 옮기면 지운다.
-    - 항목이 없거나 형식이 틀리면 **그 항목만 기본값**으로 채운다 (자동 보관과 같은 정리 함수). 로봇(`sanitizeRobotPreset`) = 숫자는 유한값만, 문자열 / 불리언 / 슈터 형식 / 터렛 범위(숫자 2개)는 형식이 맞을 때만, 흡입 구역은 형식이 맞는 구역만 최대 8개, 탄도는 항목별. 시나리오(`sanitizeScenarioPreset`) = 선택 항목은 없으면 기본 시나리오 그대로, 형식이 틀린 항목만 기본값, 모르는 항목은 버림.
+    - 항목이 없거나 형식이 틀리면 **그 항목만 기본값**으로 채운다 (자동 보관과 같은 정리 함수). 로봇(`sanitizeRobotPreset`) = 숫자는 유한값만, 문자열 / 불리언 / 슈터 형식 / 터렛 범위(숫자 2개)는 형식이 맞을 때만, 흡입 구역 / 투입 방향 구역은 형식이 맞는 구역만 최대 8개, 슈터 구성은 4값 중 하나일 때만, NECTAR 슈터 런타임 값은 주 슈터와 같은 규칙, 탄도는 슈터마다 항목별. 시나리오(`sanitizeScenarioPreset`) = 선택 항목은 없으면 기본 시나리오 그대로, 형식이 틀린 항목만 기본값, 모르는 항목은 버림 (지정 바닥 기물 = 모든 기물이 {종류, x, y} 형식일 때만, RP 기준값 = 세 값이 모두 숫자일 때만, 오토 이동 = `NONE` / `LEAVE` / `PARK`).
     - 범위를 벗어난 값은 버리지 않고 초안에 넣어 빨간 오류로 보여 준다 (사용자가 고쳐서 `APPLY`). 팀 번호 / 팀명이 입력칸 규칙에 어긋나면 값은 비우고 그 글자를 틀린 입력 글자로 보관한다.
     - 불러온 값은 **초안**에만 들어가고 기존 `APPLY` 흐름(확률표 재생성 포함)을 탄다 (`importPresetToDrafts`). 적용 안 된 수정이 있는 탭에 넣으면 `COPY TO`와 같은 덮어쓰기 확인창(`importOverwriteTabs`).
 - 파일 도우미 `src/ui/fileTransfer.ts`: `downloadTextFile`(Blob + `<a download>`), `pickTextFile`(숨긴 `<input type=file>`, 취소 → null).
@@ -1176,7 +1211,7 @@ config 창의 편집 버튼을 누르면 메인 필드가 그 편집 모드로 �
 
 엔진의 주요 타입이다 (`src/core/types.ts`). 좌표 / 길이는 inch, 각도는 라디안, 시간은 주석에 적힌 단위.
 
-> v2.0.0에서 추가 / 바뀌는 항목(슈터 구성, 기물별 슈터, 좌우 오프셋, 투입 방향 구역, 리프트 주행 속도, 바닥 기물 배치, RP 기준값, 오토 이동)은 [5.4항 v2.0.0 데이터 형식](#v200-데이터-형식-step-11-1)에 확정해 두었고, 11-2에서 구현할 때 이 장으로 옮긴다.
+> v2.0.0 항목(슈터 구성, NECTAR 슈터, 좌우 오프셋, 투입 방향 구역, 리프트 주행 속도, 바닥 기물 배치, RP 기준값, 오토 이동)은 **형식만 들어와 있다** (11-2). 기본값 = v1 동작이라 지금 결과는 v1과 같고, 엔진 / 화면 동작은 12 ~ 14 Step에서 구현한다 ([5.4항 v2.0.0 항목 규칙](#v200-항목-규칙-step-11)).
 
 ```tsx
 // 로봇 범퍼 면에 붙는 직사각형 구역 (로봇 기준 좌표, 3.3항)
@@ -1188,6 +1223,17 @@ export interface BumperZone {
   offset: number; // 변 중점 기준 변을 따른 이동 (inch). |offset| ≤ 변 길이 / 2
   width: number; // 변과 평행한 길이 (inch, > 0, 변 길이 초과 허용)
   depth: number; // 변에서 바깥 수직으로 뻗는 깊이 (inch, > 0)
+}
+
+// 슈터 구성: 발사 가능 기물 = NONE 없음 / POLLEN_ONLY POLLEN / SHARED · PER_PIECE 둘 다 (v2.0.0, 기본 SHARED = v1)
+export type ShooterSetup = 'NONE' | 'POLLEN_ONLY' | 'SHARED' | 'PER_PIECE';
+
+// 슈터 1개의 조준 / 발사 런타임 제원 (RobotConfig 주 슈터 항목 4개와 같은 의미)
+export interface ShooterAimConfig {
+  shooterDelay: number; // 발사 딜레이 (ms)
+  turretType: 'FIXED' | 'TURRET';
+  turretRange: [number, number]; // 터렛 회전 한계 (rad, RobotConfig.turretRange와 같은 규약)
+  aimTolerance: number; // 고정형 허용 조준 오차 (rad)
 }
 
 // 1. 로봇 하드웨어 제원 (RoadRunner 튜닝 상수 호환)
@@ -1208,16 +1254,21 @@ export interface RobotConfig {
   intakeZones: BumperZone[]; // 인테이크 구역 목록 (개수 무제한, 빈 배열 = 흡입 불가). FRONT/ANY는 프리셋 함수로 생성
 
   // HIVE 득점 (슈터) 런타임 제원 (명중률은 탄도 LUT 판정 함수가 결정)
+  shooterSetup: ShooterSetup; // 슈터 구성 (v2.0.0, 기본 SHARED)
+  // 아래 4개 = 주 슈터: SHARED / POLLEN_ONLY = 유일한 슈터, PER_PIECE = POLLEN 슈터, NONE = 쓰지 않음 (값은 보관)
   shooterDelay: number; // 발사 딜레이 (ms)
   turretType: 'FIXED' | 'TURRET';
   // 터렛 회전 한계 [α, β] (rad, 차체 헤딩 기준 상대각 Δψ = 목표 방위 − 헤딩, + = 로봇 오른쪽, [-π, π] 정규화)
   // α > β이면 ±π를 가로지르는 구간, 360° 터렛 = [-π, π]
   turretRange: [number, number];
   aimTolerance: number; // 고정형 허용 조준 오차 (rad, 헤딩 기준 ±, 기본 3° ≈ 0.0524)
+  nectarShooter: ShooterAimConfig; // PER_PIECE의 NECTAR 슈터 (v2.0.0). 다른 구성에서는 값만 보관
 
   // FLOWER 득점 옵션
   flowerSetupDelay: number; // 리프트 올림 시간 = 내림 시간 (ms, 2.6.3항 리프트 FSM)
   flowerDropDelay: number; // 연속 투입 간격 (ms)
+  flowerDropZones: BumperZone[]; // 투입 방향 구역 (v2.0.0, 인테이크 구역과 같은 형식). 빈 배열 = 방향 무관 (기본)
+  liftMaxSpeed: number; // 리프트 상태 최고 속도 (in/s, v2.0.0). 0 = Stationary Lock (기본)
 }
 
 // 로봇 자세 (필드 좌표계 위치 + 헤딩)
@@ -1225,6 +1276,23 @@ export interface RobotPose {
   x: number; // inch
   y: number; // inch
   heading: number; // 라디안
+}
+
+// 오토 이동 (SWARM 판정에만 사용, v2.0.0): LEAVE 3점 / PARK 5점 / NONE 0점
+export type AutoMovement = 'NONE' | 'LEAVE' | 'PARK';
+
+// 바닥 기물 직접 배치 1개 (v2.0.0, 필드 좌표, 정지 상태 ON_FIELD로 놓임). NECTAR = 우리 진영 NECTAR
+export interface FloorPiecePlacement {
+  type: 'POLLEN' | 'NECTAR';
+  x: number;
+  y: number;
+}
+
+// RP 기준값 (v2.0.0, 기본 SWARM 16점 / POLLINATOR 1 TIP 4회 / POLLINATOR 2 TIP 7회)
+export interface RPThresholds {
+  swarmPoints: number;
+  pollinator1Tips: number;
+  pollinator2Tips: number;
 }
 
 // TELEOP 시작 조건 (오토 결과를 반영한 시나리오, 2.4항)
@@ -1260,10 +1328,20 @@ export interface ScenarioConfig {
   // POLLINATOR RP TIP 횟수에 합산 (TELEOP 점수에는 미포함)
   autoTipCount?: number;
 
+  // 바닥 기물 직접 배치 (v2.0.0, 기본 없음 = 빈 배열 = 무작위 산포). 지정하지 않은 나머지 바닥 기물은 무작위 산포
+  floorPieces?: FloorPiecePlacement[];
+
   // ※ 위에서 지정되지 않은 나머지 POLLEN / NECTAR는 모두 바닥에 무작위 산포 (자동 계산)
 
   // 결정론적 난수 시드 (미지정 시 엔진 기본 시드). 동일 시드 + 동일 입력 = 동일 경기
   rngSeed?: number;
+
+  // RP 기준값 (v2.0.0, 미지정 시 기본값)
+  rpThresholds?: RPThresholds;
+
+  // 오토 이동 (v2.0.0, 미지정 시 LEAVE = v1 판정과 같은 결과). 오토 이동 점수는 RP에만, totalScore에는 미포함
+  r1AutoMovement?: AutoMovement;
+  r2AutoMovement?: AutoMovement;
 }
 
 // 독립 모듈용 탄도학 설정 및 히트맵 타입 (로봇별 1개)
@@ -1272,6 +1350,7 @@ export interface BallisticsConfig {
   shooterPitch: number; // 발사각 (rad)
   sweetSpot: { x: number; y: number }; // 기준 셀 RED_AUDIENCE 스윗스팟 (로봇 중심 좌표 한 점)
   shooterOffset: number; // 차체 중심 기준 발사구 오프셋 (in, 조준 방향)
+  shooterLateralOffset?: number; // 좌우 오프셋 (in, + = 로봇 오른쪽, v2.0.0, 미지정 = 0 = v1 계산)
   v0NoisePercent?: number; // 속도 편차 (기본 0.02)
   headingNoiseRad?: number; // 방위각 편차 (기본 0.02 rad)
   pitchNoiseRad?: number; // 피치각 편차 (기본 0.006 rad)
@@ -1478,14 +1557,14 @@ v1.0.0 이후 구현하기로 정한 항목이다. v2.0.0 항목은 아래 "v2.0
 | 바닥 기물 직접 배치 + 시나리오 필드 편집 화면 | 중 | v1은 무작위 산포 (2.4항). `ScenarioConfig` 선택 항목으로 기물 위치를 지정한다. 터널 바닥에는 놓을 수 있고 기둥에는 놓을 수 없다 (5.4항). 엔진 쪽은 작고 편집 화면이 대부분이다.<br>**편집 화면 방향:** 공 배치 전용 모드를 따로 두지 않고, **오토가 끝난 필드를 보이는 그대로 옮기는 시나리오 전체 필드 편집 화면**으로 만든다. 사용자가 숫자 칸을 오가며 종료 상태를 머릿속으로 계산하지 않게 하는 것이 목적이다.<br>· 로봇: 끌어 옮기기 / 핸들로 돌리기 (시작 자세 편집 모드 `EDIT ON FIELD` 흡수)<br>· 바닥 공: 끌어 놓기 / 추가 / 빼기<br>· FLOWER / GARDEN: 눌러 개수 조절<br>· HIVE: 셀을 눌러 상향 셀과 안의 NECTAR / POLLEN 개수<br>· 로봇 적재물: 로봇을 눌러 지정<br>· 오토 TIP 횟수: HIVE 옆 칸<br>· 공 총량 검증(`validateScenario`)을 그대로 쓰고 남은 공 수를 늘 보여 준다<br>필드 편집 모드 틀(3.8항)을 재사용한다. 시나리오 탭의 숫자 칸은 정밀 입력 / 확인용으로 그대로 둔다. 세부 조작은 구현 전에 정한다 |
 | RP 기준값 + 오토 이동 점수 입력 | 하~중 | **기준값:** v1은 RP 기준이 엔진(`finalizeScore`)과 화면 상수(`mainScreenModel.ts`, `resultModel.ts`)에 따로 고정돼 있다 (2.6.5항). 대회마다 기준이 바뀔 수 있으므로(예: 국가 대회 기준 미발표) `ScenarioConfig.rpThresholds`(`swarmPoints` 기본 16, `pollinator1Tips` 기본 4, `pollinator2Tips` 기본 7)를 추가하고 엔진 RP 판정, TIP 진행 표시(목표 4 → 7), 결과 팝업 RP 카드가 모두 이 값을 읽는다 (규칙의 출처 하나). 시나리오 / 경기 파일에 함께 저장되어 받은 사람도 같은 기준으로 본다. 기준 **숫자**만 바꿀 수 있고 RP 조건 자체가 바뀌면 코드를 고친다. v2.0.0이 국가 대회보다 먼저이므로 임시 화면 계산안은 두지 않는다.<br>**오토 이동 (SWARM 정교화):** SWARM 기준은 오토 LEAVE / PARK 점수 + TELEOP PARK 점수의 합(기본 16점)이다. 오토에서 로봇마다 LEAVE 3점 또는 PARK 5점 중 하나(또는 없음)라 두 로봇 합은 0 / 3 / 5 / 6 / 8 / 10점, TELEOP에서는 로봇마다 PARK 5점이라 합 0 / 5 / 10점이다. TELEOP 최대가 10점이므로 기본 16점은 오토 6점 이상 + TELEOP 두 로봇 주차일 때만 달성된다. v1은 "TELEOP 두 로봇 주차"만 보므로 오토 6점 이상을 가정한 셈이고, 오토에서 한 대만 움직였으면(3 / 5점) 실제로는 불가능한 SWARM을 달성으로 판정한다.<br>· `ScenarioConfig.r1AutoMovement` / `r2AutoMovement`: 로봇별 `NONE` / `LEAVE` / `PARK`. 기본 `LEAVE` · `LEAVE`(6점) — v1 판정과 결과가 같으므로 v1 파일 변환에도 이 값을 쓴다<br>· SWARM 점수 = 오토 이동 점수 + TELEOP PARK 점수(종료 프레임 주차 로봇 × 5) ≥ `swarmPoints`. 오토 이동 점수는 오토 TIP처럼 **RP에만** 쓰고 `totalScore`(TELEOP 점수)에는 넣지 않는다<br>· `PARK`는 오토 종료 위치 = TELEOP 시작 자세가 우리 LOADING ZONE과 겹쳐야 한다. 겹치지 않으면 시나리오 검증 오류(`AUTO_PARK_NOT_IN_ZONE`)로 적용을 막는다 (오토 PARK 판정 구역은 룰북 확인)<br>· 화면: 시나리오 탭과 시나리오 필드 편집 화면에서 로봇별 오토 이동 선택. 결과 팝업 SWARM 카드 = "AUTO 6 + PARK 10 = 16 / 16", 결과 근거 / 요약 텍스트에 "오토 LEAVE · PARK n점은 RP에만"<br>· 입력 검사: 기준값은 양의 정수, 로봇 2대로 도달할 수 없는 값(SWARM 20점 초과)은 경고 |
 | 미종료 가지 / 트리 전체 저장 | 중 | v1 경기 파일은 끝난 가지 하나만 저장한다 (3.9항). 가지마다 {부모, 분기 틱, 이름, 분기 이후 적용 입력 기록, 체크섬}을 저장해 트리 전체와 미종료 가지를 내보내고 불러온다 (`RECIPE_VERSION` 2). v1 경기 파일(가지 하나)도 계속 불러온다. 불러올 가지 수가 그 앱의 가지 상한을 넘으면 거부한다 |
-| 리프트 상태 주행 | 중 | v1은 리프트 상태 전체를 Stationary Lock으로 둔다 (3.4항). `RobotConfig.liftMaxSpeed`(리프트 상태 최고 속도, 0 = 잠금 = v1 동작, 5.4항 v2.0.0 데이터 형식)를 추가한다. 제동 / 타이머 규칙, 투입 중 이동 시 투입 조건 재확인, "리프트를 내려야 이동" 토스트(3.8항)를 옵션에 따라 띄우기를 함께 정한다. 실제 로봇이 리프트를 올린 채 움직이는지 자료 확인이 필요하다 |
+| 리프트 상태 주행 | 중 | v1은 리프트 상태 전체를 Stationary Lock으로 둔다 (3.4항). `RobotConfig.liftMaxSpeed`(리프트 상태 최고 속도, 0 = 잠금 = v1 동작, 형식은 4장, 회전 한계 규칙은 5.4항 v2.0.0 항목 규칙)를 추가한다. 제동 / 타이머 규칙, 투입 중 이동 시 투입 조건 재확인, "리프트를 내려야 이동" 토스트(3.8항)를 옵션에 따라 띄우기를 함께 정한다. 실제 로봇이 리프트를 올린 채 움직이는지 자료 확인이 필요하다 |
 | FLOWER 투입 방향 구역 | 하~중 | v1은 방향 무관(도달 거리 1.0 in, 2.6.3항). `RobotConfig.flowerDropZones`(인테이크 구역과 같은 `BumperZone[]`, 빈 배열 = 방향 무관 = v1 동작)를 추가한다. 엔진은 대상 판정 함수(`findDropTargetFlower`)만 교체하고, 편집 화면은 흡입 구역 편집기를 재사용한다 |
 | 슈터 구성 (없음 / POLLEN 전용 / 공용 1개 / 기물별 2개) | 중 | 상위 팀 상당수가 POLLEN / NECTAR를 서로 다른 슈터로 쏘고, NECTAR는 쏘지 않고 FLOWER용으로 보관만 하는 로봇도 있다. "어떤 기물을 쏠 수 있는가"는 슈터 하나하나의 성질이 아니라 **로봇의 슈터 구성**이므로 기물별 토글 대신 구성 하나로 받는다 (기물별 토글로 두면 "슈터 2개인데 NECTAR 발사 불가" 같은 말이 안 되는 조합이 생김).<br>· **`RobotConfig.shooterSetup`:** `NONE` 슈터 없음(FLOWER 전용) / `POLLEN_ONLY` POLLEN만 발사, NECTAR는 FLOWER용 보관 / `SHARED` 한 슈터로 두 기물 발사 (기본 = v1) / `PER_PIECE` 기물별 슈터 2개. 로봇 탭 슈터 구역 맨 위 선택 + 한 줄 설명. `canIntakeNectar = false`면 NECTAR를 다루지 않으므로 `NONE` / `SHARED`만 고를 수 있다 (`POLLEN_ONLY` · `PER_PIECE`는 `SHARED`와 같아짐)<br>· **발사 가능 기물:** `NONE` 없음, `POLLEN_ONLY` POLLEN, `SHARED` · `PER_PIECE` 둘 다<br>· **발사 대기열 = 발사 가능 기물만의 FIFO:** v1은 적재함 맨 앞 기물(`controlledPieces[0]`)을 쏜다. 그대로 두면 발사할 수 없는 기물(예: `POLLEN_ONLY` 로봇의 NECTAR)이 맨 앞에 있을 때 뒤의 POLLEN까지 영영 못 쏜다. 그래서 발사는 적재함에서 **첫 번째 발사 가능 기물**을 꺼내고(나머지 기물 순서는 유지), `SHOOTING` 요청은 발사 가능 기물이 하나라도 있을 때만 받는다 (없으면 빈 적재함처럼 조용히 무시, 토스트 없음). 연속 발사도 남은 발사 가능 기물이 있을 때만 이어 간다. 실제로 NECTAR를 따로 보관하는 로봇은 저장 경로가 슈터와 분리돼 있으므로 이 모델이 맞다. `SHARED` / `PER_PIECE`는 모든 기물이 발사 가능이라 v1과 똑같이 맨 앞 기물을 쏜다<br>· **FLOWER 투입은 그대로 맨 앞 기물(FIFO, 2.6.3항):** ENDGAME 전 NECTAR가 맨 앞이면 뒤 POLLEN 투입이 막히는 것은 v1 규칙 그대로다 (발사 대기열과 달리 바꾸지 않음)<br>· **기물별 슈터(`PER_PIECE`):** 발사구 지상고, 발사각, 앞뒤 오프셋, **좌우 오프셋**(신규, + = 로봇 오른쪽), 발사 편차 3종, 슈터 형식 / 허용 조준 오차 / 터렛 범위, 발사 딜레이, 스윗스팟을 기물별로 받는다 (기물별 슈터 카드). v0 탐색과 LUT 생성은 이미 기물별로 따로 돌므로(2.6.2항) 각 몬테카를로가 자기 슈터 설정으로 돌 뿐 **계산량 불변**. 좌우 오프셋은 `SHARED` / `POLLEN_ONLY`의 단일 슈터에도 쓸 수 있다<br>· **좌우 오프셋 조준 보정:** 드라이버(또는 자동 조준)가 그 사출구를 기준으로 맞춘다고 본다. 고정형의 조준 헤딩 ψ = β − asin(b / D) (β = 로봇 중심 → 조준점 방위, b = 좌우 오프셋, D = 로봇 중심 → 조준점 수평 거리, D ≤ |b|면 조준 불가). 사출구 → 조준점 수평 거리 = √(D² − b²) − 앞뒤 오프셋. LUT의 몸체 방향 / 발사구, 경기 중 고정형 허용 오차 · 터렛 범위 판정, 발사 비행 계획, 조준선 표시, 로봇 미리보기에 같은 식을 쓴다 (부호 규약은 테스트로 고정). 터렛 회전축은 지금처럼 차체 중심<br>· **확률표:** 발사 가능 기물만 v0 탐색 / LUT를 만들고 스윗스팟을 검증한다 (`POLLEN_ONLY`는 POLLEN만 → 생성 시간 절반). `NONE`은 생성 없이 바로 준비 완료. 발사 불가 기물의 판정 확률은 0 (엔진이 쏘지 않으므로 쓰이지 않음)<br>· **표시:** 로봇 몸체 적재물의 강조 테두리(3.7항, v1 = 0번)와 좌측 패널 명중 확률의 밝은 줄(3.8항, v1 = 0번 종류)은 **다음에 발사할 기물**(첫 발사 가능 기물) 기준으로 바꾼다. 로봇 미리보기는 사출구 수만큼 점을 그린다<br>· **버전 / 캐시:** `SHARED` + 좌우 0이면 계산 결과가 v1과 같으므로 `BALLISTICS_MODEL_VERSION`은 올리지 않는다. 확률표 캐시 키(`lutRequestKey`)는 기본값과 같은 새 항목을 키에 넣지 않아 v1 캐시가 그대로 쓰이게 한다. 캐시 레코드는 지금처럼 로봇 단위다 (`PER_PIECE` 로봇은 한 기물만 고쳐도 두 기물을 다시 만듦 — 단순함을 위해 수용) |
 | 필드 벽 반사 | 중 | v1은 공중에서 벽에 닿은 공을 높이 무한 · 반발 0 벽으로 본다 (2.6.2항). 반발 계수 > 0 반사로 바꾸고(비행 구간 구조는 그대로), 반사 뒤 HIVE나 반대쪽 벽에 다시 닿는 경우를 처리한다. 벽을 넘어 필드 밖으로 나가는 공은 계속 구현하지 않는다 |
 | 착지 겹침 보정 | 하 | v1은 HIVE TIP 낙하 / 발사 비행의 착지 지점이 그 사이 움직인 로봇이나 기물 위일 수 있다 (다음 틱 충돌 처리로 밀려남). 착지 틱에 겹치면 가까운 빈 자리로 결정론적으로 옮긴다. 비행 중 충돌은 넣지 않는다 (5.3항) |
 
 - **버전:** `ENGINE_VERSION` 1 → 2, `RECIPE_VERSION` 1 → 2, `PRESET_VERSION` 1 → 2를 각각 한 번만 올린다. `BALLISTICS_MODEL_VERSION`은 올리지 않는다 (명중 판정 / LUT 규칙을 바꾸지 않아 사용자의 확률표 캐시가 그대로 쓰이게).
-- **v1 파일 호환:** 로봇 제원 항목이 늘어나므로(리프트 상태 주행, FLOWER 투입 방향 구역, 슈터 구성 / 좌우 오프셋) 경기 파일 엄격 해석(3.9항)이 v1 파일을 거부하지 않도록, 파일 버전에 따라 "없는 새 항목 = v1 동작 값"으로 채우는 변환을 함께 넣는다. v1 경기 파일은 기존 흐름대로 "엔진 버전 다름" 경고 + 체크섬 불일치 배너와 함께 열린다. 프리셋은 원래 없는 항목을 기본값으로 채운다. 시나리오 새 항목은 선택 항목이며 없으면 v1과 같은 결과가 나오는 값으로 본다 (`rpThresholds` = 기본값, `r1AutoMovement` / `r2AutoMovement` = `LEAVE`, 바닥 기물 = 무작위 산포). 로봇은 `shooterSetup = SHARED` + 좌우 오프셋 0 + NECTAR 슈터 = 주 슈터 복사로 변환한다 (v1과 같은 결과, 상세는 5.4항 v2.0.0 데이터 형식).
+- **v1 파일 호환:** 로봇 제원 항목이 늘어나므로(리프트 상태 주행, FLOWER 투입 방향 구역, 슈터 구성 / 좌우 오프셋) 경기 파일 엄격 해석(3.9항)이 v1 파일을 거부하지 않도록, 파일 버전에 따라 "없는 새 항목 = v1 동작 값"으로 채우는 변환을 함께 넣는다. v1 경기 파일은 기존 흐름대로 "엔진 버전 다름" 경고 + 체크섬 불일치 배너와 함께 열린다. 프리셋은 원래 없는 항목을 기본값으로 채운다. 시나리오 새 항목은 선택 항목이며 없으면 v1과 같은 결과가 나오는 값으로 본다 (`rpThresholds` = 기본값, `r1AutoMovement` / `r2AutoMovement` = `LEAVE`, 바닥 기물 = 무작위 산포). 로봇은 `shooterSetup = SHARED` + 좌우 오프셋 0 + NECTAR 슈터 = 주 슈터 복사로 변환한다 (v1과 같은 결과, 상세는 3.9항 프리셋 파일 이전 형식 변환).
 - **설정 자동 보관:** 저장된 로봇 프로필 / 시나리오는 없는 항목을 기본값으로 채우므로(`mergeWithDefaults`, 3.8항) `SETTINGS_VERSION`은 올리지 않는다 (올리면 사용자 설정이 전부 기본값으로 돌아감).
 
 #### v2.0.0 구현 순서
@@ -1495,7 +1574,7 @@ CLAUDE.md의 작은 단계 원칙에 따라 v1 Step 01 ~ 10에 이어 Step 11 ~ 
 | Step | 내용 | 이유 / 의존 |
 |---|---|---|
 | (선행, 완료) | 브라우저 자동 테스트 편입 (개발 도구, 3.7항 테스트) | v2.0.0의 큰 화면 변경(터널 지붕, 시나리오 필드 편집 화면) 전에 화면 회귀를 잡을 장치. 사용자 릴리스가 아니므로 버전 변경 없음 |
-| 11 형식 / 호환 기반 | 11-1 명세: v2.0.0 데이터 형식 확정 (완료, 5.4항 v2.0.0 데이터 형식 — `RobotConfig` / 탄도 설정의 슈터 구성(`shooterSetup`) · NECTAR 슈터(`nectarShooter`) · 좌우 오프셋(`shooterLateralOffset`), `liftMaxSpeed`, `flowerDropZones`, `ScenarioConfig` `floorPieces` · `rpThresholds` · `r1AutoMovement` / `r2AutoMovement`, 검증 코드, 이전 형식 변환). 11-2 타입 + 프리셋 / 자동 보관 정리 함수 + 경기 파일 엄격 해석의 v1 변환 규칙 (`PRESET_VERSION` 2), 형식을 4장 · 3.8항 · 3.9항으로 이관 | 이후 모든 Step이 새 항목을 쓰므로 먼저 확정. 변환 규칙을 한 번에 작성 |
+| 11 형식 / 호환 기반 | 11-1 명세: v2.0.0 데이터 형식 확정 (완료 — `RobotConfig` / 탄도 설정의 슈터 구성(`shooterSetup`) · NECTAR 슈터(`nectarShooter`) · 좌우 오프셋(`shooterLateralOffset`), `liftMaxSpeed`, `flowerDropZones`, `ScenarioConfig` `floorPieces` · `rpThresholds` · `r1AutoMovement` / `r2AutoMovement`, 검증 코드, 이전 형식 변환). 11-2 타입 + 프리셋 / 자동 보관 정리 함수 + 경기 파일 엄격 해석의 v1 변환 규칙 (`PRESET_VERSION` 2), 형식을 4장 · 3.8항 · 3.9항으로 이관 (완료) | 이후 모든 Step이 새 항목을 쓰므로 먼저 확정. 변환 규칙을 한 번에 작성 |
 | 12 엔진 / 탄도 규칙 | 12-1 HIVE 터널 충돌 / 배치 검증 (5.4항). 12-2 터널 안 발사 금지. 12-3 슈터 구성 탄도: 좌우 오프셋 조준 보정, LUT 생성 / 판정 함수 / 발사 비행 계획에 기물별 설정, 엔진 발사 대기열(첫 발사 가능 기물) (`ballistics.ts`, 엔진 발사). 12-4 확률표 생성 관리자 / 캐시: 기물별 작업 설정, 발사 불가 기물 생략, v1 캐시 키 호환 (`src/workers/`). 12-5 RP 기준값 + 오토 이동 점수. 12-6 바닥 기물 직접 배치 (`reset`). 12-7 FLOWER 투입 방향 구역. 12-8 리프트 상태 주행 (+ 입력 계층 토스트 조건). 12-9 필드 벽 반사 (발사 비행 계획). 12-10 착지 겹침 보정 | 렌더러 / 화면이 이 규칙에 의존. 12-1은 13-1이 의존하고 `ENGINE_VERSION`을 올리는 첫 커밋이라 맨 앞. 12-3 / 12-4는 슈터 설정 구조를 바꾸는 작업이라 같은 발사 비행 계획을 고치는 12-9보다 먼저 (구조를 바꾼 뒤 벽 반사를 얹어 두 번 고치지 않음). 나머지는 서로 독립 |
 | 13 렌더러 / 로봇 탭 | 13-1 터널 지붕 렌더링 + 기둥 표시 (5.4항). 13-2 렌더러: 조준선 / 비행 공을 기물별 사출구 기준으로, 적재물 강조를 다음 발사 기물 기준으로. 13-3 로봇 탭: 슈터 구역(슈터 구성 선택, 기물별 슈터 카드, 좌우 오프셋), 좌측 패널 명중 확률 밝은 줄 기준, 리프트 주행 속도 칸, 투입 방향 구역 편집기(흡입 구역 편집기 재사용), 미리보기(사출구 2개, 투입 방향 구역). 13-4 스윗스팟 편집 모드 / 히트맵 / 확률표 상태 상자 기물별 | 12-1 / 12-3 / 12-4 / 12-7 / 12-8 |
 | 14 시나리오 화면 | 14-1 시나리오 필드 편집 화면 (바닥 기물 · 로봇 · FLOWER · GARDEN · HIVE · 적재물 · 오토 TIP, 시작 자세 편집 모드 흡수). 14-2 시나리오 탭: RP 기준값 / 오토 이동 입력. 14-3 TIP 진행 표시 · 결과 팝업 RP 카드 · 요약 텍스트 | 12-5 / 12-6, 13-1(지붕 규칙을 편집 장면에도 적용) |
@@ -1542,93 +1621,41 @@ CLAUDE.md의 작은 단계 원칙에 따라 v1 Step 01 ~ 10에 이어 Step 11 ~ 
 
 5.2항 업데이트 예정 항목 중 설계까지 확정한 내용이다. 아직 코드에 없으며, 구현되면 해당 절(2.2, 2.6.2, 3.3, 3.4, 3.7, 3.8 등)로 옮기고 여기서 지운다.
 
-#### v2.0.0 데이터 형식 (Step 11-1)
+#### v2.0.0 항목 규칙 (Step 11)
 
-v2.0.0 항목이 쓰는 저장 형식(로봇 프로필 / 시나리오)과 이전 형식 변환 규칙이다. 이후 모든 Step이 이 형식을 쓰므로 먼저 확정한다. 11-2에서 타입 / 정리 함수 / 변환으로 구현하고 4장 · 3.8항 · 3.9항으로 옮긴다. 각 항목의 **동작 규칙**(엔진 판정, 화면 조작)은 해당 Step(12 ~ 14)에서 정하고, 여기서는 그 규칙이 쓸 값의 이름 / 모양 / 기본값 / 범위 / 검증만 정한다.
+v2.0.0 항목의 저장 형식은 11-1에서 확정해 11-2에서 구현했다 — 타입은 4장, 로봇 프로필 / 프리셋 / 이전 형식 변환은 3.8항 · 3.9항. 여기에는 그 항목을 쓰는 **아직 구현하지 않은 규칙**(엔진 판정, 화면 입력, 검증)을 모은다. 각 규칙은 해당 Step(12 ~ 14)에서 구현하며 형식을 바꾸지 않는다.
 
-**원칙**
+**원칙 (11-1)**
 
-- **새 항목의 기본값 = v1 동작.** 기본값만 들어 있으면 v1과 같은 경기가 나온다 (탄도 / 확률표 계산 결과도 같음).
-- **로봇 프로필의 새 항목은 필수**다 (화면 · 파일에 항상 있음). 로봇 탭이 모든 항목을 보여 주고, 경기 파일 엄격 해석(3.9항)이 "없는 항목 = 거부" 규칙을 그대로 쓸 수 있게 하기 위해서다. 그래서 이전 형식은 아래 변환 규칙으로 채운다.
+- **새 항목의 기본값 = v1 동작.** 기본값만 들어 있으면 v1과 같은 경기가 나온다 (탄도 / 확률표 계산 결과도 같음). 11-2 뒤에도 `engineVersion.test.ts` 기대값이 그대로 통과한다.
+- **로봇 프로필의 새 항목은 필수**다 (화면 · 파일에 항상 있음). 로봇 탭이 모든 항목을 보여 주고, 경기 파일 엄격 해석(3.9항)이 "없는 항목 = 거부" 규칙을 그대로 쓸 수 있게 하기 위해서다. 이전 형식은 변환으로 채운다 (3.9항 프리셋 파일).
 - **시나리오의 새 항목은 선택**이다 (v1 시나리오 항목과 같은 방식). 없으면 v1과 같은 결과가 나오는 값으로 보므로 이전 파일 변환이 필요 없다.
-- 이름 규칙은 기존 형식을 따른다: 로봇별 시나리오 항목은 `r1…` / `r2…` 접두사(`r1Spawn`, `r1Loadout`처럼), 길이 in · 각도 rad · 시간 ms · 속도 in/s.
-- 엔진 내부 입력(비행 처리용 슈터 탄도, 확률표 생성 함수 인자)은 저장되지 않으므로 여기서 모양을 고정하지 않는다. 아래 "엔진 내부 입력 방향"만 따른다.
+- 이름 규칙은 기존 형식을 따른다: 로봇별 시나리오 항목은 `r1…` / `r2…` 접두사, 길이 in · 각도 rad · 시간 ms · 속도 in/s.
 
-**로봇 제원 (`RobotConfig`) — 추가 / 바뀌는 항목**
+**로봇 항목의 뜻**
 
-```tsx
-// 슈터 구성 (5.2항 슈터 구성): 발사 가능 기물 = NONE 없음 / POLLEN_ONLY POLLEN / SHARED · PER_PIECE 둘 다
-export type ShooterSetup = 'NONE' | 'POLLEN_ONLY' | 'SHARED' | 'PER_PIECE';
-
-// 슈터 1개의 조준 / 발사 런타임 제원 (v1 RobotConfig의 슈터 항목 4개와 같은 의미)
-export interface ShooterAimConfig {
-  shooterDelay: number; // 발사 딜레이 (ms)
-  turretType: 'FIXED' | 'TURRET';
-  turretRange: [number, number]; // 터렛 회전 한계 (rad, v1과 같은 규약)
-  aimTolerance: number; // 고정형 허용 조준 오차 (rad)
-}
-
-export interface RobotConfig {
-  // … v1 항목 그대로 (id, name, 크기, 동역학, 인테이크) …
-
-  // HIVE 득점 (슈터)
-  shooterSetup: ShooterSetup; // 기본 'SHARED' (= v1)
-  // 주 슈터 (v1 항목 그대로): SHARED / POLLEN_ONLY = 유일한 슈터, PER_PIECE = POLLEN 슈터, NONE = 쓰지 않음 (값은 보관)
-  shooterDelay: number;
-  turretType: 'FIXED' | 'TURRET';
-  turretRange: [number, number];
-  aimTolerance: number;
-  nectarShooter: ShooterAimConfig; // PER_PIECE의 NECTAR 슈터. 다른 구성에서는 쓰지 않고 값만 보관 (기본 = 기본 주 슈터와 같은 값)
-
-  // FLOWER 득점
-  flowerSetupDelay: number;
-  flowerDropDelay: number;
-  flowerDropZones: BumperZone[]; // 투입 방향 구역 (인테이크 구역과 같은 형식). 빈 배열 = 방향 무관 (기본, = v1)
-  liftMaxSpeed: number; // 리프트 상태 최고 속도 (in/s). 0 = Stationary Lock (기본, = v1)
-}
-```
-
-- **주 슈터 항목을 옮기지 않는 이유:** v1 항목 4개를 그대로 "주 슈터"로 두고 NECTAR 슈터만 덧붙이면, `SHARED` / `POLLEN_ONLY` / `NONE` 로봇과 v1 파일은 항목 위치가 바뀌지 않는다 (변환 = 새 항목 추가뿐). 엔진 / 판정 함수 / 렌더러는 기물별 슈터를 고르는 함수 하나(`shooterFor(config, pieceType)`, 이름은 12-3에서 확정)로 읽는다: `PER_PIECE` + NECTAR → `nectarShooter`, 그 외 → 주 슈터.
+- **주 슈터 항목을 옮기지 않은 이유:** v1 슈터 항목 4개(`RobotConfig`)와 탄도(`ProfileBallistics`)를 그대로 "주 슈터"로 두고 NECTAR 슈터만 덧붙이면, `SHARED` / `POLLEN_ONLY` / `NONE` 로봇과 v1 파일은 항목 위치가 바뀌지 않는다 (변환 = 새 항목 추가뿐). NECTAR 슈터는 v1의 주 슈터와 같은 방식으로 런타임 값(`config.nectarShooter`)과 탄도(`ballistics.nectarShooter`)로 나뉘어 저장된다.
+- **슈터 고르기 (12-3):** 엔진 / 판정 함수 / 렌더러는 기물별 슈터를 고르는 함수 하나(`shooterFor(config, pieceType)`, 이름은 12-3에서 확정)로 읽는다: `PER_PIECE` + NECTAR → `nectarShooter`, 그 외 → 주 슈터.
 - **쓰지 않는 슈터 값도 보관:** v1의 숨는 칸 규칙(고정형일 때 터렛 범위 보관 등, 3.8항)과 같다. 구성을 바꿔 봤다가 되돌려도 값이 남는다.
-- `liftMaxSpeed`는 항목 하나만 둔다. 회전 한계는 따로 받지 않고 평상시 최고 속도 대비 비율을 그대로 쓴다:
+- **`BallisticsConfig.shooterLateralOffset`은 선택 항목:** v1 호출부 / 테스트가 그대로 동작하고, 0이면 계산이 v1과 비트 단위로 같다 (`BALLISTICS_MODEL_VERSION` 유지). 프로필 → 확률표 입력 변환(`profileBallisticsConfig`)은 12-3 / 12-4에서 좌우 오프셋 / NECTAR 슈터를 넘기도록 넓힌다 (지금은 주 슈터의 v1 항목만).
+- **`liftMaxSpeed` (12-8):** 항목 하나만 둔다. 회전 한계는 따로 받지 않고 평상시 최고 속도 대비 비율을 그대로 쓴다:
     - 비율 r = min(`liftMaxSpeed`, `maxSpeed`) / `maxSpeed`
     - 리프트 상태 최고 속도 = `maxSpeed` × r (= `liftMaxSpeed`, 단 `maxSpeed` 이하), 최고 각속도 = `maxTurnRate` × r
     - `liftMaxSpeed` = 0이면 r = 0이라 이동 / 회전 모두 막힌다 (= v1 Stationary Lock).
     - `maxSpeed`보다 큰 값도 오류가 아니다 (r = 1로 제한, 최고 속도를 낮출 때 다른 칸이 빨개지지 않게).
     - 가속도(`maxLinearAccel` / `maxAngularAccel`)는 바꾸지 않는 안이며, 제동 / 타이머 규칙과 함께 12-8에서 확정한다 (항목은 더하지 않음).
-- `flowerDropZones`의 판정(FLOWER 원통 정사영 원과 구역 겹침)은 12-7에서 정한다.
+- **`flowerDropZones` (12-7):** 판정(FLOWER 원통 정사영 원과 구역 겹침)은 12-7에서 정한다.
 
-**슈터 탄도 (`RobotProfile.ballistics` = `ProfileBallistics`, 확률표 입력 `BallisticsConfig`)**
+**시나리오 항목의 뜻**
 
-```tsx
-// 슈터 1개의 탄도 (v1 ProfileBallistics 항목 + 좌우 오프셋)
-export interface ProfileShooterBallistics {
-  dz: number;
-  shooterPitch: number;
-  shooterOffset: number; // 앞뒤 오프셋 (in, + = 로봇 앞)
-  shooterLateralOffset: number; // 좌우 오프셋 (in, + = 로봇 오른쪽). 기본 0 (= v1)
-  sweetSpot: { x: number; y: number }; // 기준 셀 RED_AUDIENCE 좌표 (v1과 같음)
-  v0NoisePercent: number;
-  headingNoiseRad: number;
-  pitchNoiseRad: number;
-}
+- **바닥 기물 직접 배치 `floorPieces` (12-6):** 지정한 기물은 그 자리에 놓고, **바닥 기물 수(2.4항 자동 계산) 중 지정하지 않은 나머지는 지금처럼 무작위 산포**한다 (지정 기물도 피함). 그래서 빈 배열 = v1과 같고(난수 사용 순서 그대로), 바닥 기물을 모두 지정하면 무작위 산포가 없어 오토 종료 필드를 그대로 옮길 수 있다. 일부만 지정해도 기물 총량이 유지된다.
+    - 배치 순서: 로봇 적재물 → FLOWER → HIVE → GARDEN → **지정 바닥 기물** → 오토 TIP NECTAR(LOADING ZONE) → 바닥 무작위 산포 (지정 기물은 난수를 쓰지 않음).
+    - 진영을 바꾸면 지정 바닥 기물은 필드 중심 점대칭 (x, y) → (144 − x, 144 − y)로 옮긴다 (FLOWER / GARDEN / LOADING ZONE의 진영 대칭과 같음, 3.8항 시나리오 탭 진영 전환 규칙에 14-1에서 추가).
+- **`rpThresholds` (12-5):** 세 값을 묶어 저장한다 (부분 지정 없음 — 화면은 항상 세 칸을 함께 씀). 엔진 RP 판정, TIP 진행 표시, 결과 팝업 RP 카드가 모두 이 값을 읽는다 (5.2항 RP 기준값).
+- **`r1AutoMovement` / `r2AutoMovement` (12-5):** SWARM 점수 = 오토 이동 점수(`LEAVE` 3 / `PARK` 5 / `NONE` 0, 두 로봇 합) + TELEOP PARK 점수 ≥ `swarmPoints`. 오토 이동 점수는 RP에만 쓰고 `totalScore`에는 넣지 않는다 (5.2항 오토 이동).
+- 프레임 형식(`TimelineFrame` / `RPState` / `ScoreBreakdown`)은 바뀌지 않는다. 오토 이동 점수와 기준값은 화면이 시나리오에서 읽는다.
 
-// 로봇 프로필의 탄도 = 주 슈터(v1 항목 위치 그대로) + NECTAR 슈터
-export interface ProfileBallistics extends ProfileShooterBallistics {
-  nectarShooter: ProfileShooterBallistics; // PER_PIECE의 NECTAR 슈터. 다른 구성에서는 값만 보관
-}
-
-// 확률표 / 검증 입력 (엔진, 슈터 1개분): v1 항목 + 선택 항목 1개
-export interface BallisticsConfig {
-  // … v1 항목 그대로 …
-  shooterLateralOffset?: number; // 미지정 = 0 (v1과 같은 계산)
-}
-```
-
-- NECTAR 슈터는 런타임 값(`config.nectarShooter`)과 탄도(`ballistics.nectarShooter`)로 나뉘어 저장된다. v1이 주 슈터를 같은 방식(`config` / `ballistics`)으로 나눠 저장하므로 이를 따른다.
-- `BallisticsConfig.shooterLateralOffset`을 선택 항목으로 두는 이유: v1 호출부 / 테스트가 그대로 동작하고, 0이면 계산이 v1과 비트 단위로 같다 (`BALLISTICS_MODEL_VERSION` 유지).
-
-**입력 허용 범위 (3.8항 로봇 탭 표에 추가)**
+**입력 허용 범위 (13-3 / 14-2, 3.8항 로봇 탭 / 시나리오 탭 표에 추가)**
 
 | 항목 | 범위 |
 |---|---|
@@ -1637,52 +1664,17 @@ export interface BallisticsConfig {
 | NECTAR 슈터 카드 | 주 슈터와 같은 항목 · 같은 범위 (형식, 허용 오차 / 터렛 한계, 발사 딜레이, 발사구 지상고, 발사각, 앞뒤 · 좌우 오프셋, 편차 3종, 스윗스팟) |
 | 리프트 주행 속도 `liftMaxSpeed` | 0 ~ 200 in/s (0 = 잠금, 기본 0) |
 | 투입 방향 구역 수 / 위치 / 폭 / 깊이 | 흡입 구역과 같음 (0 ~ 8개, 0개 = 방향 무관) |
+| RP 기준값 | 정수 1 ~ 99 (아래 `RP_THRESHOLDS`) |
 
-**로봇 검증 추가 (로봇 폼 문제 코드, `APPLY` 막음)**
+- 11-2는 형식 정리(숫자 유한값, 구역 형식 등)만 하고 위 범위는 검사하지 않는다. 범위 검사(로봇 폼 문제 코드)는 입력칸과 함께 13-3에서 추가한다 — 그 전까지는 엔진이 새 항목을 쓰지 않으므로 경기에 영향이 없다.
+
+**로봇 검증 추가 (로봇 폼 문제 코드, `APPLY` 막음, 13-3)**
 
 - `SHOOTER_SETUP_NECTAR` — `canIntakeNectar = false`인데 `POLLEN_ONLY` / `PER_PIECE` (파일로 들어온 값 등. 화면은 고를 수 없게 하지만 흡입 토글을 나중에 끄면 이 오류로 알림).
 - 스윗스팟 검증(`validateBallisticsConfig`)은 **발사 가능 기물의 슈터만** 한다: `NONE` 없음, `POLLEN_ONLY` · `SHARED` 주 슈터, `PER_PIECE` 주 슈터 + NECTAR 슈터. 쓰지 않는 슈터의 스윗스팟은 틀려도 막지 않는다.
 - 좌우 오프셋이 있으면 조준점 수평 거리 D ≤ |좌우 오프셋|인 스윗스팟은 조준 불가이므로 `SWEET_SPOT_NO_SOLUTION`으로 본다 (새 코드 없음).
 
-**시나리오 (`ScenarioConfig`) — 추가 항목 (모두 선택)**
-
-```tsx
-export type AutoMovement = 'NONE' | 'LEAVE' | 'PARK';
-
-// 바닥 기물 직접 배치 1개 (필드 좌표, 정지 상태 ON_FIELD로 놓임)
-export interface FloorPiecePlacement {
-  type: 'POLLEN' | 'NECTAR'; // NECTAR = 우리 진영 NECTAR
-  x: number;
-  y: number;
-}
-
-export interface ScenarioConfig {
-  // … v1 항목 그대로 …
-
-  // 바닥 기물 직접 배치 (기본 없음 = 빈 배열 = v1 무작위 산포)
-  floorPieces?: FloorPiecePlacement[];
-
-  // RP 기준값 (기본 SWARM 16점 / POLLINATOR 1 TIP 4회 / POLLINATOR 2 TIP 7회 = v1 판정)
-  rpThresholds?: {
-    swarmPoints: number;
-    pollinator1Tips: number;
-    pollinator2Tips: number;
-  };
-
-  // 오토 이동 (SWARM 판정에만 사용, 기본 'LEAVE' = v1 판정과 같은 결과)
-  r1AutoMovement?: AutoMovement;
-  r2AutoMovement?: AutoMovement;
-}
-```
-
-- **바닥 기물 직접 배치의 뜻:** 지정한 기물은 그 자리에 놓고, **바닥 기물 수(2.4항 자동 계산) 중 지정하지 않은 나머지는 지금처럼 무작위 산포**한다 (지정 기물도 피함). 그래서 빈 배열 = v1과 같고(난수 사용 순서 그대로), 바닥 기물을 모두 지정하면 무작위 산포가 없어 오토 종료 필드를 그대로 옮길 수 있다. 일부만 지정해도 기물 총량이 유지된다.
-    - 배치 순서: 로봇 적재물 → FLOWER → HIVE → GARDEN → **지정 바닥 기물** → 오토 TIP NECTAR(LOADING ZONE) → 바닥 무작위 산포 (지정 기물은 난수를 쓰지 않음).
-    - 진영을 바꾸면 지정 바닥 기물은 필드 중심 점대칭 (x, y) → (144 − x, 144 − y)로 옮긴다 (FLOWER / GARDEN / LOADING ZONE의 진영 대칭과 같음, 3.8항 시나리오 탭 진영 전환 규칙에 14-1에서 추가).
-- **`rpThresholds`:** 세 값을 묶어 저장한다 (부분 지정 없음 — 화면은 항상 세 칸을 함께 씀). 엔진 RP 판정, TIP 진행 표시, 결과 팝업 RP 카드가 모두 이 값을 읽는다 (5.2항 RP 기준값).
-- **`r1AutoMovement` / `r2AutoMovement`:** SWARM 점수 = 오토 이동 점수(`LEAVE` 3 / `PARK` 5 / `NONE` 0, 두 로봇 합) + TELEOP PARK 점수 ≥ `swarmPoints`. 오토 이동 점수는 RP에만 쓰고 `totalScore`에는 넣지 않는다 (5.2항 오토 이동).
-- 프레임 형식(`TimelineFrame` / `RPState` / `ScoreBreakdown`)은 바뀌지 않는다. 오토 이동 점수와 기준값은 화면이 시나리오에서 읽는다.
-
-**시나리오 검증 추가 (`validateScenario` 문제 코드, 2.4항 목록에 추가)**
+**시나리오 검증 추가 (`validateScenario` 문제 코드, 2.4항 목록에 추가, 12-5 / 12-6)**
 
 - `FLOOR_PIECE_COUNT` — 종류별 지정 수 > 그 종류의 바닥 기물 수 (2.4항 자동 계산: 바닥 POLLEN = 32 − …, 바닥 NECTAR = 3 − …).
 - `FLOOR_PIECE_POSITION` — 기물 원(반지름 포함)이 필드 밖으로 나감 / HIVE **기둥**과 겹침(터널 바닥은 허용, 5.4항 HIVE 터널) / FLOWER 원과 겹침 / GARDEN과 겹침(GARDEN 기물은 `gardenPiecesCount`로 정하므로). LOADING ZONE은 허용 (오토 TIP NECTAR 슬롯은 이미 놓인 기물을 피함).
@@ -1691,47 +1683,6 @@ export interface ScenarioConfig {
 - `RP_THRESHOLDS` — 세 값이 정수 1 ~ 99가 아님, 또는 `pollinator1Tips > pollinator2Tips`. 로봇 2대로 도달할 수 없는 `swarmPoints > 20`(오토 최대 10 + TELEOP 최대 10)은 오류가 아니라 경고(적용 허용).
 - `AUTO_PARK_NOT_IN_ZONE` — 오토 이동 `PARK`인 로봇의 시작 자세(지정하지 않으면 진영 기본값) OBB가 우리 LOADING ZONE과 겹치지 않음. (오토 PARK 판정 구역은 룰북 확인 후 12-5에서 확정)
 - 엔진은 화면을 거치지 않은 값에 대비해 v1과 같이 잘라서 받는다: 바닥 기물 수 초과분과 위치가 틀린 지정 기물은 지정에서 빼고(남은 수는 무작위 산포로), 기준값은 기본값, 모르는 오토 이동 값은 `LEAVE`.
-
-**저장 예 (로봇 프로필, 프리셋 / 경기 파일 `setup.robot1`)**
-
-```
-{
-  "teamNumber": "12345", "teamName": "Bumblebots",
-  "config": {
-    "name": "R1", "width": 18, "length": 18, …,
-    "shooterSetup": "PER_PIECE",
-    "shooterDelay": 300, "turretType": "FIXED", "turretRange": [0, 0], "aimTolerance": 0.0524,
-    "nectarShooter": { "shooterDelay": 400, "turretType": "FIXED", "turretRange": [0, 0], "aimTolerance": 0.0524 },
-    "flowerSetupDelay": 500, "flowerDropDelay": 200,
-    "flowerDropZones": [],
-    "liftMaxSpeed": 0
-  },
-  "ballistics": {
-    "dz": 39.5, "shooterPitch": 1.0472, "shooterOffset": 0, "shooterLateralOffset": 3,
-    "sweetSpot": { "x": 59.5, "y": 131.5 }, "v0NoisePercent": 0.02, "headingNoiseRad": 0.02, "pitchNoiseRad": 0.006,
-    "nectarShooter": { "dz": 41.5, "shooterPitch": 0.9599, "shooterOffset": 0, "shooterLateralOffset": -3, "sweetSpot": { … }, … }
-  }
-}
-```
-
-**이전 형식 변환 (11-2 구현)**
-
-v1 로봇 프로필 = 위 형식에서 `shooterSetup` · `nectarShooter`(두 곳) · `flowerDropZones` · `liftMaxSpeed` · `shooterLateralOffset`이 없는 것. 세 경로 모두 같은 변환 함수(`upgradeRobotProfile`, 이름은 11-2에서 확정)를 정리 함수 **앞에** 거친다.
-
-| 없는 항목 | 채우는 값 |
-|---|---|
-| `config.shooterSetup` | `SHARED` |
-| `config.nectarShooter` | 그 파일의 주 슈터 값 복사 (`shooterDelay` / `turretType` / `turretRange` / `aimTolerance`) |
-| `ballistics.shooterLateralOffset` | 0 |
-| `ballistics.nectarShooter` | 그 파일의 주 슈터 탄도 복사 (좌우 오프셋 0) |
-| `config.flowerDropZones` | `[]` |
-| `config.liftMaxSpeed` | 0 |
-
-- NECTAR 슈터를 앱 기본값이 아니라 **주 슈터 복사**로 채우는 이유: 나중에 `PER_PIECE`로 바꿨을 때 NECTAR 카드가 자기 로봇 값에서 시작한다. 결과는 어느 쪽이든 v1과 같다 (`SHARED`에서는 쓰지 않음).
-- **프리셋 파일 (`PRESET_VERSION` 1 → 2, 11-2):** 버전 1 파일은 변환 후 기존 정리 규칙(없는 항목 기본값). 버전 2 파일도 없는 항목은 기본값으로 채운다 (프리셋은 원래 관대함). 버전을 올리는 이유는 v1 앱이 v2 프리셋을 조용히 잘라 읽지 않고 `NEWER_VERSION`으로 거부하게 하기 위해서다.
-- **경기 파일 (엄격 해석):** `recipeVersion` 1 파일은 위 새 로봇 항목이 **없으면** 변환으로 채우고, **있으면** 기존 엄격 규칙으로 검사한다 (11-2 ~ 15-1 사이 개발 중 내보낸 파일도 읽힘). 15-1에서 `RECIPE_VERSION` 2가 되면 버전 2 파일은 새 항목이 모두 있어야 한다. v1 경기 파일은 계속 "엔진 버전 다름" 경고 + 체크섬 비교로 열린다 (5.2항 v1 파일 호환). 시나리오 새 항목은 선택이라 변환하지 않는다.
-- **설정 자동 보관 (`SETTINGS_VERSION` 1 유지):** 저장된 로봇 프로필에 새 항목이 없으면 같은 변환을 `mergeWithDefaults` 앞에 거친다 (변환 없이 기본값으로 채우면 NECTAR 카드가 앱 기본값이 됨). 버전을 올리지 않으므로 사용자 설정이 유지된다.
-- **변환 결과는 v1과 같은 경기를 낸다:** 변환 함수 테스트로 "v1 프로필 → 변환 → 엔진 / 확률표 입력"이 v1과 같음을 고정한다 (11-2).
 
 **엔진 내부 입력 방향 (저장되지 않음, 12-3 / 12-4에서 확정)**
 
@@ -1743,9 +1694,9 @@ v1 로봇 프로필 = 위 형식에서 `shooterSetup` · `nectarShooter`(두 곳
 
 | 상수 | 언제 | 이유 |
 |---|---|---|
-| `PRESET_VERSION` 1 → 2 | 11-2 | 로봇 프로필 항목 추가 |
-| `ENGINE_VERSION` 1 → 2 | 12-1 (한 번) | HIVE 터널부터 결과가 바뀜. 11-2는 기본값 = v1이라 결과 불변 (`engineVersion.test.ts` 그대로 통과해야 함) |
-| `RECIPE_VERSION` 1 → 2 | 15-1 | 트리 / 미종료 가지 형식 |
+| `PRESET_VERSION` 1 → 2 | 11-2 (완료) | 로봇 프로필 항목 추가 |
+| `ENGINE_VERSION` 1 → 2 | 12-1 (한 번) | HIVE 터널부터 결과가 바뀜. 11-2는 기본값 = v1이라 결과 불변 (`engineVersion.test.ts` 그대로 통과) |
+| `RECIPE_VERSION` 1 → 2 | 15-1 | 트리 / 미종료 가지 형식. 그 전까지 버전 1 파일의 새 로봇 항목은 "없으면 변환, 있으면 엄격 검사" (3.9항) |
 | `BALLISTICS_MODEL_VERSION` | 유지 | 좌우 0 / `SHARED`의 계산이 v1과 같음 |
 | `SETTINGS_VERSION` | 유지 | 변환 + 기본값 채움으로 사용자 설정 보존 |
 

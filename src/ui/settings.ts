@@ -15,6 +15,7 @@ import { DEFAULT_LENGTH_UNIT, toLengthUnit } from './units';
 import type { LengthUnit } from './units';
 import { tabIssues } from './configDraft';
 import { robotProfileIssues } from './robotForm';
+import { upgradeRobotProfileData } from './presetFile';
 import type { DraftValues } from './configDraft';
 
 export const SETTINGS_STORAGE_KEY = 'ftc-tactic-sim/settings';
@@ -96,8 +97,9 @@ export function mergeWithDefaults<T>(value: unknown, template: T): T | null {
  */
 export function sanitizeApplied(raw: unknown, defaults: DraftValues): DraftValues | null {
   if (!isRecord(raw)) return null;
-  const robot1 = mergeWithDefaults(raw.robot1, defaults.robot1);
-  const robot2 = mergeWithDefaults(raw.robot2, defaults.robot2);
+  // 11-2: v2.0.0 새 로봇 항목이 없으면 기본값이 아니라 이전 형식 변환으로 채움 (NECTAR 슈터 = 주 슈터 복사, 명세서 3.8 · 3.9)
+  const robot1 = mergeWithDefaults(upgradeRobotProfileData(raw.robot1), defaults.robot1);
+  const robot2 = mergeWithDefaults(upgradeRobotProfileData(raw.robot2), defaults.robot2);
   const { scenario } = raw;
   if (!robot1 || !robot2) return null;
   if (!isRecord(scenario) || (scenario.allianceColor !== 'RED' && scenario.allianceColor !== 'BLUE')) return null;

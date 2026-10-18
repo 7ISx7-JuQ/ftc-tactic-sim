@@ -25,15 +25,24 @@ import type { RobotId } from '../input/inputConfig';
 import { DISPLAY_DECIMALS, formatNumber, fromDisplay, parseNumberInput, toDisplay, unitLabel } from './units';
 import type { LengthUnit, QuantityKind } from './units';
 
-/** 슈터 탄도 = 엔진 BallisticsConfig (편차 3종은 값을 항상 채움). dz = 림 높이 − 발사구 지상고, 스윗스팟 = 기준 셀 RED_AUDIENCE 좌표 */
-export interface ProfileBallistics {
+/**
+ * 슈터 1개의 탄도 = 엔진 BallisticsConfig (편차 3종 / 좌우 오프셋은 값을 항상 채움). dz = 림 높이 − 발사구 지상고,
+ * 스윗스팟 = 기준 셀 RED_AUDIENCE 좌표, 좌우 오프셋 + = 로봇 오른쪽 (명세서 4장 / 5.4 v2.0.0 항목 규칙)
+ */
+export interface ProfileShooterBallistics {
   dz: number;
   shooterPitch: number;
   shooterOffset: number;
+  shooterLateralOffset: number;
   sweetSpot: { x: number; y: number };
   v0NoisePercent: number;
   headingNoiseRad: number;
   pitchNoiseRad: number;
+}
+
+/** 로봇 프로필의 탄도 = 주 슈터(v1 항목 위치 그대로) + PER_PIECE의 NECTAR 슈터 (다른 구성에서는 값만 보관) */
+export interface ProfileBallistics extends ProfileShooterBallistics {
+  nectarShooter: ProfileShooterBallistics;
 }
 
 /**
@@ -42,15 +51,19 @@ export interface ProfileBallistics {
  */
 export const DEFAULT_SWEET_SPOT: Readonly<{ x: number; y: number }> = { x: 59.5, y: 131.5 };
 
-export const DEFAULT_PROFILE_BALLISTICS: Readonly<ProfileBallistics> = {
+const defaultShooterBallistics = (): ProfileShooterBallistics => ({
   dz: DEFAULT_SHOOTER_BALLISTICS.dz,
   shooterPitch: DEFAULT_SHOOTER_BALLISTICS.shooterPitch,
   shooterOffset: DEFAULT_SHOOTER_BALLISTICS.shooterOffset,
+  shooterLateralOffset: 0,
   sweetSpot: { ...DEFAULT_SWEET_SPOT },
   v0NoisePercent: DEFAULT_V0_NOISE_PERCENT,
   headingNoiseRad: DEFAULT_HEADING_NOISE_RAD,
   pitchNoiseRad: DEFAULT_PITCH_NOISE_RAD,
-};
+});
+
+/** 기본 탄도: NECTAR 슈터 = 기본 주 슈터와 같은 값 */
+export const DEFAULT_PROFILE_BALLISTICS: Readonly<ProfileBallistics> = { ...defaultShooterBallistics(), nectarShooter: defaultShooterBallistics() };
 
 export interface RobotProfile {
   teamNumber: string; // GUI 전용 (엔진 미전달). 비우면 R1 / R2로 표시
@@ -152,7 +165,7 @@ const EPS = 1e-9;
 // 값 읽기 / 쓰기
 // ------------------------------------------------------------
 
-const BALLISTICS_KEYS: Readonly<Record<BallisticsFieldKey, Exclude<keyof ProfileBallistics, 'sweetSpot'>>> = {
+const BALLISTICS_KEYS: Readonly<Record<BallisticsFieldKey, Exclude<keyof ProfileBallistics, 'sweetSpot' | 'nectarShooter' | 'shooterLateralOffset'>>> = {
   launchHeight: 'dz',
   shooterPitch: 'shooterPitch',
   shooterOffset: 'shooterOffset',

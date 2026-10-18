@@ -234,4 +234,42 @@ describe('저장 레시피 (10-3)', () => {
     ]);
     expect(recipeWarnings({ engineVersion: ENGINE_VERSION, ballisticsModelVersion: BALLISTICS_MODEL_VERSION, lut: { ...CURRENT_LUT_SETTINGS, seed: 1 } })).toEqual([{ code: 'LUT_SETTINGS' }]);
   }, TEST_TIMEOUT_MS);
+
+  it('G. (11-2) v1 경기 파일: v2.0.0 로봇 항목이 없으면 변환으로 채움(NECTAR 슈터 = 주 슈터 복사), 있으면 엄격 검사, 시나리오 새 항목도 엄격', () => {
+    const v1 = (id: RobotId): Change[] => [
+      [`setup.${id}.config.shooterSetup`, DEL], [`setup.${id}.config.nectarShooter`, DEL], [`setup.${id}.config.flowerDropZones`, DEL], [`setup.${id}.config.liftMaxSpeed`, DEL],
+      [`setup.${id}.ballistics.shooterLateralOffset`, DEL], [`setup.${id}.ballistics.nectarShooter`, DEL],
+    ];
+    // R2 주 슈터를 바꾼 v1 파일 → NECTAR 슈터는 그 값의 복사
+    const old = parse(edit(...v1('robot1'), ...v1('robot2'), ['setup.robot2.config.shooterDelay', 250], ['setup.robot2.ballistics.dz', 41]));
+    expect(old.ok).toBe(true);
+    if (!old.ok) return;
+    expect(old.recipe.setup.robot1).toEqual(sample().recipe.setup.robot1); // 기본 프로필은 주 슈터 = NECTAR 슈터라 변환 결과가 원래와 같음
+    const r2 = old.recipe.setup.robot2;
+    expect([r2.config.shooterSetup, r2.config.nectarShooter.shooterDelay, r2.config.flowerDropZones, r2.config.liftMaxSpeed]).toEqual(['SHARED', 250, [], 0]);
+    expect([r2.ballistics.shooterLateralOffset, r2.ballistics.nectarShooter.dz, r2.ballistics.nectarShooter.shooterLateralOffset]).toEqual([0, 41, 0]);
+
+    const code = (text: string) => {
+      const r = parse(text);
+      return r.ok ? 'OK' : r.error;
+    };
+    // 일부만 없어도 그 항목만 채움
+    expect(code(edit(['setup.robot1.config.liftMaxSpeed', DEL]))).toBe('OK');
+    // 있는 새 항목은 형식이 맞아야 함 (기본값으로 채우지 않음)
+    expect(code(edit(['setup.robot1.config.shooterSetup', 'TRIPLE']))).toEqual({ code: 'INVALID_FIELD', field: 'setup.robot1' });
+    expect(code(edit(['setup.robot1.config.nectarShooter.turretType', 'LASER']))).toEqual({ code: 'INVALID_FIELD', field: 'setup.robot1' });
+    expect(code(edit(['setup.robot2.ballistics.nectarShooter.dz', DEL]))).toEqual({ code: 'INVALID_FIELD', field: 'setup.robot2' });
+    expect(code(edit(['setup.robot1.config.flowerDropZones', [{ side: 'TOP', offset: 0, width: 5, depth: 1 }]]))).toEqual({ code: 'INVALID_FIELD', field: 'setup.robot1' });
+    expect(code(edit(['setup.robot1.ballistics.shooterLateralOffset', '3']))).toEqual({ code: 'INVALID_FIELD', field: 'setup.robot1' });
+    // 시나리오 새 선택 항목: 형식이 맞으면 그대로, 틀리면 거부
+    const floor = [{ type: 'POLLEN', x: 70.5, y: 120 }];
+    const withNew = parse(edit(['setup.scenario.floorPieces', floor], ['setup.scenario.rpThresholds', { swarmPoints: 14, pollinator1Tips: 3, pollinator2Tips: 6 }], ['setup.scenario.r1AutoMovement', 'PARK']));
+    expect(withNew.ok && [withNew.recipe.setup.scenario.floorPieces, withNew.recipe.setup.scenario.rpThresholds?.swarmPoints, withNew.recipe.setup.scenario.r1AutoMovement]).toEqual([floor, 14, 'PARK']);
+    expect(code(edit(['setup.scenario.floorPieces', [{ type: 'ROCK', x: 1, y: 2 }]]))).toEqual({ code: 'INVALID_FIELD', field: 'setup.scenario' });
+    expect(code(edit(['setup.scenario.rpThresholds', { swarmPoints: 16 }]))).toEqual({ code: 'INVALID_FIELD', field: 'setup.scenario' });
+    expect(code(edit(['setup.scenario.r2AutoMovement', 'FLY']))).toEqual({ code: 'INVALID_FIELD', field: 'setup.scenario' });
+    // 내보낸 파일에는 새 로봇 항목이 들어 있음
+    const robot1 = (JSON.parse(sample().text) as { setup: { robot1: { config: Record<string, unknown>; ballistics: Record<string, unknown> } } }).setup.robot1;
+    expect([robot1.config.shooterSetup, robot1.config.liftMaxSpeed, robot1.ballistics.shooterLateralOffset]).toEqual(['SHARED', 0, 0]);
+  }, TEST_TIMEOUT_MS);
 });

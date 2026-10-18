@@ -1,20 +1,22 @@
 // 프리셋 파일 내보내기 / 불러오기 (명세서 3.9 프리셋, 10-2): React / DOM 비의존 순수 함수
 // - 파일 = { format, presetVersion, kind, data }. kind: ROBOT(RobotProfile) / SCENARIO(ScenarioConfig) / SETUP(R1 + R2 + 시나리오).
+// - 11-2: presetVersion 2 = v2.0.0 로봇 프로필 항목 (명세서 3.9 프리셋 파일). 로봇 데이터는 정리 전에 이전 형식 변환
+//   (upgradeRobotProfileData: 없는 새 항목 = v1 동작 값, NECTAR 슈터 = 그 파일의 주 슈터 복사)을 거친다 — 경기 파일 / 자동 보관도 같은 함수.
 // - EXPORT는 적용 값을 내보낸다. IMPORT는 초안에만 넣고 기존 APPLY 흐름을 탄다.
 // - 파일 자체가 틀리면 거부 (JSON 아님 / format 다름 / kind가 그 줄과 다름 / 더 새 버전). 항목이 없거나 형식이 틀리면 그 항목만 기본값.
 //   범위 검증에 걸리는 값은 버리지 않고 초안에 넣어 빨간 오류로 보여 준다 (숫자 칸은 폼이 값으로 판정, 팀 번호 / 팀명은 틀린 입력 글자로 보관).
 
-import type { BumperZone, RobotConfig, RobotPose, ScenarioConfig } from '../core/types';
+import type { AutoMovement, BumperZone, FloorPiecePlacement, RobotConfig, RobotPose, ScenarioConfig, ShooterAimConfig, ShooterSetup } from '../core/types';
 import type { RobotId } from '../input/inputConfig';
 import { TAB_LABEL_KEYS, editDraft, setFieldText, tabStatus } from './configDraft';
 import type { ConfigDrafts, DraftTab, DraftValues } from './configDraft';
 import { BUMPER_SIDES, MAX_INTAKE_ZONES, checkText } from './robotForm';
-import type { ProfileBallistics, RobotProfile } from './robotForm';
+import type { ProfileBallistics, ProfileShooterBallistics, RobotProfile } from './robotForm';
 import { t } from './i18n';
 import type { Language, MessageKey } from './i18n';
 
 export const PRESET_FORMAT = 'ftc-tactic-sim/preset';
-export const PRESET_VERSION = 1;
+export const PRESET_VERSION = 2;
 // 경기 레시피 (3.9항, 10-3 ~ 10-4). 프리셋 줄에 경기 파일을 넣으면 따로 알려 준다
 export const MATCH_FORMAT = 'ftc-tactic-sim/match';
 // 읽을 파일 크기 상한 (프리셋은 수 KB, 경기 레시피도 약 100 KB 이하)
@@ -95,7 +97,46 @@ export function presetFileName(row: PresetRow, applied: DraftValues, now: Date):
 }
 
 // ============================================================
-// 2. 불러오기: 항목별 정리 (없거나 형식이 틀린 항목만 기본값)
+// 2. 이전 형식 변환 (v1 → v2.0.0 로봇 프로필, 명세서 3.9 프리셋 파일)
+// ============================================================
+
+const AIM_KEYS = ['shooterDelay', 'turretType', 'turretRange', 'aimTolerance'] as const;
+const SHOOTER_BALLISTICS_KEYS = ['dz', 'shooterPitch', 'shooterOffset', 'shooterLateralOffset', 'sweetSpot', 'v0NoisePercent', 'headingNoiseRad', 'pitchNoiseRad'] as const;
+
+/** 있는 항목만 깊은 복사 (없는 항목은 정리 함수가 기본값으로 채움) */
+function pick(r: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of keys) if (r[k] !== undefined) out[k] = clone(r[k]);
+  return out;
+}
+
+/**
+ * 로봇 프로필 데이터(파일 / 자동 보관의 날 값)의 없는 v2.0.0 항목을 v1 동작 값으로 채운다. 있는 항목은 그대로 둔다
+ * (형식 검사는 정리 함수 / 엄격 해석이 함). shooterSetup = SHARED, NECTAR 슈터 = 그 데이터의 주 슈터 복사, 좌우 오프셋 0,
+ * 투입 방향 구역 [], 리프트 주행 속도 0. 원본은 바꾸지 않는다
+ */
+export function upgradeRobotProfileData(v: unknown): unknown {
+  if (!isRecord(v)) return v;
+  const out: Record<string, unknown> = { ...v };
+  if (isRecord(v.config)) {
+    const c: Record<string, unknown> = { ...v.config };
+    if (c.shooterSetup === undefined) c.shooterSetup = 'SHARED';
+    if (c.nectarShooter === undefined) c.nectarShooter = pick(c, AIM_KEYS);
+    if (c.flowerDropZones === undefined) c.flowerDropZones = [];
+    if (c.liftMaxSpeed === undefined) c.liftMaxSpeed = 0;
+    out.config = c;
+  }
+  if (isRecord(v.ballistics)) {
+    const b: Record<string, unknown> = { ...v.ballistics };
+    if (b.shooterLateralOffset === undefined) b.shooterLateralOffset = 0;
+    if (b.nectarShooter === undefined) b.nectarShooter = pick(b, SHOOTER_BALLISTICS_KEYS);
+    out.ballistics = b;
+  }
+  return out;
+}
+
+// ============================================================
+// 3. 불러오기: 항목별 정리 (없거나 형식이 틀린 항목만 기본값)
 // ============================================================
 
 function sanitizeZone(v: unknown): BumperZone | null {
@@ -104,27 +145,43 @@ function sanitizeZone(v: unknown): BumperZone | null {
   return { side: v.side as BumperZone['side'], offset: v.offset, width: v.width, depth: v.depth };
 }
 
-function sanitizeConfig(v: unknown, def: RobotConfig, id: RobotId): RobotConfig {
-  const r = isRecord(v) ? v : {};
-  const out = { ...clone(def), id } as RobotConfig;
-  const numKeys = ['width', 'length', 'maxSpeed', 'maxTurnRate', 'maxLinearAccel', 'maxAngularAccel', 'intakeDelay', 'maxControlledPieces', 'shooterDelay', 'aimTolerance', 'flowerSetupDelay', 'flowerDropDelay'] as const;
-  for (const k of numKeys) out[k] = num(r[k], def[k]);
-  if (typeof r.name === 'string') out.name = r.name;
-  if (typeof r.canIntakeNectar === 'boolean') out.canIntakeNectar = r.canIntakeNectar;
+const SHOOTER_SETUPS: readonly ShooterSetup[] = ['NONE', 'POLLEN_ONLY', 'SHARED', 'PER_PIECE'];
+
+/** 구역 목록: 배열이면 형식이 맞는 구역만 남기고 최대 개수까지 (배열이 아니면 기본값) */
+const sanitizeZones = (v: unknown, def: BumperZone[]): BumperZone[] =>
+  Array.isArray(v) ? v.map(sanitizeZone).filter((z): z is BumperZone => z !== null).slice(0, MAX_INTAKE_ZONES) : clone(def);
+
+/** 슈터 1개의 조준 / 발사 런타임 제원 (주 슈터는 RobotConfig에 바로, NECTAR 슈터는 nectarShooter) */
+function sanitizeAim(r: Record<string, unknown>, def: ShooterAimConfig): ShooterAimConfig {
+  const out: ShooterAimConfig = { shooterDelay: num(r.shooterDelay, def.shooterDelay), turretType: def.turretType, turretRange: [def.turretRange[0], def.turretRange[1]], aimTolerance: num(r.aimTolerance, def.aimTolerance) };
   if (r.turretType === 'FIXED' || r.turretType === 'TURRET') out.turretType = r.turretType;
   if (Array.isArray(r.turretRange) && r.turretRange.length === 2 && r.turretRange.every(isNumber)) out.turretRange = [r.turretRange[0], r.turretRange[1]];
-  // 구역: 배열이면 형식이 맞는 구역만 남기고 최대 개수까지 (배열이 아니면 기본값)
-  if (Array.isArray(r.intakeZones)) out.intakeZones = r.intakeZones.map(sanitizeZone).filter((z): z is BumperZone => z !== null).slice(0, MAX_INTAKE_ZONES);
   return out;
 }
 
-function sanitizeBallistics(v: unknown, def: ProfileBallistics): ProfileBallistics {
+function sanitizeConfig(v: unknown, def: RobotConfig, id: RobotId): RobotConfig {
+  const r = isRecord(v) ? v : {};
+  const out = { ...clone(def), id } as RobotConfig;
+  const numKeys = ['width', 'length', 'maxSpeed', 'maxTurnRate', 'maxLinearAccel', 'maxAngularAccel', 'intakeDelay', 'maxControlledPieces', 'flowerSetupDelay', 'flowerDropDelay', 'liftMaxSpeed'] as const;
+  for (const k of numKeys) out[k] = num(r[k], def[k]);
+  if (typeof r.name === 'string') out.name = r.name;
+  if (typeof r.canIntakeNectar === 'boolean') out.canIntakeNectar = r.canIntakeNectar;
+  if (SHOOTER_SETUPS.includes(r.shooterSetup as ShooterSetup)) out.shooterSetup = r.shooterSetup as ShooterSetup;
+  Object.assign(out, sanitizeAim(r, def));
+  out.nectarShooter = sanitizeAim(isRecord(r.nectarShooter) ? r.nectarShooter : {}, def.nectarShooter);
+  out.intakeZones = sanitizeZones(r.intakeZones, def.intakeZones);
+  out.flowerDropZones = sanitizeZones(r.flowerDropZones, def.flowerDropZones);
+  return out;
+}
+
+function sanitizeShooterBallistics(v: unknown, def: ProfileShooterBallistics): ProfileShooterBallistics {
   const r = isRecord(v) ? v : {};
   const spot = isRecord(r.sweetSpot) ? r.sweetSpot : {};
   return {
     dz: num(r.dz, def.dz),
     shooterPitch: num(r.shooterPitch, def.shooterPitch),
     shooterOffset: num(r.shooterOffset, def.shooterOffset),
+    shooterLateralOffset: num(r.shooterLateralOffset, def.shooterLateralOffset),
     sweetSpot: { x: num(spot.x, def.sweetSpot.x), y: num(spot.y, def.sweetSpot.y) },
     v0NoisePercent: num(r.v0NoisePercent, def.v0NoisePercent),
     headingNoiseRad: num(r.headingNoiseRad, def.headingNoiseRad),
@@ -132,9 +189,18 @@ function sanitizeBallistics(v: unknown, def: ProfileBallistics): ProfileBallisti
   };
 }
 
-/** 로봇 프로필 정리. 팀 번호 / 팀명 글자가 입력칸 규칙에 어긋나면 값은 비우고 글자를 따로 돌려준다 (초안의 틀린 입력 글자) */
-export function sanitizeRobotPreset(v: unknown, def: RobotProfile, id: RobotId): { profile: RobotProfile; invalidTexts: Partial<Record<'teamNumber' | 'teamName', string>> } {
+function sanitizeBallistics(v: unknown, def: ProfileBallistics): ProfileBallistics {
   const r = isRecord(v) ? v : {};
+  return { ...sanitizeShooterBallistics(r, def), nectarShooter: sanitizeShooterBallistics(r.nectarShooter, def.nectarShooter) };
+}
+
+/**
+ * 로봇 프로필 정리. 이전 형식 변환(upgradeRobotProfileData)을 먼저 거친다.
+ * 팀 번호 / 팀명 글자가 입력칸 규칙에 어긋나면 값은 비우고 글자를 따로 돌려준다 (초안의 틀린 입력 글자)
+ */
+export function sanitizeRobotPreset(v: unknown, def: RobotProfile, id: RobotId): { profile: RobotProfile; invalidTexts: Partial<Record<'teamNumber' | 'teamName', string>> } {
+  const upgraded = upgradeRobotProfileData(v);
+  const r = isRecord(upgraded) ? upgraded : {};
   const invalidTexts: Partial<Record<'teamNumber' | 'teamName', string>> = {};
   const text = (key: 'teamNumber' | 'teamName'): string => {
     const value = r[key];
@@ -155,6 +221,7 @@ export function sanitizeRobotPreset(v: unknown, def: RobotProfile, id: RobotId):
 }
 
 const PIECE_TYPES = ['POLLEN', 'NECTAR'] as const;
+const AUTO_MOVEMENTS: readonly AutoMovement[] = ['NONE', 'LEAVE', 'PARK'];
 const isPose = (v: unknown): v is RobotPose => isRecord(v) && isNumber(v.x) && isNumber(v.y) && isNumber(v.heading);
 
 /** 시나리오 정리: 선택 항목은 없으면 없는 대로(엔진 기본값), 형식이 틀리면 기본 시나리오의 그 항목 */
@@ -182,11 +249,21 @@ export function sanitizeScenarioPreset(v: unknown, def: ScenarioConfig): Scenari
   });
   take('autoTipCount', isNumber);
   take('rngSeed', isNumber);
+  // v2.0.0 선택 항목 (명세서 4장). 값 범위 검증은 validateScenario (12-5 / 12-6)
+  const isFloorPiece = (p: unknown): p is FloorPiecePlacement => isRecord(p) && (PIECE_TYPES as readonly unknown[]).includes(p.type) && isNumber(p.x) && isNumber(p.y);
+  take('floorPieces', x => Array.isArray(x) && x.every(isFloorPiece), x => (x as FloorPiecePlacement[]).map(p => ({ type: p.type, x: p.x, y: p.y })));
+  take('rpThresholds', x => isRecord(x) && isNumber(x.swarmPoints) && isNumber(x.pollinator1Tips) && isNumber(x.pollinator2Tips), x => {
+    const t = x as Record<string, number>;
+    return { swarmPoints: t.swarmPoints, pollinator1Tips: t.pollinator1Tips, pollinator2Tips: t.pollinator2Tips };
+  });
+  const isAutoMovement = (x: unknown) => (AUTO_MOVEMENTS as readonly unknown[]).includes(x);
+  take('r1AutoMovement', isAutoMovement);
+  take('r2AutoMovement', isAutoMovement);
   return out;
 }
 
 // ============================================================
-// 3. 불러오기: 파일 해석
+// 4. 불러오기: 파일 해석
 // ============================================================
 
 /** 파일 글자 → 줄에 넣을 값. 파일 자체가 틀리면 오류 (아무것도 바꾸지 않음) */
@@ -239,7 +316,7 @@ export function importPresetToDrafts(state: ConfigDrafts, preset: PresetImport):
 }
 
 // ============================================================
-// 4. 화면 문구 / 확인창 대상
+// 5. 화면 문구 / 확인창 대상
 // ============================================================
 
 /** 덮어쓰기 확인이 필요한 탭: 줄이 바꾸는 탭 중 적용 안 된 수정 / 틀린 입력이 있는 탭 (COPY TO와 같은 규칙) */
