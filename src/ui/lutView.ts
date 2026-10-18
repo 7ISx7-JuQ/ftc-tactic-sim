@@ -10,7 +10,7 @@ import { DRAFT_TABS, deepEqual, tabStatus } from './configDraft';
 import { t } from './i18n';
 import type { Language } from './i18n';
 import type { ConfigDrafts, DraftTab } from './configDraft';
-import { profileBallisticsConfig } from './robotForm';
+import { profileLUTShooters } from './robotForm';
 import type { RobotProfile } from './robotForm';
 
 export type LutPhase = 'READY' | 'WORKING' | 'ERROR' | 'IDLE';
@@ -96,9 +96,9 @@ export function lutView(status: RobotLUTStatus, timing: LutTiming | null, now: n
   };
 }
 
-/** 초안과 적용 값의 LUT 입력(탄도 설정 + 로봇 크기)이 다른지: 다르면 "적용하면 새로 생성" 안내 */
+/** 초안과 적용 값의 LUT 입력(발사 가능 기물별 탄도 설정 + 로봇 크기, 12-4)이 다른지: 다르면 "적용하면 새로 생성" 안내 */
 export function lutInputsChanged(draft: RobotProfile, applied: RobotProfile): boolean {
-  const input = (p: RobotProfile) => ({ ballistics: profileBallisticsConfig(p), length: p.config.length, width: p.config.width });
+  const input = (p: RobotProfile) => ({ ballistics: profileLUTShooters(p), length: p.config.length, width: p.config.width });
   return !deepEqual(input(draft), input(applied));
 }
 

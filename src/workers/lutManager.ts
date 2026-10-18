@@ -8,6 +8,8 @@
 //   - 캐시 (09-4): 요청 시 캐시를 먼저 조회 → 적중하면 Worker 없이 즉시 READY, 미스 / 실패면 생성 후 저장.
 //   - 공유 (09-10a): 다른 로봇이 같은 요청 키로 생성 중 / 완료면 따라가기(follower)만 한다 — 진행은 앞선 로봇 것을 보여주고,
 //     앞선 로봇이 READY면 결과를 함께 쓰고, 멈추거나(취소 / 오류 / 설정 변경) 키가 바뀌면 그때부터 스스로 생성한다.
+//   - 슈터 구성 (12-4): 요청은 발사 가능 기물별 슈터 설정. 기물마다 그 슈터 설정으로 작업을 만들고, 발사 불가 기물은 작업 없이
+//     0 LUT / v0 null (전체 격자 수에서도 뺌). 발사 가능 기물이 없으면(NONE) 생성 없이 바로 READY.
 // Worker 생성 함수 / 캐시를 주입받아 Node에서 가짜로 테스트한다 (브라우저는 createLUTWorker.ts, lutCache.ts).
 
 import {
@@ -20,12 +22,13 @@ import {
   DEFAULT_V0_SEARCH_SAMPLES,
   LUT_GRID_SIZE,
   PIECE_TYPES,
+  lutShooters,
   mirrorLUTSet,
   robotLUTSeeds,
   snapSweetSpot,
-  validateBallisticsConfig,
+  validateLUTShooters,
 } from '../core/ballistics';
-import type { BallisticsIssue, RobotBallisticsResult } from '../core/ballistics';
+import type { BallisticsIssue, RobotBallisticsResult, RobotLUTShooters } from '../core/ballistics';
 import type { BallisticsConfig, MatchHeatmapLUTs } from '../core/types';
 import type { LUTCache, LUTCacheEntry } from './lutCache';
 import type { LUTJobMessage, LUTPieceType, LUTRobotId, LUTRobotSize, LUTWorkerMessage } from './lutProtocol';
@@ -45,8 +48,9 @@ export interface LUTWorkerLike {
 // 진행 중 설정이 바뀌면 CANCELLED를 알린 뒤 다시 QUEUED. cancel()로 멈추면 CANCELLED에 머문다.
 export type LUTGenState = 'IDLE' | 'QUEUED' | 'SEARCHING' | 'GENERATING' | 'READY' | 'ERROR' | 'CANCELLED';
 
+// 탄도 설정: 하나면 두 기물 공용 (v1), 기물별이면 발사 가능 기물만 키가 있다 (12-4, RobotLUTShooters)
 export interface LUTRequest {
-  config: BallisticsConfig;
+  config: BallisticsConfig | RobotLUTShooters;
   robotSize: LUTRobotSize;
 }
 
@@ -59,8 +63,8 @@ export interface RobotLUTStatus {
   searched: Record<LUTPieceType, boolean>;          // 기물별 v0 탐색 완료 여부 (v0 선표시)
   v0: Record<LUTPieceType, number | null>;
   sweetSpotHitRate: Record<LUTPieceType, number>;   // 0이면 GUI 경고
-  cellsDone: number;                                // 완료 격자 (기물 2종 합산, 진행 중 작업의 행 단위 진행 포함)
-  cellsTotal: number;                               // 2 × 20,736
+  cellsDone: number;                                // 완료 격자 (발사 가능 기물 합산, 진행 중 작업의 행 단위 진행 포함)
+  cellsTotal: number;                               // 발사 가능 기물 수 × 20,736 (v1 = 2 × 20,736)
   reference: Record<LUTPieceType, Float32Array>;    // 조립 중인 기준 셀(RED_AUDIENCE) LUT
   rowsDone: Record<LUTPieceType, Uint8Array>;       // 행별 완료 여부 (1 = 계산 끝남)
   result: RobotBallisticsResult | null;             // READY일 때만
@@ -85,31 +89,47 @@ export function defaultLUTPoolSize(hardwareConcurrency?: number): number {
   return Math.max(1, Math.min(cores - 1, 8));
 }
 
+// 슈터 1개의 키 항목: v1 항목 그대로 (스윗스팟은 스냅, 편차 미지정 값은 기본값) + 좌우 오프셋은 0이 아닐 때만 끝에 추가
+function shooterKey(c: BallisticsConfig): Record<string, unknown> {
+  const sweetSpot = snapSweetSpot(c.sweetSpot);
+  const key: Record<string, unknown> = {
+    dz: c.dz,
+    shooterPitch: c.shooterPitch,
+    shooterOffset: c.shooterOffset,
+    sweetSpot: { x: sweetSpot.x, y: sweetSpot.y },
+    v0NoisePercent: c.v0NoisePercent ?? DEFAULT_V0_NOISE_PERCENT,
+    headingNoiseRad: c.headingNoiseRad ?? DEFAULT_HEADING_NOISE_RAD,
+    pitchNoiseRad: c.pitchNoiseRad ?? DEFAULT_PITCH_NOISE_RAD,
+  };
+  const lateral = c.shooterLateralOffset ?? 0;
+  if (lateral !== 0) key.shooterLateralOffset = lateral;
+  return key;
+}
+
 /**
  * LUT 결과를 결정하는 입력의 정규화 키 (재요청 무시 판정, 09-4 캐시 키의 원문):
  * 모델 버전 + 탄도 설정(스윗스팟은 스냅한 좌표, 편차 미지정 값은 기본값으로 채움) + 로봇 길이 / 폭 + 시드 + 샘플 수.
  * skipUnreachable은 결과가 같으므로 제외. 속성 순서를 고정한 JSON 문자열.
+ * 12-4 (v1 캐시 호환): 기본값과 다른 새 항목만 넣는다 — 좌우 오프셋 ≠ 0이면 그 슈터 항목에 shooterLateralOffset,
+ * 발사 가능 기물이 둘 다가 아니면 끝에 pieces(발사 가능 기물 목록), 두 기물의 설정이 다르면 끝에 nectar(NECTAR 슈터 항목).
+ * 그래서 두 기물 공용 + 좌우 0(SHARED) = v1 키이고, PER_PIECE라도 두 슈터의 확률표 입력이 같으면 같은 키다
  */
 export function lutRequestKey(req: LUTRequest, samples: number, searchSamples: number, seed: number): string {
-  const c = req.config;
-  const sweetSpot = snapSweetSpot(c.sweetSpot);
-  return JSON.stringify({
+  const shooters = lutShooters(req.config);
+  const pollen = shooters.POLLEN ? shooterKey(shooters.POLLEN) : null;
+  const nectar = shooters.NECTAR ? shooterKey(shooters.NECTAR) : null;
+  const key: Record<string, unknown> = {
     modelVersion: BALLISTICS_MODEL_VERSION,
-    config: {
-      dz: c.dz,
-      shooterPitch: c.shooterPitch,
-      shooterOffset: c.shooterOffset,
-      sweetSpot: { x: sweetSpot.x, y: sweetSpot.y },
-      v0NoisePercent: c.v0NoisePercent ?? DEFAULT_V0_NOISE_PERCENT,
-      headingNoiseRad: c.headingNoiseRad ?? DEFAULT_HEADING_NOISE_RAD,
-      pitchNoiseRad: c.pitchNoiseRad ?? DEFAULT_PITCH_NOISE_RAD,
-    },
+    config: pollen ?? nectar,
     length: req.robotSize.length,
     width: req.robotSize.width,
     seed,
     samples,
     searchSamples,
-  });
+  };
+  if (!pollen || !nectar) key.pieces = PIECE_TYPES.filter(type => shooters[type]);
+  else if (JSON.stringify(pollen) !== JSON.stringify(nectar)) key.nectar = nectar;
+  return JSON.stringify(key);
 }
 
 type Job = LUTJobMessage;
@@ -125,7 +145,8 @@ interface RobotRun {
   key: string | null;
   issues: BallisticsIssue[];
   error: string | null;
-  config: BallisticsConfig | null;    // 스윗스팟을 스냅한 설정
+  shooters: RobotLUTShooters | null; // 발사 가능 기물별 설정 (스윗스팟을 스냅한 값)
+  pieces: LUTPieceType[];             // 발사 가능 기물 (작업을 만드는 기물)
   robotSize: LUTRobotSize | null;
   searched: Record<LUTPieceType, boolean>;
   v0: Record<LUTPieceType, number | null>;
@@ -149,7 +170,8 @@ function emptyRun(generation: number): RobotRun {
     key: null,
     issues: [],
     error: null,
-    config: null,
+    shooters: null,
+    pieces: [...PIECE_TYPES],
     robotSize: null,
     searched: perPiece(() => false),
     v0: perPiece<number | null>(() => null),
@@ -210,7 +232,8 @@ export class LUTManager {
   request(robotId: LUTRobotId, req: LUTRequest): void {
     if (this.disposed) return;
     const run = this.runs[robotId];
-    const issues = validateBallisticsConfig(req.config, req.robotSize);
+    const shooters = lutShooters(req.config);
+    const issues = validateLUTShooters(shooters, req.robotSize);
     if (issues.length > 0) {
       this.reset(robotId, 'IDLE');
       this.runs[robotId].issues = issues;
@@ -226,8 +249,25 @@ export class LUTManager {
     }
     const next = this.reset(robotId, 'QUEUED');
     next.key = key;
-    next.config = { ...req.config, sweetSpot: snapSweetSpot(req.config.sweetSpot) };
+    next.shooters = {};
+    for (const type of PIECE_TYPES) {
+      const c = shooters[type];
+      if (c) next.shooters[type] = { ...c, sweetSpot: snapSweetSpot(c.sweetSpot) };
+    }
+    next.pieces = PIECE_TYPES.filter(type => next.shooters![type]);
     next.robotSize = { length: req.robotSize.length, width: req.robotSize.width };
+    // 발사 불가 기물: 작업 없이 끝난 것으로 (0 LUT, v0 null)
+    for (const type of PIECE_TYPES) {
+      if (next.pieces.includes(type)) continue;
+      next.searched[type] = true;
+      next.rowsRemaining[type] = 0;
+      next.rowsDone[type].fill(1);
+    }
+    // 발사 가능 기물이 없으면 (NONE) 생성 없이 바로 준비 완료
+    if (next.pieces.length === 0) {
+      this.completeIfDone(robotId);
+      return;
+    }
     // 다른 로봇이 같은 LUT를 생성 중 / 완료했으면 따라가기 (기본 프리셋처럼 R1 = R2면 한 번만 생성)
     const otherId = OTHER[robotId];
     const other = this.runs[otherId];
@@ -261,7 +301,7 @@ export class LUTManager {
       v0: { ...src.v0 },
       sweetSpotHitRate: { ...src.hitRate },
       cellsDone: src.cellsCompleted + inFlight,
-      cellsTotal: PIECE_TYPES.length * CELLS_PER_PIECE,
+      cellsTotal: src.pieces.length * CELLS_PER_PIECE,
       reference: src.reference,
       rowsDone: src.rowsDone,
       result: run.result,
@@ -346,7 +386,7 @@ export class LUTManager {
 
   private enqueueSearches(robotId: LUTRobotId, run: RobotRun): void {
     const seeds = robotLUTSeeds(this.seed);
-    for (const pieceType of PIECE_TYPES) {
+    for (const pieceType of run.pieces) {
       this.searchQueue.push(this.makeJob('search', robotId, run, pieceType, this.searchSamples, seeds[pieceType].search));
     }
     this.dispatch();
@@ -377,7 +417,7 @@ export class LUTManager {
       run.rowsDone[type].fill(1);
       run.rowsRemaining[type] = 0;
     }
-    run.cellsCompleted = PIECE_TYPES.length * CELLS_PER_PIECE;
+    run.cellsCompleted = run.pieces.length * CELLS_PER_PIECE;
     run.fromCache = true;
     this.completeIfDone(robotId);
   }
@@ -389,7 +429,7 @@ export class LUTManager {
       generation: run.generation,
       robotId,
       pieceType,
-      config: run.config!,
+      config: run.shooters![pieceType]!,
       robotSize: run.robotSize!,
       samples,
       seed,
@@ -507,7 +547,7 @@ export class LUTManager {
     };
     run.state = 'READY';
     this.emit(robotId);
-    if (this.cache && !run.fromCache && run.key) {
+    if (this.cache && !run.fromCache && run.key && run.pieces.length > 0) {
       // 저장 실패는 무시 (다음에 다시 생성하면 됨)
       const entry: LUTCacheEntry = { v0: { ...run.v0 }, sweetSpotHitRate: { ...run.hitRate }, reference: run.reference };
       try {

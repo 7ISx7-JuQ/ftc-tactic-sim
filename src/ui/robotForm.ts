@@ -11,6 +11,8 @@
 //   칸 범위 0 ~ 144 in, 입력은 1 in 격자 중심으로 맞춤, 검증(validateBallisticsConfig) 실패는 탭 문제.
 
 import {
+  PIECE_TYPES,
+  isPieceFireable,
   DEFAULT_HEADING_NOISE_RAD,
   DEFAULT_PITCH_NOISE_RAD,
   DEFAULT_SHOOTER_BALLISTICS,
@@ -19,6 +21,7 @@ import {
   sweetSpotToBasis,
   validateBallisticsConfig,
 } from '../core/ballistics';
+import type { RobotLUTShooters } from '../core/ballistics';
 import { FIELD_SIZE, HIVE_RIM_Z, PIECE_PHYSICS } from '../core/collision';
 import type { BallisticsConfig, BumperSide, BumperZone, RobotConfig } from '../core/types';
 import type { RobotId } from '../input/inputConfig';
@@ -218,18 +221,35 @@ export function profileShooterBallistics(profile: RobotProfile, pieceType: 'POLL
   return profile.config.shooterSetup === 'PER_PIECE' && pieceType === 'NECTAR' ? b.nectarShooter : b;
 }
 
-/** 프로필 → 엔진 탄도 설정 (LUT 요청 / 검증) */
-export function profileBallisticsConfig(profile: RobotProfile): BallisticsConfig {
-  const b = profile.ballistics;
+/** 슈터 1개의 탄도 → 엔진 탄도 설정 (LUT 요청 / 검증). 좌우 오프셋 0이면 계산은 v1과 같다 */
+export function shooterBallisticsConfig(b: ProfileShooterBallistics): BallisticsConfig {
   return {
     dz: b.dz,
     shooterPitch: b.shooterPitch,
     shooterOffset: b.shooterOffset,
+    shooterLateralOffset: b.shooterLateralOffset,
     sweetSpot: { x: b.sweetSpot.x, y: b.sweetSpot.y },
     v0NoisePercent: b.v0NoisePercent,
     headingNoiseRad: b.headingNoiseRad,
     pitchNoiseRad: b.pitchNoiseRad,
   };
+}
+
+/** 프로필 → 주 슈터의 엔진 탄도 설정 (폼 검증) */
+export function profileBallisticsConfig(profile: RobotProfile): BallisticsConfig {
+  return shooterBallisticsConfig(profile.ballistics);
+}
+
+/**
+ * 프로필 → 확률표 생성 입력 (12-4): 발사 가능 기물마다 그 기물을 쏘는 슈터의 탄도 설정 (NONE = 빈 객체 → 생성 없이 준비 완료).
+ * SHARED는 두 기물이 같은 값이라 확률표 / 캐시 키가 v1과 같다
+ */
+export function profileLUTShooters(profile: RobotProfile): RobotLUTShooters {
+  const out: RobotLUTShooters = {};
+  for (const type of PIECE_TYPES) {
+    if (isPieceFireable(profile.config, type)) out[type] = shooterBallisticsConfig(profileShooterBallistics(profile, type));
+  }
+  return out;
 }
 
 /** 구역 하나의 칸 값 바꾸기 (구역 목록 복사) */

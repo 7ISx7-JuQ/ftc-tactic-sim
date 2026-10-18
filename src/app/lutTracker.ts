@@ -12,7 +12,7 @@ import type { LUTPieceType } from '../workers/lutProtocol';
 import type { DraftValues } from '../ui/configDraft';
 import { lutView, nextTiming } from '../ui/lutView';
 import type { LutTiming, RobotLutView } from '../ui/lutView';
-import { profileBallisticsConfig } from '../ui/robotForm';
+import { profileLUTShooters } from '../ui/robotForm';
 import type { RobotProfile } from '../ui/robotForm';
 
 export const LUT_UPDATE_INTERVAL_MS = 100;
@@ -113,6 +113,7 @@ export class LUTTracker {
   }
 }
 
+// 확률표 요청 = 발사 가능 기물별 슈터 탄도 설정 + 로봇 크기 (12-4)
 function requestOf(profile: RobotProfile) {
-  return { config: profileBallisticsConfig(profile), robotSize: { length: profile.config.length, width: profile.config.width } };
+  return { config: profileLUTShooters(profile), robotSize: { length: profile.config.length, width: profile.config.width } };
 }

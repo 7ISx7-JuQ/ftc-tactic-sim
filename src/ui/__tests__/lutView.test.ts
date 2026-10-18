@@ -65,6 +65,15 @@ describe('LUT 상태 표시 (09-10a)', () => {
     expect(lutInputsChanged({ ...r1, ballistics: { ...r1.ballistics, sweetSpot: { x: 60.5, y: 131.5 } } }, r1)).toBe(true);
     expect(lutInputsChanged({ ...r1, ballistics: { ...r1.ballistics, headingNoiseRad: 0.03 } }, r1)).toBe(true);
     expect(lutInputsChanged({ ...r1, config: { ...r1.config, length: 16 } }, r1)).toBe(true);
+    // 12-4: 확률표 입력 = 발사 가능 기물별 슈터 설정 (profileLUTShooters)
+    const nectarCard = { ...r1.ballistics, nectarShooter: { ...r1.ballistics.nectarShooter, dz: 30 } };
+    expect(lutInputsChanged({ ...r1, ballistics: nectarCard }, r1)).toBe(false); // SHARED는 NECTAR 카드를 쓰지 않음
+    const perPiece = { ...r1, config: { ...r1.config, shooterSetup: 'PER_PIECE' as const }, ballistics: nectarCard };
+    expect(lutInputsChanged(perPiece, r1)).toBe(true);
+    expect(lutInputsChanged({ ...r1, config: { ...r1.config, shooterSetup: 'PER_PIECE' } }, r1)).toBe(false); // 두 슈터 입력이 같으면 그대로
+    expect(lutInputsChanged({ ...r1, config: { ...r1.config, shooterSetup: 'POLLEN_ONLY' } }, r1)).toBe(true);
+    expect(lutInputsChanged({ ...r1, ballistics: { ...r1.ballistics, shooterLateralOffset: 2 } }, r1)).toBe(true);
+    expect(lutInputsChanged({ ...r1, config: { ...r1.config, shooterSetup: 'PER_PIECE', nectarShooter: { ...r1.config.nectarShooter, shooterDelay: 900 } } }, r1)).toBe(false); // 런타임 값은 확률표 입력 아님
   });
 
   it('E. START 막기: R1 탭 → R1 LUT → R2 탭 → R2 LUT → SCENARIO', () => {

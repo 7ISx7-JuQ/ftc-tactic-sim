@@ -24,6 +24,7 @@ import {
   DEFAULT_PROFILE_BALLISTICS,
   SWEET_SPOT_SPEC,
   profileBallisticsConfig,
+  profileLUTShooters,
   readSweetSpot,
   writeSweetSpot,
 } from '../robotForm';
@@ -174,11 +175,11 @@ describe('로봇 제원 폼 (09-9a)', () => {
     expect(readSweetSpot(blue, 'BLUE')).toEqual({ x: 90.5, y: 12.5 });
     expect(r1.ballistics.sweetSpot).toEqual({ x: 59.5, y: 131.5 }); // 원본 불변
     expect(SWEET_SPOT_SPEC).toMatchObject({ kind: 'coordinate', min: 0, max: 144 });
-    // 확률표 입력 = 주 슈터의 v1 항목 (좌우 오프셋 / NECTAR 슈터는 12-3 / 12-4에서 연결)
-    const { nectarShooter, shooterLateralOffset, ...v1Ballistics } = r1.ballistics;
+    // 주 슈터의 탄도 설정 = 주 슈터 탄도 항목 (좌우 오프셋 포함, NECTAR 슈터 카드 제외)
+    const { nectarShooter, ...primary } = r1.ballistics;
     expect(nectarShooter).toEqual(DEFAULT_PROFILE_BALLISTICS.nectarShooter);
-    expect(shooterLateralOffset).toBe(0);
-    expect(profileBallisticsConfig(r1)).toEqual({ ...v1Ballistics, sweetSpot: { x: 59.5, y: 131.5 } });
+    expect(primary.shooterLateralOffset).toBe(0);
+    expect(profileBallisticsConfig(r1)).toEqual({ ...primary, sweetSpot: { x: 59.5, y: 131.5 } });
     // 검증: 칸 범위 → 탄도 검증 (HIVE / 해 없음 / 로봇 몸체 필드 밖)
     const at = (x: number, y: number) => ({ ...r1, ballistics: { ...r1.ballistics, sweetSpot: { x, y } } });
     expect(robotProfileIssues(at(-1, 131.5)).map(i => i.code)).toEqual(['FIELD_sweetSpot.x']);
@@ -194,5 +195,17 @@ describe('로봇 제원 폼 (09-9a)', () => {
     const copied = copyRobotProfile(src, DEFAULT_DRAFT_VALUES.robot2, 'robot2');
     expect(copied.ballistics.sweetSpot).toEqual({ x: 40.5, y: 128.5 });
     expect(copied.ballistics.sweetSpot).not.toBe(src.ballistics.sweetSpot);
+  });
+
+  it('K. (12-4) 확률표 생성 입력: 발사 가능 기물마다 그 기물 슈터의 탄도 설정', () => {
+    const r1 = DEFAULT_DRAFT_VALUES.robot1;
+    const card = { ...r1.ballistics.nectarShooter, dz: 30, shooterLateralOffset: -2 };
+    const p = (setup: 'NONE' | 'POLLEN_ONLY' | 'SHARED' | 'PER_PIECE') => profileLUTShooters({ ...r1, config: { ...r1.config, shooterSetup: setup }, ballistics: { ...r1.ballistics, nectarShooter: card } });
+    expect(p('SHARED')).toEqual({ POLLEN: profileBallisticsConfig(r1), NECTAR: profileBallisticsConfig(r1) });
+    expect(p('POLLEN_ONLY')).toEqual({ POLLEN: profileBallisticsConfig(r1) });
+    expect(p('NONE')).toEqual({});
+    const per = p('PER_PIECE');
+    expect(per.POLLEN).toEqual(profileBallisticsConfig(r1));
+    expect([per.NECTAR?.dz, per.NECTAR?.shooterLateralOffset]).toEqual([30, -2]);
   });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BALLISTICS_MODEL_VERSION,
   generateReferenceLUTRows,
   generateRobotLUTs,
   LUT_GRID_SIZE,
@@ -9,6 +10,7 @@ import type { RobotBallisticsResult } from '../../core/ballistics';
 import type { BallisticsConfig, HiveCellKey } from '../../core/types';
 import { handleLUTJob } from '../lutProtocol';
 import type { LUTWorkerMessage } from '../lutProtocol';
+import type { LUTCache, LUTCacheEntry } from '../lutCache';
 import { defaultLUTPoolSize, lutRequestKey } from '../lutManager';
 import type { LUTRequest } from '../lutManager';
 import { setupLUTManager } from './fakeWorker';
@@ -293,6 +295,117 @@ describe('LUT 생성 관리자 (09-3)', () => {
       manager.request('robot2', REQ2);
       drain();
       assert(sameResult(manager.getStatus('robot1').result!, direct1) && sameResult(manager.getStatus('robot2').result!, direct2), 'follower re-request is independent');
+    }
+  }, 120_000);
+
+  it('G. (12-4) 슈터 구성: 발사 가능 기물만 작업, 기물별 슈터 설정, NONE은 바로 준비, v1 캐시 키 호환', () => {
+    const size = REQ1.robotSize;
+    const k = (config: LUTRequest['config'], robotSize = size) => lutRequestKey({ config, robotSize }, 12, 150, 5);
+    // v1 키 (v1.0.0이 만든 문자열 그대로): 두 기물 공용 + 좌우 0은 이 키와 같아야 v1 캐시가 쓰인다
+    const v1Key = JSON.stringify({
+      modelVersion: BALLISTICS_MODEL_VERSION,
+      config: { dz: 39.5, shooterPitch: CFG1.shooterPitch, shooterOffset: 6, sweetSpot: { x: 60.5, y: 134.5 }, v0NoisePercent: 0.02, headingNoiseRad: 0.02, pitchNoiseRad: 0.006 },
+      length: 18, width: 18, seed: 5, samples: 12, searchSamples: 150,
+    });
+    assert(k(CFG1) === v1Key && k({ POLLEN: CFG1, NECTAR: CFG1 }) === v1Key && k({ POLLEN: { ...CFG1, shooterLateralOffset: 0 }, NECTAR: { ...CFG1 } }) === v1Key, 'shared + lateral 0 = v1 key');
+    // 기본값과 다른 새 항목만 키에 들어감
+    const lateral = JSON.parse(k({ ...CFG1, shooterLateralOffset: 3 }));
+    assert(lateral.config.shooterLateralOffset === 3 && lateral.pieces === undefined && lateral.nectar === undefined, 'lateral offset ≠ 0 -> in the shooter key');
+    assert(JSON.stringify(JSON.parse(k({ POLLEN: CFG1 })).pieces) === '["POLLEN"]', 'POLLEN only -> pieces');
+    assert(JSON.parse(k({ POLLEN: CFG1, NECTAR: CFG2 })).nectar.dz === CFG2.dz, 'different NECTAR shooter -> nectar');
+    const none = JSON.parse(k({}));
+    assert(none.config === null && JSON.stringify(none.pieces) === '[]', 'no shooter -> empty pieces');
+    assert(new Set([v1Key, k({ ...CFG1, shooterLateralOffset: 3 }), k({ POLLEN: CFG1 }), k({ POLLEN: CFG1, NECTAR: CFG2 }), k({})]).size === 5, 'all distinct');
+
+    // POLLEN_ONLY: POLLEN 작업만, 전체 격자 = 1기물, 결과 = 단일 스레드 generateRobotLUTs와 같음 (NECTAR 0 / v0 null)
+    {
+      const { manager, workers, drain } = setup({ poolSize: 2 });
+      manager.request('robot1', { config: { POLLEN: CFG1 }, robotSize: size });
+      assert(manager.getStatus('robot1').cellsTotal === LUT_GRID_SIZE * LUT_GRID_SIZE, 'POLLEN only -> one piece of cells');
+      drain();
+      const s = manager.getStatus('robot1');
+      const direct = generateRobotLUTs({ POLLEN: CFG1 }, size, OPTS);
+      assert(s.state === 'READY' && sameResult(s.result!, direct) && s.result!.v0.NECTAR === null && s.result!.luts.NECTAR.RED_AUDIENCE.every(v => v === 0), 'POLLEN only result = generateRobotLUTs');
+      assert(workers.every(w => w.received.every(j => j.pieceType === 'POLLEN')), 'no NECTAR jobs');
+      assert(s.cellsDone === s.cellsTotal && s.searched.NECTAR && s.rowsDone.NECTAR.every(v => v === 1), 'non-fireable piece counts as done');
+    }
+    // PER_PIECE: 기물마다 그 슈터 설정으로 작업, 결과 = generateRobotLUTs(기물별)
+    {
+      const { manager, workers, drain } = setup({ poolSize: 3 });
+      manager.request('robot1', { config: { POLLEN: CFG1, NECTAR: CFG2 }, robotSize: size });
+      drain();
+      const s = manager.getStatus('robot1');
+      assert(s.state === 'READY' && sameResult(s.result!, generateRobotLUTs({ POLLEN: CFG1, NECTAR: CFG2 }, size, OPTS)), 'per-piece result = generateRobotLUTs');
+      const jobs = workers.flatMap(w => w.received);
+      assert(jobs.filter(j => j.pieceType === 'NECTAR').every(j => j.config.dz === CFG2.dz) && jobs.filter(j => j.pieceType === 'POLLEN').every(j => j.config.dz === CFG1.dz), 'jobs carry the piece shooter config');
+      assert(jobs.filter(j => j.pieceType === 'NECTAR').every(j => j.config.sweetSpot.x === 59.5 && j.config.sweetSpot.y === 129.5), 'NECTAR sweet spot snapped');
+    }
+    // NONE: 작업 / 캐시 없이 바로 READY, 다른 로봇과 경기 LUT
+    {
+      const puts: string[] = [];
+      const cache: LUTCache = { get: async () => null, put: async key => void puts.push(key) };
+      const { manager, workers, drain } = setup({ poolSize: 1, cache });
+      manager.request('robot2', { config: {}, robotSize: size });
+      const s = manager.getStatus('robot2');
+      assert(s.state === 'READY' && s.cellsTotal === 0 && s.result!.v0.POLLEN === null && s.result!.luts.POLLEN.RED_AUDIENCE.every(v => v === 0), 'NONE -> READY at once with zero LUTs');
+      assert(workers[0].received.length === 0 && puts.length === 0, 'no jobs, nothing cached');
+      manager.request('robot2', { config: {}, robotSize: size });
+      assert(manager.getStatus('robot2').generation === s.generation, 'same NONE request ignored');
+      drain();
+    }
+    {
+      const { manager, drain } = setup({ poolSize: 1 });
+      manager.request('robot2', { config: {}, robotSize: size });
+      manager.request('robot1', REQ1);
+      drain();
+      assert(!!manager.matchLUTs(), 'match LUTs with a NONE robot');
+    }
+    // 캐시: v1 키로 저장된 결과를 기물별 공용 요청이 그대로 씀 / POLLEN_ONLY 결과 저장 · 복원
+    {
+      const store = new Map<string, LUTCacheEntry>();
+      const cache: LUTCache = { get: async key => store.get(key) ?? null, put: async (key, entry) => void store.set(key, entry) };
+      const first = setup({ poolSize: 2, cache });
+      first.manager.request('robot1', REQ1); // v1 방식 요청 (단일 설정)
+      return new Promise<void>(resolve => setTimeout(resolve, 0)).then(() => {
+        first.drain();
+        assert(store.has(v1Key), 'stored under the v1 key');
+        const second = setup({ poolSize: 2, cache });
+        second.manager.request('robot1', { config: { POLLEN: { ...CFG1, shooterLateralOffset: 0 }, NECTAR: { ...CFG1, shooterLateralOffset: 0 } }, robotSize: size });
+        second.manager.request('robot2', { config: { POLLEN: CFG1 }, robotSize: size });
+        return new Promise<void>(resolve => setTimeout(resolve, 0)).then(() => {
+          const s1 = second.manager.getStatus('robot1');
+          assert(s1.state === 'READY' && s1.fromCache && sameResult(s1.result!, direct1), 'per-piece shared request hits the v1 cache entry');
+          second.drain();
+          assert(store.has(k({ POLLEN: CFG1 })), 'POLLEN only result stored under its own key');
+          const third = setup({ poolSize: 1, cache });
+          third.manager.request('robot2', { config: { POLLEN: CFG1 }, robotSize: size });
+          return new Promise<void>(resolve => setTimeout(resolve, 0)).then(() => {
+            const s2 = third.manager.getStatus('robot2');
+            assert(s2.state === 'READY' && s2.fromCache && sameResult(s2.result!, generateRobotLUTs({ POLLEN: CFG1 }, size, OPTS)) && third.workers[0].received.length === 0, 'POLLEN only result restored from cache');
+          });
+        });
+      });
+    }
+  }, 120_000);
+
+  it('H. (12-4) 기물별 검증 / 로봇 간 공유', () => {
+    // 발사 가능 기물의 슈터만 검증, 다르면 문제 기물 표시
+    {
+      const { manager, workers } = setup({ poolSize: 1 });
+      manager.request('robot1', { config: { POLLEN: CFG1, NECTAR: { ...CFG2, shooterPitch: 0 } }, robotSize: REQ1.robotSize });
+      const s = manager.getStatus('robot1');
+      assert(s.state === 'IDLE' && s.issues.length > 0 && s.issues.every(i => i.pieceType === 'NECTAR') && workers[0].received.length === 0, 'invalid NECTAR shooter -> IDLE with NECTAR issues');
+      manager.request('robot1', { config: { POLLEN: CFG1 }, robotSize: REQ1.robotSize });
+      assert(manager.getStatus('robot1').state !== 'IDLE', 'POLLEN only does not validate the NECTAR card');
+    }
+    // 같은 확률표 입력(단일 설정 vs 같은 값의 기물별 설정)이면 한 번만 생성
+    {
+      const { manager, workers, drain } = setup({ poolSize: 2 });
+      manager.request('robot1', REQ1);
+      manager.request('robot2', { config: { POLLEN: { ...CFG1 }, NECTAR: { ...CFG1 } }, robotSize: REQ1.robotSize });
+      drain();
+      const jobs = workers.flatMap(w => w.received);
+      assert(jobs.every(j => j.robotId === 'robot1') && manager.getStatus('robot2').state === 'READY' && sameResult(manager.getStatus('robot2').result!, direct1), 'equal inputs shared (one generation)');
     }
   }, 120_000);
 });
