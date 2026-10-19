@@ -9,6 +9,8 @@ import {
   GARDEN_AABB,
   HIVE_AABB,
   HIVE_CENTER_X,
+  HIVE_PILLARS,
+  HIVE_TUNNEL,
   LOADING_ZONE_AABB,
 } from '../core/collision';
 import type { AABB } from '../core/collision';
@@ -167,6 +169,7 @@ export const COLORS = {
   labelOnDark: '#ffffff',
   pollenFill: '#fde047',
   pollenStroke: '#a16207',
+  pillarMark: 'rgba(31, 41, 55, 0.45)', // 터널 경계 점선 (HIVE 틀 테두리색, 흐리게)
 };
 
 // 5. 기본 도형 헬퍼
@@ -298,9 +301,47 @@ export function hiveCellBox(alliance: Alliance, cell: HiveCell): Rect {
   };
 }
 
-// HIVE 정적 바탕 (장면 렌더러 정적 레이어용, 라벨 / 상태 없음): 프레임 + 셀 박스
+/**
+ * HIVE를 나눠 그리는 부분 (명세서 3.7 HIVE 터널 지붕, 13-1): 'PILLARS' = 기둥 2개(바닥 기물 아래, 늘 불투명),
+ * 'TUNNEL' = 터널 위 지붕(로봇 위에 지붕 불투명도로), 'ALL' = 전체 (로봇 / 기물이 없는 히트맵 / 스윗스팟 장면)
+ */
+export type HivePart = 'ALL' | 'PILLARS' | 'TUNNEL';
+
+/** 이후 그리기를 HIVE의 그 부분으로 제한 (호출자가 save / restore). 'ALL'은 제한 없음 */
+export function clipToHivePart(ctx: CanvasRenderingContext2D, part: HivePart): void {
+  if (part === 'ALL') return;
+  ctx.beginPath();
+  for (const box of part === 'TUNNEL' ? [HIVE_TUNNEL] : HIVE_PILLARS) {
+    ctx.rect(inchToPx(box.minX), inchToPx(box.minY), inchToPx(box.maxX - box.minX), inchToPx(box.maxY - box.minY));
+  }
+  ctx.clip();
+}
+
+// 기둥 표시: 터널 경계 x(약 53.176 / 90.824)에 얇고 흐린 점선. 지붕이 불투명할 때도 터널 위치를 알 수 있게 (지붕 쪽에 그림)
+const PILLAR_MARK_WIDTH = 1.5;
+
+function drawPillarMarks(ctx: CanvasRenderingContext2D): void {
+  ctx.save();
+  ctx.strokeStyle = COLORS.pillarMark;
+  ctx.lineWidth = PILLAR_MARK_WIDTH;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  // 선을 터널 안쪽으로 반 굵기만큼 들여 그려 'TUNNEL' 제한에서 잘리지 않게
+  for (const [x, inward] of [[HIVE_TUNNEL.minX, 1], [HIVE_TUNNEL.maxX, -1]] as const) {
+    const px = inchToPx(x) + (inward * PILLAR_MARK_WIDTH) / 2;
+    ctx.moveTo(px, inchToPx(HIVE_TUNNEL.minY));
+    ctx.lineTo(px, inchToPx(HIVE_TUNNEL.maxY));
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+// HIVE 정적 바탕 (장면 렌더러 정적 레이어용, 라벨 / 상태 없음): 프레임 + 셀 박스 + 기둥 표시
 // 아군 셀은 진영 기본색, 상대 셀은 비활성 스타일 (상향 방향 / 개수 표시 없음, 명세서 3.8)
-export function drawHiveBase(ctx: CanvasRenderingContext2D, ally: Alliance): void {
+// part: 기둥 / 터널 지붕으로 나눠 그릴 때 그 부분만 (13-1)
+export function drawHiveBase(ctx: CanvasRenderingContext2D, ally: Alliance, part: HivePart = 'ALL'): void {
+  ctx.save();
+  clipToHivePart(ctx, part);
   const hive = FIELD_LAYOUT.hive;
   fillStrokeRect(ctx, hive, COLORS.hiveFrame, COLORS.hiveFrameStroke);
   const alliances: Alliance[] = ['RED', 'BLUE'];
@@ -318,6 +359,8 @@ export function drawHiveBase(ctx: CanvasRenderingContext2D, ally: Alliance): voi
   ctx.moveTo(inchToPx(hive.x), inchToPx(FIELD_CENTER));
   ctx.lineTo(inchToPx(hive.x + hive.width), inchToPx(FIELD_CENTER));
   ctx.stroke();
+  ctx.restore();
+  if (part !== 'PILLARS') drawPillarMarks(ctx);
   ctx.restore();
 }
 

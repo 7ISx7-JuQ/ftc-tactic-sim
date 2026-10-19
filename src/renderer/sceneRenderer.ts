@@ -31,11 +31,13 @@ import {
   drawGardens,
   drawHiveBase,
   drawLoadingZones,
+  clipToHivePart,
   hiveCellBox,
   inchToPx,
   pieceColors,
 } from './canvasRenderer';
-import type { Alliance, HiveCell, Rect } from './canvasRenderer';
+import type { Alliance, HiveCell, HivePart, Rect } from './canvasRenderer';
+import { tunnelRoofOpacity } from './tunnelRoof';
 import {
   GAUGE_PIECE_RADIUS,
   GAUGE_THICKNESS,
@@ -119,7 +121,8 @@ const ROBOT_OUTLINE_PX = 2.25; // 로봇 몸체 윤곽선 (09-6b: 1.5 → 2.25)
 const CELL_NECTAR_OUTLINE_PX = 2.25; // HIVE 상향 셀 안 NECTAR 윤곽선 (09-6b: 1.5 → 2.25)
 
 // ------------------------------------------------------------
-// 1. 정적 레이어 (배경 / 타일 / 벽 / GARDEN / 로딩 존 / HIVE 바탕 / FLOWER 원통 / 게이지 틀): 진영 × dpr별로 한 번 그려 캐시
+// 1. 정적 레이어 (배경 / 타일 / 벽 / GARDEN / 로딩 존 / HIVE 기둥 부분 / FLOWER 원통 / 게이지 틀): 진영 × dpr별로 한 번 그려 캐시
+//    HIVE 터널 부분(지붕)은 따로 캐시해 로봇 위에 지붕 불투명도로 덮는다 (13-1)
 // ------------------------------------------------------------
 
 type LayerCanvas = HTMLCanvasElement | OffscreenCanvas;
@@ -130,7 +133,7 @@ function drawStaticField(ctx: CanvasRenderingContext2D, ally: Alliance): void {
   drawFieldBackground(ctx);
   drawGardens(ctx, false, ally);
   drawLoadingZones(ctx, false, ally);
-  drawHiveBase(ctx, ally);
+  drawHiveBase(ctx, ally, 'PILLARS');
   drawFlowers(ctx, false);
   drawGaugeFrames(ctx, ally);
 }
@@ -188,21 +191,59 @@ function createLayerCanvas(width: number, height: number): LayerCanvas | null {
 // 창 크기에 따라 배율(dpr)이 계속 바뀌므로 캐시가 쌓이지 않게 상한을 둔다 (09-6d)
 const STATIC_LAYER_CACHE_MAX = 4;
 
+// 뷰포트 크기 레이어 (필드 + 사방 여백, 필드 px 원점은 여백만큼 안쪽)에 필드 px 공간으로 그림
+function paintLayer(dpr: number, paint: (lctx: CanvasRenderingContext2D) => void): LayerCanvas | null {
+  const size = Math.round(VIEWPORT_PX * dpr);
+  const layer = createLayerCanvas(size, size);
+  const lctx = layer?.getContext('2d') as CanvasRenderingContext2D | null | undefined;
+  if (!layer || !lctx) return null;
+  lctx.setTransform(dpr, 0, 0, dpr, dpr * MARGIN_PX, dpr * MARGIN_PX);
+  paint(lctx);
+  return layer;
+}
+
 function staticLayer(ally: Alliance, dpr: number): LayerCanvas | null {
   const key = `${ally}@${dpr}`;
   if (!staticLayers.has(key)) {
     if (staticLayers.size >= STATIC_LAYER_CACHE_MAX) staticLayers.clear();
-    const size = Math.round(VIEWPORT_PX * dpr);
-    const layer = createLayerCanvas(size, size);
-    const lctx = layer?.getContext('2d') as CanvasRenderingContext2D | null | undefined;
-    if (layer && lctx) {
-      // 레이어 = 뷰포트 (필드 + 사방 여백), 필드 px 원점은 여백만큼 안쪽
-      lctx.setTransform(dpr, 0, 0, dpr, dpr * MARGIN_PX, dpr * MARGIN_PX);
-      drawStaticField(lctx, ally);
-    }
-    staticLayers.set(key, layer && lctx ? layer : null);
+    staticLayers.set(key, paintLayer(dpr, (lctx) => drawStaticField(lctx, ally)));
   }
   return staticLayers.get(key) ?? null;
+}
+
+// 터널 지붕 레이어 (13-1): HIVE 터널 부분(바탕 + 셀 상태 + 기둥 표시)만 그린 투명 레이어. 그림이 정해진 몇 가지
+// (진영 × 상향 셀 × 전복 중 / 편집 장면은 상태 없음)뿐이라 dpr별로 캐시하고, 매 프레임 불투명도만 적용해 한 번에 복사한다
+// (층마다 따로 반투명으로 그리면 지붕 안의 셀 바탕이 비쳐 보이므로 한 장으로 합성)
+const roofLayers = new Map<string, LayerCanvas | null>();
+const ROOF_LAYER_CACHE_MAX = 16;
+
+export type RoofState = Pick<HiveState, 'upwardCell' | 'isTipping'> | null; // null = 셀 상태 없음 (시작 자세 편집 장면)
+
+function roofLayer(ally: Alliance, state: RoofState, dpr: number): LayerCanvas | null {
+  const key = `${ally}@${dpr}:${state ? `${state.upwardCell}/${state.isTipping}` : '-'}`;
+  if (!roofLayers.has(key)) {
+    if (roofLayers.size >= ROOF_LAYER_CACHE_MAX) roofLayers.clear();
+    roofLayers.set(key, paintLayer(dpr, (lctx) => paintRoof(lctx, ally, state)));
+  }
+  return roofLayers.get(key) ?? null;
+}
+
+function paintRoof(ctx: CanvasRenderingContext2D, ally: Alliance, state: RoofState): void {
+  drawHiveBase(ctx, ally, 'TUNNEL');
+  if (state) drawHiveState(ctx, state, ally, 'TUNNEL');
+}
+
+/**
+ * 터널 지붕을 불투명도 opacity로 그림 (경기 장면 / 시작 자세 편집 장면 공용). ctx는 필드 px 공간(보기 변환 적용) 상태
+ * 레이어를 만들 수 없는 환경이면 직접 그린다 (불투명도 1일 때와 같은 그림, 반투명이면 층별 근사)
+ */
+export function drawTunnelRoof(ctx: CanvasRenderingContext2D, ally: Alliance, state: RoofState, opacity: number, dpr: number): void {
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, Math.max(0, opacity));
+  const layer = roofLayer(ally, state, dpr);
+  if (layer) ctx.drawImage(layer, -MARGIN_PX, -MARGIN_PX, VIEWPORT_PX, VIEWPORT_PX);
+  else paintRoof(ctx, ally, state);
+  ctx.restore();
 }
 
 // ------------------------------------------------------------
@@ -260,8 +301,10 @@ function strokeBox(ctx: CanvasRenderingContext2D, box: Rect, color: string, widt
   ctx.setLineDash([]);
 }
 
-function drawHiveState(ctx: CanvasRenderingContext2D, hive: DeepReadonly<HiveState>, ally: Alliance): void {
+// part: 기둥 부분은 바닥 기물 아래, 터널 부분은 지붕 레이어로 (13-1)
+function drawHiveState(ctx: CanvasRenderingContext2D, hive: Pick<HiveState, 'upwardCell' | 'isTipping'>, ally: Alliance, part: HivePart): void {
   ctx.save();
+  clipToHivePart(ctx, part);
   const up = hiveCellBox(ally, hive.upwardCell);
   ctx.fillStyle = ally === 'RED' ? COLORS.redCellUp : COLORS.blueCellUp;
   ctx.fillRect(inchToPx(up.x), inchToPx(up.y), inchToPx(up.width), inchToPx(up.height));
@@ -641,8 +684,9 @@ function drawBadge(ctx: CanvasRenderingContext2D, robot: DeepReadonly<RobotState
 
 /**
  * 장면 전체를 그림. ctx는 SCENE_WIDTH_PX × SCENE_HEIGHT_PX(= 필드 뷰포트 800 × 800) 논리 크기 × dpr 버퍼의 캔버스
- * 순서: 둘레 배경 → 정적 레이어(게이지 틀 포함) → HIVE 셀 상태 / 게이지 내용 → 바닥 기물(득점 GARDEN 포함) → 종료 강조(FLOWER)
- *       → [조준선] → 로봇 → 종료 강조(주차) → [흡입 진행] → 팁 낙하 → 비행 공([잔상] / [결과 색])
+ * 순서: 둘레 배경 → 정적 레이어(HIVE 기둥 부분, 게이지 틀 포함) → HIVE 셀 상태(기둥 부분) / 게이지 내용 → 바닥 기물(득점 GARDEN 포함)
+ *       → 종료 강조(FLOWER) → [조준선] → 로봇 → 종료 강조(주차) → [흡입 진행] → 터널 지붕(지붕 불투명도, 13-1) → 팁 낙하
+ *       → 비행 공([잔상] / [결과 색])
  *       → HIVE 셀 알약 / 번호 / 배지   ([ ] = 표시 옵션)
  */
 export function renderScene(ctx: CanvasRenderingContext2D, scene: SceneInput, dpr = 1): void {
@@ -666,7 +710,7 @@ export function renderScene(ctx: CanvasRenderingContext2D, scene: SceneInput, dp
   if (layer) ctx.drawImage(layer, -MARGIN_PX, -MARGIN_PX, VIEWPORT_PX, VIEWPORT_PX);
   else drawStaticField(ctx, ally);
 
-  drawHiveState(ctx, frame.field.hive, ally);
+  drawHiveState(ctx, frame.field.hive, ally, 'PILLARS');
   drawGaugeContents(ctx, frame, ally);
   drawFloorPieces(ctx, frame);
   drawScoredFieldMarks(ctx, frame, ally);
@@ -675,10 +719,12 @@ export function renderScene(ctx: CanvasRenderingContext2D, scene: SceneInput, dp
   drawRobotBody(ctx, frame.r2, scene.r2Config, ally);
   drawParkedMarks(ctx, frame, scene);
   if (options.intakeProgress) drawIntakeProgress(ctx, frame, scene, view);
+  const roofRobots = [{ pose: frame.r1, size: scene.r1Config }, { pose: frame.r2, size: scene.r2Config }];
+  drawTunnelRoof(ctx, ally, frame.field.hive, tunnelRoofOpacity(roofRobots, frame.pieces), dpr);
   drawTipDrops(ctx, frame, ally, view);
   drawFlights(ctx, frame, view, options);
 
-  // 화면 공간: HIVE 셀 알약 / 로봇 번호 / 배지는 똑바로
+  // 화면 공간: HIVE 셀 알약 / 로봇 번호 / 배지는 똑바로 (지붕과 함께 흐리게 하지 않음 — 선명한 셀 내용과 흐린 바닥 기물로 위아래 구분)
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   drawHiveLabels(ctx, frame.field.hive, ally, view);
   const robots: [DeepReadonly<RobotState>, RobotConfig, string][] = [

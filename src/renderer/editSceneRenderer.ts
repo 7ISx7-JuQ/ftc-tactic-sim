@@ -6,6 +6,7 @@
 //   초안 스윗스팟의 몸체 윤곽 + 조준 점선 + 표시, 확률표를 만든(적용한) 스윗스팟은 초안과 다를 때 빈 고리로.
 // 09-11b = 시작 자세(SPAWN) 모드: 경기 바닥 그대로(타일 / GARDEN / 로딩 존 / HIVE / FLOWER) + GARDEN 기물 + 두 로봇
 //   (흡입 구역 / 몸체 / 앞 변 / 헤딩 화살표 / 번호) + 회전 핸들. 배치 검증에 걸린 로봇은 빨간 테두리 + 빨간 덧칠.
+//   HIVE 터널 지붕은 경기 장면과 같은 규칙으로 로봇 위에 (13-1). 히트맵 / 스윗스팟 모드는 로봇 / 기물이 없어 지붕이 늘 불투명 (전체를 한 번에).
 //   바닥 산포 공은 그리지 않는다 (09-11 확정 ④: 로봇 자리를 피해 다시 뿌려지므로 끌 때마다 공이 튀는 것 방지).
 // 히트맵 / 스윗스팟 모드는 로봇 / 기물 / 게이지를 그리지 않는다 (편집 모드의 필드는 비어 있음). 색 / 행 계산은 heatmapView.ts (순수 함수).
 
@@ -19,6 +20,8 @@ import { HANDLE_RADIUS, spawnHandlePoint } from './spawnEditLayout';
 import type { SpawnPart, SpawnRobotId } from './spawnEditLayout';
 import type { Alliance } from './canvasRenderer';
 import { heatmapBasis, heatmapPixels, pendingRowRanges } from './heatmapView';
+import { drawTunnelRoof } from './sceneRenderer';
+import { tunnelRoofOpacity } from './tunnelRoof';
 import { PX_PER_INCH, SCENE_HEIGHT_PX, SCENE_WIDTH_PX, VIEWPORT_PX, fieldPxMatrix, fieldToCanvas } from './viewTransform';
 import type { Point2, ViewTransform } from './viewTransform';
 
@@ -354,12 +357,13 @@ function drawSpawnRobot(ctx: CanvasRenderingContext2D, robot: SpawnEditRobot, al
   ctx.restore();
 }
 
-function renderSpawnField(ctx: CanvasRenderingContext2D, scene: SpawnEditScene): void {
+// HIVE는 경기 장면과 같이 기둥 부분 → (GARDEN 기물 / 로봇) → 터널 지붕(지붕 불투명도) 순서 (13-1, 터널 안에 시작 자세를 둘 수 있음)
+function renderSpawnField(ctx: CanvasRenderingContext2D, scene: SpawnEditScene, dpr: number): void {
   const ally = scene.alliance;
   drawFieldBackground(ctx);
   drawGardens(ctx, false, ally);
   drawLoadingZones(ctx, false, ally);
-  drawHiveBase(ctx, ally);
+  drawHiveBase(ctx, ally, 'PILLARS');
   drawFlowers(ctx, false);
   ctx.save();
   const r = PIECE_PHYSICS.POLLEN.radius;
@@ -376,6 +380,9 @@ function renderSpawnField(ctx: CanvasRenderingContext2D, scene: SpawnEditScene):
   // 끄는 로봇을 위에 (R1 → R2 순서, 끄는 로봇은 마지막)
   const order: SpawnRobotId[] = scene.active?.robot === 'robot1' ? ['robot2', 'robot1'] : ['robot1', 'robot2'];
   for (const id of order) drawSpawnRobot(ctx, scene.robots[id], ally, scene.active?.robot === id ? scene.active.part : null);
+  const robots = order.map((id) => ({ pose: scene.robots[id].pose, size: scene.robots[id].config }));
+  const pieces = scene.gardenPieces.map((p) => ({ type: 'POLLEN' as const, state: 'IN_GARDEN' as const, x: p.x, y: p.y }));
+  drawTunnelRoof(ctx, ally, null, tunnelRoofOpacity(robots, pieces), dpr);
 }
 
 // 로봇 번호 (화면 공간, 똑바로)
@@ -415,7 +422,7 @@ export function renderEditScene(ctx: CanvasRenderingContext2D, scene: EditScene,
   ctx.setTransform(...fieldPxMatrix(view, dpr));
 
   if (scene.mode === 'SPAWN') {
-    renderSpawnField(ctx, scene);
+    renderSpawnField(ctx, scene, dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawSpawnLabels(ctx, scene, view);
     ctx.restore();
