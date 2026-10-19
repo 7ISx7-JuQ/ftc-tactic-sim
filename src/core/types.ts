@@ -286,7 +286,7 @@ export interface PendingShot {
   segments: FlightSegment[]; // 충돌 후 구간 (시간순, 빈 배열 = 명목 구간 끝이 착지점 또는 명중)
   landX: number;            // 최종 착지점 (공 중심 바닥 투영)
   landY: number;
-  landingVx: number;        // 착지 직후 속도 (inch/s, 수평 속도 × landingSpeedRetention, 벽 정지 시 0)
+  landingVx: number;        // 착지 직후 속도 (inch/s, 수평 속도 × landingSpeedRetention, 벽 반사 상한 초과 정지 시 0)
   landingVy: number;
   bounceRestitutionRoll: number; // 반사 세기 산포 난수 [0, 1) (발사 시점에 소비)
   bounceAngleRoll: number;       // 반사 방향 산포 난수 [0, 1)

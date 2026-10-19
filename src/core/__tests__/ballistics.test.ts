@@ -36,6 +36,7 @@ import {
   HIVE_BOUNCE_MIN_SPEED,
   HIVE_BOUNCE_RESTITUTION_SPREAD,
   HIVE_TOP_MAX_BOUNCES,
+  FIELD_WALL_MAX_BOUNCES,
   RNG_DRAWS_PER_SAMPLE,
   sampleLUT,
   robotLUTSeeds,
@@ -548,14 +549,18 @@ describe('발사 비행 계획 (06-6)', () => {
       assert(near(p.flightTime, timeAtDistance(traj, R), 1e-12) && p.contactTime === p.flightTime && p.segments.length === 0, `${type} landing time`);
       assert(p.landing.x === p.to.x && p.landing.y === p.to.y, `${type} landing point = nominal end`);
     }
-    // 착지 전에 벽에 닿으면 벽 접촉점(반지름 여유)에서 수평 정지 후 수직 낙하 (08-2)
+    // 착지 전에 벽에 닿으면 벽 접촉점(반지름 여유)에서 반사해 바닥까지 낙하 (12-9, 08-2의 수평 정지 대체)
     {
       const p = plan(125, 72, 0, false);
-      assert(p.result === 'MISS_FLOOR' && near(p.to.x, FIELD_SIZE - R_POLLEN, 1e-9) && p.to.z > R_POLLEN && p.landingVx === 0 && p.landingVy === 0, 'blocked by the wall -> stops at the wall (in the air)');
-      const drop = p.segments;
-      const end = flightSegmentPoint(drop[drop.length - 1], Infinity);
-      assert(drop.length === 1 && drop[0].vx === 0 && drop[0].vy === 0 && drop[0].t0 === p.contactTime && drop[0].x === p.to.x && drop[0].z === p.to.z, 'then drops straight down from the wall contact');
-      assert(near(end.z, R_POLLEN, 1e-9) && p.landing.x === p.to.x && near(p.flightTime, drop[0].t1, 1e-12), 'lands at the wall foot after the drop');
+      const vh = p.v0 * Math.cos(p.pitch);
+      const vzAtWall = p.v0 * Math.sin(p.pitch) - GRAVITY * p.contactTime;
+      assert(p.result === 'MISS_FLOOR' && near(p.to.x, FIELD_SIZE - R_POLLEN, 1e-9) && p.to.z > R_POLLEN, 'blocked by the wall -> nominal flight ends at the wall (in the air)');
+      const segs = p.segments;
+      const end = flightSegmentPoint(segs[segs.length - 1], Infinity);
+      assert(segs.length === 1 && segs[0].t0 === p.contactTime && near(segs[0].x, p.to.x, 1e-9) && segs[0].z === p.to.z, 'then one parabola from the wall contact');
+      assert(near(segs[0].vx, -PIECE_PHYSICS.POLLEN.restitution * vh, 1e-9) && segs[0].vy === 0 && near(segs[0].vz, vzAtWall, 1e-9), 'reflected: vx -> -e·vx, vertical speed kept');
+      assert(near(end.z, R_POLLEN, 1e-9) && p.landing.x < p.to.x && near(p.flightTime, segs[0].t1, 1e-12), 'lands back in front of the wall');
+      assert(near(p.landingVx, segs[0].vx * PIECE_PHYSICS.POLLEN.landingSpeedRetention, 1e-9) && p.landingVy === 0, 'landing speed = rebound speed × landingSpeedRetention');
     }
     // 터렛: 로봇이 반대쪽을 봐도 조준 방위로 발사
     {
@@ -571,7 +576,7 @@ describe('발사 비행 계획 (06-6)', () => {
 });
 
 describe('충돌 후 낙하 (08-2, 06-6 개정)', () => {
-  it('P. HIVE 옆면 / 윗면 반사, 벽 수평 정지, 무효 명중 반사', () => {
+  it('P. HIVE 옆면 / 윗면 반사, 벽 반사, 무효 명중 반사', () => {
     const E_POLLEN = PIECE_PHYSICS.POLLEN.restitution;
     const box = { minX: HIVE_AABB.minX - R_POLLEN, maxX: HIVE_AABB.maxX + R_POLLEN, minY: HIVE_AABB.minY - R_POLLEN, maxY: HIVE_AABB.maxY + R_POLLEN };
     const topZ = HIVE_HEIGHT + R_POLLEN;
@@ -654,13 +659,13 @@ describe('충돌 후 낙하 (08-2, 06-6 개정)', () => {
       assert(stillRoll.vx === 0 && near(stillRoll.vy, -HIVE_BOUNCE_MIN_SPEED, 1e-12) && still.landing.y < box.minY, 'no horizontal speed -> rolls off the nearest face at the minimum speed');
       chain({ ...contact, vy: 0 }, still, 'top still');
     }
-    // 벽: 착지 전에 벽에 닿으면 수평 정지 후 수직 낙하 (착지 속도 0), 수직 속도는 이어짐
+    // 벽: 착지 전에 벽에 닿으면 반사 (12-9 — 상세는 V), 수직 속도는 이어짐
     {
       const start: FlightState = { t: 0, x: 140, y: 72, z: 40, vx: 100, vy: 0, vz: 0 };
       const f = planFallToFloor(start, 'POLLEN');
       const [a, b] = f.segments;
-      assert(f.segments.length === 2 && near(flightSegmentPoint(a, a.t1).x, FIELD_SIZE - R_POLLEN, 1e-9) && b.vx === 0 && b.vy === 0, 'stops horizontally at the wall');
-      assert(near(b.vz, a.vz - GRAVITY * (a.t1 - a.t0), 1e-9) && f.landingVx === 0 && f.landingVy === 0, 'vertical speed continues, no landing speed');
+      assert(f.segments.length === 2 && near(flightSegmentPoint(a, a.t1).x, FIELD_SIZE - R_POLLEN, 1e-9) && near(b.vx, -E_POLLEN * 100, 1e-9) && b.vy === 0, 'reflects at the wall');
+      assert(near(b.vz, a.vz - GRAVITY * (a.t1 - a.t0), 1e-9) && near(f.landingVx, b.vx * PIECE_PHYSICS.POLLEN.landingSpeedRetention, 1e-9) && f.landingVy === 0, 'vertical speed continues, rebound speed retained on landing');
       chain(start, f, 'wall');
       const open = planFallToFloor({ ...start, x: 60 }, 'NECTAR');
       assert(open.segments.length === 1 && near(open.landingVx, 100 * PIECE_PHYSICS.NECTAR.landingSpeedRetention, 1e-9), 'open floor: one parabola, speed retained');
@@ -933,5 +938,105 @@ describe('슈터 구성 / 좌우 오프셋 (12-3)', () => {
     const v1 = planShotFlight({ robotX: x, robotY: y, robotHeading: beta, shooter: FIXED, ballistics: DEFAULT_SHOOTER_BALLISTICS, pieceType: 'POLLEN', alliance: 'RED', upwardCell: 'AUDIENCE_CELL', hit: false });
     const zero = planShotFlight({ robotX: x, robotY: y, robotHeading: beta, shooter: FIXED, ballistics: { ...DEFAULT_SHOOTER_BALLISTICS, shooterLateralOffset: 0 }, pieceType: 'POLLEN', alliance: 'RED', upwardCell: 'AUDIENCE_CELL', hit: false });
     expect(zero).toEqual(v1);
+  });
+});
+
+describe('필드 벽 반사 (12-9)', () => {
+  it('V. 높이 무한 벽 반사(닿은 축 −e배, 산포 없음), 모서리, 반대쪽 벽, 반사 뒤 HIVE 재충돌, 반사 상한, 발사 비행 계획', () => {
+    const box = { minX: HIVE_AABB.minX - R_POLLEN, maxX: HIVE_AABB.maxX + R_POLLEN, minY: HIVE_AABB.minY - R_POLLEN, maxY: HIVE_AABB.maxY + R_POLLEN };
+    const insideBox = (x: number, y: number) => x > box.minX && x < box.maxX && y > box.minY && y < box.maxY;
+    const end = (f: PostContactFlight) => { const last = f.segments[f.segments.length - 1]; return flightSegmentPoint(last, last.t1); };
+    // 구간끼리 위치 / 시각이 이어지고 마지막 끝이 필드 안 · HIVE 밖 바닥 착지점
+    const continuous = (f: PostContactFlight, label: string, r = R_POLLEN) => {
+      for (let i = 0; i + 1 < f.segments.length; i++) {
+        const a = flightSegmentPoint(f.segments[i], f.segments[i].t1);
+        const b = f.segments[i + 1];
+        assert(near(f.segments[i].t1, b.t0, 1e-12) && near(a.x, b.x, 1e-9) && near(a.y, b.y, 1e-9) && near(a.z, b.z, 1e-9), `${label}: segment ${i} -> ${i + 1} continuous`);
+      }
+      const e = end(f);
+      assert(near(e.z, r, 1e-9) && near(e.x, f.landing.x, 1e-9) && near(e.y, f.landing.y, 1e-9) && near(f.segments[f.segments.length - 1].t1, f.landingTime, 1e-12), `${label}: ends on the floor at the landing point`);
+      assert(!insideBox(f.landing.x, f.landing.y) && f.landing.x >= r && f.landing.x <= FIELD_SIZE - r && f.landing.y >= r && f.landing.y <= FIELD_SIZE - r, `${label}: lands in the field, outside the HIVE`);
+    };
+
+    // 기물별 반발 계수 (바닥 공의 벽 충돌과 같은 값), 접선 / 수직 속도 유지, 반사 산포 난수와 무관
+    for (const type of ['POLLEN', 'NECTAR'] as const) {
+      const { radius: r, restitution: e } = PIECE_PHYSICS[type];
+      const start: FlightState = { t: 0.2, x: 30, y: 135, z: 30, vx: -20, vy: 200, vz: 50 };
+      const f = planFallToFloor(start, type);
+      const [a, b] = f.segments;
+      assert(f.segments.length === 2 && near(b.y, FIELD_SIZE - r, 1e-9), `${type}: hits the audience wall (y = 144 − r)`);
+      assert(near(b.vy, -e * 200, 1e-9) && b.vx === -20 && near(b.vz, a.vz - GRAVITY * (a.t1 - a.t0), 1e-9), `${type}: vy -> −e·vy, vx / vz kept`);
+      assert(near(f.landingVx, -20 * PIECE_PHYSICS[type].landingSpeedRetention, 1e-9) && near(f.landingVy, b.vy * PIECE_PHYSICS[type].landingSpeedRetention, 1e-9), `${type}: landing speed retained after the rebound`);
+      continuous(f, `${type} wall`, r);
+      for (const rolls of [{ restitution: 0, angle: 0 }, { restitution: 0.99, angle: 0.99 }]) {
+        expect(planFallToFloor(start, type, [], rolls), `${type}: wall rebound ignores bounce rolls`).toEqual(f);
+      }
+    }
+    // 모서리: 두 축에 동시에 닿으면 한 번에 두 축 반사
+    {
+      const f = planFallToFloor({ t: 0, x: 140, y: 140, z: 40, vx: 100, vy: 100, vz: 0 }, 'POLLEN');
+      const b = f.segments[1];
+      assert(f.segments.length === 2 && near(b.x, FIELD_SIZE - R_POLLEN, 1e-9) && near(b.y, FIELD_SIZE - R_POLLEN, 1e-9), 'corner contact');
+      assert(near(b.vx, -E(100), 1e-9) && near(b.vy, -E(100), 1e-9), 'both axes reflected at once');
+      continuous(f, 'corner');
+    }
+    // 반대쪽 벽: 빠른 공은 반사 뒤 반대쪽 벽에도 닿아 다시 반사 (HIVE를 비켜 가는 y = 10 줄)
+    {
+      const f = planFallToFloor({ t: 0, x: 140, y: 10, z: 40, vx: 1500, vy: 0, vz: 0 }, 'POLLEN');
+      const [, b, c] = f.segments;
+      assert(f.segments.length === 3 && near(b.vx, -E(1500), 1e-9) && near(c.x, R_POLLEN, 1e-9) && near(c.vx, E(E(1500)), 1e-9), 'second rebound off the opposite wall');
+      continuous(f, 'opposite wall');
+    }
+    // 반사 상한: FIELD_WALL_MAX_BOUNCES회 반사 뒤의 벽 접촉은 v1처럼 수평 정지 후 수직 낙하 (착지 속도 0)
+    {
+      const f = planFallToFloor({ t: 0, x: 140, y: 10, z: 40, vx: 1e5, vy: 0, vz: 0 }, 'POLLEN');
+      const segs = f.segments;
+      const last = segs[segs.length - 1];
+      assert(segs.length === FIELD_WALL_MAX_BOUNCES + 2, `${FIELD_WALL_MAX_BOUNCES} rebounds, then a stop at the next wall (${segs.length} segments)`);
+      for (let i = 1; i <= FIELD_WALL_MAX_BOUNCES; i++) assert(Math.sign(segs[i].vx) === (i % 2 === 1 ? -1 : 1), `rebound ${i} alternates direction`);
+      assert(last.vx === 0 && last.vy === 0 && f.landingVx === 0 && f.landingVy === 0 && (near(last.x, R_POLLEN, 1e-9) || near(last.x, FIELD_SIZE - R_POLLEN, 1e-9)), 'beyond the cap: drops straight down at the wall');
+      continuous(f, 'cap');
+    }
+    // 반사 뒤 HIVE 재충돌: 벽에서 튕겨 HIVE 옆면(+x 면)에 공중에서 닿으면 옆면 규칙으로 다시 튕김 (반사 산포 난수도 그 규칙대로)
+    {
+      const start: FlightState = { t: 0, x: 140, y: 72, z: 20, vx: 300, vy: 0, vz: 100 };
+      const f = planFallToFloor(start, 'POLLEN');
+      const [, toHive, fromHive] = f.segments;
+      const contact = flightSegmentPoint(toHive, toHive.t1);
+      assert(f.segments.length === 3 && near(toHive.vx, -E(300), 1e-9) && near(contact.x, box.maxX, 1e-9) && contact.z < HIVE_HEIGHT + R_POLLEN, 'wall rebound reaches the HIVE side in the air');
+      assert(near(fromHive.vx, HIVE_BOUNCE_MIN_SPEED > E(E(300)) ? HIVE_BOUNCE_MIN_SPEED : E(E(300)), 1e-9), 'side rule: −e·vn (outward speed at least the minimum)');
+      assert(f.landing.x > box.maxX, 'lands between the HIVE and the wall');
+      continuous(f, 'wall -> HIVE');
+      const turned = planFallToFloor(start, 'POLLEN', [], { restitution: 0.5, angle: 0 });
+      assert(turned.segments[2].vy !== 0, 'the HIVE re-contact uses the shot\'s bounce rolls');
+      // 같은 높이에서 HIVE 위로 넘어가면 (높은 공) 재충돌 없음
+      const over = planFallToFloor({ ...start, z: 60, vz: 250 }, 'POLLEN');
+      const crossing = over.segments[1];
+      assert(near(flightSegmentPoint(crossing, crossing.t1).x, R_POLLEN, 1e-9), 'high rebound: flies over the HIVE to the opposite wall (no HIVE contact)');
+      continuous(over, 'over the HIVE');
+    }
+    // HIVE 옆면 반사 → 벽 반사 → HIVE 재충돌 사슬 / 무효 명중 낙하도 같은 낙하 규칙
+    {
+      const f = planHiveBounce({ t: 0, x: box.maxX, y: 72, z: 30, vx: -400, vy: 0, vz: 150 }, 'SIDE', 'POLLEN');
+      assert(f.segments.length >= 2 && near(flightSegmentPoint(f.segments[0], f.segments[0].t1).x, FIELD_SIZE - R_POLLEN, 1e-9), 'HIVE rebound then reaches the wall');
+      assert(f.segments[1].vx < 0, 'wall rebound heads back toward the HIVE');
+      continuous(f, 'HIVE -> wall');
+    }
+    // 발사 비행 계획: 벽 접촉 = 명목 구간 끝, 이후 반사 구간 (결과는 첫 접촉 기준 MISS_FLOOR), 막히지 않은 바닥 착지는 그대로
+    {
+      const FIXED = { turretType: 'FIXED' as const, turretRange: [0, 0] as [number, number] };
+      const shot = (x: number, y: number, heading: number) =>
+        planShotFlight({ robotX: x, robotY: y, robotHeading: heading, shooter: FIXED, ballistics: DEFAULT_SHOOTER_BALLISTICS, pieceType: 'POLLEN', alliance: 'RED', upwardCell: 'AUDIENCE_CELL', hit: false });
+      const corner = shot(120, 120, Math.PI / 4);
+      const vh = corner.v0 * Math.cos(corner.pitch);
+      const s0 = corner.segments[0];
+      assert(corner.result === 'MISS_FLOOR' && near(corner.to.x, FIELD_SIZE - R_POLLEN, 1e-9) && near(corner.to.y, FIELD_SIZE - R_POLLEN, 1e-9), 'diagonal shot hits the corner');
+      assert(near(s0.vx, -E(vh * Math.cos(Math.PI / 4)), 1e-9) && near(s0.vy, -E(vh * Math.sin(Math.PI / 4)), 1e-9), 'corner: both axes reflected');
+      assert(corner.landingVx < 0 && corner.landingVy < 0 && near(corner.flightTime, corner.segments[corner.segments.length - 1].t1, 1e-12), 'lands back toward the field, arrival = final landing');
+    }
+
+    function E(v: number) {
+      return PIECE_PHYSICS.POLLEN.restitution * v;
+    }
   });
 });

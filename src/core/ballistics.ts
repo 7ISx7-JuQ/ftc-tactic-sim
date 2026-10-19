@@ -1201,7 +1201,7 @@ export interface ShotFlightPlan {
   pitch: number;
   segments: FlightSegment[]; // 충돌 후 구간 (명중 / 바로 바닥 착지는 빈 배열)
   landing: { x: number; y: number }; // 최종 착지점 (명중은 조준점 — 도착 시 무효면 엔진이 planVoidedHitBounce로 교체)
-  landingVx: number;      // 착지 직후 속도 (수평 속도 × landingSpeedRetention, 벽 정지 / 명중 0)
+  landingVx: number;      // 착지 직후 속도 (수평 속도 × landingSpeedRetention, 명중 / 벽 반사 상한 초과 정지 0)
   landingVy: number;
 }
 
@@ -1223,7 +1223,7 @@ export interface ShotFlightInput {
  * - 명중: 궤적과 무관하게 조준점 도착, 비행 시간 = 발사구 → 조준점 수평 거리 / (v0·cosθ)
  * - 빗맞음 + HIVE 직육면체 충돌 (intersectHiveBox, 반지름 확장): 첫 접촉점에서 반사 포물선 (planHiveBounce) → 바닥 착지
  * - 빗맞음 + HIVE를 넘어가거나 닿지 않음: 공 중심 높이 = 반지름인 사거리 지점 착지, 착지 속도 = 발사 방향 v0·cosθ × landingSpeedRetention.
- *   지면 직선이 착지 전에 필드 벽(반지름 여유)에 닿으면 벽 접촉점에서 수평 이동을 멈추고 수직 낙하 (착지 속도 0)
+ *   지면 직선이 착지 전에 필드 벽(반지름 여유)에 닿으면 벽 접촉점에서 반사해 바닥까지 낙하 (12-9, fallToFloor)
  * - v0: 탄도 설정의 값(그 기물 슈터의 탐색 v0) → 없으면 조준점 닫힌 해 → 그것도 없으면 평지 사거리 = 조준점 거리인 속도
  * - 좌우 오프셋 (12-3): 사출구 = 발사 방향 기준 오른쪽으로 shooterLateralOffset. 터렛형은 보정한 조준 방향 ψ(shooterAimHeading)로 돌린다
  *   (조준 불가 자리면 조준점 방위). 0이면 v1과 같은 계산
@@ -1295,14 +1295,12 @@ export function planShotFlight(input: ShotFlightInput): ShotFlightPlan {
 
   // 바닥 착지 (해가 없으면 발사구 바로 아래)
   const range = landingDistance(traj, radius) ?? 0;
-  // 지면 직선이 필드 벽(반지름 여유)에 닿는 거리
-  let wall = Infinity;
-  const axis = (p: number, d: number) => {
-    if (d > EPSILON) wall = Math.min(wall, (FIELD_SIZE - radius - p) / d);
-    else if (d < -EPSILON) wall = Math.min(wall, (radius - p) / d);
-  };
-  axis(origin.x, cos);
-  axis(origin.y, sin);
+  // 지면 직선이 필드 벽(반지름 여유)에 닿는 거리 (축별, 같으면 모서리)
+  const axis = (p: number, d: number) =>
+    d > EPSILON ? (FIELD_SIZE - radius - p) / d : d < -EPSILON ? (radius - p) / d : Infinity;
+  const wallX = axis(origin.x, cos);
+  const wallY = axis(origin.y, sin);
+  const wall = Math.min(wallX, wallY);
   const blocked = wall < range;
   const d = Math.max(0, blocked ? wall : range);
   const clampXY = (v: number) => clamp(v, radius, FIELD_SIZE - radius);
@@ -1322,18 +1320,20 @@ export function planShotFlight(input: ShotFlightInput): ShotFlightPlan {
       landingVy: retained * sin,
     };
   }
-  // 벽 접촉: 수평 정지 후 수직 낙하 (높이 무한 · 반발 0 벽 가정)
-  const drop = planFallToFloor({ t: contactTime, ...to, vx: 0, vy: 0, vz: vzAt(contactTime) }, pieceType);
+  // 벽 접촉 (12-9): 높이 무한 벽에서 반사 → 바닥까지 낙하 (반사 뒤 HIVE / 다른 벽에 다시 닿을 수 있음)
+  const contact: FlightState = { t: contactTime, ...to, vx: vh * cos, vy: vh * sin, vz: vzAt(contactTime) };
+  const hits = { x: wallX <= wall + WALL_TIE_EPSILON * vh, y: wallY <= wall + WALL_TIE_EPSILON * vh };
+  const after = fallToFloor(bounceOffWall(contact, hits, pieceType), pieceType, [], { rolls, wallBounces: 1, afterWall: true });
   return {
     ...base,
     result: 'MISS_FLOOR',
     to,
     contactTime,
-    flightTime: drop.landingTime,
-    segments: drop.segments,
-    landing: drop.landing,
-    landingVx: 0,
-    landingVy: 0,
+    flightTime: after.landingTime,
+    segments: after.segments,
+    landing: after.landing,
+    landingVx: after.landingVx,
+    landingVy: after.landingVy,
   };
 }
 
@@ -1353,6 +1353,10 @@ export const HIVE_TOP_MAX_BOUNCES = 3;
 export const HIVE_BOUNCE_MIN_SPEED = 20;
 // 착지 안전장치: 착지점이 HIVE 확장 AABB 안이면 가장 가까운 면 바깥 이 여유만큼으로 이동 (정상 궤도에서는 발생하지 않음)
 const HIVE_BOUNCE_GAP = 0.1;
+/** 발사 1회의 필드 벽 반사 최대 횟수 (12-9). 넘는 벽 접촉은 수평 정지 후 수직 낙하 (발사 1회당 상수 시간 보장) */
+export const FIELD_WALL_MAX_BOUNCES = 4;
+// 두 축의 벽 접촉 시각 차가 이 값(초) 이하면 모서리로 보고 두 축을 함께 반사
+const WALL_TIE_EPSILON = 1e-9;
 
 /** 비행 상태: 시각 t (발사 후 초), 위치 (inch), 속도 (inch/s) */
 export interface FlightState {
@@ -1377,7 +1381,7 @@ export interface PostContactFlight {
   segments: FlightSegment[];
   landing: { x: number; y: number };
   landingTime: number; // 발사 후 초
-  landingVx: number;   // 착지 직후 속도 (수평 속도 × landingSpeedRetention, 벽 정지 시 0)
+  landingVx: number;   // 착지 직후 속도 (수평 속도 × landingSpeedRetention, 벽 반사 상한 초과 정지 시 0)
   landingVy: number;
 }
 
@@ -1428,16 +1432,60 @@ function timeToDescend(z0: number, vz: number, targetZ: number): number {
   return Math.max(0, (vz + Math.sqrt(disc)) / GRAVITY);
 }
 
-// 수평 직선이 필드 벽(반지름 여유)에 닿는 시간 (닿지 않으면 Infinity)
-function timeToWall(s: FlightState, r: number): number {
-  let t = Infinity;
-  const axis = (p: number, v: number) => {
-    if (v > EPSILON) t = Math.min(t, (FIELD_SIZE - r - p) / v);
-    else if (v < -EPSILON) t = Math.min(t, (r - p) / v);
+interface WallContact {
+  t: number;  // 닿는 시간 (닿지 않으면 Infinity)
+  x: boolean; // x 벽에 닿음 (x, y 둘 다면 모서리)
+  y: boolean;
+}
+
+// 수평 직선이 필드 벽(반지름 여유)에 닿는 시간과 닿는 축
+function wallContact(s: FlightState, r: number): WallContact {
+  const axis = (p: number, v: number) =>
+    v > EPSILON ? (FIELD_SIZE - r - p) / v : v < -EPSILON ? (r - p) / v : Infinity;
+  const tx = axis(s.x, s.vx);
+  const ty = axis(s.y, s.vy);
+  const t = Math.max(0, Math.min(tx, ty));
+  return { t, x: tx <= t + WALL_TIE_EPSILON, y: ty <= t + WALL_TIE_EPSILON };
+}
+
+// 필드 벽 반사 (12-9): 높이 무한 벽, 닿은 축의 수평 속도만 −e배 (e = 기물 반발 계수, 바닥 공의 벽 충돌과 같음, 산포 없음).
+// 접선 / 수직 속도 유지, 위치는 벽 접촉선(반지름 여유)에 맞춘다
+function bounceOffWall(s: FlightState, hits: { x: boolean; y: boolean }, pieceType: PieceType): FlightState {
+  const { radius: r, restitution: e } = PIECE_PHYSICS[pieceType];
+  return {
+    ...s,
+    x: hits.x ? clamp(s.x, r, FIELD_SIZE - r) : s.x,
+    y: hits.y ? clamp(s.y, r, FIELD_SIZE - r) : s.y,
+    vx: hits.x ? -e * s.vx : s.vx,
+    vy: hits.y ? -e * s.vy : s.vy,
   };
-  axis(s.x, s.vx);
-  axis(s.y, s.vy);
-  return Math.max(0, t);
+}
+
+// 밖에서 날아오는 공이 착지 / 벽 접촉(tEnd) 전에 HIVE 확장 직육면체에 처음 닿는 시간과 면 (벽 반사 뒤 재충돌, 12-9).
+// intersectHiveBox와 같은 규칙: 확장 AABB 진입 순간 이미 윗면 높이 이하면 SIDE, 위로 들어와 구간 안에서 내려오면 TOP
+function hiveBoxContact(s: FlightState, r: number, tEnd: number): { t: number; face: 'SIDE' | 'TOP' } | null {
+  const box = expandedHiveBox(r);
+  const topZ = HIVE_HEIGHT + r;
+  let tIn = 0;
+  let tOut = tEnd;
+  const slabs: [number, number, number, number][] = [
+    [s.x, s.vx, box.minX, box.maxX],
+    [s.y, s.vy, box.minY, box.maxY],
+  ];
+  for (const [p, v, lo, hi] of slabs) {
+    if (Math.abs(v) < EPSILON) {
+      if (p < lo || p > hi) return null;
+      continue;
+    }
+    const t1 = (lo - p) / v;
+    const t2 = (hi - p) / v;
+    tIn = Math.max(tIn, Math.min(t1, t2));
+    tOut = Math.min(tOut, Math.max(t1, t2));
+    if (tIn > tOut) return null;
+  }
+  if (advance(s, tIn).z <= topZ) return { t: tIn, face: 'SIDE' };
+  const tTop = timeToDescend(s.z, s.vz, topZ);
+  return tTop >= tIn && tTop <= tOut ? { t: tTop, face: 'TOP' } : null;
 }
 
 // 공 중심 기준 HIVE 확장 AABB (xy 경계 ± r)
@@ -1507,20 +1555,47 @@ function rotateHorizontal(s: FlightState, angle: number): FlightState {
   return { ...s, vx: s.vx * c - s.vy * sn, vy: s.vx * sn + s.vy * c };
 }
 
+// 충돌 후 낙하의 진행 상태: 반사 산포 난수(발사 시점 값, 재충돌에도 같은 값), 지금까지의 벽 반사 횟수,
+// 직전 접촉이 벽인지 (HIVE 재충돌은 벽 반사 뒤에만 가능 — HIVE 반사 직후는 볼록 박스에서 멀어지므로 보지 않음)
+interface FallContext {
+  rolls: BounceRolls;
+  wallBounces: number;
+  afterWall: boolean;
+}
+
 /**
  * 바닥까지 자유 낙하 (중력 포물선, 공 중심 높이 = 반지름에서 착지). 이미 쌓인 구간(segments) 뒤에 이어 붙인다.
- * 지면 직선이 착지 전에 필드 벽(반지름 여유)에 닿으면 벽에서 수평 이동을 멈추고 수직으로 낙하한다
- * (높이 무한 · 반발 0 벽 가정, 착지 속도 0). 착지 속도 = 착지 순간 수평 속도 × landingSpeedRetention
+ * 지면 직선이 착지 전에 필드 벽(반지름 여유)에 닿으면 벽에서 반사한다 (12-9, bounceOffWall). 반사 뒤에는 HIVE 직육면체나
+ * 다른 벽에 다시 닿을 수 있다 (HIVE는 planHiveBounce와 같은 규칙). 벽 반사가 FIELD_WALL_MAX_BOUNCES회를 넘으면
+ * 그 벽에서 수평 이동을 멈추고 수직으로 낙하한다 (착지 속도 0). 착지 속도 = 착지 순간 수평 속도 × landingSpeedRetention
  */
-export function planFallToFloor(start: FlightState, pieceType: PieceType, segments: readonly FlightSegment[] = []): PostContactFlight {
+export function planFallToFloor(
+  start: FlightState,
+  pieceType: PieceType,
+  segments: readonly FlightSegment[] = [],
+  rolls: BounceRolls = NEUTRAL_BOUNCE_ROLLS,
+): PostContactFlight {
+  return fallToFloor(start, pieceType, [...segments], { rolls, wallBounces: 0, afterWall: false });
+}
+
+function fallToFloor(start: FlightState, pieceType: PieceType, segs: FlightSegment[], ctx: FallContext): PostContactFlight {
   const phys = PIECE_PHYSICS[pieceType];
   const r = phys.radius;
-  const segs = [...segments];
   const tLand = timeToDescend(start.z, start.vz, r);
-  const tWall = timeToWall(start, r);
-  if (tWall < tLand) {
-    pushSegment(segs, 'BALLISTIC', start, tWall);
-    const drop: FlightState = { ...advance(start, tWall), vx: 0, vy: 0 };
+  const wall = wallContact(start, r);
+  const hive = ctx.afterWall ? hiveBoxContact(start, r, Math.min(tLand, wall.t)) : null;
+  if (hive) {
+    pushSegment(segs, 'BALLISTIC', start, hive.t);
+    return hiveBounce(advance(start, hive.t), hive.face, pieceType, segs, { ...ctx, afterWall: false });
+  }
+  if (wall.t < tLand) {
+    pushSegment(segs, 'BALLISTIC', start, wall.t);
+    const contact = advance(start, wall.t);
+    if (ctx.wallBounces < FIELD_WALL_MAX_BOUNCES) {
+      const next = { ...ctx, wallBounces: ctx.wallBounces + 1, afterWall: true };
+      return fallToFloor(bounceOffWall(contact, wall, pieceType), pieceType, segs, next);
+    }
+    const drop: FlightState = { ...contact, vx: 0, vy: 0 };
     const tDrop = timeToDescend(drop.z, drop.vz, r);
     pushSegment(segs, 'BALLISTIC', drop, tDrop);
     return { segments: segs, landing: safeLandingPoint(drop.x, drop.y, r), landingTime: drop.t + tDrop, landingVx: 0, landingVy: 0 };
@@ -1554,16 +1629,15 @@ function bounceOffSide(s: FlightState, n: { nx: number; ny: number }, pieceType:
 // 윗면 반복 튐: 수직 속도만 −e배로 뒤집고 수평 속도 유지 (첫 튐에서 산포 각도만큼 회전).
 // 다음에 윗면 높이로 내려오기 전에 확장 AABB를 벗어나면 그 포물선 그대로 바닥까지 낙하 (수평 직선 + 볼록 박스라 재충돌 없음).
 // 최대 횟수를 튀고도 윗면 위면 수평 속도 방향(정지 상태면 가장 가까운 면)으로 굴러(최소 속도 보장) 가장자리에서 낙하
-function bounceOnTop(contact: FlightState, pieceType: PieceType, rolls: BounceRolls): PostContactFlight {
+function bounceOnTop(contact: FlightState, pieceType: PieceType, segs: FlightSegment[], ctx: FallContext): PostContactFlight {
   const r = PIECE_PHYSICS[pieceType].radius;
   const box = expandedHiveBox(r);
-  const e = bounceRestitution(pieceType, rolls);
-  const segs: FlightSegment[] = [];
-  let s = rotateHorizontal(contact, HIVE_BOUNCE_ANGLE_SPREAD * (2 * rolls.angle - 1));
+  const e = bounceRestitution(pieceType, ctx.rolls);
+  let s = rotateHorizontal(contact, HIVE_BOUNCE_ANGLE_SPREAD * (2 * ctx.rolls.angle - 1));
   for (let bounce = 1; bounce <= HIVE_TOP_MAX_BOUNCES; bounce++) {
     const up: FlightState = { ...s, vz: e * Math.abs(s.vz) };
     const airTime = (2 * up.vz) / GRAVITY;
-    if (timeToLeaveBox(up, box) < airTime) return planFallToFloor(up, pieceType, segs);
+    if (timeToLeaveBox(up, box) < airTime) return fallToFloor(up, pieceType, segs, ctx);
     pushSegment(segs, 'BALLISTIC', up, airTime);
     s = { ...advance(up, airTime), z: contact.z }; // 윗면 높이로 복귀 (반올림 누적 방지)
   }
@@ -1573,13 +1647,22 @@ function bounceOnTop(contact: FlightState, pieceType: PieceType, rolls: BounceRo
   const roll: FlightState = { ...s, vx: dir.nx * rollSpeed, vy: dir.ny * rollSpeed, vz: 0 };
   const tRoll = timeToLeaveBox(roll, box);
   pushSegment(segs, 'ROLL', roll, tRoll);
-  return planFallToFloor({ ...advance(roll, tRoll, 'ROLL'), vz: 0 }, pieceType, segs);
+  return fallToFloor({ ...advance(roll, tRoll, 'ROLL'), vz: 0 }, pieceType, segs, ctx);
+}
+
+// HIVE 접촉 후 궤도 (첫 접촉 / 벽 반사 뒤 재충돌 공통): SIDE = 면 바깥 법선 반사, TOP = 윗면 반복 튐, 이어서 바닥까지 낙하
+function hiveBounce(contact: FlightState, face: 'SIDE' | 'TOP', pieceType: PieceType, segs: FlightSegment[], ctx: FallContext): PostContactFlight {
+  if (face === 'TOP') return bounceOnTop(contact, pieceType, segs, ctx);
+  const r = PIECE_PHYSICS[pieceType].radius;
+  const n = hiveFaceNormal(contact.x, contact.y, r, contact.vx, contact.vy);
+  return fallToFloor(bounceOffSide(contact, n, pieceType, ctx.rolls), pieceType, segs, ctx);
 }
 
 /**
  * HIVE 직육면체 충돌 후 궤도 (빗맞음 MISS_HIVE): contact = 첫 접촉 순간 상태 (공 중심, 확장 박스 경계 위)
  * - SIDE: 접촉 면의 수평 바깥 법선으로 반사 후 바닥까지 낙하
  * - TOP: 윗면 반복 튐 (최대 HIVE_TOP_MAX_BOUNCES회) → 박스를 벗어나거나 굴러 떨어져 바닥까지 낙하
+ * 낙하 중 벽에 닿으면 반사한다 (12-9, planFallToFloor)
  */
 export function planHiveBounce(
   contact: FlightState,
@@ -1587,10 +1670,7 @@ export function planHiveBounce(
   pieceType: PieceType,
   rolls: BounceRolls = NEUTRAL_BOUNCE_ROLLS,
 ): PostContactFlight {
-  if (face === 'TOP') return bounceOnTop(contact, pieceType, rolls);
-  const r = PIECE_PHYSICS[pieceType].radius;
-  const n = hiveFaceNormal(contact.x, contact.y, r, contact.vx, contact.vy);
-  return planFallToFloor(bounceOffSide(contact, n, pieceType, rolls), pieceType);
+  return hiveBounce(contact, face, pieceType, [], { rolls, wallBounces: 0, afterWall: false });
 }
 
 export interface VoidedHitInput {
@@ -1625,5 +1705,6 @@ export function planVoidedHitBounce(input: VoidedHitInput): PostContactFlight {
     vz: v0 * Math.sin(pitch) - GRAVITY * contactTime,
   };
   const n = { nx: 0, ny: input.targetCell === 'AUDIENCE_CELL' ? 1 : -1 };
-  return planFallToFloor(bounceOffSide(contact, n, pieceType, input.rolls ?? NEUTRAL_BOUNCE_ROLLS), pieceType);
+  const rolls = input.rolls ?? NEUTRAL_BOUNCE_ROLLS;
+  return planFallToFloor(bounceOffSide(contact, n, pieceType, rolls), pieceType, [], rolls);
 }
