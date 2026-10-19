@@ -16,10 +16,10 @@ import {
 import type { OBB } from '../core/collision';
 import { getCarryCapacity } from '../core/simulationEngine';
 import { hiveTipPollenThreshold } from '../core/types';
-import type { DeepReadonly, HiveState, RobotConfig, RobotState, TimelineFrame } from '../core/types';
+import type { DeepReadonly, HiveState, MatchShooterBallistics, RobotConfig, RobotState, TimelineFrame } from '../core/types';
 import { airborneDisplay, shotElapsed, shotPositionAt, shotTrail } from './flightView';
 import { DEFAULT_RENDER_OPTIONS, aimGuide, intakeProgress } from './renderOptions';
-import type { RenderOptions } from './renderOptions';
+import type { AimGuide, RenderOptions } from './renderOptions';
 import { badgeImage } from './badgeAssets';
 import { canvasFont } from './fonts';
 import {
@@ -53,6 +53,7 @@ import {
   BADGE_FALLBACK_TEXT,
   BADGE_SIZE_INCH,
   badgeCenter,
+  carriedHighlightIndex,
   carriedPieceRadius,
   carriedPieceSlots,
   carriedTray,
@@ -79,6 +80,7 @@ export interface SceneInput {
   r2Config: RobotConfig;
   view: ViewTransform;
   options?: RenderOptions;                 // 미지정 = 모두 꺼짐
+  shooters?: MatchShooterBallistics;       // 경기의 기물별 슈터 탄도 (엔진 생성 인자와 같음, 조준선 사출구 — 13-2). 미지정 = 엔진 기본 슈터
 }
 
 const SCENE_COLORS = {
@@ -460,16 +462,22 @@ function pathPolyline(ctx: CanvasRenderingContext2D, pts: Point2[]): void {
   pts.forEach((p, i) => (i === 0 ? ctx.moveTo(inchToPx(p.x), inchToPx(p.y)) : ctx.lineTo(inchToPx(p.x), inchToPx(p.y))));
 }
 
-// 표시 옵션 aimGuide: 조준 가능 부채꼴 + 발사 방향 선 (조준점 거리까지)
+// 표시 옵션 aimGuide: 다음에 발사할 기물의 슈터 기준 (13-2) — 사출구를 꼭짓점으로 조준 가능 부채꼴
+// + 사출구에서 발사 방향으로 조준점 거리만큼 점선 (로봇 아래) + 사출구 점 (비행 공이 출발하는 점, 몸체 안이라 로봇 위 — drawMuzzleMarks)
 const AIM_SECTOR_RADIUS = 24; // inch
+const MUZZLE_MARK_RADIUS = 0.8; // inch
 
-function drawAimGuides(ctx: CanvasRenderingContext2D, frame: DeepReadonly<TimelineFrame>, scene: SceneInput): void {
-  ctx.save();
+function sceneAimGuides(frame: DeepReadonly<TimelineFrame>, scene: SceneInput): AimGuide[] {
   const { allianceColor, hive } = frame.field;
-  for (const [robot, config] of [[frame.r1, scene.r1Config], [frame.r2, scene.r2Config]] as const) {
-    const g = aimGuide(robot, config, allianceColor, hive.upwardCell);
-    const cx = inchToPx(g.center.x);
-    const cy = inchToPx(g.center.y);
+  const robots = [[frame.r1, scene.r1Config, scene.shooters?.robot1], [frame.r2, scene.r2Config, scene.shooters?.robot2]] as const;
+  return robots.flatMap(([robot, config, shooters]) => aimGuide(robot, config, allianceColor, hive.upwardCell, shooters) ?? []); // 슈터 없음(NONE) = 없음
+}
+
+function drawAimGuides(ctx: CanvasRenderingContext2D, guides: readonly AimGuide[]): void {
+  ctx.save();
+  for (const g of guides) {
+    const cx = inchToPx(g.muzzle.x);
+    const cy = inchToPx(g.muzzle.y);
     ctx.beginPath();
     ctx.moveTo(cx, cy);
     ctx.arc(cx, cy, inchToPx(AIM_SECTOR_RADIUS), g.sectorStart, g.sectorEnd);
@@ -479,16 +487,22 @@ function drawAimGuides(ctx: CanvasRenderingContext2D, frame: DeepReadonly<Timeli
     ctx.lineWidth = 1;
     ctx.strokeStyle = SCENE_COLORS.aimSectorStroke;
     ctx.stroke();
-    const reach = Math.hypot(g.aim.x - g.center.x, g.aim.y - g.center.y);
+    const reach = Math.hypot(g.aim.x - g.muzzle.x, g.aim.y - g.muzzle.y);
     ctx.beginPath();
     ctx.moveTo(cx, cy);
-    ctx.lineTo(inchToPx(g.center.x + Math.cos(g.launchHeading) * reach), inchToPx(g.center.y + Math.sin(g.launchHeading) * reach));
+    ctx.lineTo(inchToPx(g.muzzle.x + Math.cos(g.launchHeading) * reach), inchToPx(g.muzzle.y + Math.sin(g.launchHeading) * reach));
     ctx.setLineDash([6, 4]);
     ctx.lineWidth = 1.5;
     ctx.strokeStyle = SCENE_COLORS.aimLine;
     ctx.stroke();
     ctx.setLineDash([]);
   }
+  ctx.restore();
+}
+
+function drawMuzzleMarks(ctx: CanvasRenderingContext2D, guides: readonly AimGuide[], ally: Alliance): void {
+  ctx.save();
+  for (const g of guides) drawCircle(ctx, g.muzzle.x, g.muzzle.y, MUZZLE_MARK_RADIUS, pieceColors({ type: g.pieceType, alliance: ally }).fill, SCENE_COLORS.robotStroke, 1.5);
   ctx.restore();
 }
 
@@ -562,6 +576,7 @@ function drawRobotBody(
   ctx.fill();
   const radius = carriedPieceRadius(config.length);
   const capacity = getCarryCapacity(config);
+  const next = carriedHighlightIndex(config, robot.controlledPieces);
   carriedPieceSlots(config.length, capacity).forEach((slot, i) => {
     const at = localToField(robot, slot);
     const piece = robot.controlledPieces[i];
@@ -569,9 +584,9 @@ function drawRobotBody(
       drawCircle(ctx, at.x, at.y, radius, 'transparent', SCENE_COLORS.traySlot, 1);
       return;
     }
-    // FIFO: 앞쪽부터 0번, 0번(다음에 나갈 기물)은 굵은 테두리 강조
+    // FIFO: 앞쪽부터 0번, 다음에 발사할 기물(첫 발사 가능 기물, 13-2 — SHARED / PER_PIECE는 0번 = v1)은 굵은 테두리 강조
     const { fill, stroke } = pieceColors(piece);
-    drawCircle(ctx, at.x, at.y, radius, fill, i === 0 ? SCENE_COLORS.carriedNext : stroke, i === 0 ? 2.5 : 1);
+    drawCircle(ctx, at.x, at.y, radius, fill, i === next ? SCENE_COLORS.carriedNext : stroke, i === next ? 2.5 : 1);
   });
   ctx.restore();
 }
@@ -685,7 +700,7 @@ function drawBadge(ctx: CanvasRenderingContext2D, robot: DeepReadonly<RobotState
 /**
  * 장면 전체를 그림. ctx는 SCENE_WIDTH_PX × SCENE_HEIGHT_PX(= 필드 뷰포트 800 × 800) 논리 크기 × dpr 버퍼의 캔버스
  * 순서: 둘레 배경 → 정적 레이어(HIVE 기둥 부분, 게이지 틀 포함) → HIVE 셀 상태(기둥 부분) / 게이지 내용 → 바닥 기물(득점 GARDEN 포함)
- *       → 종료 강조(FLOWER) → [조준선] → 로봇 → 종료 강조(주차) → [흡입 진행] → 터널 지붕(지붕 불투명도, 13-1) → 팁 낙하
+ *       → 종료 강조(FLOWER) → [조준선] → 로봇 → [사출구 점] → 종료 강조(주차) → [흡입 진행] → 터널 지붕(지붕 불투명도, 13-1) → 팁 낙하
  *       → 비행 공([잔상] / [결과 색])
  *       → HIVE 셀 알약 / 번호 / 배지   ([ ] = 표시 옵션)
  */
@@ -714,9 +729,11 @@ export function renderScene(ctx: CanvasRenderingContext2D, scene: SceneInput, dp
   drawGaugeContents(ctx, frame, ally);
   drawFloorPieces(ctx, frame);
   drawScoredFieldMarks(ctx, frame, ally);
-  if (options.aimGuide) drawAimGuides(ctx, frame, scene);
+  const guides = options.aimGuide ? sceneAimGuides(frame, scene) : [];
+  drawAimGuides(ctx, guides);
   drawRobotBody(ctx, frame.r1, scene.r1Config, ally);
   drawRobotBody(ctx, frame.r2, scene.r2Config, ally);
+  drawMuzzleMarks(ctx, guides, ally);
   drawParkedMarks(ctx, frame, scene);
   if (options.intakeProgress) drawIntakeProgress(ctx, frame, scene, view);
   const roofRobots = [{ pose: frame.r1, size: scene.r1Config }, { pose: frame.r2, size: scene.r2Config }];

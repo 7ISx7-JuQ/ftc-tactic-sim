@@ -1,7 +1,8 @@
 // 로봇 표시 배치 (명세서 3.7 로봇, 08-4). DOM 비의존 순수 함수
 // 로봇 기준 좌표: forward = 로봇 앞쪽(+) 거리, right = 로봇 오른쪽(+) 거리 (inch)
 
-import type { RobotConfig, RobotState } from '../core/types';
+import { nextFireablePieceIndex } from '../core/ballistics';
+import type { GamePiece, RobotConfig, RobotState } from '../core/types';
 import { fieldToCanvas } from './viewTransform';
 import type { Point2, ViewTransform } from './viewTransform';
 
@@ -108,11 +109,19 @@ export function carriedPieceRadius(length: number): number {
   return Math.min(PIECE_RADIUS_MAX, carriedPiecePitch(length) * PIECE_FILL_RATIO);
 }
 
-/** 적재물 i번(0 = 다음에 나갈 기물)의 로봇 기준 위치: 받침 앞쪽 칸부터 */
+/** 적재물 i번(0 = 적재함 맨 앞, FIFO)의 로봇 기준 위치: 받침 앞쪽 칸부터 */
 export function carriedPieceSlots(length: number, count: number): LocalPoint[] {
   const pitch = carriedPiecePitch(length);
   const first = TRAY_FRONT * len(length) - pitch / 2;
   return Array.from({ length: Math.min(TRAY_SLOTS, Math.max(0, count)) }, (_, i) => ({ forward: first - i * pitch, right: 0 }));
+}
+
+/**
+ * 굵은 테두리로 강조할 적재물 번호 = 다음에 발사할 기물 (13-2): 엔진 발사 대기열과 같은 첫 발사 가능 기물
+ * (SHARED / PER_PIECE는 0번 = v1, POLLEN_ONLY는 첫 POLLEN). 발사 가능 기물이 없으면(NONE 등) −1 = 강조 없음
+ */
+export function carriedHighlightIndex(config: Partial<Pick<RobotConfig, 'shooterSetup'>>, pieces: readonly Pick<GamePiece, 'type'>[]): number {
+  return nextFireablePieceIndex(config, pieces);
 }
 
 /** 적재물 받침 (밝은 바탕: 몸체와 같은 진영색 NECTAR도 보이게) — 앞 / 뒤 끝과 반폭 */

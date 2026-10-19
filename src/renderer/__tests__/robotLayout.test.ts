@@ -6,6 +6,7 @@ import {
   BADGE_GAP_PX,
   BADGE_OPACITY,
   badgeCenter,
+  carriedHighlightIndex,
   carriedPieceRadius,
   carriedPieceSlots,
   carriedTray,
@@ -87,5 +88,17 @@ describe('로봇 표시 배치 (명세서 3.7, 08-4)', () => {
       // 이미지 SVG에서는 currentColor / 웹폰트 / 외부 참조가 동작하지 않음
       assert(!/currentColor|<text|<image|href=|@import/.test(svg), `${path}: self-contained, fixed colors, no text`);
     }
+  });
+
+  it('D. 적재물 강조 = 다음에 발사할 기물 (13-2, 엔진 발사 대기열의 첫 발사 가능 기물)', () => {
+    const tray = (...types: ('POLLEN' | 'NECTAR')[]) => types.map(type => ({ type }));
+    for (const setup of ['SHARED', 'PER_PIECE'] as const) {
+      expect(carriedHighlightIndex({ shooterSetup: setup }, tray('NECTAR', 'POLLEN')), `${setup}: FIFO head (v1)`).toBe(0);
+    }
+    expect(carriedHighlightIndex({}, tray('NECTAR')), 'no setup = SHARED').toBe(0);
+    expect(carriedHighlightIndex({ shooterSetup: 'POLLEN_ONLY' }, tray('NECTAR', 'NECTAR', 'POLLEN')), 'POLLEN_ONLY: first POLLEN').toBe(2);
+    expect(carriedHighlightIndex({ shooterSetup: 'POLLEN_ONLY' }, tray('NECTAR')), 'POLLEN_ONLY with only NECTAR: no highlight').toBe(-1);
+    expect(carriedHighlightIndex({ shooterSetup: 'NONE' }, tray('POLLEN')), 'NONE: no highlight').toBe(-1);
+    expect(carriedHighlightIndex({ shooterSetup: 'SHARED' }, tray()), 'empty tray').toBe(-1);
   });
 });

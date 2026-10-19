@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { bearingTo } from '../../core/ballistics';
 import { FLOWER_CIRCLES, PIECE_PHYSICS, createIntakeZonePreset, hiveCellAimPoint } from '../../core/collision';
+import { DEFAULT_SHOOTER_BALLISTICS, bearingTo, planShotFlight, shooterFor } from '../../core/ballistics';
 import { SimulationEngine } from '../../core/simulationEngine';
 import type { RobotDriveInput } from '../../core/simulationEngine';
 import type { DeepReadonly, RobotConfig, ShotProbabilityResolver, TimelineFrame } from '../../core/types';
 import { renderScene } from '../sceneRenderer';
-import { DEFAULT_RENDER_OPTIONS, aimGuide, hitProbabilities, intakeProgress } from '../renderOptions';
+import { DEFAULT_RENDER_OPTIONS, aimGuide, aimGuidePiece, hitProbabilities, intakeProgress } from '../renderOptions';
 import type { RenderOptions } from '../renderOptions';
 import { restingView } from '../viewTransform';
 
@@ -37,16 +37,16 @@ describe('표시 옵션 (명세서 3.7, 08-6)', () => {
     const robot = { ...frame.r1, x: 60.5, y: 130.5, heading: 1.2 };
     const aim = hiveCellAimPoint('RED', 'AUDIENCE_CELL');
     const bearing = bearingTo(60.5, 130.5, aim.x, aim.y);
-    const fixed = aimGuide(robot, C1, 'RED', 'AUDIENCE_CELL');
+    const fixed = aimGuide(robot, C1, 'RED', 'AUDIENCE_CELL')!;
     assert(near(fixed.sectorStart, 1.2 - 0.05) && near(fixed.sectorEnd, 1.2 + 0.05) && fixed.launchHeading === 1.2 && near(fixed.aim.x, aim.x), 'FIXED: heading ± aimTolerance, launches along the heading');
-    const half = aimGuide(robot, cfg('robot1', { turretType: 'TURRET', turretRange: [-Math.PI / 2, Math.PI / 2] }), 'RED', 'AUDIENCE_CELL');
+    const half = aimGuide(robot, cfg('robot1', { turretType: 'TURRET', turretRange: [-Math.PI / 2, Math.PI / 2] }), 'RED', 'AUDIENCE_CELL')!;
     assert(near(half.sectorStart, 1.2 - Math.PI / 2) && near(half.sectorEnd, 1.2 + Math.PI / 2), 'TURRET ±90°: sector heading ± 90°');
-    const rear = aimGuide(robot, cfg('robot1', { turretType: 'TURRET', turretRange: [2.5, -2.5] }), 'RED', 'AUDIENCE_CELL');
+    const rear = aimGuide(robot, cfg('robot1', { turretType: 'TURRET', turretRange: [2.5, -2.5] }), 'RED', 'AUDIENCE_CELL')!;
     assert(near(rear.sectorEnd - rear.sectorStart, 2 * Math.PI - 5) && near(rear.sectorStart, 1.2 + 2.5), 'rear turret [2.5, −2.5]: sector crosses ±π (length 2π − 5)');
-    const full = aimGuide({ ...robot, heading: bearing + 2 }, cfg('robot1', { turretType: 'TURRET', turretRange: [-Math.PI, Math.PI] }), 'RED', 'AUDIENCE_CELL');
+    const full = aimGuide({ ...robot, heading: bearing + 2 }, cfg('robot1', { turretType: 'TURRET', turretRange: [-Math.PI, Math.PI] }), 'RED', 'AUDIENCE_CELL')!;
     assert(near(full.sectorEnd - full.sectorStart, 2 * Math.PI) && near(full.launchHeading, bearing), '360° turret [−π, π]: full circle, launches at the aim bearing');
     // 엔진과 같은 해석: [0, 2π]는 정규화하면 [0, 0] (360° 아님) → 폭 0 부채꼴, 발사 방향 = 헤딩 (한계각)
-    const zero = aimGuide({ ...robot, heading: bearing + 2 }, cfg('robot1', { turretType: 'TURRET', turretRange: [0, 2 * Math.PI] }), 'RED', 'AUDIENCE_CELL');
+    const zero = aimGuide({ ...robot, heading: bearing + 2 }, cfg('robot1', { turretType: 'TURRET', turretRange: [0, 2 * Math.PI] }), 'RED', 'AUDIENCE_CELL')!;
     assert(near(zero.sectorEnd - zero.sectorStart, 0) && near(zero.launchHeading, bearing + 2), '[0, 2π] normalizes to [0, 0] like the engine: zero-width sector');
   });
 
@@ -104,4 +104,61 @@ describe('표시 옵션 (명세서 3.7, 08-6)', () => {
     assert(calls === 4, `hitProbabilities still calls the resolver 4 times (${calls})`);
     assert(engineCalls > 0, 'engine itself still calls the resolver only when firing');
   }, 120_000);
+
+  it('E. 조준선 = 다음에 발사할 기물의 슈터 / 사출구 (13-2): 엔진 발사 비행의 발사구 / 발사 방향과 같음', () => {
+    const frame = engine().getFrame(0)!;
+    const aim = hiveCellAimPoint('RED', 'AUDIENCE_CELL');
+    const piece = (type: 'POLLEN' | 'NECTAR', i: number) => ({ ...frame.r1.controlledPieces[0], id: `t${i}`, type });
+    const robot = (types: ('POLLEN' | 'NECTAR')[], heading = 1.2) => ({ ...frame.r1, x: 60.5, y: 120, heading, controlledPieces: types.map(piece) });
+    const SH = {
+      POLLEN: { ...DEFAULT_SHOOTER_BALLISTICS, shooterOffset: 5, shooterLateralOffset: 4 },
+      NECTAR: { ...DEFAULT_SHOOTER_BALLISTICS, shooterOffset: 2, shooterLateralOffset: -3 },
+    };
+    const PER = cfg('robot1', { shooterSetup: 'PER_PIECE', turretType: 'TURRET', turretRange: [-Math.PI, Math.PI], nectarShooter: { shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0], aimTolerance: 0.2 } });
+    const planFor = (r: ReturnType<typeof robot>, config: RobotConfig, type: 'POLLEN' | 'NECTAR') =>
+      planShotFlight({ robotX: r.x, robotY: r.y, robotHeading: r.heading, shooter: shooterFor(config, type), ballistics: SH[type], pieceType: type, alliance: 'RED', upwardCell: 'AUDIENCE_CELL', hit: false });
+
+    // 기물 고르기: 적재함의 첫 발사 가능 기물, 없으면 그 로봇이 쏠 수 있는 첫 종류, 슈터 없음 = null
+    assert(aimGuidePiece(robot(['NECTAR', 'POLLEN']), PER) === 'NECTAR' && aimGuidePiece(robot([]), PER) === 'POLLEN', 'PER_PIECE: FIFO head / POLLEN when empty');
+    assert(aimGuidePiece(robot(['NECTAR', 'POLLEN']), { shooterSetup: 'POLLEN_ONLY' }) === 'POLLEN' && aimGuidePiece(robot(['NECTAR']), { shooterSetup: 'POLLEN_ONLY' }) === 'POLLEN', 'POLLEN_ONLY: skips NECTAR');
+    assert(aimGuidePiece(robot(['POLLEN']), { shooterSetup: 'NONE' }) === null && aimGuide(robot(['POLLEN']), cfg('robot1', { shooterSetup: 'NONE' }), 'RED', 'AUDIENCE_CELL', SH) === null, 'NONE: no aim guide');
+
+    // PER_PIECE + 360° 터렛 주 슈터: POLLEN 다음이면 POLLEN 슈터 (터렛, 좌우 +4) — 사출구 / 발사 방향 = 비행 계획
+    {
+      const r = robot(['POLLEN', 'NECTAR']);
+      const g = aimGuide(r, PER, 'RED', 'AUDIENCE_CELL', SH)!;
+      const plan = planFor(r, PER, 'POLLEN');
+      assert(g.pieceType === 'POLLEN' && near(g.muzzle.x, plan.from.x) && near(g.muzzle.y, plan.from.y) && near(g.launchHeading, plan.heading), 'POLLEN turret: muzzle / heading = planShotFlight');
+      assert(near(Math.hypot(g.muzzle.x - r.x, g.muzzle.y - r.y), Math.hypot(5, 4)), 'muzzle offset forward 5 / right 4');
+      // 좌우 오프셋 보정: 사출구에서 발사 방향 직선이 조준점을 지남
+      const toAim = bearingTo(g.muzzle.x, g.muzzle.y, aim.x, aim.y);
+      assert(near(toAim, g.launchHeading, 1e-9), 'turret with lateral offset: the line from the muzzle passes the aim point');
+    }
+    // NECTAR 다음이면 NECTAR 슈터 (고정형, 허용 오차 0.2, 좌우 −3)
+    {
+      const r = robot(['NECTAR', 'POLLEN']);
+      const g = aimGuide(r, PER, 'RED', 'AUDIENCE_CELL', SH)!;
+      const plan = planFor(r, PER, 'NECTAR');
+      assert(g.pieceType === 'NECTAR' && near(g.muzzle.x, plan.from.x) && near(g.muzzle.y, plan.from.y) && g.launchHeading === 1.2 && plan.heading === 1.2, 'NECTAR fixed: muzzle = planShotFlight, launches along the heading');
+      assert(near(g.sectorStart, 1.2 - 0.2) && near(g.sectorEnd, 1.2 + 0.2), 'sector from the NECTAR shooter tolerance');
+    }
+    // 탄도 미지정 = 엔진 기본 슈터 (오프셋 0): 사출구 = 로봇 중심 (v1과 같은 그림)
+    {
+      const g = aimGuide(robot(['POLLEN']), C1, 'RED', 'AUDIENCE_CELL')!;
+      assert(g.muzzle.x === 60.5 && g.muzzle.y === 120 && g.launchHeading === 1.2, 'no ballistics -> muzzle at the robot center');
+    }
+    // 엔진 실제 발사: 발사 직전 프레임의 조준선 사출구 = 비행 기록의 발사구 (PER_PIECE, NECTAR 먼저)
+    {
+      const C = cfg('robot1', { shooterSetup: 'PER_PIECE' });
+      const e = new SimulationEngine(C, C2, () => 0, 'RED', { allianceColor: 'RED', r1Spawn: { x: 60.5, y: 120, heading: 1.2 }, r1Loadout: ['NECTAR', 'POLLEN'] }, { robot1: SH });
+      const shoot: RobotDriveInput = { targetVx: 0, targetVy: 0, targetOmega: 0, actionState: 'SHOOTING' };
+      for (let i = 0; i < 40 && e.field.pendingShots.length === 0; i++) e.step(shoot);
+      const shot = e.field.pendingShots[0];
+      const before = e.getFrame(shot.launchTick - 1)!;
+      const g = aimGuide(before.r1, C, 'RED', before.field.hive.upwardCell, SH)!;
+      assert(shot.pieceType === 'NECTAR' && g.pieceType === 'NECTAR' && near(g.muzzle.x, shot.fromX) && near(g.muzzle.y, shot.fromY), `engine launch point = aim guide muzzle (${shot.fromX.toFixed(2)}, ${shot.fromY.toFixed(2)})`);
+      const after = e.getFrame(shot.launchTick)!;
+      assert(aimGuide(after.r1, C, 'RED', after.field.hive.upwardCell, SH)!.pieceType === 'POLLEN', 'after the NECTAR shot the guide switches to the POLLEN shooter');
+    }
+  });
 });

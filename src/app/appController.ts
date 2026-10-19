@@ -857,7 +857,7 @@ export class AppController {
       renderEditScene(this.ctx, this.editScene, view, this.dpr);
     } else {
       const frame = this.currentFrame();
-      renderScene(this.ctx, { frame, r1Config: this.setup.r1Config, r2Config: this.setup.r2Config, view, options: this.options }, this.dpr);
+      renderScene(this.ctx, { frame, r1Config: this.setup.r1Config, r2Config: this.setup.r2Config, view, options: this.options, shooters: this.setup.shooters }, this.dpr);
     }
 
     if (!view.done || this.playing || this.endStage === 'HIGHLIGHT') {

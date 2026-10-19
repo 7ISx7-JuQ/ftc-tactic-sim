@@ -1,11 +1,21 @@
 // 표시 옵션 (명세서 3.7, 08-6): 사용자에게 공개하는 공통 환경설정 (로봇별 아님), 기본값 모두 꺼짐
 // 옵션별 표시 계산은 DOM 비의존 순수 함수 (그리기는 sceneRenderer)
 
-import { bearingTo, shotLaunchHeading } from '../core/ballistics';
+import {
+  DEFAULT_SHOOTER_BALLISTICS,
+  PIECE_TYPES,
+  bearingTo,
+  isPieceFireable,
+  launchPoint,
+  nextFireablePieceIndex,
+  shooterAimHeading,
+  shooterFor,
+  shotLaunchHeading,
+} from '../core/ballistics';
 import { FLOWER_CIRCLES, FLOWER_IDS, FLOWER_RADIUS, PIECE_PHYSICS, hiveCellAimPoint } from '../core/collision';
 import { normalizeAngle } from '../core/kinematics';
 import { FLOWER_DEQ_GRAVITY_COOLDOWN } from '../core/types';
-import type { DeepReadonly, GamePiece, RobotConfig, RobotState, ShotProbabilityResolver, TimelineFrame } from '../core/types';
+import type { DeepReadonly, GamePiece, RobotConfig, RobotShooterBallistics, RobotState, ShotProbabilityResolver, TimelineFrame } from '../core/types';
 
 export interface RenderOptions {
   aimGuide: boolean;       // 조준선 (고정형 허용 오차 부채꼴 / 터렛 범위 부채꼴 + 발사 방향)
@@ -26,34 +36,72 @@ export const DEFAULT_RENDER_OPTIONS: Readonly<RenderOptions> = {
 type Robot = DeepReadonly<RobotState>;
 type Frame = DeepReadonly<TimelineFrame>;
 
-// 1. 조준선
+// 1. 조준선 (13-2: 다음에 발사할 기물의 슈터 / 사출구 기준)
 export interface AimGuide {
-  center: { x: number; y: number };
+  pieceType: GamePiece['type'];   // 이 조준선의 기물 (그 기물을 쏘는 슈터)
+  center: { x: number; y: number }; // 로봇 중심
+  muzzle: { x: number; y: number }; // 사출구 바닥 투영 (앞뒤 / 좌우 오프셋, 발사 비행 계획의 발사구와 같은 점)
   aim: { x: number; y: number };  // 상향 셀 조준점 (바닥 투영)
-  launchHeading: number;          // 발사 방향 (고정형 = 헤딩, 터렛 = 조준 방위, 범위 밖이면 한계각)
-  sectorStart: number;            // 조준 가능 부채꼴 (시작 → 끝, 시계 방향 = 각도 증가, 필드 좌표 rad)
+  launchHeading: number;          // 발사 방향 (고정형 = 헤딩, 터렛 = 좌우 오프셋 보정한 조준 방향 ψ, 범위 밖이면 한계각)
+  sectorStart: number;            // 조준 가능 부채꼴 (시작 → 끝, 시계 방향 = 각도 증가, 필드 좌표 rad, 꼭짓점 = 사출구)
   sectorEnd: number;
 }
 
 /**
- * 조준선 계산: 고정형 부채꼴 = 헤딩 ± aimTolerance, 터렛 부채꼴 = 헤딩 + turretRange (±π를 가로지르면 끝에 2π 더함)
- * 터렛 범위 해석은 엔진 판정(isAimWithinShooterRange)과 같다: 각 끝을 [-π, π]로 정규화하므로 360°는 [-π, π]만 해당
+ * 조준선을 그릴 기물: 적재함의 다음 발사 기물(첫 발사 가능 기물, 엔진 발사 대기열과 같은 nextFireablePieceIndex),
+ * 적재함에 발사 가능 기물이 없으면 그 로봇이 쏠 수 있는 첫 기물 종류(POLLEN → NECTAR), 슈터가 없으면(NONE) null
  */
-export function aimGuide(robot: Robot, config: RobotConfig, alliance: 'RED' | 'BLUE', upwardCell: 'AUDIENCE_CELL' | 'OPPOSITE_CELL'): AimGuide {
+export function aimGuidePiece(robot: Pick<Robot, 'controlledPieces'>, config: Partial<Pick<RobotConfig, 'shooterSetup'>>): GamePiece['type'] | null {
+  const next = nextFireablePieceIndex(config, robot.controlledPieces);
+  if (next >= 0) return robot.controlledPieces[next].type;
+  return PIECE_TYPES.find((type) => isPieceFireable(config, type)) ?? null;
+}
+
+/**
+ * 조준선 계산 (13-2): 그 기물을 쏘는 슈터(shooterFor)와 탄도(shooters[기물], 없으면 엔진 기본 슈터)로
+ * - 발사 방향 = 발사 비행 계획(planShotFlight)과 같은 shotLaunchHeading(좌우 오프셋 보정 ψ, 조준 불가 자리면 조준점 방위)
+ * - 사출구 = launchPoint(로봇 중심, 발사 방향, 앞뒤 / 좌우 오프셋) — 비행 공이 출발하는 점
+ * - 부채꼴: 고정형 = 헤딩 ± aimTolerance, 터렛 = 헤딩 + turretRange (±π를 가로지르면 끝에 2π 더함)
+ * 터렛 범위 해석은 엔진 판정(isAimWithinShooterRange)과 같다: 각 끝을 [-π, π]로 정규화하므로 360°는 [-π, π]만 해당.
+ * 쏠 수 있는 기물이 없으면(NONE) null
+ */
+export function aimGuide(
+  robot: Robot,
+  config: RobotConfig,
+  alliance: 'RED' | 'BLUE',
+  upwardCell: 'AUDIENCE_CELL' | 'OPPOSITE_CELL',
+  shooters?: DeepReadonly<RobotShooterBallistics>,
+): AimGuide | null {
+  const pieceType = aimGuidePiece(robot, config);
+  if (!pieceType) return null;
+  const shooter = shooterFor(config, pieceType);
+  const ballistics = shooters?.[pieceType] ?? DEFAULT_SHOOTER_BALLISTICS;
+  const lateral = Number.isFinite(ballistics.shooterLateralOffset) ? (ballistics.shooterLateralOffset as number) : 0;
   const aim = hiveCellAimPoint(alliance, upwardCell);
-  const launchHeading = shotLaunchHeading(config, robot.heading, bearingTo(robot.x, robot.y, aim.x, aim.y));
+  const aimHeading = shooterAimHeading(robot.x, robot.y, aim, lateral) ?? bearingTo(robot.x, robot.y, aim.x, aim.y);
+  const launchHeading = shotLaunchHeading(shooter, robot.heading, aimHeading);
+  const offset = Number.isFinite(ballistics.shooterOffset) ? ballistics.shooterOffset : 0;
+  const muzzle = launchPoint(robot.x, robot.y, launchHeading, { dz: 0, shooterOffset: offset, shooterLateralOffset: lateral });
   let lo: number;
   let hi: number;
-  if (config.turretType === 'TURRET') {
-    lo = normalizeAngle(config.turretRange[0]);
-    hi = normalizeAngle(config.turretRange[1]);
+  if (shooter.turretType === 'TURRET') {
+    lo = normalizeAngle(shooter.turretRange[0]);
+    hi = normalizeAngle(shooter.turretRange[1]);
     if (lo > hi) hi += Math.PI * 2;
   } else {
-    const tol = Number.isFinite(config.aimTolerance) ? Math.max(0, config.aimTolerance) : 0;
+    const tol = Number.isFinite(shooter.aimTolerance) ? Math.max(0, shooter.aimTolerance) : 0;
     lo = -tol;
     hi = tol;
   }
-  return { center: { x: robot.x, y: robot.y }, aim: { x: aim.x, y: aim.y }, launchHeading, sectorStart: robot.heading + lo, sectorEnd: robot.heading + hi };
+  return {
+    pieceType,
+    center: { x: robot.x, y: robot.y },
+    muzzle: { x: muzzle.x, y: muzzle.y },
+    aim: { x: aim.x, y: aim.y },
+    launchHeading,
+    sectorStart: robot.heading + lo,
+    sectorEnd: robot.heading + hi,
+  };
 }
 
 // 2. 흡입 접촉 진행
