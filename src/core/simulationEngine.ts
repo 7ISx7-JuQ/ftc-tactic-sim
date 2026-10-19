@@ -417,6 +417,37 @@ export function isRobotUnderHive(pose: Pick<RobotState, 'x' | 'y' | 'heading'>, 
   return hit.colliding && hit.depth > HIVE_SHOOT_TOLERANCE;
 }
 
+// ------------------------------------------------------------
+// 착지 겹침 보정 (명세서 2.6.1 / 2.6.2, 12-10)
+// ------------------------------------------------------------
+
+/** 착지 자리 탐색 링 간격 / 링 위 후보 간격 (inch) */
+export const LANDING_SEARCH_STEP = 0.5;
+/** 착지 자리 탐색 최대 반경 (inch). 이 안에 빈 자리가 없으면 원래 자리에 둔다 (v1과 같이 다음 틱 충돌 처리) */
+export const LANDING_SEARCH_MAX_RADIUS = 24;
+
+/**
+ * (x, y)에서 가장 가까운 빈 자리 (난수 없음, 결정론적). (x, y)가 비어 있으면 그대로.
+ * 반경 LANDING_SEARCH_STEP 간격의 링을 안쪽부터 넓혀 가며, 각 링은 원주 간격 약 LANDING_SEARCH_STEP의 후보를
+ * startAngle 방향부터 좌우 번갈아(0, +1, −1, +2, −2, … 칸) 검사해 첫 빈 자리를 고른다. 최대 반경 안에 없으면 null
+ */
+export function findLandingSpot(x: number, y: number, startAngle: number, isFree: (x: number, y: number) => boolean): Vector2D | null {
+  if (isFree(x, y)) return { x, y };
+  const rings = Math.round(LANDING_SEARCH_MAX_RADIUS / LANDING_SEARCH_STEP);
+  for (let ring = 1; ring <= rings; ring++) {
+    const dist = ring * LANDING_SEARCH_STEP;
+    const samples = Math.max(8, Math.ceil((2 * Math.PI * dist) / LANDING_SEARCH_STEP));
+    for (let k = 0; k < samples; k++) {
+      const j = k % 2 === 1 ? (k + 1) / 2 : -k / 2;
+      const angle = startAngle + (2 * Math.PI * j) / samples;
+      const px = x + dist * Math.cos(angle);
+      const py = y + dist * Math.sin(angle);
+      if (isFree(px, py)) return { x: px, y: py };
+    }
+  }
+  return null;
+}
+
 export interface PlacementIssue {
   code:
     | 'PLACEMENT_OUT_OF_FIELD'
@@ -1266,11 +1297,7 @@ export class SimulationEngine {
       }
       const piece = this.getPiece(drop.pieceId);
       if (!piece) continue;
-      piece.state = 'ON_FIELD';
-      piece.x = drop.targetX;
-      piece.y = drop.targetY;
-      piece.vx = 0;
-      piece.vy = 0;
+      this.landPiece(piece, drop.targetX, drop.targetY, 0, 0);
     }
     hive.pendingDrops = remaining;
     if (remaining.length === 0) hive.isTipping = false;
@@ -1594,13 +1621,31 @@ export class SimulationEngine {
           continue;
         }
       }
-      piece.state = 'ON_FIELD';
-      piece.x = shot.landX;
-      piece.y = shot.landY;
-      piece.vx = shot.landingVx;
-      piece.vy = shot.landingVy;
+      this.landPiece(piece, shot.landX, shot.landY, shot.landingVx, shot.landingVy);
     }
     this.field.pendingShots = remaining;
+  }
+
+  // 착지 (TIP 낙하 / 발사 비행, 12-10): 착지 자리가 로봇 / 바닥 기물 / FLOWER와 겹치면 가까운 빈 자리로 옮겨 ON_FIELD.
+  // 빈 자리 = 필드 안(반지름 여유) · HIVE 면적 밖(반지름 여유, 위에서 떨어진 공은 터널 바닥에 갈 수 없음) · FLOWER / 로봇 / 바닥 기물과
+  // 겹치지 않음 (닿음 허용). 탐색 시작 방향 = 착지 속도 방향, 정지 착지면 HIVE 중심에서 바깥 방향. 착지 속도는 유지.
+  // 같은 틱에 먼저 내려앉은 기물도 장애물이다 (처리 순서 = 낙하 대기열 / 발사 순서)
+  private landPiece(piece: GamePiece, x: number, y: number, vx: number, vy: number): void {
+    const r = PIECE_PHYSICS[piece.type].radius;
+    const isFree = (px: number, py: number): boolean => {
+      if (px < r || px > FIELD_SIZE - r || py < r || py > FIELD_SIZE - r) return false;
+      if (px > HIVE_AABB.minX - r && px < HIVE_AABB.maxX + r && py > HIVE_AABB.minY - r && py < HIVE_AABB.maxY + r) return false;
+      if (FLOWER_CIRCLES.some((f) => Math.hypot(f.center.x - px, f.center.y - py) < f.radius + r)) return false;
+      return !this.overlapsRobot(px, py, r) && !this.overlapsFieldPiece(px, py, r);
+    };
+    const hiveY = (HIVE_AABB.minY + HIVE_AABB.maxY) / 2;
+    const startAngle = vx !== 0 || vy !== 0 ? Math.atan2(vy, vx) : Math.atan2(y - hiveY, x - (HIVE_AABB.minX + HIVE_AABB.maxX) / 2);
+    const spot = findLandingSpot(x, y, startAngle, isFree) ?? { x, y };
+    piece.state = 'ON_FIELD';
+    piece.x = spot.x;
+    piece.y = spot.y;
+    piece.vx = vx;
+    piece.vy = vy;
   }
 
   // 무효 명중: 조준점에서 셀 쪽 HIVE 앞면으로 반사 낙하 (발사 시점에 뽑아 둔 산포 난수 사용), 착지 틱은 현재 틱 이후

@@ -9,7 +9,7 @@ import { ENGINE_VERSION, SimulationEngine } from '../simulationEngine';
 import type { DriveInputProvider, RobotDriveInput } from '../simulationEngine';
 import type { RobotConfig } from '../types';
 
-const EXPECTED = { engineVersion: 2, final: 'a196a494', all: 'a9322250' };
+const EXPECTED = { engineVersion: 2, final: '69611bab', all: 'e2652d87' };
 
 const cfg = (id: 'robot1' | 'robot2', over: Partial<RobotConfig> = {}): RobotConfig => ({
   id, name: id, width: 18, length: 18, maxSpeed: 60, maxTurnRate: 4, maxLinearAccel: 120, maxAngularAccel: 10,

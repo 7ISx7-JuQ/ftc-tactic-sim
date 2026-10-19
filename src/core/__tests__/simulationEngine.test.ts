@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SimulationEngine, DEFAULT_RNG_SEED, DEFAULT_SPAWN_POSES, validateScenario, validateRobotPlacement, PLACEMENT_TOLERANCE, HIVE_SHOOT_TOLERANCE, isRobotUnderHive, getCarryCapacity, DT, DEFAULT_RP_THRESHOLDS, AUTO_MOVEMENT_POINTS, autoMovementPoints, resolveAutoMovement, resolveRPThresholds, scenarioWarnings, acceptedFloorPieces, isFloorPiecePositionValid } from '../simulationEngine';
+import { SimulationEngine, DEFAULT_RNG_SEED, DEFAULT_SPAWN_POSES, validateScenario, validateRobotPlacement, PLACEMENT_TOLERANCE, HIVE_SHOOT_TOLERANCE, isRobotUnderHive, getCarryCapacity, DT, DEFAULT_RP_THRESHOLDS, AUTO_MOVEMENT_POINTS, autoMovementPoints, resolveAutoMovement, resolveRPThresholds, scenarioWarnings, acceptedFloorPieces, isFloorPiecePositionValid, findLandingSpot, LANDING_SEARCH_STEP, LANDING_SEARCH_MAX_RADIUS } from '../simulationEngine';
 import type { RobotDriveInput } from '../simulationEngine';
 import type { BumperZone, RobotConfig, RobotPose, RobotState, ScenarioConfig, ShotProbabilityResolver } from '../types';
 import { liftDriveRatio, stepRobotKinematics } from '../kinematics';
@@ -823,7 +823,12 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       settle(e);
       assert(e.getFrame(shot.arriveTick - 1)!.pieces.find(p => p.id === shot.pieceId)!.state === 'IN_FLIGHT', 'still in flight (falling) one tick before landing');
       const piece = e.getFrame(shot.arriveTick)!.pieces.find(p => p.id === shot.pieceId)!;
-      assert(piece.state === 'ON_FIELD' && near(piece.x, shot.landX, 1e-9) && near(piece.y, shot.landY, 1e-9) && piece.y > HIVE_AABB.maxY && piece.vy > 0, 'lands in front of the HIVE face, moving outward');
+      assert(piece.state === 'ON_FIELD' && piece.y > HIVE_AABB.maxY && piece.vy > 0 && near(piece.vy, shot.landingVy, 1e-9), 'lands in front of the HIVE face, moving outward');
+      // 반사된 공이 쏜 로봇 앞 범퍼에 걸쳐 떨어짐 → 착지 겹침 보정으로 바로 옆 빈 자리 (12-10, 상세는 AD)
+      const robot = e.getFrame(shot.arriveTick)!.r1;
+      assert(testOBBvsCircle(getRobotOBB(robot, C1), { center: { x: shot.landX, y: shot.landY }, radius: PIECE_PHYSICS.POLLEN.radius }).colliding, 'planned landing touches the shooting robot');
+      assert(!testOBBvsCircle(getRobotOBB(robot, C1), { center: { x: piece.x, y: piece.y }, radius: PIECE_PHYSICS.POLLEN.radius }).colliding && near(Math.hypot(piece.x - shot.landX, piece.y - shot.landY), LANDING_SEARCH_STEP, 1e-9),
+        'moved to the nearest free spot (first search ring)');
     }
     // 무효 명중: 명중으로 발사됐지만 도착 시점에 HIVE 전복 중 → 조준점에서 셀 앞면 바깥으로 반사 낙하 (08-2)
     {
@@ -1551,6 +1556,77 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       e.step(LIFT);
       for (let i = 0; i < 25; i++) e.step(liftInput(20, 'FLOWER_SETUP'));
       assert(e.r1.y === atFlower.y && e.r1.x === atFlower.x, 'locked in the lift states (v1)');
+    }
+  }, TEST_TIMEOUT_MS);
+
+  it('AD. 착지 겹침 보정 (12-10): 착지 자리가 로봇 / 바닥 기물 / FLOWER와 겹치면 가까운 빈 자리로, 결정론적 링 탐색, 같은 틱 먼저 내려앉은 기물도 피함', () => {
+    const near = (a: number, b: number, tol: number) => Math.abs(a - b) < tol;
+    // 탐색 함수: 비어 있으면 그대로, 링을 안쪽부터 넓히며 시작 방향 → +1칸 → −1칸 … 순서, 최대 반경 안에 없으면 null
+    {
+      assert(JSON.stringify(findLandingSpot(10, 20, 0, () => true)) === JSON.stringify({ x: 10, y: 20 }), 'free spot stays');
+      const outside = (r: number) => (x: number, y: number) => Math.hypot(x - 10, y - 20) > r;
+      const a = findLandingSpot(10, 20, Math.PI / 2, outside(1.2))!;
+      assert(near(a.x, 10, 1e-9) && near(a.y, 20 + 1.5, 1e-9), 'first free ring (1.5 in), at the start angle');
+      // 시작 방향이 막히면 +1칸(반시계) 먼저, 그다음 −1칸
+      const first = findLandingSpot(10, 20, 0, (x, y) => outside(0.4)(x, y) && !(y === 20 && x > 10))!;
+      assert(first.y > 20 && near(Math.hypot(first.x - 10, first.y - 20), LANDING_SEARCH_STEP, 1e-9), 'start blocked -> next candidate counter-clockwise');
+      const second = findLandingSpot(10, 20, 0, (x, y) => outside(0.4)(x, y) && !(y >= 20 && x > 10))!;
+      assert(second.y < 20 && near(Math.hypot(second.x - 10, second.y - 20), LANDING_SEARCH_STEP, 1e-9), 'then clockwise');
+      assert(findLandingSpot(10, 20, 0, () => false) === null, 'nothing free -> null (engine keeps the original spot)');
+      const far = findLandingSpot(10, 20, 0, outside(LANDING_SEARCH_MAX_RADIUS - 0.1))!;
+      assert(far !== null && near(Math.hypot(far.x - 10, far.y - 20), LANDING_SEARCH_MAX_RADIUS, 1e-9), 'searches up to the max radius');
+    }
+    // 발사 비행 착지점에 바닥 기물이 있음 → 착지 속도 방향(+x)의 가장 가까운 빈 자리, 착지 속도 유지
+    {
+      const robot = pose(72, 110, 0);
+      const plan = planShotFlight({ robotX: robot.x, robotY: robot.y, robotHeading: robot.heading, shooter: C1, ballistics: DEFAULT_SHOOTER_BALLISTICS, pieceType: 'POLLEN', alliance: 'RED', upwardCell: 'AUDIENCE_CELL', hit: false });
+      const blocker = { type: 'POLLEN' as const, x: plan.landing.x, y: plan.landing.y };
+      const e = eng({ r1Spawn: robot, r1Loadout: ['POLLEN'], floorPieces: [blocker] }, C1, C2, fixedP(0));
+      for (let i = 0; i < 15; i++) e.step(SHOOT);
+      const shot = e.field.pendingShots[0];
+      assert(shot.result === 'MISS_FLOOR' && near(shot.landX, blocker.x, 1e-9) && shot.landingVx > 0, 'shot planned to land on the floor piece');
+      settle(e);
+      const f = e.getFrame(shot.arriveTick)!;
+      const piece = f.pieces.find(p => p.id === shot.pieceId)!;
+      const other = f.pieces.find(p => p.state === 'ON_FIELD' && p.id !== shot.pieceId && near(p.x, blocker.x, 1e-9) && near(p.y, blocker.y, 1e-9));
+      // 두 POLLEN 반지름 합 2.8 in → 겹치지 않는 첫 링은 3.0 in, 시작 방향 = 착지 속도 방향 (+x)
+      assert(other !== undefined && piece.state === 'ON_FIELD' && near(piece.x, blocker.x + 3.0, 1e-9) && near(piece.y, blocker.y, 1e-9), `moved ahead of the floor piece (${piece.x.toFixed(2)}, ${piece.y.toFixed(2)})`);
+      assert(piece.vx === shot.landingVx && piece.vy === shot.landingVy, 'landing speed kept');
+      // 바닥 기물이 없으면 v1과 같이 계획된 착지점 그대로
+      const open = eng({ r1Spawn: robot, r1Loadout: ['POLLEN'], floorPieces: [{ ...blocker, x: 30, y: 130 }] }, C1, C2, fixedP(0));
+      for (let i = 0; i < 15; i++) open.step(SHOOT);
+      const openShot = open.field.pendingShots[0];
+      settle(open);
+      const landed = open.getFrame(openShot.arriveTick)!.pieces.find(p => p.id === openShot.pieceId)!;
+      assert(landed.x === openShot.landX && landed.y === openShot.landY, 'free landing spot -> unchanged');
+    }
+    // HIVE TIP 낙하: 착지 자리에 로봇이 있음 → 로봇 밖 빈 자리 (속도 0). 같은 틱 같은 자리 두 기물 → 뒤 기물이 앞 기물을 피함
+    {
+      const e = eng({ flowerPiecesCount: [0, 0, 0, 0], hiveInitialPieces: { nectarCount: 3, pollenCount: 2 } });
+      for (let i = 0; i < 15; i++) e.step(SHOOT);
+      while (!e.field.hive.isTipping && e.currentTick < 200) e.step();
+      const drops = e.field.hive.pendingDrops;
+      assert(e.field.hive.isTipping && drops.length >= 3, `tipping with ${drops.length} drops`);
+      const onRobot = drops[0];
+      onRobot.targetX = e.r2.x;
+      onRobot.targetY = e.r2.y;
+      const spot = { x: 40, y: 125 };
+      for (const d of [drops[1], drops[2]]) {
+        d.targetX = spot.x;
+        d.targetY = spot.y;
+        d.settleTime = drops[1].settleTime;
+      }
+      while (e.field.hive.isTipping) e.step();
+      const at = (id: string) => e.pieces.find(p => p.id === id)!;
+      const a = at(onRobot.pieceId);
+      const r = PIECE_PHYSICS[a.type].radius;
+      assert(a.state === 'ON_FIELD' && !testOBBvsCircle(getRobotOBB(e.r2, C2), { center: { x: a.x, y: a.y }, radius: r }).colliding && a.vx === 0 && a.vy === 0,
+        `drop on the robot -> moved off the robot (${a.x.toFixed(2)}, ${a.y.toFixed(2)})`);
+      assert(Math.hypot(a.x - e.r2.x, a.y - e.r2.y) < 9 + r + 2 * LANDING_SEARCH_STEP + 2, 'nearest free spot just outside the robot');
+      const b = at(drops[1].pieceId), c = at(drops[2].pieceId);
+      const gap = PIECE_PHYSICS[b.type].radius + PIECE_PHYSICS[c.type].radius;
+      assert(b.x === spot.x && b.y === spot.y, 'first drop lands on its spot');
+      assert(Math.hypot(c.x - b.x, c.y - b.y) >= gap && Math.hypot(c.x - b.x, c.y - b.y) < gap + LANDING_SEARCH_STEP, 'second drop on the same tick avoids the first');
     }
   }, TEST_TIMEOUT_MS);
 });
