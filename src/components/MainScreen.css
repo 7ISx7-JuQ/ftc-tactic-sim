@@ -2082,6 +2082,14 @@
   box-shadow: 0 calc(var(--u) * 6) calc(var(--u) * 20) rgba(0, 0, 0, 0.4);
   font-size: calc(var(--u) * 12);
 }
+.field-popover-section {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 5);
+}
+.field-popover-section.has-error .form-label {
+  color: var(--error);
+}
 .field-popover-row {
   display: grid;
   grid-template-columns: 1fr 1fr;

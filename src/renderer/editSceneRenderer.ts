@@ -13,12 +13,12 @@
 // 히트맵 / 스윗스팟 모드는 로봇 / 기물 / 게이지를 그리지 않는다 (편집 모드의 필드는 비어 있음). 색 / 행 계산은 heatmapView.ts (순수 함수).
 
 import { LUT_GRID_SIZE, aimingRobotOBB } from '../core/ballistics';
-import { FLOWER_CIRCLES, FLOWER_IDS, GARDEN_AABB, PIECE_PHYSICS, getBumperZoneOBB, getRobotOBB } from '../core/collision';
+import { FLOWER_CIRCLES, FLOWER_IDS, GARDEN_AABB, LOADING_ZONE_AABB, PIECE_PHYSICS, getBumperZoneOBB, getRobotOBB } from '../core/collision';
 import { INITIAL_HUMAN_NECTAR_STOCK } from '../core/simulationEngine';
 import type { RobotConfig, RobotPose } from '../core/types';
 import { ALLIANCE_COLORS, COLORS, drawFieldLines, drawHiveBase, hiveCellBox, inchToPx, pieceColors } from './canvasRenderer';
 import { canvasFont } from './fonts';
-import { headingArrow, localToField, robotLabelOffset } from './robotLayout';
+import { carriedPieceRadius, carriedPieceSlots, carriedTray, headingArrow, localToField, robotLabelOffset } from './robotLayout';
 import { HANDLE_RADIUS, spawnHandlePoint } from './spawnEditLayout';
 import type { SpawnPart, SpawnRobotId } from './spawnEditLayout';
 import type { Alliance, HiveCell } from './canvasRenderer';
@@ -53,7 +53,10 @@ export interface SweetSpotEditScene {
 export interface SpawnEditRobot {
   pose: RobotPose;                                // 초안 시작 자세 (지정 안 했으면 진영 기본 스폰)
   config: Pick<RobotConfig, 'length' | 'width' | 'intakeZones'>; // 초안 로봇 크기 / 흡입 구역
-  bad: boolean;                                   // 배치 검증에 걸림 (빨간 표시)
+  bad: boolean;                                   // 배치 검증 / 오토 PARK 구역에 걸림 (빨간 표시)
+  loadout?: readonly ('POLLEN' | 'NECTAR')[];     // 적재물 (14-1d, FIFO 앞에서부터, 없으면 받침을 그리지 않음)
+  capacity?: number;                              // 적재 한도 (빈 칸 윤곽 수)
+  next?: number;                                  // 다음에 발사할 기물 번호 (강조, 없으면 −1)
 }
 
 export interface ScenarioEditFloorPiece {
@@ -77,7 +80,8 @@ export interface ScenarioEditScene {
   flowers?: readonly number[];
   hive?: { upwardCell: HiveCell; nectar: number; pollen: number };
   stock?: number;
-  target?: { kind: 'HIVE' } | { kind: 'FLOWER'; index: number } | { kind: 'GARDEN'; side: 'ally' | 'opponent' } | null;
+  target?: { kind: 'HIVE' } | { kind: 'FLOWER'; index: number } | { kind: 'GARDEN'; side: 'ally' | 'opponent' } | { kind: 'ROBOT'; robot: SpawnRobotId } | null;
+  parkZone?: boolean;                             // 오토 이동 PARK 로봇이 있음 (14-1d): 우리 LOADING ZONE 강조
 }
 
 /** 편집 모드 장면 */
@@ -107,6 +111,8 @@ const SPAWN_COLORS = {
   handle: '#ffffff',
   handleActive: '#f59e0b',
   activeRing: 'rgba(245, 158, 11, 0.9)',
+  tray: 'rgba(255, 255, 255, 0.85)',
+  traySlot: 'rgba(17, 24, 39, 0.25)',
   pieceBad: '#dc2626',
   previewOk: '#15803d',
 };
@@ -306,6 +312,52 @@ function obbPoints(obb: ReturnType<typeof getRobotOBB>): Point2[] {
   return [at(hl, -hw), at(hl, hw), at(-hl, hw), at(-hl, -hw)]; // 앞-왼, 앞-오른, 뒤-오른, 뒤-왼
 }
 
+// 적재물 받침 (14-1d, 경기 장면 robotLayout과 같은 배치): 밝은 받침 + 적재 한도만큼 빈 칸 윤곽 + 기물 원(다음 발사 기물 굵은 테두리)
+function drawLoadoutTray(ctx: CanvasRenderingContext2D, robot: SpawnEditRobot, ally: Alliance): void {
+  const { pose, config } = robot;
+  const loadout = robot.loadout ?? [];
+  const tray = carriedTray(config.length);
+  pathCorners(ctx, [
+    localToField(pose, { forward: tray.front, right: -tray.halfWidth }),
+    localToField(pose, { forward: tray.front, right: tray.halfWidth }),
+    localToField(pose, { forward: tray.back, right: tray.halfWidth }),
+    localToField(pose, { forward: tray.back, right: -tray.halfWidth }),
+  ]);
+  ctx.fillStyle = SPAWN_COLORS.tray;
+  ctx.fill();
+  const radius = carriedPieceRadius(config.length);
+  carriedPieceSlots(config.length, Math.max(robot.capacity ?? 0, loadout.length)).forEach((slot, i) => {
+    const at = localToField(pose, slot);
+    const type = loadout[i];
+    ctx.beginPath();
+    ctx.arc(inchToPx(at.x), inchToPx(at.y), inchToPx(radius), 0, Math.PI * 2);
+    if (!type) {
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = SPAWN_COLORS.traySlot;
+      ctx.stroke();
+      return;
+    }
+    const colors = pieceColors({ type, alliance: type === 'NECTAR' ? ally : 'NONE' });
+    ctx.fillStyle = colors.fill;
+    ctx.fill();
+    ctx.lineWidth = i === robot.next ? 2.5 : 1;
+    ctx.strokeStyle = i === robot.next ? SPAWN_COLORS.robotStroke : colors.stroke;
+    ctx.stroke();
+  });
+}
+
+// 오토 PARK 로봇이 있으면 우리 LOADING ZONE을 초록 점선으로 강조 (14-1d)
+function drawParkZone(ctx: CanvasRenderingContext2D, scene: ScenarioEditScene): void {
+  if (!scene.parkZone) return;
+  const z = LOADING_ZONE_AABB[scene.alliance];
+  ctx.save();
+  ctx.setLineDash([6, 4]);
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = EDIT_COLORS.valid;
+  ctx.strokeRect(inchToPx(z.minX) + 1.5, inchToPx(z.minY) + 1.5, inchToPx(z.maxX - z.minX) - 3, inchToPx(z.maxY - z.minY) - 3);
+  ctx.restore();
+}
+
 // 로봇 한 대: 흡입 구역 → 몸체(진영색, 문제면 빨간 덧칠 + 빨간 테두리) → 앞 변 굵게 → 헤딩 화살표 → 핸들 막대 / 원
 function drawSpawnRobot(ctx: CanvasRenderingContext2D, robot: SpawnEditRobot, ally: Alliance, active: SpawnPart | null): void {
   const { pose, config } = robot;
@@ -362,6 +414,7 @@ function drawSpawnRobot(ctx: CanvasRenderingContext2D, robot: SpawnEditRobot, al
   pathCorners(ctx, headingArrow(config.length).map(p => localToField(pose, p)));
   ctx.fillStyle = SPAWN_COLORS.heading;
   ctx.fill();
+  if (robot.loadout) drawLoadoutTray(ctx, robot, ally);
   // 회전 핸들: 앞 변 가운데 → 핸들 원
   const front = { x: pose.x + Math.cos(pose.heading) * (config.length / 2), y: pose.y + Math.sin(pose.heading) * (config.length / 2) };
   const h = spawnHandlePoint(pose, config);
@@ -446,6 +499,10 @@ function drawTargetHighlight(ctx: CanvasRenderingContext2D, scene: ScenarioEditS
     ctx.stroke();
     const g = flowerGaugeLayout(target.index).rect;
     box(g.minX, g.minY, g.maxX, g.maxY, 0.5);
+  } else if (target.kind === 'ROBOT') {
+    const body = getRobotOBB(scene.robots[target.robot].pose, scene.robots[target.robot].config);
+    pathCorners(ctx, obbPoints({ ...body, halfExtents: [body.halfExtents[0] + 1.2, body.halfExtents[1] + 1.2] }));
+    ctx.stroke();
   } else {
     const side = target.side === 'ally' ? scene.alliance : scene.alliance === 'RED' ? 'BLUE' : 'RED';
     const g = GARDEN_AABB[side];
@@ -469,6 +526,7 @@ function renderScenarioField(ctx: CanvasRenderingContext2D, scene: ScenarioEditS
       nectarStock: stock,
     }, ally);
   }
+  drawParkZone(ctx, scene);
   drawScenarioPieces(ctx, scene);
   // 끄는 로봇을 위에 (R1 → R2 순서, 끄는 로봇은 마지막)
   const order: SpawnRobotId[] = scene.active?.robot === 'robot1' ? ['robot2', 'robot1'] : ['robot1', 'robot2'];

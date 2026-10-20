@@ -282,6 +282,36 @@ describe('config 창', () => {
     await expect.element(banner).toBeVisible();
   });
 
+  it('시나리오 필드 편집 로봇 팝오버 (14-1d): 로봇 클릭 → 적재물 칸 / 오토 이동, PARK가 LOADING ZONE 밖이면 빨간 사유, 다시 클릭하면 닫기', async () => {
+    await userEvent.click(button('Open settings'));
+    await userEvent.click(page.getByRole('tab', { name: 'SCENARIO' }));
+    await userEvent.click(button('EDIT ON FIELD').first());
+    const canvas = document.querySelector('.field-canvas') as HTMLCanvasElement;
+    const at = (x: number, y: number) => {
+      const k = canvas.getBoundingClientRect().width / 160;
+      return { x: (x + 8) * k, y: (y + 8) * k };
+    };
+    const field = page.elementLocator(canvas);
+    // R2 (9, 108) 몸체를 끌지 않고 클릭
+    await userEvent.click(field, { position: at(5, 112) });
+    const popover = page.getByRole('dialog', { name: 'R2' });
+    await expect.element(popover).toBeVisible();
+    const movement = popover.getByRole('radiogroup', { name: 'Auto movement' });
+    await expect.element(movement.getByRole('radio', { name: 'LEAVE' })).toBeChecked();
+    // PARK: R2 기본 자세는 LOADING ZONE 밖 → 빨간 사유 + 탭 무효
+    await userEvent.click(movement.getByRole('radio', { name: 'PARK' }));
+    await expect.element(popover.getByText('R2 auto PARK needs a start pose in the LOADING ZONE')).toBeVisible();
+    await userEvent.click(movement.getByRole('radio', { name: 'LEAVE' }));
+    await expect.element(popover.getByText('R2 auto PARK needs a start pose in the LOADING ZONE')).not.toBeInTheDocument();
+    // 적재물 1번 칸: POLLEN → NECTAR (탭에도 반영)
+    await userEvent.click(popover.getByRole('button', { name: 'Slot 1: POLLEN' }));
+    await expect.element(popover.getByRole('button', { name: 'Slot 1: NECTAR' })).toBeVisible();
+    await expect.element(page.getByRole('tabpanel').getByRole('button', { name: 'Slot 1: NECTAR' })).toBeVisible();
+    // 같은 로봇을 다시 클릭 = 닫기 (자세는 그대로)
+    await userEvent.click(field, { position: at(5, 112) });
+    await expect.element(popover).not.toBeInTheDocument();
+  });
+
   it('시나리오 REROLL은 APPLY 없이 바로 적용된다', async () => {
     await userEvent.click(button('Open settings'));
     await userEvent.click(page.getByRole('tab', { name: 'SCENARIO' }));

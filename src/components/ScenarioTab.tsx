@@ -4,7 +4,7 @@
 // 14-1a: EDIT ON FIELD = 시나리오 필드 편집 모드 — 탭 맨 위 버튼, 시작 자세 구역의 버튼도 같은 모드를 연다.
 import { CircleAlert, CircleCheck, Dices, Move, RotateCcw } from 'lucide-react';
 import { hiveTipPollenThreshold } from '../core/types';
-import type { RobotPose, ScenarioConfig } from '../core/types';
+import type { RobotConfig, RobotPose, ScenarioConfig } from '../core/types';
 import type { RobotId } from '../input/inputConfig';
 import { t } from '../ui/i18n';
 import type { Language } from '../ui/i18n';
@@ -30,7 +30,7 @@ import {
   setUpwardCell,
   spawnFieldKey,
 } from '../ui/scenarioForm';
-import type { HiveCellChoice, PieceType, ScenarioFormIssue } from '../ui/scenarioForm';
+import type { HiveCellChoice, PieceType, ScenarioFormIssue, ScenarioView } from '../ui/scenarioForm';
 import { getCarryCapacity } from '../core/simulationEngine';
 import type { LengthUnit } from '../ui/units';
 import { NumberField, Section, Segmented, Stepper } from './FormControls';
@@ -63,7 +63,6 @@ export default function ScenarioTab({ scenario, robots, seed, fieldText, issues,
   const problems = issues.length + typoCount;
   const edit = (next: ScenarioConfig) => onEdit(next, null, null);
   const floor = floorSummary(view);
-  const pieceLabel = (piece: PieceType | null) => piece ?? t(lang, 'scenario.slotEmpty');
   const editOnFieldButton = (
     <button type="button" className={`config-button${fieldEditOn ? ' is-active' : ''}`} aria-pressed={fieldEditOn} disabled={locked || fieldEditOn} onClick={onEditOnField}>
       <Move />
@@ -125,37 +124,12 @@ export default function ScenarioTab({ scenario, robots, seed, fieldText, issues,
       </Section>
 
       <Section title={t(lang, 'scenario.section.loadout')}>
-        {ROBOTS.map(robot => {
-          const config = robots[robot].config;
-          const capacity = getCarryCapacity(config);
-          const list = view.loadout[robot];
-          const slots = Math.max(capacity, list.length);
-          return (
-            <div key={robot} className={`loadout-row${red.has(`loadout.${robot}`) ? ' has-error' : ''}`}>
-              <span className="loadout-robot">{robotLabel(robot)}</span>
-              <div className="loadout-slots">
-                {Array.from({ length: slots }, (_, i) => {
-                  const piece = list[i] ?? null;
-                  const over = i >= capacity;
-                  const label = `${t(lang, 'scenario.slot', { n: i + 1, piece: pieceLabel(piece) })}${over ? ` (${t(lang, 'scenario.slotOver')})` : ''}`;
-                  return (
-                    <button
-                      key={i}
-                      type="button"
-                      className={`loadout-slot is-${piece ? piece.toLowerCase() : 'empty'}${piece === 'NECTAR' ? ` is-${view.alliance.toLowerCase()}` : ''}${over ? ' is-over' : ''}`}
-                      title={label}
-                      aria-label={label}
-                      disabled={locked}
-                      onClick={() => edit(setLoadoutSlot(scenario, view, robot, i, nextSlotPiece(piece, config.canIntakeNectar)))}
-                    >
-                      <span className="loadout-index">{i + 1}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
+        {ROBOTS.map(robot => (
+          <div key={robot} className={`loadout-row${red.has(`loadout.${robot}`) ? ' has-error' : ''}`}>
+            <span className="loadout-robot">{robotLabel(robot)}</span>
+            <LoadoutSlots robot={robot} scenario={scenario} view={view} config={robots[robot].config} lang={lang} disabled={locked} onEdit={edit} />
+          </div>
+        ))}
         <p className="settings-note">{t(lang, 'scenario.loadoutHint')}</p>
       </Section>
 
@@ -226,6 +200,55 @@ export default function ScenarioTab({ scenario, robots, seed, fieldText, issues,
         </div>
         <p className="settings-note">{t(lang, 'scenario.seedHint')}</p>
       </Section>
+    </div>
+  );
+}
+
+/**
+ * 로봇 적재물 칸 (FIFO, 0번이 먼저 나감): 칸을 누르면 POLLEN → NECTAR(흡입 가능 로봇만) → 빈 칸 순환, 적재 한도를 넘는 칸은 빨간 테두리.
+ * 시나리오 탭과 시나리오 필드 편집 모드의 로봇 팝오버(14-1d)가 함께 쓴다
+ */
+export function LoadoutSlots({
+  robot,
+  scenario,
+  view,
+  config,
+  lang,
+  disabled,
+  onEdit,
+}: {
+  robot: RobotId;
+  scenario: ScenarioConfig;
+  view: ScenarioView;
+  config: RobotConfig;
+  lang: Language;
+  disabled?: boolean;
+  onEdit: (scenario: ScenarioConfig) => void;
+}) {
+  const capacity = getCarryCapacity(config);
+  const list = view.loadout[robot];
+  const slots = Math.max(capacity, list.length);
+  const pieceLabel = (piece: PieceType | null) => piece ?? t(lang, 'scenario.slotEmpty');
+  return (
+    <div className="loadout-slots">
+      {Array.from({ length: slots }, (_, i) => {
+        const piece = list[i] ?? null;
+        const over = i >= capacity;
+        const label = `${t(lang, 'scenario.slot', { n: i + 1, piece: pieceLabel(piece) })}${over ? ` (${t(lang, 'scenario.slotOver')})` : ''}`;
+        return (
+          <button
+            key={i}
+            type="button"
+            className={`loadout-slot is-${piece ? piece.toLowerCase() : 'empty'}${piece === 'NECTAR' ? ` is-${view.alliance.toLowerCase()}` : ''}${over ? ' is-over' : ''}`}
+            title={label}
+            aria-label={label}
+            disabled={disabled}
+            onClick={() => onEdit(setLoadoutSlot(scenario, view, robot, i, nextSlotPiece(piece, config.canIntakeNectar)))}
+          >
+            <span className="loadout-index">{i + 1}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

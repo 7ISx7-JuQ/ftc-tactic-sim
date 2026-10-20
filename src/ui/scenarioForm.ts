@@ -20,10 +20,11 @@ import {
   NECTAR_IN_PLAY,
   TOTAL_POLLEN,
   getCarryCapacity,
+  resolveAutoMovement,
   validateRobotPlacement,
   validateScenario,
 } from '../core/simulationEngine';
-import type { FloorPiecePlacement, GamePiece, RobotConfig, RobotPose, ScenarioConfig } from '../core/types';
+import type { AutoMovement, FloorPiecePlacement, GamePiece, RobotConfig, RobotPose, ScenarioConfig } from '../core/types';
 import type { RobotId } from '../input/inputConfig';
 import type { ConfigDrafts, DraftValues } from './configDraft';
 import type { NumberFieldSpec } from './robotForm';
@@ -45,6 +46,7 @@ export interface ScenarioView {
   garden: { ally: number; opponent: number };
   autoTipCount: number;
   floorPieces: FloorPiecePlacement[]; // 지정 바닥 기물 (없으면 빈 목록 = 모두 무작위 산포, 14-1b)
+  autoMovement: Record<RobotId, AutoMovement>; // 로봇별 오토 이동 (없거나 모르는 값 = LEAVE, 엔진 resolveAutoMovement, 14-1d)
   spawn: Record<RobotId, RobotPose>;
   spawnIsDefault: Record<RobotId, boolean>;
   seed: number;
@@ -75,6 +77,7 @@ export function readScenario(scenario: ScenarioConfig, r1: RobotConfig, r2: Robo
     garden: { ...(scenario.gardenPiecesCount ?? { ally: DEFAULT_GARDEN_PIECES, opponent: DEFAULT_GARDEN_PIECES }) },
     autoTipCount: scenario.autoTipCount ?? 0,
     floorPieces: (scenario.floorPieces ?? []).map(p => ({ type: p.type, x: p.x, y: p.y })),
+    autoMovement: { robot1: resolveAutoMovement(scenario.r1AutoMovement), robot2: resolveAutoMovement(scenario.r2AutoMovement) },
     spawn: { robot1: { ...(spawnOf('robot1') ?? DEFAULT_SPAWN_POSES[a].robot1) }, robot2: { ...(spawnOf('robot2') ?? DEFAULT_SPAWN_POSES[a].robot2) } },
     spawnIsDefault: { robot1: spawnOf('robot1') === undefined, robot2: spawnOf('robot2') === undefined },
     seed: scenario.rngSeed ?? DEFAULT_RNG_SEED,
@@ -136,6 +139,14 @@ export function setGardenCount(scenario: ScenarioConfig, view: ScenarioView, sid
 export function setAutoTipCount(scenario: ScenarioConfig, count: number): ScenarioConfig {
   return { ...scenario, autoTipCount: count };
 }
+
+/** 로봇별 오토 이동 (14-1d 로봇 팝오버, 탭 입력은 14-2) */
+export function setAutoMovement(scenario: ScenarioConfig, robot: RobotId, movement: AutoMovement): ScenarioConfig {
+  return robot === 'robot1' ? { ...scenario, r1AutoMovement: movement } : { ...scenario, r2AutoMovement: movement };
+}
+
+/** 오토 이동 선택지 (점수: NONE 0 / LEAVE 3 / PARK 5, RP에만) */
+export const AUTO_MOVEMENTS: readonly AutoMovement[] = ['NONE', 'LEAVE', 'PARK'];
 
 /** 적재 칸 순환 (칸 클릭): POLLEN → NECTAR(흡입 가능 로봇만) → 빈 칸 → POLLEN */
 export function nextSlotPiece(current: PieceType | null, canIntakeNectar: boolean): PieceType | null {

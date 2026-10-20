@@ -36,6 +36,7 @@ import {
   floorRemaining,
   isOffField,
   moveFloorPiece,
+  robotPopoverIssues,
   sameTarget,
   scenarioTargetAnchor,
   scenarioTargetHitTest,
@@ -304,7 +305,7 @@ describe('필드 편집 모드 (09-10b / 09-10c / 09-11b)', () => {
     const scene = scenarioEditScene(drafts.draft, { robot: 'robot2', part: 'handle' });
     expect(scene.mode).toBe('SCENARIO');
     expect(scene.alliance).toBe('RED');
-    expect(scene.robots.robot1).toEqual({ pose: DEFAULT_SPAWN_POSES.RED.robot1, config: drafts.draft.robot1.config, bad: true });
+    expect(scene.robots.robot1).toMatchObject({ pose: DEFAULT_SPAWN_POSES.RED.robot1, config: drafts.draft.robot1.config, bad: true });
     expect(scene.robots.robot2.bad).toBe(true);
     expect(scene.active).toEqual({ robot: 'robot2', part: 'handle' });
     expect(scene.gardenPieces).toEqual([...gardenPiecePositions('RED', 4), ...gardenPiecePositions('BLUE', 4)]);
@@ -455,6 +456,8 @@ describe('시나리오 필드 편집 바닥 기물 (14-1b)', () => {
 });
 
 describe('시나리오 필드 편집 팝오버 대상 (14-1c)', () => {
+  const RED_VALUES = DEFAULT_DRAFT_VALUES;
+  const BLUE_VALUES = { ...DEFAULT_DRAFT_VALUES, scenario: { allianceColor: 'BLUE' as const } };
   it('U. 대상 잡기: FLOWER 원 + 여유 3 in / 게이지, GARDEN 구역 + 여유(우리 / 상대는 진영 기준), 우리 HIVE 두 셀, 빈 자리 = null', () => {
     expect(scenarioTargetHitTest('RED', { x: 4, y: 99 })).toEqual({ kind: 'FLOWER', index: 0 }); // (2, 96) 반지름 2 + 3
     expect(scenarioTargetHitTest('RED', { x: -2.2, y: 110 })).toEqual({ kind: 'FLOWER', index: 0 }); // 왼쪽 벽 게이지
@@ -473,11 +476,11 @@ describe('시나리오 필드 편집 팝오버 대상 (14-1c)', () => {
   });
 
   it('V. 팝오버 기준점: FLOWER / GARDEN = 가운데(위쪽 절반이면 아래로), HIVE = 우리 셀 아래 가장자리에서 아래로', () => {
-    expect(scenarioTargetAnchor('RED', { kind: 'FLOWER', index: 1 })).toEqual({ x: 48, y: 2, below: true });
-    expect(scenarioTargetAnchor('RED', { kind: 'FLOWER', index: 0 })).toEqual({ x: 2, y: 96, below: false });
-    expect(scenarioTargetAnchor('RED', { kind: 'GARDEN', side: 'ally' })).toEqual({ x: 11.5, y: 143, below: false });
-    expect(scenarioTargetAnchor('BLUE', { kind: 'GARDEN', side: 'ally' })).toEqual({ x: 132.5, y: 1, below: true });
-    const hive = scenarioTargetAnchor('RED', { kind: 'HIVE' });
+    expect(scenarioTargetAnchor(RED_VALUES, { kind: 'FLOWER', index: 1 })).toEqual({ x: 48, y: 2, below: true });
+    expect(scenarioTargetAnchor(RED_VALUES, { kind: 'FLOWER', index: 0 })).toEqual({ x: 2, y: 96, below: false });
+    expect(scenarioTargetAnchor(RED_VALUES, { kind: 'GARDEN', side: 'ally' })).toEqual({ x: 11.5, y: 143, below: false });
+    expect(scenarioTargetAnchor(BLUE_VALUES, { kind: 'GARDEN', side: 'ally' })).toEqual({ x: 132.5, y: 1, below: true });
+    const hive = scenarioTargetAnchor(RED_VALUES, { kind: 'HIVE' });
     expect(hive.below).toBe(true);
     expect(hive.y).toBeCloseTo(91.475, 6);
     expect(hive.x).toBeCloseTo(59.25, 6);
@@ -491,6 +494,34 @@ describe('시나리오 필드 편집 팝오버 대상 (14-1c)', () => {
     expect(scene.stock).toBe(3);
     expect(scene.target).toEqual({ kind: 'HIVE' });
     expect(scenarioEditScene(DEFAULT_DRAFT_VALUES, null).target).toBeNull();
+  });
+});
+
+describe('시나리오 필드 편집 로봇 팝오버 (14-1d)', () => {
+  const values = (scenario: object) => ({ ...DEFAULT_DRAFT_VALUES, scenario: { allianceColor: 'RED' as const, ...scenario } });
+
+  it('X. 로봇 대상: 같은 로봇 비교, 기준점 = 몸체 외접원 끝(위쪽 절반이면 아래로), 문제 = 그 로봇의 적재물 / 오토 이동', () => {
+    expect(sameTarget({ kind: 'ROBOT', robot: 'robot1' }, { kind: 'ROBOT', robot: 'robot1' })).toBe(true);
+    expect(sameTarget({ kind: 'ROBOT', robot: 'robot1' }, { kind: 'ROBOT', robot: 'robot2' })).toBe(false);
+    const r = Math.hypot(18, 18) / 2;
+    expect(scenarioTargetAnchor(values({}), { kind: 'ROBOT', robot: 'robot1' })).toEqual({ x: 9, y: 36 + r, below: true });
+    expect(scenarioTargetAnchor(values({}), { kind: 'ROBOT', robot: 'robot2' })).toEqual({ x: 9, y: 108 - r, below: false });
+    const v = values({ r2AutoMovement: 'PARK', r1Loadout: ['POLLEN', 'POLLEN', 'POLLEN', 'POLLEN', 'POLLEN'] });
+    expect(robotPopoverIssues(v, 'robot2').map(i => i.code)).toEqual(['AUTO_PARK_NOT_IN_ZONE']);
+    expect(robotPopoverIssues(v, 'robot1').map(i => i.code)).toEqual(['LOADOUT_OVER_CAPACITY']);
+    expect(robotPopoverIssues(values({}), 'robot1')).toEqual([]);
+  });
+
+  it('Y. 장면: 로봇 적재물 / 적재 한도 / 다음 발사 기물, 오토 PARK가 LOADING ZONE 밖이면 빨간 표시, PARK가 있으면 LOADING ZONE 강조', () => {
+    const plain = scenarioEditScene(values({}), null);
+    expect([plain.robots.robot1.loadout, plain.robots.robot1.capacity, plain.robots.robot1.next]).toEqual([['POLLEN', 'POLLEN', 'POLLEN', 'POLLEN'], 4, 0]);
+    expect(plain.parkZone).toBe(false);
+    const v = { ...values({ r1Loadout: ['NECTAR', 'POLLEN'], r1AutoMovement: 'PARK', r2AutoMovement: 'PARK' }) };
+    v.robot1 = { ...v.robot1, config: { ...v.robot1.config, shooterSetup: 'POLLEN_ONLY' } };
+    const scene = scenarioEditScene(v, null);
+    expect([scene.robots.robot1.loadout, scene.robots.robot1.next]).toEqual([['NECTAR', 'POLLEN'], 1]); // POLLEN 전용: 첫 POLLEN 강조
+    expect(scene.parkZone).toBe(true);
+    expect([scene.robots.robot1.bad, scene.robots.robot2.bad]).toEqual([false, true]); // R1 기본 자세는 LOADING ZONE에 걸침
   });
 });
 

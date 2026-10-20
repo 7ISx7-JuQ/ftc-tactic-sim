@@ -12,6 +12,7 @@
 // 14-1b: 바닥 기물 — 안내 띠 + POLLEN / + NECTAR(추가 상태, 바닥 클릭 = 하나씩, Esc = 추가 상태만 끝), 끌어 옮기기 / 필드 밖으로 끌어 빼기,
 // 겹친 자리 / 놓을 기물 없음 = 놓지 않고 사유 토스트.
 // 14-1c: HIVE / FLOWER / GARDEN을 누르면 그 옆 팝오버(개수 조절기, 탭과 같은 고치기 · 되돌리기 기록), Esc = 팝오버만 닫기.
+// 14-1d: 로봇을 끌지 않고 클릭하면 로봇 팝오버(적재물 칸 + 오토 이동), 다시 클릭하면 닫기.
 // 09-10c: 스윗스팟 모드(SET ON FIELD) — 필드 클릭 = 초안 스윗스팟, DONE · APPLY = 그 로봇 탭 적용, CANCEL / Esc / START = 들어오기 전 값으로.
 
 import { useEffect, useRef, useState } from 'react';
@@ -97,6 +98,7 @@ import {
   floorRemaining,
   isOffField,
   moveFloorPiece,
+  robotPopoverIssues,
   sameTarget,
   scenarioTargetAnchor,
   scenarioTargetHitTest,
@@ -183,7 +185,8 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
   // 클릭은 마지막 포인터 이동의 칸을 쓴다 (상태는 다음 렌더에야 바뀌므로 이동 직후 클릭에도 맞도록 즉시 갱신되는 ref)
   const spotHoverRef = useRef<typeof spotHover>(null);
   // 시나리오 필드 편집 모드: 끄는 중(포인터 캡처, 끌기 전 시나리오 탭 스냅샷 / 마지막 자세) / 마우스를 올린 로봇 부분 (강조 · 커서)
-  const spawnDragRef = useRef<{ robot: SpawnRobotId; part: SpawnPart; pointerStart: { x: number; y: number }; poseStart: RobotPose; before: ScenarioSnapshot; lastPose: RobotPose | null } | null>(null);
+  // popoverWasOpen: 누를 때 그 로봇 팝오버가 열려 있었음 (끌지 않고 클릭 = 팝오버 열기 / 닫기 토글, 14-1d)
+  const spawnDragRef = useRef<{ robot: SpawnRobotId; part: SpawnPart; pointerStart: { x: number; y: number }; poseStart: RobotPose; before: ScenarioSnapshot; lastPose: RobotPose | null; popoverWasOpen: boolean } | null>(null);
   const [spawnActive, setSpawnActive] = useState<{ robot: SpawnRobotId; part: SpawnPart } | null>(null);
   // 바닥 기물 (14-1b): 끄는 중(누른 점 / 끌기 전 자리 · 스냅샷 / 마지막 자리 · 포인터), 강조, 추가 상태(켜진 기물) / 추가 미리보기
   const floorDragRef = useRef<{ index: number; pointerStart: { x: number; y: number }; start: { x: number; y: number }; before: ScenarioSnapshot; lastPoint: { x: number; y: number } | null; lastPointer: { x: number; y: number } | null } | null>(null);
@@ -713,7 +716,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
   };
   // 팝오버 위치 (14-1c): 대상 기준점의 장면 비율(%, 캔버스와 같은 크기의 글자 층 기준) + 펼칠 방향 (scenarioTargetAnchor)
   const popoverPlacement = (target: ScenarioTarget) => {
-    const anchor = scenarioTargetAnchor(drafts.draft.scenario.allianceColor, target);
+    const anchor = scenarioTargetAnchor(drafts.draft, target);
     const view = status ? { angle: status.viewAngle, scale: fitScale(status.viewAngle) } : { angle: 0, scale: 1 };
     const at = fieldToCanvas(view, anchor.x, anchor.y);
     return { leftPct: (at.x / SCENE_WIDTH_PX) * 100, topPct: (at.y / SCENE_WIDTH_PX) * 100, below: anchor.below };
@@ -752,7 +755,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
     if (hit) {
       e.preventDefault();
       e.currentTarget.setPointerCapture(e.pointerId);
-      spawnDragRef.current = { ...hit, pointerStart: p, poseStart: robots[hit.robot].pose, before: scenarioSnapshot(drafts), lastPose: null };
+      spawnDragRef.current = { ...hit, pointerStart: p, poseStart: robots[hit.robot].pose, before: scenarioSnapshot(drafts), lastPose: null, popoverWasOpen: sameTarget(popover, { kind: 'ROBOT', robot: hit.robot }) };
       setSpawnActive(hit);
       setAddPreview(null);
       setPopover(null);
@@ -795,7 +798,10 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
     spawnDragRef.current = null;
     setSpawnDragging(false);
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
-    const result = finishRobotDrag(drafts, drag.robot, drag.before, drag.lastPose);
+    // 끌지 않고 클릭한 몸체 = 로봇 팝오버 열기 / 닫기 (14-1d). 0.1 in 반올림으로 자세가 그대로인 아주 작은 끌기도 클릭으로 본다
+    const moved = drag.lastPose && (drag.lastPose.x !== drag.poseStart.x || drag.lastPose.y !== drag.poseStart.y || drag.lastPose.heading !== drag.poseStart.heading);
+    if (!moved && drag.part === 'body') setPopover(drag.popoverWasOpen ? null : { kind: 'ROBOT', robot: drag.robot });
+    const result = finishRobotDrag(drafts, drag.robot, drag.before, moved ? drag.lastPose : null);
     setDrafts(result.drafts);
     if (result.refused.length > 0) showEditToast(t(lang, 'edit.scenario.refused', { reason: scenarioIssueText(result.refused[0], lang) }));
     else setFieldEdit(edit => (edit?.mode === 'SCENARIO' ? recordScenarioChange(edit, drag.before, scenarioSnapshot(result.drafts)) : edit));
@@ -1025,6 +1031,8 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
               scenario={drafts.draft.scenario}
               view={readScenario(drafts.draft.scenario, drafts.draft.robot1.config, drafts.draft.robot2.config)}
               red={issueFieldSet(scenarioFormIssues(drafts.draft))}
+              robots={{ robot1: drafts.draft.robot1, robot2: drafts.draft.robot2 }}
+              issues={popover.kind === 'ROBOT' ? robotPopoverIssues(drafts.draft, popover.robot).map(issue => scenarioIssueText(issue, lang)) : []}
               at={popoverPlacement(popover)}
               lang={lang}
               onEdit={next => editScenario(next, null, null)}

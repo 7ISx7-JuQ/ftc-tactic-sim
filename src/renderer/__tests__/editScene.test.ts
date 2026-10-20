@@ -109,8 +109,17 @@ describe('편집 모드 장면 그리기 (09-10b / 09-10c)', () => {
     // 14-1c: 게이지 / HIVE 내용과 함께 그려도 강조 없음, 팝오버 대상은 주황 점선 (HIVE / FLOWER / GARDEN)
     const withField = spawn({ flowers: [4, 4, 4, 4], hive: { upwardCell: 'AUDIENCE_CELL', nectar: 3, pollen: 1 }, stock: 5 });
     expect(drawAll(withField).strokes).not.toContain(RING);
-    for (const target of [{ kind: 'HIVE' as const }, { kind: 'FLOWER' as const, index: 2 }, { kind: 'GARDEN' as const, side: 'opponent' as const }]) {
+    for (const target of [{ kind: 'HIVE' as const }, { kind: 'FLOWER' as const, index: 2 }, { kind: 'GARDEN' as const, side: 'opponent' as const }, { kind: 'ROBOT' as const, robot: 'robot2' as const }]) {
       expect(drawAll({ ...withField, target }).strokes).toContain(RING);
     }
+
+    // 14-1d: 적재물 받침(밝은 바탕 + 빈 칸 윤곽), 오토 PARK LOADING ZONE 강조(초록)
+    const TRAY = 'rgba(255, 255, 255, 0.85)';
+    expect(drawAll(spawn()).fills).not.toContain(TRAY);
+    const loaded = spawn({ robots: { ...spawn().robots, robot1: { ...spawn().robots.robot1, loadout: ['POLLEN'], capacity: 4, next: 0 } } });
+    expect(drawAll(loaded).fills).toContain(TRAY);
+    expect(drawAll(loaded).strokes).toContain('rgba(17, 24, 39, 0.25)');
+    expect(drawAll(spawn()).strokes).not.toContain(VALID);
+    expect(drawAll(spawn({ parkZone: true })).strokes).toContain(VALID);
   });
 });

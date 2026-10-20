@@ -18,6 +18,7 @@ import {
   scenarioFormIssues,
   scenarioIssueText,
   setAlliance,
+  setAutoMovement,
   setFlowerCount,
   setHivePieces,
   setLoadoutSlot,
@@ -43,6 +44,7 @@ describe('시나리오 탭 폼 (09-11a)', () => {
       garden: { ally: 4, opponent: 4 },
       autoTipCount: 0,
       floorPieces: [],
+      autoMovement: { robot1: 'LEAVE', robot2: 'LEAVE' },
       spawn: DEFAULT_SPAWN_POSES.RED,
       spawnIsDefault: { robot1: true, robot2: true },
       seed: DEFAULT_RNG_SEED,
@@ -109,6 +111,14 @@ describe('시나리오 탭 폼 (09-11a)', () => {
     const refill = setLoadoutSlot(emptied, readScenario(emptied, R1, R2), 'robot1', 3, 'POLLEN');
     expect(refill.r1Loadout).toEqual(['NECTAR', 'POLLEN', 'POLLEN', 'POLLEN']);
     expect(setLoadoutSlot(sc, view, 'robot2', 2, null).r2Loadout).toEqual(['POLLEN', 'POLLEN', 'POLLEN']);
+  });
+
+  it('D-2. 오토 이동 (14-1d): 읽기 = 없거나 모르는 값은 LEAVE, 고치기 = 그 로봇 항목만', () => {
+    expect(readScenario({ allianceColor: 'RED' }, R1, R2).autoMovement).toEqual({ robot1: 'LEAVE', robot2: 'LEAVE' });
+    const sc = setAutoMovement({ allianceColor: 'RED' }, 'robot2', 'PARK');
+    expect(sc).toEqual({ allianceColor: 'RED', r2AutoMovement: 'PARK' });
+    expect(readScenario(setAutoMovement(sc, 'robot1', 'NONE'), R1, R2).autoMovement).toEqual({ robot1: 'NONE', robot2: 'PARK' });
+    expect(readScenario({ allianceColor: 'RED', r1AutoMovement: 'FLY' as never }, R1, R2).autoMovement.robot1).toBe('LEAVE');
   });
 
   it('D. 시작 자세 / 개수: 한 축만 고치면 기본 스폰에서 시작, 기본값 = 지정 해제, 개수는 나머지 칸 유지', () => {
