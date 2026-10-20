@@ -6,10 +6,11 @@ import { describe, expect, it } from 'vitest';
 import { createIntakeZonePreset } from '../collision';
 import { fnv1a32, timelineCheckpoints } from '../checksum';
 import { ENGINE_VERSION, SimulationEngine } from '../simulationEngine';
+import { fixedRateShotJudge } from '../ballistics';
 import type { DriveInputProvider, RobotDriveInput } from '../simulationEngine';
 import type { RobotConfig } from '../types';
 
-const EXPECTED = { engineVersion: 2, final: '69611bab', all: 'e2652d87' };
+const EXPECTED = { engineVersion: 2, final: 'e8d49098', all: '3298c49d' };
 
 const cfg = (id: 'robot1' | 'robot2', over: Partial<RobotConfig> = {}): RobotConfig => ({
   id, name: id, width: 18, length: 18, maxSpeed: 60, maxTurnRate: 4, maxLinearAccel: 120, maxAngularAccel: 10,
@@ -34,7 +35,7 @@ describe('엔진 결과 버전 (10-3)', () => {
   it('A. 고정 입력 경기의 체크포인트 = 기대값 (다르면 ENGINE_VERSION 올림 + 기대값 갱신)', () => {
     const r1 = cfg('robot1');
     const r2 = cfg('robot2', { maxSpeed: 45, turretType: 'TURRET', turretRange: [-1.5, 1.5] });
-    const engine = new SimulationEngine(r1, r2, () => 0.6, 'RED', { allianceColor: 'RED', autoTipCount: 2, rngSeed: 20260930 });
+    const engine = new SimulationEngine(r1, r2, fixedRateShotJudge(0.8), 'RED', { allianceColor: 'RED', autoTipCount: 2, rngSeed: 20260930 });
     const provider: DriveInputProvider = tick => ({ r1: drive(tick, 0, r1), r2: drive(tick, 1, r2) });
     engine.inputProvider = provider;
     engine.runFullMatch();
@@ -45,6 +46,7 @@ describe('엔진 결과 버전 (10-3)', () => {
     const moved = last.pieces.filter((p, i) => p.x !== first.pieces[i].x || p.y !== first.pieces[i].y || p.state !== first.pieces[i].state).length;
     expect(moved).toBeGreaterThan(5);
     expect(Math.hypot(last.r1.x - first.r1.x, last.r1.y - first.r1.y)).toBeGreaterThan(1);
+    expect(last.field.hive.tipCount).toBe(3); // HIVE TIP 3회 (12-11: 명중률 0.8 고정 결과 판정)
     expect(sums).toHaveLength(121);
     expect({ engineVersion: ENGINE_VERSION, final: sums[120], all: fnv1a32(sums.join('')) }).toEqual(EXPECTED);
   }, 120_000);

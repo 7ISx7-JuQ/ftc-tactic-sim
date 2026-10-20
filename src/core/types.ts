@@ -41,7 +41,7 @@ export interface RobotConfig {
   intakeZones: BumperZone[];
 
   // HIVE 득점 (슈터) 런타임 제원
-  // 명중률은 로봇 제원이 아니라 탄도 LUT(ShotProbabilityResolver)가 결정 (명세서 2.6.2)
+  // 명중은 로봇 제원이 아니라 발사 판정(ShotJudge, 편차 궤적 1개)이 결정 (명세서 2.6.2)
   shooterSetup: ShooterSetup; // 슈터 구성 (기본 SHARED = v1)
   // 아래 3개 = 주 슈터: SHARED / POLLEN_ONLY = 유일한 슈터, PER_PIECE = POLLEN 슈터, NONE = 쓰지 않음 (값은 보관)
   shooterDelay: number;     // 한 발 발사 딜레이 (ms)
@@ -167,6 +167,10 @@ export interface ShooterBallistics {
   shooterOffset: number;    // 차체 중심 기준 발사구 앞뒤 오프셋 (inch, 발사 방향)
   shooterLateralOffset?: number; // 좌우 오프셋 (inch, + = 발사 방향 기준 오른쪽, 기본 0)
   v0?: number;              // 이 기물의 사출 속도 (generateRobotLUTs 결과)
+  // 발사 편차 (12-11 실제 궤적 명중 판정, 확률표 몬테카를로와 같은 값). 미지정 = 기본 편차값
+  v0NoisePercent?: number;
+  headingNoiseRad?: number;
+  pitchNoiseRad?: number;
 }
 export type RobotShooterBallistics = Record<GamePiece['type'], ShooterBallistics>;
 export type MatchShooterBallistics = Record<'robot1' | 'robot2', RobotShooterBallistics>;
@@ -213,8 +217,8 @@ export interface RobotState {
 // 틱별 행동 요청 (입력 계층 → 엔진, 명세서 3.6). FLOWER_READY / FLOWER_LOWERING은 엔진 상태이며 요청 값이 아님
 export type ActionRequest = 'IDLE' | 'INTAKING' | 'SHOOTING' | 'FLOWER_SETUP' | 'FLOWER_DROPPING';
 
-// 슈팅 판정 인터페이스: 0.0 ~ 1.0 명중 확률 반환 (엔진 생성자 필수 인자)
-// 실제 경기는 탄도 LUT 기반 구현(createLUTShotResolver, Step 6)을 주입하고, 테스트는 고정 확률 함수를 주입
+// 명중 확률 함수: 0.0 ~ 1.0 (좌측 패널 명중 확률 표시용, 탄도 LUT 기반 createLUTShotResolver).
+// 12-11부터 엔진 판정에는 쓰지 않는다 (아래 ShotJudge). 13-5에서 지금 자세의 기대 명중률로 바뀐다 (명세서 5.4)
 export type ShotProbabilityResolver = (
   robotId: 'robot1' | 'robot2',
   pieceType: GamePiece['type'], // 발사하는 기물 종류 (종류별 LUT 선택)
@@ -224,6 +228,52 @@ export type ShotProbabilityResolver = (
   alliance: 'RED' | 'BLUE',
   upwardCell: 'AUDIENCE_CELL' | 'OPPOSITE_CELL',
 ) => number;
+
+// 발사 궤적 1개 (공기 저항 없는 포물선): 발사구 + 수평 방향 + 사출 속도 + 발사각
+export interface ShotTrajectory {
+  x: number;      // 발사구 x (inch)
+  y: number;      // 발사구 y (inch)
+  z: number;      // 발사구 높이 (inch)
+  heading: number; // 수평 발사 방향 (rad, 필드 기준 atan2(dy, dx))
+  v0: number;     // 사출 속도 (inch/s, > 0)
+  pitch: number;  // 발사각 (rad, (-π/2, π/2))
+}
+
+// 발사 편차 (그 기물 슈터의 값): 속도 v0 · (1 + N(0, v0NoisePercent)), 방위 + N(0, headingNoiseRad), 발사각 + N(0, pitchNoiseRad)
+export interface ShotNoise {
+  v0NoisePercent: number;
+  headingNoiseRad: number;
+  pitchNoiseRad: number;
+}
+
+// 공 중심이 상향 셀 투입구 평면을 앞면에서 통과하는 순간 (발사 후 초, inch)
+export interface HiveCrossing {
+  t: number;
+  x: number;
+  y: number;
+  z: number;
+}
+
+// 발사 판정 입력 (엔진 → 판정 함수, 12-11 실제 궤적 명중 판정)
+export interface ShotJudgeInput {
+  robotId: 'robot1' | 'robot2';
+  pieceType: GamePiece['type'];
+  alliance: 'RED' | 'BLUE';
+  upwardCell: 'AUDIENCE_CELL' | 'OPPOSITE_CELL';
+  nominal: ShotTrajectory;   // 편차 없는 명목 궤적 (발사 방향 = 고정형 헤딩 / 터렛형 범위로 제한한 조준 방향)
+  noise: ShotNoise;          // 그 기물 슈터의 발사 편차
+  rolls: readonly number[];  // 엔진이 발사마다 뽑은 편차용 균등 난수 6개 [0, 1) (방위 2 → 속도 2 → 발사각 2)
+}
+
+// 발사 판정 결과: 실제 발사 궤적 + 명중 여부 (TIP 진행 중 발사는 엔진이 빗맞음으로 바꿈)
+export interface ShotJudgement {
+  trajectory: ShotTrajectory;
+  hit: boolean;
+  crossing: HiveCrossing | null; // 명중 도착점 = 투입구 통과점. null이면 조준점 도착 (고정 결과 테스트 판정)
+}
+
+// 발사 판정 함수 (엔진 생성자 필수 인자): 실제 경기 = judgeShotTrajectory(편차 궤적 1개), 테스트 = 고정 결과 판정(fixedRateShotJudge)
+export type ShotJudge = (input: ShotJudgeInput) => ShotJudgement;
 
 // 4. 구조물 상태
 export interface FlowerState {
@@ -262,7 +312,7 @@ export interface FlightSegment {
 }
 
 // 발사 비행 대기열 (명세서 2.6.2): 결과와 궤도는 발사 시점에 확정, 도착 틱에 반영
-// 명목 구간(발사구 → to) 뒤에 충돌 후 구간(segments)이 이어지고, 마지막 구간 끝이 착지점 (land)
+// 발사 구간(발사구 → to) 뒤에 충돌 후 구간(segments)이 이어지고, 마지막 구간 끝이 착지점 (land)
 export interface PendingShot {
   pieceId: string;
   pieceType: 'POLLEN' | 'NECTAR';
@@ -271,18 +321,18 @@ export interface PendingShot {
   result: 'HIT' | 'MISS_HIVE' | 'MISS_FLOOR';
   targetCell: 'AUDIENCE_CELL' | 'OPPOSITE_CELL'; // 발사 시점 상향 셀 (도착 시 바뀌었으면 명중 무효)
   launchTick: number;
-  arriveTick: number;       // HIT: 조준점 도착 틱 (유효성 판정) / 그 외: 최종 착지 틱. ≥ launchTick + 1
-  contactTime: number;      // 명목 구간 끝 (발사 후 초): 조준점 도착 / HIVE 첫 접촉 / 벽 접촉 / 바닥 착지
+  arriveTick: number;       // HIT: 투입구 통과점 도착 틱 (유효성 판정) / 그 외: 최종 착지 틱. ≥ launchTick + 1
+  contactTime: number;      // 발사 구간 끝 (발사 후 초): 통과점 도착 / HIVE 첫 접촉 / 벽 접촉 / 바닥 착지
   fromX: number;            // 발사구 (inch)
   fromY: number;
   fromZ: number;
-  toX: number;              // 명목 구간 끝 지점: 명중 = 조준점, HIVE 충돌 = 첫 접촉점, 벽 = 벽 접촉점, 바닥 = 착지점
+  toX: number;              // 발사 구간 끝 지점: 명중 = 투입구 통과점(고정 결과 판정은 조준점), HIVE 충돌 = 첫 접촉점, 벽 = 벽 접촉점, 바닥 = 착지점
   toY: number;
   toZ: number;
-  heading: number;          // 명목 궤적 수평 방향 (rad)
-  v0: number;               // 명목 사출 속도 (inch/s) — 렌더러 높이 연출용
-  pitch: number;            // 명목 발사각 (rad)
-  segments: FlightSegment[]; // 충돌 후 구간 (시간순, 빈 배열 = 명목 구간 끝이 착지점 또는 명중)
+  heading: number;          // 발사 궤적 수평 방향 (rad, 12-11부터 판정한 편차 궤적)
+  v0: number;               // 발사 궤적 사출 속도 (inch/s) — 렌더러 높이 연출용
+  pitch: number;            // 발사 궤적 발사각 (rad)
+  segments: FlightSegment[]; // 충돌 후 구간 (시간순, 빈 배열 = 발사 구간 끝이 착지점 또는 명중)
   landX: number;            // 최종 착지점 (공 중심 바닥 투영)
   landY: number;
   landingVx: number;        // 착지 직후 속도 (inch/s, 수평 속도 × landingSpeedRetention, 벽 반사 상한 초과 정지 시 0)

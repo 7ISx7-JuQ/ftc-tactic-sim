@@ -30,13 +30,18 @@ import type {
   HeatmapLUT,
   HeatmapLUTSet,
   HiveCellKey,
+  HiveCrossing,
   MatchHeatmapLUTs,
   RobotConfig,
   RobotHeatmapLUTs,
   RobotShooterBallistics,
   ShooterAimConfig,
   ShooterBallistics,
+  ShotJudge,
+  ShotJudgement,
+  ShotNoise,
   ShotProbabilityResolver,
+  ShotTrajectory,
 } from './types';
 
 // 부동소수점 오차 허용 범위
@@ -53,14 +58,7 @@ export interface Vector3D {
 }
 
 /** 명목 발사 궤적: 발사구 위치 + 수평 방향 + 사출 속도 / 발사각 */
-export interface Trajectory {
-  x: number;      // 발사구 x (inch)
-  y: number;      // 발사구 y (inch)
-  z: number;      // 발사구 높이 (inch)
-  heading: number; // 수평 발사 방향 (rad, 필드 기준 atan2(dy, dx))
-  v0: number;     // 사출 속도 (inch/s, > 0)
-  pitch: number;  // 발사각 (rad, (-π/2, π/2))
-}
+export type Trajectory = ShotTrajectory;
 
 /** 궤적 위의 한 지점 (지면 직선 거리 기준) */
 export interface TrajectoryPoint extends Vector3D {
@@ -324,7 +322,20 @@ export function isShotInHiveCell(
   cell: HiveCell,
   pieceRadius: number,
 ): boolean {
-  if (!isValidLaunch(traj.v0, traj.pitch)) return false;
+  return hiveCellCrossing(traj, alliance, cell, pieceRadius) !== null;
+}
+
+/**
+ * 명중 궤적의 투입구 평면 통과점 (isShotInHiveCell ① ~ ④를 모두 만족할 때만, 아니면 null).
+ * 12-11 실제 궤적 명중 판정의 명중 도착점 = 이 점 (공 중심, 통과 시각 t = 발사 후 초)
+ */
+export function hiveCellCrossing(
+  traj: Trajectory,
+  alliance: 'RED' | 'BLUE',
+  cell: HiveCell,
+  pieceRadius: number,
+): HiveCrossing | null {
+  if (!isValidLaunch(traj.v0, traj.pitch)) return null;
   const r = Math.max(0, pieceRadius);
   const inward = cell === 'OPPOSITE_CELL' ? 1 : -1; // 림에서 HIVE 중심 방향 (y)
   const sinT = Math.sin(HIVE_CELL_TILT);
@@ -343,21 +354,23 @@ export function isShotInHiveCell(
   const b = ny * vy + nz * vz;
   const c = ny * (traj.y - rimY) + nz * (traj.z - HIVE_RIM_Z);
   const disc = b * b - 4 * a * c;
-  if (disc < 0) return false;
+  if (disc < 0) return null;
   const t = (-b - Math.sqrt(disc)) / (2 * a);
-  if (!(t > 0)) return false;
+  if (!(t > 0)) return null;
 
   // ② 통과점의 투입구 표면 좌표: s = 림 기준 표면 거리, u = 셀 중심선 기준 좌우
   const zCross = traj.z + vz * t - 0.5 * GRAVITY * t * t;
   const s = (zCross - HIVE_RIM_Z) / sinT;
-  const u = traj.x + vx * t - HIVE_CENTER_X[alliance];
-  if (!isInsideInsetOpening(u, s, r)) return false;
+  const xCross = traj.x + vx * t;
+  const u = xCross - HIVE_CENTER_X[alliance];
+  if (!isInsideInsetOpening(u, s, r)) return null;
 
   // ③ 림 아래 벽 여유
-  if (!clearsRimWall(traj, vy, vz, t, cell, r)) return false;
+  if (!clearsRimWall(traj, vy, vz, t, cell, r)) return null;
 
   // ④ HIVE 직육면체 진입 면
-  return entersThroughCellWindow(traj, vx, vy, vz, t, alliance, cell, r);
+  if (!entersThroughCellWindow(traj, vx, vy, vz, t, alliance, cell, r)) return null;
+  return { t, x: xCross, y: traj.y + vy * t, z: zCross };
 }
 
 const GOLDEN_ITERATIONS = 60;
@@ -553,23 +566,38 @@ export function estimateHitRate(
   if (aimHeading === null) return 0;
   const origin = launchPoint(robotX, robotY, aimHeading, config);
   const radius = PIECE_PHYSICS[pieceType].radius;
-  const v0Noise = config.v0NoisePercent ?? DEFAULT_V0_NOISE_PERCENT;
-  const headingNoise = config.headingNoiseRad ?? DEFAULT_HEADING_NOISE_RAD;
-  const pitchNoise = config.pitchNoiseRad ?? DEFAULT_PITCH_NOISE_RAD;
+  const nominal: Trajectory = { x: origin.x, y: origin.y, z: origin.z, heading: aimHeading, v0, pitch: config.shooterPitch };
+  const noise = shotNoiseOf(config);
 
   let hits = 0;
   for (let i = 0; i < n; i++) {
-    const traj: Trajectory = {
-      x: origin.x,
-      y: origin.y,
-      z: origin.z,
-      heading: aimHeading + sampleNormal(0, headingNoise, rng),
-      v0: v0 * (1 + sampleNormal(0, v0Noise, rng)),
-      pitch: config.shooterPitch + sampleNormal(0, pitchNoise, rng),
-    };
-    if (isShotInHiveCell(traj, alliance, cell, radius)) hits++;
+    if (isShotInHiveCell(perturbTrajectory(nominal, noise, rng), alliance, cell, radius)) hits++;
   }
   return hits / n;
+}
+
+/**
+ * 편차 궤적 1개 (확률표 몬테카를로 샘플 1개 = 경기 중 발사 1회, 12-11): 발사구는 그대로, 공의 방향에만 편차.
+ * 난수 순서 = 방위 → 속도 → 발사각, 각 정규분포 = 균등 난수 2개 (Box-Muller, 합 RNG_DRAWS_PER_SAMPLE = 6)
+ */
+export function perturbTrajectory(nominal: Trajectory, noise: ShotNoise, rng: () => number): Trajectory {
+  return {
+    x: nominal.x,
+    y: nominal.y,
+    z: nominal.z,
+    heading: nominal.heading + sampleNormal(0, noise.headingNoiseRad, rng),
+    v0: nominal.v0 * (1 + sampleNormal(0, noise.v0NoisePercent, rng)),
+    pitch: nominal.pitch + sampleNormal(0, noise.pitchNoiseRad, rng),
+  };
+}
+
+/** 슈터 탄도의 발사 편차 (없는 값 = 기본 편차값, 확률표 몬테카를로와 같은 기본값) */
+export function shotNoiseOf(b: Partial<ShotNoise>): ShotNoise {
+  return {
+    v0NoisePercent: b.v0NoisePercent ?? DEFAULT_V0_NOISE_PERCENT,
+    headingNoiseRad: b.headingNoiseRad ?? DEFAULT_HEADING_NOISE_RAD,
+    pitchNoiseRad: b.pitchNoiseRad ?? DEFAULT_PITCH_NOISE_RAD,
+  };
 }
 
 // ============================================================
@@ -1154,7 +1182,7 @@ export function createLUTShotResolver(
 export const DEFAULT_SHOOTER_BALLISTICS: ShooterBallistics = { dz: HIVE_RIM_Z - 14, shooterPitch: Math.PI / 3, shooterOffset: 0 };
 
 /**
- * generateRobotLUTs 입력 + 결과 → 엔진 슈터 탄도 (기물별, 탐색한 v0 포함). 발사 불가 기물(설정 없음)은 다른 기물의 슈터 값
+ * generateRobotLUTs 입력 + 결과 → 엔진 슈터 탄도 (기물별, 탐색한 v0 + 발사 편차 포함 — 12-11 실제 궤적 판정). 발사 불가 기물(설정 없음)은 다른 기물의 슈터 값
  * (엔진이 쏘지 않으므로 쓰이지 않음, 둘 다 없으면 엔진 기본 슈터)
  */
 export function shooterBallisticsFrom(configs: BallisticsConfig | RobotLUTShooters, result: RobotBallisticsResult): RobotShooterBallistics {
@@ -1168,6 +1196,7 @@ export function shooterBallisticsFrom(configs: BallisticsConfig | RobotLUTShoote
       shooterPitch: config.shooterPitch,
       shooterOffset: config.shooterOffset,
       shooterLateralOffset: config.shooterLateralOffset ?? 0,
+      ...shotNoiseOf(config),
       ...(v !== null && shooters[type] ? { v0: v } : {}),
     };
   }
@@ -1198,19 +1227,20 @@ export function shotLaunchHeading(
 export interface ShotFlightPlan {
   result: 'HIT' | 'MISS_HIVE' | 'MISS_FLOOR';
   from: Vector3D;         // 발사구
-  to: Vector3D;           // 명목 구간 끝: 명중 = 조준점, HIVE 충돌 = 첫 접촉점, 벽 = 벽 접촉점, 바닥 = 착지점
-  contactTime: number;    // 명목 구간 끝 시각 (초)
+  to: Vector3D;           // 발사 구간 끝: 명중 = 투입구 통과점(통과점이 없는 고정 결과 판정은 조준점), HIVE 충돌 = 첫 접촉점, 벽 = 벽 접촉점, 바닥 = 착지점
+  contactTime: number;    // 발사 구간 끝 시각 (초)
   flightTime: number;     // 도착 시각 (초): 명중 = contactTime, 그 외 = 최종 착지
-  heading: number;        // 명목 궤적
+  heading: number;        // 발사 궤적 (판정 함수가 정한 실제 궤적, 없으면 명목 궤적)
   v0: number;
   pitch: number;
   segments: FlightSegment[]; // 충돌 후 구간 (명중 / 바로 바닥 착지는 빈 배열)
-  landing: { x: number; y: number }; // 최종 착지점 (명중은 조준점 — 도착 시 무효면 엔진이 planVoidedHitBounce로 교체)
+  landing: { x: number; y: number }; // 최종 착지점 (명중은 도착점 — 도착 시 무효면 엔진이 planVoidedHitBounce로 교체)
   landingVx: number;      // 착지 직후 속도 (수평 속도 × landingSpeedRetention, 명중 / 벽 반사 상한 초과 정지 0)
   landingVy: number;
 }
 
-export interface ShotFlightInput {
+/** 명목 궤적을 정하는 발사 정보 (로봇 자세 + 그 기물을 쏘는 슈터 + 탄도 + 상향 셀) */
+export interface NominalShotInput {
   robotX: number;
   robotY: number;
   robotHeading: number;
@@ -1219,22 +1249,23 @@ export interface ShotFlightInput {
   pieceType: PieceType;
   alliance: 'RED' | 'BLUE';
   upwardCell: HiveCell;
-  hit: boolean;           // 판정 함수 + 난수로 발사 시점에 확정된 명중 여부
+}
+
+export interface ShotFlightInput extends NominalShotInput {
+  hit: boolean;           // 발사 시점에 확정된 명중 여부 (판정 함수 결과, TIP 진행 중이면 빗맞음)
+  trajectory?: Trajectory; // 판정 함수가 정한 실제 발사 궤적 (12-11, 미지정 = 명목 궤적)
+  crossing?: HiveCrossing | null; // 명중 도착점 = 투입구 통과점 (미지정 / null = 조준점)
   bounceRolls?: BounceRolls; // 반사 산포 난수 (발사 시점 소비, 미지정 = 산포 없음)
 }
 
 /**
- * 발사 1회의 비행 계획 (편차 없는 명목 포물선 + 충돌 후 구간, 닫힌 해, 발사 1회당 상수 시간)
- * - 명중: 궤적과 무관하게 조준점 도착, 비행 시간 = 발사구 → 조준점 수평 거리 / (v0·cosθ)
- * - 빗맞음 + HIVE 직육면체 충돌 (intersectHiveBox, 반지름 확장): 첫 접촉점에서 반사 포물선 (planHiveBounce) → 바닥 착지
- * - 빗맞음 + HIVE를 넘어가거나 닿지 않음: 공 중심 높이 = 반지름인 사거리 지점 착지, 착지 속도 = 발사 방향 v0·cosθ × landingSpeedRetention.
- *   지면 직선이 착지 전에 필드 벽(반지름 여유)에 닿으면 벽 접촉점에서 반사해 바닥까지 낙하 (12-9, fallToFloor)
+ * 발사 1회의 명목 궤적 (편차 없음, 12-11 판정과 비행 계획이 같은 값을 씀)
+ * - 발사 방향 = shotLaunchHeading (고정형 = 로봇 헤딩, 터렛형 = 좌우 오프셋으로 보정한 조준 방향 ψ, 범위 밖이면 한계각,
+ *   조준 불가 자리면 조준점 방위), 발사구 = launchPoint (앞뒤 / 좌우 오프셋), 발사각이 (0, π/2) 밖이면 기본값
  * - v0: 탄도 설정의 값(그 기물 슈터의 탐색 v0) → 없으면 조준점 닫힌 해 → 그것도 없으면 평지 사거리 = 조준점 거리인 속도
- * - 좌우 오프셋 (12-3): 사출구 = 발사 방향 기준 오른쪽으로 shooterLateralOffset. 터렛형은 보정한 조준 방향 ψ(shooterAimHeading)로 돌린다
- *   (조준 불가 자리면 조준점 방위). 0이면 v1과 같은 계산
  */
-export function planShotFlight(input: ShotFlightInput): ShotFlightPlan {
-  const { robotX, robotY, ballistics, pieceType } = input;
+export function nominalShot(input: NominalShotInput): { trajectory: Trajectory; aim: Vector3D; aimDistance: number } {
+  const { robotX, robotY, ballistics } = input;
   const aim = hiveCellAimPoint(input.alliance, input.upwardCell);
   const lateral = Number.isFinite(ballistics.shooterLateralOffset) ? (ballistics.shooterLateralOffset as number) : 0;
   const aimHeading = shooterAimHeading(robotX, robotY, aim, lateral) ?? bearingTo(robotX, robotY, aim.x, aim.y);
@@ -1257,7 +1288,49 @@ export function planShotFlight(input: ShotFlightInput): ShotFlightPlan {
     given !== undefined && Number.isFinite(given) && given > 0
       ? given
       : (solveAimLaunchSpeed(robotX, robotY, aim, cfg) ?? Math.sqrt((GRAVITY * aimDistance) / Math.sin(2 * pitch)));
-  const traj: Trajectory = { ...origin, heading, v0, pitch };
+  return { trajectory: { ...origin, heading, v0, pitch }, aim, aimDistance };
+}
+
+/**
+ * 실제 궤적 명중 판정 (12-11, 경기 판정 함수): 명목 궤적에 엔진이 넘긴 균등 난수 6개로 편차를 한 번 주고(perturbTrajectory —
+ * 확률표 몬테카를로 샘플 1개와 같은 모델 / 순서), 그 궤적이 투입구 판정(isShotInHiveCell ① ~ ④)을 만족하면 명중.
+ * 고정형 / 터렛형 같은 규칙 (터렛 범위 밖 발사도 궤적이 들어가면 명중)
+ */
+export const judgeShotTrajectory: ShotJudge = (input) => {
+  let i = 0;
+  const trajectory = perturbTrajectory(input.nominal, input.noise, () => input.rolls[i++] ?? 0);
+  const crossing = hiveCellCrossing(trajectory, input.alliance, input.upwardCell, PIECE_PHYSICS[input.pieceType].radius);
+  return { trajectory, hit: crossing !== null, crossing };
+};
+
+/**
+ * 고정 결과 판정 함수 (테스트용): 편차 없는 명목 궤적으로 쏘고, 명중 = 엔진이 넘긴 첫 균등 난수 < p
+ * (p = 1 항상 명중, 0 항상 빗맞음, 함수면 발사마다 확률). 명중은 조준점에 도착한다 (통과점 없음)
+ */
+export function fixedRateShotJudge(p: number | ((input: Parameters<ShotJudge>[0]) => number)): ShotJudge {
+  return (input): ShotJudgement => {
+    const rate = typeof p === 'function' ? p(input) : p;
+    return { trajectory: { ...input.nominal }, hit: (input.rolls[0] ?? 0) < rate, crossing: null };
+  };
+}
+
+/**
+ * 발사 1회의 비행 계획 (판정 함수가 정한 발사 궤적 + 충돌 후 구간, 닫힌 해, 발사 1회당 상수 시간)
+ * - 발사 궤적: input.trajectory (12-11 실제 궤적 판정의 편차 궤적), 없으면 명목 궤적 (nominalShot)
+ * - 명중: 투입구 통과점(crossing)에 도착 (12-11). 통과점이 없으면(고정 결과 판정) 조준점 도착, 비행 시간 = 발사구 → 조준점 수평 거리 / (v0·cosθ)
+ * - 빗맞음 + HIVE 직육면체 충돌 (intersectHiveBox, 반지름 확장): 첫 접촉점에서 반사 포물선 (planHiveBounce) → 바닥 착지
+ * - 빗맞음 + HIVE를 넘어가거나 닿지 않음: 공 중심 높이 = 반지름인 사거리 지점 착지, 착지 속도 = 발사 방향 v0·cosθ × landingSpeedRetention.
+ *   지면 직선이 착지 전에 필드 벽(반지름 여유)에 닿으면 벽 접촉점에서 반사해 바닥까지 낙하 (12-9, fallToFloor)
+ * - 명목 궤적의 발사 방향 / 발사구 / v0 규칙은 nominalShot (좌우 오프셋 12-3 포함)
+ */
+export function planShotFlight(input: ShotFlightInput): ShotFlightPlan {
+  const { pieceType } = input;
+  const nominal = nominalShot(input);
+  const traj: Trajectory = input.trajectory ? { ...input.trajectory } : nominal.trajectory;
+  const { heading, v0, pitch } = traj;
+  const origin = { x: traj.x, y: traj.y, z: traj.z };
+  const { aim } = nominal;
+  const aimDistance = Math.max(EPSILON, Math.hypot(aim.x - origin.x, aim.y - origin.y));
   const radius = PIECE_PHYSICS[pieceType].radius;
   const rolls = input.bounceRolls ?? NEUTRAL_BOUNCE_ROLLS;
   const cos = Math.cos(heading);
@@ -1267,15 +1340,17 @@ export function planShotFlight(input: ShotFlightInput): ShotFlightPlan {
   const base = { from: { ...origin }, heading, v0, pitch };
 
   if (input.hit) {
-    const t = timeAtDistance(traj, aimDistance);
+    const crossing = input.crossing;
+    const to = crossing ? { x: crossing.x, y: crossing.y, z: crossing.z } : { ...aim };
+    const t = crossing ? crossing.t : timeAtDistance(traj, aimDistance);
     return {
       ...base,
       result: 'HIT',
-      to: { ...aim },
+      to,
       contactTime: t,
       flightTime: t,
       segments: [],
-      landing: { x: aim.x, y: aim.y },
+      landing: { x: to.x, y: to.y },
       landingVx: 0,
       landingVy: 0,
     };
@@ -1680,19 +1755,19 @@ export function planHiveBounce(
 
 export interface VoidedHitInput {
   from: { x: number; y: number }; // 발사구
-  aim: Vector3D;                  // 조준점 (명중 도착 지점)
+  aim: Vector3D;                  // 명중 도착 지점 (투입구 통과점, 통과점이 없는 고정 결과 판정은 조준점)
   v0: number;
   pitch: number;
-  contactTime: number;            // 조준점 도착 시각 (발사 후 초)
+  contactTime: number;            // 도착 시각 (발사 후 초)
   targetCell: HiveCell;           // 발사 시점 상향 셀 (반사 면 = 그 셀 쪽 HIVE 앞면)
   pieceType: PieceType;
   rolls?: BounceRolls;
 }
 
 /**
- * 무효 명중 (도착 시점에 HIVE 전복 중이거나 상향 셀이 바뀜): 조준점에서 그 셀 쪽 HIVE 앞면의 수평 바깥 법선
- * (AUDIENCE +y / OPPOSITE −y)으로 옆면과 같은 규칙으로 반사 후 바닥까지 낙하.
- * 도착 속도 = 발사구 → 조준점 수평 방향 × v0·cosθ, 수직 v0·sinθ − g·t (렌더러 명목 구간과 같은 방향)
+ * 무효 명중 (도착 시점에 HIVE 전복 중이거나 상향 셀이 바뀜): 명중 도착점(투입구 통과점, 12-11)에서 그 셀 쪽 HIVE 앞면의
+ * 수평 바깥 법선 (AUDIENCE +y / OPPOSITE −y)으로 옆면과 같은 규칙으로 반사 후 바닥까지 낙하.
+ * 도착 속도 = 발사구 → 도착점 수평 방향(= 발사 궤적의 수평 방향) × v0·cosθ, 수직 v0·sinθ − g·t (렌더러 발사 구간과 같은 방향)
  */
 export function planVoidedHitBounce(input: VoidedHitInput): PostContactFlight {
   const { from, aim, v0, pitch, contactTime, pieceType } = input;

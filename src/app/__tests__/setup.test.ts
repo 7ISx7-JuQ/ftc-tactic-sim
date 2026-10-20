@@ -1,6 +1,7 @@
-// 적용 값 → 경기 설정 (09-9b): 로봇 프로필의 슈터 탄도가 엔진 비행 처리에 전달되는지. 09-10a: LUT 결과 → 판정 함수 / 사출 속도
+// 적용 값 → 경기 설정 (09-9b): 로봇 프로필의 슈터 탄도가 엔진 비행 처리에 전달되는지. 09-10a: LUT 결과 → 표시용 확률 / 사출 속도.
+// 12-11: 엔진 판정 = 실제 궤적 판정 (슈터 탄도에 발사 편차 포함)
 import { describe, expect, it } from 'vitest';
-import { LUT_GRID_SIZE, bearingTo, mirrorLUTSet } from '../../core/ballistics';
+import { DEFAULT_HEADING_NOISE_RAD, DEFAULT_PITCH_NOISE_RAD, DEFAULT_V0_NOISE_PERCENT, LUT_GRID_SIZE, bearingTo, judgeShotTrajectory, mirrorLUTSet } from '../../core/ballistics';
 import type { RobotBallisticsResult } from '../../core/ballistics';
 import { HIVE_RIM_Z, hiveCellAimPoint } from '../../core/collision';
 import { SimulationEngine } from '../../core/simulationEngine';
@@ -12,7 +13,7 @@ const launchZ = (dz: number, pitch = Math.PI / 3, luts: Record<'robot1' | 'robot
     robot2: { ...DEFAULT_DRAFT_VALUES.robot2, ballistics: { ...DEFAULT_DRAFT_VALUES.robot2.ballistics, dz, shooterPitch: pitch } },
   };
   const setup = setupFromDrafts(values, luts);
-  const engine = new SimulationEngine(setup.r1Config, setup.r2Config, setup.shotResolver, 'RED', setup.scenario, setup.shooters);
+  const engine = new SimulationEngine(setup.r1Config, setup.r2Config, setup.shotJudge, 'RED', setup.scenario, setup.shooters);
   for (let i = 0; i < 40 && engine.field.pendingShots.length === 0; i++) {
     engine.step(undefined, { targetVx: 0, targetVy: 0, targetOmega: 0, actionState: 'SHOOTING' });
   }
@@ -23,9 +24,11 @@ const launchZ = (dz: number, pitch = Math.PI / 3, luts: Record<'robot1' | 'robot
 describe('경기 설정 (09-9b)', () => {
   it('A. 프로필 탄도 → 엔진 shooters (발사구 높이 / 발사각 / 오프셋), 적용한 발사구 높이에서 발사', () => {
     const { setup } = launchZ(HIVE_RIM_Z - 20, 0.9);
-    // 12-3: 기물별 (SHARED = 두 기물이 주 슈터 값), 좌우 오프셋 포함
-    const r2 = { dz: HIVE_RIM_Z - 20, shooterPitch: 0.9, shooterOffset: 0, shooterLateralOffset: 0 };
-    const r1 = { dz: HIVE_RIM_Z - 14, shooterPitch: Math.PI / 3, shooterOffset: 0, shooterLateralOffset: 0 };
+    // 12-3: 기물별 (SHARED = 두 기물이 주 슈터 값), 좌우 오프셋 포함. 12-11: 발사 편차 포함 (기본 프로필 = 기본 편차값)
+    const noise = { v0NoisePercent: DEFAULT_V0_NOISE_PERCENT, headingNoiseRad: DEFAULT_HEADING_NOISE_RAD, pitchNoiseRad: DEFAULT_PITCH_NOISE_RAD };
+    const r2 = { dz: HIVE_RIM_Z - 20, shooterPitch: 0.9, shooterOffset: 0, shooterLateralOffset: 0, ...noise };
+    const r1 = { dz: HIVE_RIM_Z - 14, shooterPitch: Math.PI / 3, shooterOffset: 0, shooterLateralOffset: 0, ...noise };
+    expect(setup.shotJudge).toBe(judgeShotTrajectory);
     expect(setup.shooters?.robot2).toEqual({ POLLEN: r2, NECTAR: r2 });
     expect(setup.shooters?.robot1).toEqual({ POLLEN: r1, NECTAR: r1 });
     const low = launchZ(HIVE_RIM_Z - 10).shot;
@@ -35,7 +38,7 @@ describe('경기 설정 (09-9b)', () => {
     expect(high!.fromZ).toBeCloseTo(30, 9);
   });
 
-  it('B. (09-10a) LUT 결과가 있으면 LUT 판정 함수 + 기물별 사출 속도, 없으면 간이 판정', () => {
+  it('B. (09-10a) LUT 결과가 있으면 표시용 LUT 확률 + 기물별 사출 속도, 없으면 간이 확률 (12-11: 엔진 판정은 실제 궤적 판정)', () => {
     // 모든 격자가 일정한 가짜 LUT (로봇마다 다른 값)
     const fake = (p: number, v0: { POLLEN: number | null; NECTAR: number | null }): RobotBallisticsResult => {
       const make = (v: number) => mirrorLUTSet(new Float32Array(LUT_GRID_SIZE * LUT_GRID_SIZE).fill(v));
@@ -51,9 +54,11 @@ describe('경기 설정 (09-9b)', () => {
     expect(setup.shotResolver('robot2', 'POLLEN', 60, 130, facing, 'RED', 'AUDIENCE_CELL')).toBeCloseTo(0.75, 6);
     expect(setup.shotResolver('robot1', 'NECTAR', 60, 130, facing, 'RED', 'AUDIENCE_CELL')).toBeCloseTo(0.1875, 6);
     expect(setup.shotResolver('robot1', 'POLLEN', 60, 130, facing + 0.5, 'RED', 'AUDIENCE_CELL')).toBe(0); // 조준 범위 밖 (고정형 ±3°)
-    // 엔진이 LUT 사출 속도로 발사 (R2 = 발사한 로봇)
+    // 엔진이 LUT 사출 속도로 발사 (R2 = 발사한 로봇, 실제 궤적 = 사출 속도 × (1 + 편차 N(0, 2%)))
     expect(shot?.pieceType).toBe('POLLEN');
-    expect(shot!.v0).toBe(230);
+    expect(shot!.v0).not.toBe(230);
+    expect(Math.abs(shot!.v0 / 230 - 1)).toBeLessThan(0.1);
+    expect(setup.shotJudge).toBe(judgeShotTrajectory);
     // LUT가 없으면 간이 판정 (조준되면 0.6)
     const simple = setupFromDrafts(DEFAULT_DRAFT_VALUES);
     expect(simple.shotResolver('robot1', 'POLLEN', 60, 130, facing, 'RED', 'AUDIENCE_CELL')).toBe(SIMPLE_HIT_PROBABILITY);
@@ -72,8 +77,12 @@ describe('경기 설정 (09-9b)', () => {
       },
     };
     const setup = setupFromDrafts(values);
-    expect(setup.shooters?.robot1.POLLEN).toEqual({ dz: d.ballistics.dz, shooterPitch: d.ballistics.shooterPitch, shooterOffset: 0, shooterLateralOffset: 3 });
-    expect(setup.shooters?.robot1.NECTAR).toEqual({ dz: HIVE_RIM_Z - 24, shooterPitch: nectarCard.shooterPitch, shooterOffset: 0, shooterLateralOffset: -2 });
+    const noiseOf = (b: typeof nectarCard) => ({ v0NoisePercent: b.v0NoisePercent, headingNoiseRad: b.headingNoiseRad, pitchNoiseRad: b.pitchNoiseRad });
+    expect(setup.shooters?.robot1.POLLEN).toEqual({ dz: d.ballistics.dz, shooterPitch: d.ballistics.shooterPitch, shooterOffset: 0, shooterLateralOffset: 3, ...noiseOf(d.ballistics) });
+    expect(setup.shooters?.robot1.NECTAR).toEqual({ dz: HIVE_RIM_Z - 24, shooterPitch: nectarCard.shooterPitch, shooterOffset: 0, shooterLateralOffset: -2, ...noiseOf(nectarCard) });
+    // 발사 편차도 그 기물 슈터의 값 (NECTAR 카드 편차를 바꾸면 NECTAR만)
+    const noisy = setupFromDrafts({ ...values, robot1: { ...values.robot1, ballistics: { ...values.robot1.ballistics, nectarShooter: { ...nectarCard, headingNoiseRad: 0.05 } } } });
+    expect([noisy.shooters?.robot1.NECTAR.headingNoiseRad, noisy.shooters?.robot1.POLLEN.headingNoiseRad]).toEqual([0.05, d.ballistics.headingNoiseRad]);
     // SHARED면 NECTAR 카드를 쓰지 않음
     const shared = setupFromDrafts({ ...values, robot1: { ...values.robot1, config: { ...values.robot1.config, shooterSetup: 'SHARED' } } });
     expect(shared.shooters?.robot1.NECTAR).toEqual(shared.shooters?.robot1.POLLEN);
@@ -84,7 +93,7 @@ describe('경기 설정 (09-9b)', () => {
     const none = setupFromDrafts({ ...values, robot1: { ...values.robot1, config: { ...values.robot1.config, shooterSetup: 'NONE' } } });
     expect(none.shotResolver('robot1', 'NECTAR', 60, 130, off, 'RED', 'AUDIENCE_CELL')).toBe(0);
     // 엔진: R1이 NECTAR를 NECTAR 슈터 높이에서 발사
-    const engine = new SimulationEngine(setup.r1Config, setup.r2Config, setup.shotResolver, 'RED', { allianceColor: 'RED', r1Loadout: ['NECTAR'], gardenPiecesCount: { ally: 7, opponent: 4 } }, setup.shooters);
+    const engine = new SimulationEngine(setup.r1Config, setup.r2Config, setup.shotJudge, 'RED', { allianceColor: 'RED', r1Loadout: ['NECTAR'], gardenPiecesCount: { ally: 7, opponent: 4 } }, setup.shooters);
     for (let i = 0; i < 40 && engine.field.pendingShots.length === 0; i++) engine.step({ targetVx: 0, targetVy: 0, targetOmega: 0, actionState: 'SHOOTING' });
     const shot = engine.field.pendingShots[0];
     expect(shot?.pieceType).toBe('NECTAR');

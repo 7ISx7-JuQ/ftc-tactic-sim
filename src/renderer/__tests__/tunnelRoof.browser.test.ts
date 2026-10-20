@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { HIVE_TUNNEL, createIntakeZonePreset } from '../../core/collision';
 import { SimulationEngine } from '../../core/simulationEngine';
+import { fixedRateShotJudge } from '../../core/ballistics';
 import type { RobotConfig, RobotPose } from '../../core/types';
 import { renderEditScene } from '../editSceneRenderer';
 import { renderScene } from '../sceneRenderer';
@@ -38,7 +39,7 @@ function canvas(): CanvasRenderingContext2D {
 }
 
 function matchPixel(r1Spawn: RobotPose): number[] {
-  const engine = new SimulationEngine(C1, C2, () => 0.5, 'RED', { allianceColor: 'RED', r1Spawn });
+  const engine = new SimulationEngine(C1, C2, fixedRateShotJudge(0.5), 'RED', { allianceColor: 'RED', r1Spawn });
   const ctx = canvas();
   renderScene(ctx, { frame: engine.getFrame(0)!, r1Config: C1, r2Config: C2, view: VIEW }, 1);
   return pixel(ctx, PROBE);

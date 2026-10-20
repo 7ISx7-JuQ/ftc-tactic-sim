@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bearingTo, DEFAULT_SHOOTER_BALLISTICS, heightAtDistance, solveAimLaunchSpeed } from '../../core/ballistics';
+import { bearingTo, DEFAULT_SHOOTER_BALLISTICS, heightAtDistance, solveAimLaunchSpeed, fixedRateShotJudge } from '../../core/ballistics';
 import { PIECE_PHYSICS, createIntakeZonePreset, hiveCellAimPoint } from '../../core/collision';
 import { DT, SimulationEngine } from '../../core/simulationEngine';
 import type { RobotDriveInput } from '../../core/simulationEngine';
@@ -25,7 +25,7 @@ const facingAim = (x: number, y: number): RobotPose => ({ x, y, heading: bearing
 
 // 엔진이 실제로 기록한 비행 1발 (R1이 15틱 발사)
 function recordedShot(p: number, spawn: RobotPose, shooters?: MatchShooterBallistics): DeepReadonly<PendingShot> {
-  const e = new SimulationEngine(cfg('robot1'), cfg('robot2'), () => p, 'RED', { allianceColor: 'RED', r1Spawn: spawn, r1Loadout: ['POLLEN'] }, shooters);
+  const e = new SimulationEngine(cfg('robot1'), cfg('robot2'), fixedRateShotJudge(p), 'RED', { allianceColor: 'RED', r1Spawn: spawn, r1Loadout: ['POLLEN'] }, shooters);
   for (let i = 0; i < 15; i++) e.step(SHOOT);
   return e.getFrame(15)!.field.pendingShots[0];
 }

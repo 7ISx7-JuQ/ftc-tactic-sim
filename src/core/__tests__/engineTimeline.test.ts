@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { createIntakeZonePreset } from '../collision';
 import { SimulationEngine } from '../simulationEngine';
+import { fixedRateShotJudge } from '../ballistics';
 import type { RobotDriveInput } from '../simulationEngine';
 import type { RobotConfig } from '../types';
 
@@ -19,7 +20,7 @@ const drive = (t: number, phase: number): RobotDriveInput => ({
   targetOmega: 1.5 * Math.sin(t / 37 + phase),
   actionState: (t + phase * 97) % 400 < 150 ? 'INTAKING' : (t + phase * 97) % 400 < 190 ? 'SHOOTING' : 'IDLE',
 });
-const eng = () => new SimulationEngine(cfg('robot1'), cfg('robot2'), () => 0.6, 'RED', { allianceColor: 'RED', rngSeed: 7 });
+const eng = () => new SimulationEngine(cfg('robot1'), cfg('robot2'), fixedRateShotJudge(0.6), 'RED', { allianceColor: 'RED', rngSeed: 7 });
 const run = (e: SimulationEngine, until: number, phase = 0) => {
   while (e.currentTick < until) e.step(drive(e.currentTick, phase), drive(e.currentTick, phase + 1));
 };

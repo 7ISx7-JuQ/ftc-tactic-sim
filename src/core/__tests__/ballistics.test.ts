@@ -39,6 +39,12 @@ import {
   HIVE_TOP_MAX_BOUNCES,
   FIELD_WALL_MAX_BOUNCES,
   RNG_DRAWS_PER_SAMPLE,
+  fixedRateShotJudge,
+  hiveCellCrossing,
+  judgeShotTrajectory,
+  nominalShot,
+  perturbTrajectory,
+  shotNoiseOf,
   sampleLUT,
   robotLUTSeeds,
   searchLaunchSpeed,
@@ -1040,5 +1046,105 @@ describe('필드 벽 반사 (12-9)', () => {
     function E(v: number) {
       return PIECE_PHYSICS.POLLEN.restitution * v;
     }
+  });
+});
+
+describe('실제 궤적 명중 판정 (12-11)', () => {
+  it('W. 편차 궤적 1개 = 몬테카를로 샘플 1개, 명중 = 투입구 통과점, 고정형 / 터렛형 조준 범위 컷 없음, 고정 결과 판정', () => {
+    const v0 = sweetSpotLaunchSpeed(MC)!;
+    const { x, y } = MC.sweetSpot;
+    const aim = hiveCellAimPoint('RED', 'AUDIENCE_CELL');
+    const facing = bearingTo(x, y, aim.x, aim.y);
+    const FIXED = { turretType: 'FIXED' as const, turretRange: [0, 0] as [number, number] };
+    const ballistics: ShooterBallistics = { dz: MC.dz, shooterPitch: MC.shooterPitch, shooterOffset: MC.shooterOffset, v0 };
+    const nominalAt = (heading: number, shooter: typeof FIXED | { turretType: 'TURRET'; turretRange: [number, number] } = FIXED) =>
+      nominalShot({ robotX: x, robotY: y, robotHeading: heading, shooter, ballistics, pieceType: 'POLLEN', alliance: 'RED', upwardCell: 'AUDIENCE_CELL' }).trajectory;
+    const noise = shotNoiseOf(MC);
+    const input = (nominal: Trajectory, rolls: number[]) => ({ robotId: 'robot1' as const, pieceType: 'POLLEN' as const, alliance: 'RED' as const, upwardCell: 'AUDIENCE_CELL' as const, nominal, noise, rolls });
+    const rate = (nominal: Trajectory, n: number, rng: () => number) => {
+      let hits = 0;
+      for (let i = 0; i < n; i++) if (judgeShotTrajectory(input(nominal, Array.from({ length: RNG_DRAWS_PER_SAMPLE }, rng))).hit) hits++;
+      return hits / n;
+    };
+
+    // 기본 편차값 / 같은 난수 스트림이면 판정 명중 수 = 몬테카를로 명중 수 (샘플 단위로 같은 궤적, 정면 조준)
+    expect(noise).toEqual({ v0NoisePercent: 0.02, headingNoiseRad: 0.02, pitchNoiseRad: 0.006 });
+    const onTarget = rate(nominalAt(facing), 2000, createRng(7));
+    assert(onTarget === estimateHitRate(x, y, v0, MC, 'POLLEN', 2000, createRng(7)), `judge = Monte Carlo sample (${onTarget})`);
+    // perturbTrajectory: 발사구 그대로, 방향 / 속도 / 발사각만 (편차 0이면 명목 궤적 그대로)
+    const nominal = nominalAt(facing);
+    const p = perturbTrajectory(nominal, noise, createRng(5));
+    assert(p.x === nominal.x && p.y === nominal.y && p.z === nominal.z && p.heading !== nominal.heading && p.v0 !== nominal.v0 && p.pitch !== nominal.pitch, 'noise on the direction only');
+    expect(perturbTrajectory(nominal, NO_NOISE, createRng(5))).toEqual(nominal);
+
+    // 명중 = 통과점 (궤적 위, 투입구 평면 위), isShotInHiveCell과 일치. 같은 난수 = 같은 결과
+    const rng = createRng(11);
+    let crossings = 0;
+    for (let i = 0; i < 300; i++) {
+      const rolls = Array.from({ length: RNG_DRAWS_PER_SAMPLE }, rng);
+      const j = judgeShotTrajectory(input(nominal, rolls));
+      expect(judgeShotTrajectory(input(nominal, rolls))).toEqual(j);
+      assert(j.hit === isShotInHiveCell(j.trajectory, 'RED', 'AUDIENCE_CELL', PIECE_PHYSICS.POLLEN.radius) && j.hit === (j.crossing !== null), 'hit = isShotInHiveCell = crossing');
+      if (!j.crossing) continue;
+      crossings++;
+      const c = j.crossing, t = j.trajectory;
+      const vh = t.v0 * Math.cos(t.pitch);
+      assert(near(c.x, t.x + vh * Math.cos(t.heading) * c.t, 1e-9) && near(c.y, t.y + vh * Math.sin(t.heading) * c.t, 1e-9)
+        && near(c.z, t.z + t.v0 * Math.sin(t.pitch) * c.t - 0.5 * GRAVITY * c.t * c.t, 1e-9), 'crossing lies on the trajectory');
+      // 투입구 평면 (림에서 셀 기울기만큼 기운 면, AUDIENCE: y가 림에서 HIVE 쪽으로 줄어듦)
+      assert(near((c.z - HIVE_RIM_Z) / Math.tan(HIVE_CELL_TILT), HIVE_RIM_Y.AUDIENCE_CELL - c.y, 1e-6), 'crossing lies on the opening plane');
+    }
+    assert(crossings > 200, `most sweet-spot shots cross the opening (${crossings} / 300)`);
+    assert(hiveCellCrossing({ ...nominal, pitch: deg(10) }, 'RED', 'AUDIENCE_CELL', PIECE_PHYSICS.POLLEN.radius) === null, 'low shot -> no crossing');
+
+    // 고정형: 이전 허용 오차(3°) 밖도 궤적이 들어가면 명중 — 각도가 커질수록 줄어듦
+    const off5 = rate(nominalAt(facing + deg(5)), 2000, createRng(9));
+    const off10 = rate(nominalAt(facing + deg(10)), 2000, createRng(9));
+    const off30 = rate(nominalAt(facing + deg(30)), 500, createRng(9));
+    assert(off5 > 0.5 && off5 <= onTarget + 0.02 && off10 < off5 && off30 === 0, `FIXED off aim: 5° ${off5}, 10° ${off10}, 30° ${off30}`);
+    // 터렛형: 범위 밖이면 가까운 한계각으로 쏘고 그 궤적으로 판정 (범위 밖 = 0 아님)
+    const turret = { turretType: 'TURRET' as const, turretRange: [deg(3), deg(30)] as [number, number] };
+    const tn = nominalAt(facing, turret);
+    assert(near(tn.heading, facing + deg(3), 1e-9) && rate(tn, 2000, createRng(9)) > 0.5, 'TURRET out of range fires at the nearest limit and can hit');
+
+    // 고정 결과 판정: 명목 궤적 그대로 (복사), 명중 = 첫 난수 < p, 통과점 없음
+    const fixed = fixedRateShotJudge(0.5);
+    const hitJ = fixed(input(nominal, [0.3, 0, 0, 0, 0, 0]));
+    assert(hitJ.hit && !fixed(input(nominal, [0.7, 0, 0, 0, 0, 0])).hit && hitJ.crossing === null && hitJ.trajectory !== nominal, 'fixed judge: roll < p, no crossing');
+    expect(hitJ.trajectory).toEqual(nominal);
+    assert(fixedRateShotJudge(1)(input(nominal, [0.999, 0, 0, 0, 0, 0])).hit && !fixedRateShotJudge(0)(input(nominal, [0, 0, 0, 0, 0, 0])).hit, 'p = 1 always hits, p = 0 never');
+    assert(fixedRateShotJudge(({ pieceType }) => (pieceType === 'POLLEN' ? 1 : 0))(input(nominal, [0.5, 0, 0, 0, 0, 0])).hit, 'per-shot probability function');
+  });
+
+  it('X. 비행 계획: 판정한 궤적으로 비행, 명중은 통과점 도착 (통과점이 없으면 조준점), 빗맞음은 그 궤적의 충돌 규칙', () => {
+    const v0 = sweetSpotLaunchSpeed(MC)!;
+    const { x, y } = MC.sweetSpot;
+    const aim = hiveCellAimPoint('RED', 'AUDIENCE_CELL');
+    const facing = bearingTo(x, y, aim.x, aim.y);
+    const base = {
+      robotX: x, robotY: y, robotHeading: facing, shooter: { turretType: 'FIXED' as const, turretRange: [0, 0] as [number, number] },
+      ballistics: { dz: MC.dz, shooterPitch: MC.shooterPitch, shooterOffset: MC.shooterOffset, v0 }, pieceType: 'POLLEN' as const, alliance: 'RED' as const, upwardCell: 'AUDIENCE_CELL' as const,
+    };
+    const nominal = nominalShot(base).trajectory;
+    // 명목 궤적: planShotFlight 기본값과 같음
+    const plain = planShotFlight({ ...base, hit: false });
+    assert(plain.heading === nominal.heading && plain.v0 === nominal.v0 && plain.from.x === nominal.x, 'planShotFlight without a trajectory = nominal');
+    // 명중으로 판정된 편차 궤적 하나 찾기
+    const rng = createRng(21);
+    let judged = judgeShotTrajectory({ robotId: 'robot1', pieceType: 'POLLEN', alliance: 'RED', upwardCell: 'AUDIENCE_CELL', nominal, noise: shotNoiseOf(MC), rolls: Array.from({ length: 6 }, rng) });
+    for (let i = 0; i < 50 && !judged.hit; i++) judged = judgeShotTrajectory({ robotId: 'robot1', pieceType: 'POLLEN', alliance: 'RED', upwardCell: 'AUDIENCE_CELL', nominal, noise: shotNoiseOf(MC), rolls: Array.from({ length: 6 }, rng) });
+    const c = judged.crossing!;
+    const hit = planShotFlight({ ...base, hit: true, trajectory: judged.trajectory, crossing: c });
+    assert(hit.result === 'HIT' && hit.to.x === c.x && hit.to.y === c.y && hit.to.z === c.z && hit.contactTime === c.t && hit.flightTime === c.t, 'hit arrives at the crossing');
+    assert(hit.landing.x === c.x && hit.landing.y === c.y && hit.heading === judged.trajectory.heading && hit.v0 === judged.trajectory.v0 && hit.pitch === judged.trajectory.pitch, 'flight record = judged trajectory');
+    // 통과점이 없는 명중(고정 결과 판정) = 조준점 (v1과 같은 규칙)
+    const atAim = planShotFlight({ ...base, hit: true, trajectory: nominal, crossing: null });
+    assert(near(atAim.to.x, aim.x, 1e-9) && near(atAim.to.z, aim.z, 1e-9), 'no crossing -> aim point');
+    // 같은 궤적을 빗맞음으로 처리(TIP 중 발사): 투입구 쪽 HIVE 직육면체 충돌로 튕김
+    const voided = planShotFlight({ ...base, hit: false, trajectory: judged.trajectory });
+    assert(voided.result === 'MISS_HIVE' && voided.segments.length > 0, 'entering trajectory as a miss bounces off the HIVE box');
+    // 무효 명중 반사: 도착점(통과점)에서 시작, 도착 수평 방향 = 궤적 방향
+    const after = planVoidedHitBounce({ from: hit.from, aim: hit.to, v0: hit.v0, pitch: hit.pitch, contactTime: hit.contactTime, targetCell: 'AUDIENCE_CELL', pieceType: 'POLLEN' });
+    assert(after.segments.length > 0 && near(after.segments[0].x, c.x, 1e-9) && near(after.segments[0].y, c.y, 1e-9), 'voided hit bounces from the crossing point');
   });
 });

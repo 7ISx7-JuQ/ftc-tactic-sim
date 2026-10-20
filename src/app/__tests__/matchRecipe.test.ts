@@ -33,7 +33,7 @@ const values: DraftValues = {
 };
 const engineFor = (v: DraftValues) => {
   const s = setupFromDrafts(v);
-  return new SimulationEngine(s.r1Config, s.r2Config, s.shotResolver, v.scenario.allianceColor, v.scenario, s.shooters);
+  return new SimulationEngine(s.r1Config, s.r2Config, s.shotJudge, v.scenario.allianceColor, v.scenario, s.shooters);
 };
 // 결정론적 조작 스크립트 (주행 / 회전 + 흡입 · 발사 + 리프트)
 const script = (t: number, seed: number): TickControls => ({

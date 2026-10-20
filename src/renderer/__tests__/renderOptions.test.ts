@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { FLOWER_CIRCLES, PIECE_PHYSICS, createIntakeZonePreset, hiveCellAimPoint } from '../../core/collision';
-import { DEFAULT_SHOOTER_BALLISTICS, FIXED_AIM_TOLERANCE, bearingTo, planShotFlight, shooterFor } from '../../core/ballistics';
+import { DEFAULT_SHOOTER_BALLISTICS, FIXED_AIM_TOLERANCE, bearingTo, fixedRateShotJudge, planShotFlight, shooterFor } from '../../core/ballistics';
 import { SimulationEngine } from '../../core/simulationEngine';
 import type { RobotDriveInput } from '../../core/simulationEngine';
-import type { DeepReadonly, RobotConfig, ShotProbabilityResolver, TimelineFrame } from '../../core/types';
+import type { DeepReadonly, RobotConfig, ShotJudge, ShotProbabilityResolver, TimelineFrame } from '../../core/types';
 import { renderScene } from '../sceneRenderer';
 import { DEFAULT_RENDER_OPTIONS, aimGuide, aimGuidePiece, hitProbabilities, intakeProgress } from '../renderOptions';
 import type { RenderOptions } from '../renderOptions';
@@ -24,8 +24,8 @@ const cfg = (id: 'robot1' | 'robot2', over: Partial<RobotConfig> = {}): RobotCon
 });
 const C1 = cfg('robot1'), C2 = cfg('robot2');
 type Frame = DeepReadonly<TimelineFrame>;
-const engine = (resolver: ShotProbabilityResolver = () => 0.5) =>
-  new SimulationEngine(C1, C2, resolver, 'RED', { allianceColor: 'RED', flowerPiecesCount: [0, 4, 4, 4] }); // FLOWER 1 비움 → 바닥 산포 POLLEN 있음
+const engine = (judge: ShotJudge = fixedRateShotJudge(0.5)) =>
+  new SimulationEngine(C1, C2, judge, 'RED', { allianceColor: 'RED', flowerPiecesCount: [0, 4, 4, 4] }); // FLOWER 1 비움 → 바닥 산포 POLLEN 있음
 // 모든 메서드를 받아 아무것도 하지 않는 캔버스 (Node에서 renderScene 실행용, measureText만 폭 반환)
 const noopCtx = () =>
   new Proxy({}, { get: (_t, prop) => (prop === 'measureText' ? () => ({ width: 10 }) : () => undefined), set: () => true }) as unknown as CanvasRenderingContext2D;
@@ -92,12 +92,11 @@ describe('표시 옵션 (명세서 3.7, 08-6)', () => {
       calls++;
       return 0.5;
     };
-    const e = engine(counting);
+    const e = engine();
     const drive: RobotDriveInput = { targetVx: 20, targetVy: 5, targetOmega: 0.3, actionState: 'INTAKING' };
     const shoot: RobotDriveInput = { targetVx: 0, targetVy: 0, targetOmega: 0, actionState: 'SHOOTING' };
     e.inputProvider = t => ({ r1: t % 400 < 200 ? drive : shoot, r2: t % 300 < 150 ? shoot : drive });
     e.runFullMatch();
-    const engineCalls = calls;
     assert(e.timeline.some(f => f.field.pendingShots.length > 0), 'match has flights to draw');
     const ctx = noopCtx();
     const draw = (frame: Frame, options?: RenderOptions) =>
@@ -110,7 +109,6 @@ describe('표시 옵션 (명세서 3.7, 08-6)', () => {
     // 명중 확률 계산 함수 자체는 그대로 (HTML 패널이 호출): 로봇 2 × 기물 2 = 4회
     hitProbabilities(e.timeline[500], counting);
     assert(calls === 4, `hitProbabilities still calls the resolver 4 times (${calls})`);
-    assert(engineCalls > 0, 'engine itself still calls the resolver only when firing');
   }, 120_000);
 
   it('E. 조준선 = 다음에 발사할 기물의 슈터 / 사출구 (13-2): 엔진 발사 비행의 발사구 / 발사 방향과 같음', () => {
@@ -158,7 +156,7 @@ describe('표시 옵션 (명세서 3.7, 08-6)', () => {
     // 엔진 실제 발사: 발사 직전 프레임의 조준선 사출구 = 비행 기록의 발사구 (PER_PIECE, NECTAR 먼저)
     {
       const C = cfg('robot1', { shooterSetup: 'PER_PIECE' });
-      const e = new SimulationEngine(C, C2, () => 0, 'RED', { allianceColor: 'RED', r1Spawn: { x: 60.5, y: 120, heading: 1.2 }, r1Loadout: ['NECTAR', 'POLLEN'] }, { robot1: SH });
+      const e = new SimulationEngine(C, C2, fixedRateShotJudge(0), 'RED', { allianceColor: 'RED', r1Spawn: { x: 60.5, y: 120, heading: 1.2 }, r1Loadout: ['NECTAR', 'POLLEN'] }, { robot1: SH });
       const shoot: RobotDriveInput = { targetVx: 0, targetVy: 0, targetOmega: 0, actionState: 'SHOOTING' };
       for (let i = 0; i < 40 && e.field.pendingShots.length === 0; i++) e.step(shoot);
       const shot = e.field.pendingShots[0];

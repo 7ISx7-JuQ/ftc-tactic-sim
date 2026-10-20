@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { SimulationEngine } from '../../core/simulationEngine';
+import { fixedRateShotJudge } from '../../core/ballistics';
 import { createIntakeZonePreset } from '../../core/collision';
 import type { RobotConfig, RobotPose, ScenarioConfig } from '../../core/types';
 import {
@@ -26,7 +27,7 @@ const cfg = (id: 'robot1' | 'robot2'): RobotConfig => ({
 });
 const pose = (x: number, y: number, heading = 0): RobotPose => ({ x, y, heading });
 const eng = (sc: Partial<ScenarioConfig> = {}) =>
-  new SimulationEngine(cfg('robot1'), cfg('robot2'), () => 0.6, 'RED', { allianceColor: 'RED', ...sc });
+  new SimulationEngine(cfg('robot1'), cfg('robot2'), fixedRateShotJudge(0.6), 'RED', { allianceColor: 'RED', ...sc });
 
 // 가짜 브라우저 환경: Node의 EventTarget + 조작 가능한 visibilityState / getGamepads
 const fakeEnv = () => {

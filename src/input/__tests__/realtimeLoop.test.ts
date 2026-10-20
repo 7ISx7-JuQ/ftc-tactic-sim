@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { DT, MATCH_TICKS, SimulationEngine } from '../../core/simulationEngine';
+import { fixedRateShotJudge } from '../../core/ballistics';
 import { createIntakeZonePreset } from '../../core/collision';
 import type { RobotConfig, RobotPose, ScenarioConfig } from '../../core/types';
 import { NEUTRAL_TICK } from '../controls';
@@ -29,7 +30,7 @@ const cfg = (id: 'robot1' | 'robot2', over: Partial<RobotConfig> = {}): RobotCon
 const C1 = cfg('robot1'), C2 = cfg('robot2');
 const pose = (x: number, y: number, heading = 0): RobotPose => ({ x, y, heading });
 const eng = (sc: Partial<ScenarioConfig> = {}) =>
-  new SimulationEngine(C1, C2, () => 0.6, sc.allianceColor ?? 'RED', { allianceColor: 'RED', ...sc });
+  new SimulationEngine(C1, C2, fixedRateShotJudge(0.6), sc.allianceColor ?? 'RED', { allianceColor: 'RED', ...sc });
 
 // 가짜 requestAnimationFrame: frame(now)로 대기 중인 콜백을 실행
 class FakeScheduler implements FrameScheduler {

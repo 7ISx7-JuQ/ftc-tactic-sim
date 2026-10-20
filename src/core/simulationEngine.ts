@@ -28,7 +28,7 @@ import {
   testOBBvsOBB,
 } from './collision';
 import type { AABB, Circle, OBB, RobotBody, Vector2D } from './collision';
-import { DEFAULT_SHOOTER_BALLISTICS, nextFireablePieceIndex, planShotFlight, planVoidedHitBounce, shooterFor } from './ballistics';
+import { DEFAULT_SHOOTER_BALLISTICS, nextFireablePieceIndex, nominalShot, planShotFlight, planVoidedHitBounce, shooterFor, shotNoiseOf } from './ballistics';
 import { isLiftState, liftDriveRatio, stepRobotKinematics } from './kinematics';
 import {
   FLOWER_DEQ_GRAVITY_COOLDOWN,
@@ -55,7 +55,7 @@ import type {
   RPThresholds,
   ScenarioConfig,
   ScoreBreakdown,
-  ShotProbabilityResolver,
+  ShotJudge,
   TimelineFrame,
 } from './types';
 
@@ -753,8 +753,8 @@ export class SimulationEngine {
   public r1Config: RobotConfig;
   public r2Config: RobotConfig;
 
-  // 외부 주입 슈터 명중률 해결자 (필수: 실제 경기는 탄도 LUT 기반, 테스트는 고정 확률)
-  public shotResolver: ShotProbabilityResolver;
+  // 외부 주입 발사 판정 함수 (필수, 12-11: 실제 경기는 편차 궤적 1개 판정 judgeShotTrajectory, 테스트는 고정 결과 판정)
+  public shotJudge: ShotJudge;
 
   // 발사 비행 처리용 슈터 탄도 (로봇별 · 기물별, 미주입 시 기본 자동 슈터: 발사마다 조준점 닫힌 해 v0)
   public shooters: MatchShooterBallistics;
@@ -774,7 +774,7 @@ export class SimulationEngine {
   constructor(
     r1Config: RobotConfig,
     r2Config: RobotConfig,
-    shotResolver: ShotProbabilityResolver,
+    shotJudge: ShotJudge,
     allianceColor: 'RED' | 'BLUE' = 'RED',
     scenario?: ScenarioConfig,
     shooters?: Partial<Record<'robot1' | 'robot2', Partial<MatchShooterBallistics['robot1']>>>,
@@ -784,7 +784,7 @@ export class SimulationEngine {
     this.r2Config = { ...r2Config, id: 'robot2' };
     this.defaultAlliance = allianceColor;
     this.scenario = scenario;
-    this.shotResolver = shotResolver;
+    this.shotJudge = shotJudge;
     // 생성 시점 복사 (경기 중 원본 변경이 판정에 새지 않도록). 기물별 (12-3), 없는 기물은 기본 자동 슈터
     const copyShooter = (b: Partial<MatchShooterBallistics['robot1']> | undefined): MatchShooterBallistics['robot1'] => ({
       POLLEN: { ...(b?.POLLEN ?? DEFAULT_SHOOTER_BALLISTICS) },
@@ -1551,27 +1551,40 @@ export class SimulationEngine {
 
     const hive = this.field.hive;
     const alliance = this.field.allianceColor;
-    // 슬롯 기반 식별자 전달 (config.id에 의존하지 않음)
-    const rawP = this.shotResolver(robotId, piece.type, robot.x, robot.y, robot.heading, alliance, hive.upwardCell);
-    const p = Number.isFinite(rawP) ? clamp(rawP, 0, 1) : 0;
-    // 난수는 발사마다 항상 3회 소비 (명중 판정, 반사 세기 / 방향 산포): 결과와 무관하게 RNG 시퀀스를 일정하게 유지하고,
-    // 도착 시점에는 난수를 쓰지 않음 (결과론 불변)
-    const roll = this.random();
-    const bounceRestitutionRoll = this.random();
-    const bounceAngleRoll = this.random();
-    // 전복 진행 중(낙하 대기열 방출 전)에는 새 득점을 수용하지 않음
-    const hit = !hive.isTipping && roll < p;
-
-    const plan = planShotFlight({
+    const ballistics = this.shooters[robotId][piece.type];
+    const shot = {
       robotX: robot.x,
       robotY: robot.y,
       robotHeading: robot.heading,
       shooter: shooterFor(config, piece.type),
-      ballistics: this.shooters[robotId][piece.type],
+      ballistics,
       pieceType: piece.type,
       alliance,
       upwardCell: hive.upwardCell,
+    };
+    // 난수는 발사마다 항상 8개 소비 (12-11): 편차 6개(방위 2 → 속도 2 → 발사각 2) + 반사 세기 / 방향 산포 2개.
+    // 결과 / 판정 함수와 무관하게 RNG 시퀀스를 일정하게 유지하고, 도착 시점에는 난수를 쓰지 않음 (결과론 불변)
+    const noiseRolls = [this.random(), this.random(), this.random(), this.random(), this.random(), this.random()];
+    const bounceRestitutionRoll = this.random();
+    const bounceAngleRoll = this.random();
+    // 실제 궤적 명중 판정 (12-11): 명목 궤적 + 편차 1회 → 투입구 판정. 슬롯 기반 식별자 전달 (config.id에 의존하지 않음)
+    const judged = this.shotJudge({
+      robotId,
+      pieceType: piece.type,
+      alliance,
+      upwardCell: hive.upwardCell,
+      nominal: nominalShot(shot).trajectory,
+      noise: shotNoiseOf(ballistics),
+      rolls: noiseRolls,
+    });
+    // 전복 진행 중(낙하 대기열 방출 전)에는 새 득점을 수용하지 않음 (입구로 들어가는 궤적은 HIVE 직육면체 충돌로 튕김)
+    const hit = !hive.isTipping && judged.hit;
+
+    const plan = planShotFlight({
+      ...shot,
       hit,
+      trajectory: judged.trajectory,
+      crossing: judged.crossing,
       bounceRolls: { restitution: bounceRestitutionRoll, angle: bounceAngleRoll },
     });
     const flightTicks = Number.isFinite(plan.flightTime) ? Math.max(1, Math.round(plan.flightTime / DT)) : 1;
@@ -1610,8 +1623,8 @@ export class SimulationEngine {
   }
 
   // 비행 도착: 도착 틱이 된 발사를 발사 순서대로 반영
-  // - 명중: 조준점 도착 틱에 HIVE가 전복 중이 아니고 상향 셀이 발사 시점과 같으면 적재 (같은 틱 앞 발의 팁이 뒤 발을 무효화).
-  //   무효면 조준점에서 반사 낙하 구간을 붙이고 MISS_HIVE로 바꿔 착지 틱까지 비행 유지
+  // - 명중: 도착 틱(투입구 통과점, 12-11)에 HIVE가 전복 중이 아니고 상향 셀이 발사 시점과 같으면 적재 (같은 틱 앞 발의 팁이 뒤 발을 무효화).
+  //   무효면 도착점에서 반사 낙하 구간을 붙이고 MISS_HIVE로 바꿔 착지 틱까지 비행 유지
   // - 그 외: 발사 시점에 확정된 최종 착지점 / 착지 속도로 ON_FIELD
   private stepShotArrivals(): void {
     const hive = this.field.hive;
@@ -1661,7 +1674,7 @@ export class SimulationEngine {
     piece.vy = vy;
   }
 
-  // 무효 명중: 조준점에서 셀 쪽 HIVE 앞면으로 반사 낙하 (발사 시점에 뽑아 둔 산포 난수 사용), 착지 틱은 현재 틱 이후
+  // 무효 명중: 도착점(투입구 통과점)에서 셀 쪽 HIVE 앞면으로 반사 낙하 (발사 시점에 뽑아 둔 산포 난수 사용), 착지 틱은 현재 틱 이후
   private voidHit(shot: PendingShot): void {
     const after = planVoidedHitBounce({
       from: { x: shot.fromX, y: shot.fromY },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bearingTo } from '../../core/ballistics';
+import { bearingTo, fixedRateShotJudge } from '../../core/ballistics';
 import { createIntakeZonePreset, hiveCellAimPoint } from '../../core/collision';
 import { SimulationEngine } from '../../core/simulationEngine';
 import type { RobotDriveInput } from '../../core/simulationEngine';
@@ -27,7 +27,7 @@ const cfg = (id: 'robot1' | 'robot2'): RobotConfig => ({
 });
 const C1 = cfg('robot1');
 const C2 = cfg('robot2');
-const engine = (sc: ScenarioConfig) => new SimulationEngine(C1, C2, () => 1, sc.allianceColor, sc);
+const engine = (sc: ScenarioConfig) => new SimulationEngine(C1, C2, fixedRateShotJudge(1), sc.allianceColor, sc);
 
 // 그리기 호출을 기록하는 가짜 캔버스: fillText 글자, 원(arc) 테두리 색 / 굵기
 function recordingCtx() {

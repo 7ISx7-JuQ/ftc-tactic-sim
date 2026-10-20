@@ -56,6 +56,7 @@ import {
   undoScenarioEdit,
 } from '../fieldEdit';
 import { DEFAULT_SPAWN_POSES, SimulationEngine, gardenPiecePositions, validateRobotPlacement } from '../../core/simulationEngine';
+import { fixedRateShotJudge } from '../../core/ballistics';
 import { editDraft } from '../configDraft';
 import { readSweetSpot, writeNumber } from '../robotForm';
 import type { RobotProfile } from '../robotForm';
@@ -435,7 +436,7 @@ describe('시나리오 필드 편집 바닥 기물 (14-1b)', () => {
 
   it('T. 오토 TIP NECTAR 자리 = 엔진 reset과 같음 (슬롯 순서, 로봇 / GARDEN / 지정 바닥 기물을 피함, RED / BLUE)', () => {
     const engineSpots = (values: ReturnType<typeof initialDrafts>['draft']) => {
-      const e = new SimulationEngine(values.robot1.config, values.robot2.config, () => 0.5, values.scenario.allianceColor, values.scenario);
+      const e = new SimulationEngine(values.robot1.config, values.robot2.config, fixedRateShotJudge(0.5), values.scenario.allianceColor, values.scenario);
       const placed = new Set((values.scenario.floorPieces ?? []).map(p => `${p.x},${p.y}`));
       // 재고 NECTAR는 배열 뒤에서부터 꺼내 놓으므로 배열 역순 = 놓은 순서
       return e.pieces.filter(p => p.type === 'NECTAR' && p.state === 'ON_FIELD' && !placed.has(`${p.x},${p.y}`)).map(p => ({ x: p.x, y: p.y })).reverse();

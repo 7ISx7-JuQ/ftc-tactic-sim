@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { MATCH_TICKS, SimulationEngine } from '../../core/simulationEngine';
+import { fixedRateShotJudge } from '../../core/ballistics';
 import { createIntakeZonePreset } from '../../core/collision';
 import type { RobotConfig, RobotPose, ScenarioConfig } from '../../core/types';
 import { NEUTRAL_TICK, buildDriveCommand, decodeDriveInput, encodeDriveCommand } from '../controls';
@@ -25,7 +26,7 @@ const C1 = cfg('robot1'), C2 = cfg('robot2', { maxSpeed: 45, maxTurnRate: 3 }); 
 const pose = (x: number, y: number, heading = 0): RobotPose => ({ x, y, heading });
 // 명중 확률 0.6 고정: 발사가 섞여 결과가 시드 PRNG에 의존 (재생 시 난수 소비까지 같아야 동일)
 const eng = (sc: Partial<ScenarioConfig> = {}) =>
-  new SimulationEngine(C1, C2, () => 0.6, sc.allianceColor ?? 'RED', { allianceColor: 'RED', ...sc });
+  new SimulationEngine(C1, C2, fixedRateShotJudge(0.6), sc.allianceColor ?? 'RED', { allianceColor: 'RED', ...sc });
 
 const tick = (over: Partial<TickControls> = {}): TickControls => ({ ...NEUTRAL_TICK, ...over });
 // 결정론적 조작 스크립트: 주행 / 회전 + 흡입·발사 유지 + 리프트 탭 / 투입 유지

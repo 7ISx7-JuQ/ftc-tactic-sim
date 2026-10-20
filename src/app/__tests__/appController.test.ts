@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { fixedRateShotJudge } from '../../core/ballistics';
 import { createIntakeZonePreset } from '../../core/collision';
 import type { RobotConfig, ScenarioConfig, ShotProbabilityResolver } from '../../core/types';
 import type { BrowserInputEnv, GamepadLike } from '../../input/browserInput';
@@ -96,6 +97,7 @@ const resolver: ShotProbabilityResolver = (robotId, pieceType) => {
 const makeSetup = (alliance: 'RED' | 'BLUE', scenario: Partial<ScenarioConfig> = {}): MatchSetup => ({
   r1Config: cfg('robot1'),
   r2Config: cfg('robot2'),
+  shotJudge: fixedRateShotJudge(({ robotId, pieceType }) => (robotId === 'robot1' ? (pieceType === 'POLLEN' ? 0.25 : 0.5) : 0.75)),
   shotResolver: resolver,
   scenario: { allianceColor: alliance, ...scenario },
 });
@@ -569,7 +571,7 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     frames.advance(16);
     const timeline = h.loadMatch(loadSetup, records, 'Branch 3');
     assert(!!timeline && timeline.length === MATCH_TICKS + 1, 'loadMatch recomputed the whole match');
-    const ref = new SimulationEngine(loadSetup.r1Config, loadSetup.r2Config, loadSetup.shotResolver, 'BLUE', loadSetup.scenario);
+    const ref = new SimulationEngine(loadSetup.r1Config, loadSetup.r2Config, loadSetup.shotJudge, 'BLUE', loadSetup.scenario);
     ref.inputProvider = createInputRecordProvider(records);
     ref.runFullMatch();
     assert(JSON.stringify(timeline![MATCH_TICKS]) === JSON.stringify(ref.getFrame(MATCH_TICKS)), 'same result as an independent engine replaying the records');
@@ -721,7 +723,7 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     assert(src.branchName === 'Main', 'recipe name of the root');
     // 원본 가지의 적용 입력 기록만으로 독립 재계산 = 원본 결과 (가지를 오가도 입력 기록이 섞이지 않음)
     const base = makeSetup('RED');
-    const ref = new SimulationEngine(base.r1Config, base.r2Config, base.shotResolver, 'RED', base.scenario);
+    const ref = new SimulationEngine(base.r1Config, base.r2Config, base.shotJudge, 'RED', base.scenario);
     ref.inputProvider = createInputRecordProvider(src.inputs);
     ref.runFullMatch();
     assert(JSON.stringify(ref.getFrame(MATCH_TICKS)) === JSON.stringify(src.timeline[MATCH_TICKS]), 'root inputs reproduce the root result')

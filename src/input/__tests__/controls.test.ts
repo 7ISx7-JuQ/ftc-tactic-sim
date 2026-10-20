@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { SimulationEngine } from '../../core/simulationEngine';
+import { fixedRateShotJudge } from '../../core/ballistics';
 import { createIntakeZonePreset } from '../../core/collision';
 import type { RobotConfig, RobotPose, RobotState, ScenarioConfig } from '../../core/types';
 import {
@@ -58,7 +59,7 @@ const cfg = (id: 'robot1' | 'robot2', over: Partial<RobotConfig> = {}): RobotCon
 const C1 = cfg('robot1'), C2 = cfg('robot2');
 const pose = (x: number, y: number, heading = 0): RobotPose => ({ x, y, heading });
 const eng = (sc: Partial<ScenarioConfig> = {}) =>
-  new SimulationEngine(C1, C2, () => 1, sc.allianceColor ?? 'RED', { allianceColor: 'RED', ...sc });
+  new SimulationEngine(C1, C2, fixedRateShotJudge(1), sc.allianceColor ?? 'RED', { allianceColor: 'RED', ...sc });
 
 // 입력 계층 1틱: 직전 로봇 상태로 명령 결정 → 부호화 → 복호화 → 엔진 (R2 조작, R1 정지)
 const driveR2 = (e: SimulationEngine, c: TickControls, settings: DriverSettings = RED) => {

@@ -25,6 +25,7 @@ import type {
   RPThresholds,
   ScenarioConfig,
   ScoreBreakdown,
+  ShotJudge,
   ShotProbabilityResolver,
   TimelineFrame,
 } from '../core/types';
@@ -51,7 +52,8 @@ import type { ViewMode } from '../renderer/viewTransform';
 export interface MatchSetup {
   r1Config: RobotConfig;
   r2Config: RobotConfig;
-  shotResolver: ShotProbabilityResolver;
+  shotJudge: ShotJudge;                 // 엔진 발사 판정 (12-11 실제 궤적 판정)
+  shotResolver: ShotProbabilityResolver; // 좌측 패널 명중 확률 표시용 (13-5에서 지금 자세의 기대 명중률로 바뀜)
   scenario: ScenarioConfig;
   shooters?: MatchShooterBallistics;
 }
@@ -696,8 +698,8 @@ export class AppController {
 
   private newMatch(): void {
     this.disposeLoop?.();
-    const { r1Config, r2Config, shotResolver, scenario, shooters } = this.setup;
-    this.engine = new SimulationEngine(r1Config, r2Config, shotResolver, scenario.allianceColor, scenario, shooters);
+    const { r1Config, r2Config, shotJudge, scenario, shooters } = this.setup;
+    this.engine = new SimulationEngine(r1Config, r2Config, shotJudge, scenario.allianceColor, scenario, shooters);
     this.inputs = new MatchInputs(); // 출처 / 조작 모드는 START에서 선택을 풀어 적용 (09-8b)
     this.matchView = this.defaultView; // 새 경기는 SETTINGS 기본 보기 방향 (VIEW는 그 경기에서만)
     this.viewTick = 0;
