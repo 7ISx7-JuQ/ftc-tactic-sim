@@ -16,7 +16,7 @@ import {
 import type { OBB } from '../core/collision';
 import { getCarryCapacity } from '../core/simulationEngine';
 import { hiveTipPollenThreshold } from '../core/types';
-import type { DeepReadonly, HiveState, MatchShooterBallistics, RobotConfig, RobotState, TimelineFrame } from '../core/types';
+import type { DeepReadonly, GamePiece, HiveState, MatchShooterBallistics, RobotConfig, RobotState, TimelineFrame } from '../core/types';
 import { airborneDisplay, shotElapsed, shotPositionAt, shotTrail } from './flightView';
 import { DEFAULT_RENDER_OPTIONS, aimGuide, intakeProgress } from './renderOptions';
 import type { AimGuide, RenderOptions } from './renderOptions';
@@ -213,6 +213,13 @@ function staticLayer(ally: Alliance, dpr: number): LayerCanvas | null {
   return staticLayers.get(key) ?? null;
 }
 
+/** 정적 레이어(캐시)를 그림 — 경기 장면 / 시나리오 필드 편집 장면(14-1c) 공용. ctx는 필드 px 공간(보기 변환 적용) 상태 */
+export function drawStaticScene(ctx: CanvasRenderingContext2D, ally: Alliance, dpr: number): void {
+  const layer = staticLayer(ally, dpr);
+  if (layer) ctx.drawImage(layer, -MARGIN_PX, -MARGIN_PX, VIEWPORT_PX, VIEWPORT_PX);
+  else drawStaticField(ctx, ally);
+}
+
 // 터널 지붕 레이어 (13-1): HIVE 터널 부분(바탕 + 셀 상태 + 기둥 표시)만 그린 투명 레이어. 그림이 정해진 몇 가지
 // (진영 × 상향 셀 × 전복 중 / 편집 장면은 상태 없음)뿐이라 dpr별로 캐시하고, 매 프레임 불투명도만 적용해 한 번에 복사한다
 // (층마다 따로 반투명으로 그리면 지붕 안의 셀 바탕이 비쳐 보이므로 한 장으로 합성)
@@ -303,8 +310,8 @@ function strokeBox(ctx: CanvasRenderingContext2D, box: Rect, color: string, widt
   ctx.setLineDash([]);
 }
 
-// part: 기둥 부분은 바닥 기물 아래, 터널 부분은 지붕 레이어로 (13-1)
-function drawHiveState(ctx: CanvasRenderingContext2D, hive: Pick<HiveState, 'upwardCell' | 'isTipping'>, ally: Alliance, part: HivePart): void {
+// part: 기둥 부분은 바닥 기물 아래, 터널 부분은 지붕 레이어로 (13-1). 시나리오 필드 편집 장면도 쓴다 (14-1c)
+export function drawHiveState(ctx: CanvasRenderingContext2D, hive: Pick<HiveState, 'upwardCell' | 'isTipping'>, ally: Alliance, part: HivePart): void {
   ctx.save();
   clipToHivePart(ctx, part);
   const up = hiveCellBox(ally, hive.upwardCell);
@@ -315,10 +322,17 @@ function drawHiveState(ctx: CanvasRenderingContext2D, hive: Pick<HiveState, 'upw
   ctx.restore();
 }
 
+/** 게이지 내용에 필요한 필드 상태 (경기 프레임 / 시나리오 필드 편집 장면 공용, 14-1c) */
+export type GaugeField = {
+  flowers: readonly { id: string; pieces: readonly (Pick<GamePiece, 'type' | 'alliance'> | null)[] }[];
+  pendingHumanNectar: number;
+  nectarStock: number;
+};
+
 // FLOWER / 재고 게이지 내용
-function drawGaugeContents(ctx: CanvasRenderingContext2D, frame: DeepReadonly<TimelineFrame>, ally: Alliance): void {
+export function drawGaugeContents(ctx: CanvasRenderingContext2D, field: GaugeField, ally: Alliance): void {
   ctx.save();
-  for (const flower of frame.field.flowers) {
+  for (const flower of field.flowers) {
     const index = FLOWER_IDS.indexOf(flower.id as (typeof FLOWER_IDS)[number]);
     if (index < 0) continue;
     const g = flowerGaugeLayout(index);
@@ -344,7 +358,7 @@ function drawGaugeContents(ctx: CanvasRenderingContext2D, frame: DeepReadonly<Ti
   }
   const stock = stockGaugeLayout(ally);
   const nectar = pieceColors({ type: 'NECTAR', alliance: ally });
-  stockSlotStates(frame.field.pendingHumanNectar, frame.field.nectarStock).forEach((state, i) => {
+  stockSlotStates(field.pendingHumanNectar, field.nectarStock).forEach((state, i) => {
     const at = stock.slots[i];
     if (state === 'STOCK') drawCircle(ctx, at.x, at.y, GAUGE_PIECE_RADIUS, nectar.fill, nectar.stroke, 1);
     if (state === 'PENDING') {
@@ -652,7 +666,7 @@ function drawScreenRow(ctx: CanvasRenderingContext2D, cx: number, y: number, wid
 
 // HIVE 셀 내용 (화면 공간, 똑바로): 상향 셀은 NECTAR 줄 / 개수 글자 "▲ N{NECTAR} P{POLLEN}/{임계}" / POLLEN 줄을 위에서 아래로.
 // 보기가 회전해도 줄과 글자가 겹치지 않음. 전복 중인 셀은 글자 없이 주황 점선 테두리만 (drawHiveState, 09-6b)
-function drawHiveLabels(ctx: CanvasRenderingContext2D, hive: DeepReadonly<HiveState>, ally: Alliance, view: ViewTransform): void {
+export function drawHiveLabels(ctx: CanvasRenderingContext2D, hive: Pick<HiveState, 'upwardCell' | 'nectarInUpwardCell' | 'pollenInUpwardCell'>, ally: Alliance, view: ViewTransform): void {
   const k = view.scale * PX_PER_INCH;
   const up = cellScreenBox(ally, hive.upwardCell, view);
   const n = hive.nectarInUpwardCell;
@@ -721,12 +735,10 @@ export function renderScene(ctx: CanvasRenderingContext2D, scene: SceneInput, dp
   ctx.clip();
 
   ctx.setTransform(...fieldPxMatrix(view, dpr));
-  const layer = staticLayer(ally, dpr);
-  if (layer) ctx.drawImage(layer, -MARGIN_PX, -MARGIN_PX, VIEWPORT_PX, VIEWPORT_PX);
-  else drawStaticField(ctx, ally);
+  drawStaticScene(ctx, ally, dpr);
 
   drawHiveState(ctx, frame.field.hive, ally, 'PILLARS');
-  drawGaugeContents(ctx, frame, ally);
+  drawGaugeContents(ctx, frame.field, ally);
   drawFloorPieces(ctx, frame);
   drawScoredFieldMarks(ctx, frame, ally);
   const guides = options.aimGuide ? sceneAimGuides(frame, scene) : [];

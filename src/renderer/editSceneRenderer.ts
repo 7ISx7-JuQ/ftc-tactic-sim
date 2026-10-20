@@ -13,16 +13,18 @@
 // 히트맵 / 스윗스팟 모드는 로봇 / 기물 / 게이지를 그리지 않는다 (편집 모드의 필드는 비어 있음). 색 / 행 계산은 heatmapView.ts (순수 함수).
 
 import { LUT_GRID_SIZE, aimingRobotOBB } from '../core/ballistics';
-import { PIECE_PHYSICS, getBumperZoneOBB, getRobotOBB } from '../core/collision';
+import { FLOWER_CIRCLES, FLOWER_IDS, GARDEN_AABB, PIECE_PHYSICS, getBumperZoneOBB, getRobotOBB } from '../core/collision';
+import { INITIAL_HUMAN_NECTAR_STOCK } from '../core/simulationEngine';
 import type { RobotConfig, RobotPose } from '../core/types';
-import { ALLIANCE_COLORS, COLORS, drawFieldBackground, drawFieldLines, drawFlowers, drawGardens, drawHiveBase, drawLoadingZones, hiveCellBox, inchToPx, pieceColors } from './canvasRenderer';
+import { ALLIANCE_COLORS, COLORS, drawFieldLines, drawHiveBase, hiveCellBox, inchToPx, pieceColors } from './canvasRenderer';
 import { canvasFont } from './fonts';
 import { headingArrow, localToField, robotLabelOffset } from './robotLayout';
 import { HANDLE_RADIUS, spawnHandlePoint } from './spawnEditLayout';
 import type { SpawnPart, SpawnRobotId } from './spawnEditLayout';
-import type { Alliance } from './canvasRenderer';
+import type { Alliance, HiveCell } from './canvasRenderer';
 import { heatmapBasis, heatmapPixels, pendingRowRanges } from './heatmapView';
-import { drawTunnelRoof } from './sceneRenderer';
+import { drawGaugeContents, drawHiveLabels, drawHiveState, drawStaticScene, drawTunnelRoof } from './sceneRenderer';
+import { flowerGaugeLayout } from './gaugeLayout';
 import { tunnelRoofOpacity } from './tunnelRoof';
 import { PX_PER_INCH, SCENE_HEIGHT_PX, SCENE_WIDTH_PX, VIEWPORT_PX, fieldPxMatrix, fieldToCanvas } from './viewTransform';
 import type { Point2, ViewTransform } from './viewTransform';
@@ -71,6 +73,11 @@ export interface ScenarioEditScene {
   floorActive?: { index: number; state: 'HOVER' | 'DRAG' | 'REMOVE' } | null; // 마우스를 올림 / 끄는 중 / 놓으면 빼짐
   autoTipNectar?: readonly Point2[];              // 오토 TIP NECTAR (LOADING ZONE 슬롯, 엔진과 같은 자리)
   addPreview?: { type: 'POLLEN' | 'NECTAR'; x: number; y: number; valid: boolean } | null; // 추가 상태: 포인터 자리 미리보기
+  // 14-1c: FLOWER별 POLLEN 수(게이지), 우리 HIVE 상향 셀 / 개수(셀 강조 · 알약), 휴먼 플레이어 NECTAR 재고, 팝오버 대상 강조 (없으면 그리지 않음)
+  flowers?: readonly number[];
+  hive?: { upwardCell: HiveCell; nectar: number; pollen: number };
+  stock?: number;
+  target?: { kind: 'HIVE' } | { kind: 'FLOWER'; index: number } | { kind: 'GARDEN'; side: 'ally' | 'opponent' } | null;
 }
 
 /** 편집 모드 장면 */
@@ -418,14 +425,50 @@ function drawScenarioPieces(ctx: CanvasRenderingContext2D, scene: ScenarioEditSc
   ctx.restore();
 }
 
+// 팝오버 대상 강조 (14-1c): 주황 점선 — HIVE = 우리 두 셀, FLOWER = 원 + 게이지, GARDEN = 구역
+function drawTargetHighlight(ctx: CanvasRenderingContext2D, scene: ScenarioEditScene): void {
+  const target = scene.target;
+  if (!target) return;
+  const box = (minX: number, minY: number, maxX: number, maxY: number, pad: number) =>
+    ctx.strokeRect(inchToPx(minX - pad), inchToPx(minY - pad), inchToPx(maxX - minX + 2 * pad), inchToPx(maxY - minY + 2 * pad));
+  ctx.save();
+  ctx.setLineDash([6, 4]);
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = SPAWN_COLORS.activeRing;
+  if (target.kind === 'HIVE') {
+    const a = hiveCellBox(scene.alliance, 'OPPOSITE_CELL');
+    const b = hiveCellBox(scene.alliance, 'AUDIENCE_CELL');
+    box(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.max(a.x + a.width, b.x + b.width), Math.max(a.y + a.height, b.y + b.height), 0.6);
+  } else if (target.kind === 'FLOWER') {
+    const c = FLOWER_CIRCLES[target.index];
+    ctx.beginPath();
+    ctx.arc(inchToPx(c.center.x), inchToPx(c.center.y), inchToPx(c.radius + 1.2), 0, Math.PI * 2);
+    ctx.stroke();
+    const g = flowerGaugeLayout(target.index).rect;
+    box(g.minX, g.minY, g.maxX, g.maxY, 0.5);
+  } else {
+    const side = target.side === 'ally' ? scene.alliance : scene.alliance === 'RED' ? 'BLUE' : 'RED';
+    const g = GARDEN_AABB[side];
+    box(g.minX, g.minY, g.maxX, g.maxY, 0.6);
+  }
+  ctx.restore();
+}
+
 // HIVE는 경기 장면과 같이 기둥 부분 → (바닥 기물 / 로봇) → 터널 지붕(지붕 불투명도) 순서 (13-1, 터널 안에 시작 자세 / 바닥 기물을 둘 수 있음)
+// 14-1c: 정적 레이어(게이지 틀 포함, 경기 장면과 같음) + HIVE 상향 셀 / FLOWER · 재고 게이지 내용 + 팝오버 대상 강조
 function renderScenarioField(ctx: CanvasRenderingContext2D, scene: ScenarioEditScene, dpr: number): void {
   const ally = scene.alliance;
-  drawFieldBackground(ctx);
-  drawGardens(ctx, false, ally);
-  drawLoadingZones(ctx, false, ally);
-  drawHiveBase(ctx, ally, 'PILLARS');
-  drawFlowers(ctx, false);
+  drawStaticScene(ctx, ally, dpr);
+  const hiveState = scene.hive ? { upwardCell: scene.hive.upwardCell, isTipping: false } : null;
+  if (hiveState) drawHiveState(ctx, hiveState, ally, 'PILLARS');
+  if (scene.flowers) {
+    const stock = scene.stock ?? INITIAL_HUMAN_NECTAR_STOCK;
+    drawGaugeContents(ctx, {
+      flowers: scene.flowers.map((n, k) => ({ id: FLOWER_IDS[k], pieces: Array.from({ length: n }, () => ({ type: 'POLLEN' as const, alliance: 'NONE' as const })) })),
+      pendingHumanNectar: 0,
+      nectarStock: stock,
+    }, ally);
+  }
   drawScenarioPieces(ctx, scene);
   // 끄는 로봇을 위에 (R1 → R2 순서, 끄는 로봇은 마지막)
   const order: SpawnRobotId[] = scene.active?.robot === 'robot1' ? ['robot2', 'robot1'] : ['robot1', 'robot2'];
@@ -436,7 +479,8 @@ function renderScenarioField(ctx: CanvasRenderingContext2D, scene: ScenarioEditS
     ...(scene.autoTipNectar ?? []).map((p) => ({ type: 'NECTAR' as const, state: 'ON_FIELD' as const, x: p.x, y: p.y })),
     ...(scene.floorPieces ?? []).map((p) => ({ type: p.type, state: 'ON_FIELD' as const, x: p.x, y: p.y })),
   ];
-  drawTunnelRoof(ctx, ally, null, tunnelRoofOpacity(robots, pieces), dpr);
+  drawTunnelRoof(ctx, ally, hiveState, tunnelRoofOpacity(robots, pieces), dpr);
+  drawTargetHighlight(ctx, scene);
 }
 
 // 로봇 번호 (화면 공간, 똑바로)
@@ -478,6 +522,7 @@ export function renderEditScene(ctx: CanvasRenderingContext2D, scene: EditScene,
   if (scene.mode === 'SCENARIO') {
     renderScenarioField(ctx, scene, dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (scene.hive) drawHiveLabels(ctx, { upwardCell: scene.hive.upwardCell, nectarInUpwardCell: scene.hive.nectar, pollenInUpwardCell: scene.hive.pollen }, scene.alliance, view);
     drawSpawnLabels(ctx, scene, view);
     ctx.restore();
     return;

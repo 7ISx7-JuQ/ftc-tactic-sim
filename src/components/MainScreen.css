@@ -2065,6 +2065,53 @@
 .field-area.is-scenario-edit.is-dragging .field-canvas {
   cursor: grabbing;
 }
+/* 시나리오 필드 편집 팝오버 (14-1c): 글자 층(포인터 통과) 안에서 포인터를 받음, 대상 아래 / 위로 펼침 */
+.field-popover {
+  position: absolute;
+  z-index: 2;
+  pointer-events: auto;
+  box-sizing: border-box;
+  width: calc(var(--u) * 240);
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 6);
+  padding: calc(var(--u) * 8) calc(var(--u) * 10) calc(var(--u) * 10);
+  border-radius: calc(var(--u) * 10);
+  border: 1px solid var(--panel-border);
+  background: rgba(21, 23, 28, 0.95);
+  box-shadow: 0 calc(var(--u) * 6) calc(var(--u) * 20) rgba(0, 0, 0, 0.4);
+  font-size: calc(var(--u) * 12);
+}
+.field-popover-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: calc(var(--u) * 8);
+}
+.field-popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.field-popover-title {
+  font-weight: 800;
+  font-size: calc(var(--u) * 13);
+}
+.main-screen .field-popover-close {
+  width: calc(var(--u) * 24);
+  height: calc(var(--u) * 24);
+}
+.main-screen .field-popover-close svg.lucide {
+  width: calc(var(--u) * 14);
+  height: calc(var(--u) * 14);
+}
+.field-popover .scenario-group {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 6);
+}
+.field-area.is-scenario-edit.is-over-target .field-canvas {
+  cursor: pointer;
+}
 .field-overlay {
   position: absolute;
   left: 50%;

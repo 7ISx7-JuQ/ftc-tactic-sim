@@ -36,6 +36,9 @@ import {
   floorRemaining,
   isOffField,
   moveFloorPiece,
+  sameTarget,
+  scenarioTargetAnchor,
+  scenarioTargetHitTest,
   cancelFieldEdit,
   cancelScenarioEdit,
   dragSpawnPose,
@@ -448,6 +451,46 @@ describe('시나리오 필드 편집 바닥 기물 (14-1b)', () => {
     expect(autoTipNectarSpots({ ...DEFAULT_DRAFT_VALUES, scenario: { ...cases[0], r1Spawn: { x: 40, y: 36, heading: 0 } } })).toHaveLength(3);
     expect(autoTipNectarSpots({ ...DEFAULT_DRAFT_VALUES, scenario: cases[3] })).toHaveLength(2);
     expect(autoTipNectarSpots(DEFAULT_DRAFT_VALUES)).toEqual([]);
+  });
+});
+
+describe('시나리오 필드 편집 팝오버 대상 (14-1c)', () => {
+  it('U. 대상 잡기: FLOWER 원 + 여유 3 in / 게이지, GARDEN 구역 + 여유(우리 / 상대는 진영 기준), 우리 HIVE 두 셀, 빈 자리 = null', () => {
+    expect(scenarioTargetHitTest('RED', { x: 4, y: 99 })).toEqual({ kind: 'FLOWER', index: 0 }); // (2, 96) 반지름 2 + 3
+    expect(scenarioTargetHitTest('RED', { x: -2.2, y: 110 })).toEqual({ kind: 'FLOWER', index: 0 }); // 왼쪽 벽 게이지
+    expect(scenarioTargetHitTest('RED', { x: 142, y: 48 })).toEqual({ kind: 'FLOWER', index: 2 });
+    expect(scenarioTargetHitTest('RED', { x: 10, y: 140 })).toEqual({ kind: 'GARDEN', side: 'ally' });
+    expect(scenarioTargetHitTest('RED', { x: 130, y: 3 })).toEqual({ kind: 'GARDEN', side: 'opponent' });
+    expect(scenarioTargetHitTest('BLUE', { x: 130, y: 3 })).toEqual({ kind: 'GARDEN', side: 'ally' });
+    expect(scenarioTargetHitTest('RED', { x: 59, y: 60 })).toEqual({ kind: 'HIVE' });
+    expect(scenarioTargetHitTest('RED', { x: 85, y: 60 })).toBeNull(); // 상대 HIVE 셀
+    expect(scenarioTargetHitTest('BLUE', { x: 85, y: 80 })).toEqual({ kind: 'HIVE' });
+    expect(scenarioTargetHitTest('RED', { x: 72, y: 120 })).toBeNull();
+    expect(sameTarget({ kind: 'FLOWER', index: 1 }, { kind: 'FLOWER', index: 1 })).toBe(true);
+    expect(sameTarget({ kind: 'FLOWER', index: 1 }, { kind: 'FLOWER', index: 2 })).toBe(false);
+    expect(sameTarget({ kind: 'GARDEN', side: 'ally' }, { kind: 'GARDEN', side: 'opponent' })).toBe(false);
+    expect(sameTarget({ kind: 'HIVE' }, null)).toBe(false);
+  });
+
+  it('V. 팝오버 기준점: FLOWER / GARDEN = 가운데(위쪽 절반이면 아래로), HIVE = 우리 셀 아래 가장자리에서 아래로', () => {
+    expect(scenarioTargetAnchor('RED', { kind: 'FLOWER', index: 1 })).toEqual({ x: 48, y: 2, below: true });
+    expect(scenarioTargetAnchor('RED', { kind: 'FLOWER', index: 0 })).toEqual({ x: 2, y: 96, below: false });
+    expect(scenarioTargetAnchor('RED', { kind: 'GARDEN', side: 'ally' })).toEqual({ x: 11.5, y: 143, below: false });
+    expect(scenarioTargetAnchor('BLUE', { kind: 'GARDEN', side: 'ally' })).toEqual({ x: 132.5, y: 1, below: true });
+    const hive = scenarioTargetAnchor('RED', { kind: 'HIVE' });
+    expect(hive.below).toBe(true);
+    expect(hive.y).toBeCloseTo(91.475, 6);
+    expect(hive.x).toBeCloseTo(59.25, 6);
+  });
+
+  it('W. 장면: FLOWER 개수 / HIVE 상향 셀 · 개수 / 재고(5 − 오토 TIP), 범위 밖 값은 엔진처럼 자름, 강조 대상 전달', () => {
+    const values = { ...DEFAULT_DRAFT_VALUES, scenario: { allianceColor: 'BLUE' as const, flowerPiecesCount: [4, 2, 0, 9] as [number, number, number, number], hiveInitialPieces: { pollenCount: 2, nectarCount: 1 }, autoTipCount: 2 } };
+    const scene = scenarioEditScene(values, null, { target: { kind: 'HIVE' } });
+    expect(scene.flowers).toEqual([4, 2, 0, 4]);
+    expect(scene.hive).toEqual({ upwardCell: 'OPPOSITE_CELL', nectar: 1, pollen: 2 });
+    expect(scene.stock).toBe(3);
+    expect(scene.target).toEqual({ kind: 'HIVE' });
+    expect(scenarioEditScene(DEFAULT_DRAFT_VALUES, null).target).toBeNull();
   });
 });
 

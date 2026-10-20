@@ -20,6 +20,7 @@ function recordingCtx() {
     get: (t, prop) => {
       if (prop === 'stroke' || prop === 'strokeRect') return () => strokes.push(String(t.strokeStyle));
       if (prop === 'fill') return () => fills.push(String(t.fillStyle));
+      if (prop === 'measureText') return () => ({ width: 10 }); // HIVE 셀 알약 (14-1c)
       if (prop in t) return t[prop as string];
       return () => undefined;
     },
@@ -71,7 +72,7 @@ describe('편집 모드 장면 그리기 (09-10b / 09-10c)', () => {
     expect(draw(spotScene({ appliedSweetSpot: { x: 40.5, y: 120.5 } }))).not.toContain(APPLIED);
   });
 
-  it('C. (09-11b / 14-1b) 시나리오 필드 편집 모드: 배치 문제 로봇만 흰 빗금 + 빨간 테두리, 잡은 핸들은 주황, 히트맵 빗금 없음', () => {
+  it('C. (09-11b / 14-1b / 14-1c) 시나리오 필드 편집 모드: 배치 문제 로봇만 흰 빗금 + 빨간 테두리, 잡은 핸들은 주황, 바닥 기물 / 대상 강조', () => {
     const config = { length: 18, width: 18, intakeZones: createIntakeZonePreset('FRONT', { length: 18, width: 18 }) };
     const spawn = (patch: Partial<ScenarioEditScene> = {}): ScenarioEditScene => ({
       mode: 'SCENARIO',
@@ -85,7 +86,7 @@ describe('편집 모드 장면 그리기 (09-10b / 09-10c)', () => {
     const ok = drawAll(spawn());
     expect(ok.strokes).not.toContain(STRIPE);
     expect(ok.strokes).not.toContain(INVALID);
-    expect(ok.strokes).not.toContain(HATCH);
+    // (히트맵 빗금 색 = 게이지 빈 칸 색이라 14-1c 정적 레이어(게이지 틀) 뒤로는 색으로 구분하지 않음)
     expect(ok.fills).not.toContain('#f59e0b');
     const bad = drawAll(spawn({ robots: { ...spawn().robots, robot2: { ...spawn().robots.robot2, bad: true } } }));
     expect(bad.strokes).toContain(STRIPE);
@@ -104,5 +105,12 @@ describe('편집 모드 장면 그리기 (09-10b / 09-10c)', () => {
     expect(drawAll({ ...pieceScene, floorActive: { index: 0, state: 'REMOVE' } }).strokes).not.toContain(RING);
     expect(drawAll({ ...pieceScene, addPreview: { type: 'NECTAR', x: 70, y: 20, valid: true } }).strokes).toContain(VALID);
     expect(drawAll({ ...pieceScene, addPreview: { type: 'NECTAR', x: 70, y: 20, valid: false } }).strokes).toContain(INVALID);
+
+    // 14-1c: 게이지 / HIVE 내용과 함께 그려도 강조 없음, 팝오버 대상은 주황 점선 (HIVE / FLOWER / GARDEN)
+    const withField = spawn({ flowers: [4, 4, 4, 4], hive: { upwardCell: 'AUDIENCE_CELL', nectar: 3, pollen: 1 }, stock: 5 });
+    expect(drawAll(withField).strokes).not.toContain(RING);
+    for (const target of [{ kind: 'HIVE' as const }, { kind: 'FLOWER' as const, index: 2 }, { kind: 'GARDEN' as const, side: 'opponent' as const }]) {
+      expect(drawAll({ ...withField, target }).strokes).toContain(RING);
+    }
   });
 });

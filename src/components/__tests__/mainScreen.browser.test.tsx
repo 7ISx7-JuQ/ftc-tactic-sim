@@ -243,6 +243,45 @@ describe('config 창', () => {
     await expect.element(button('APPLY')).toBeDisabled();
   });
 
+  it('시나리오 필드 편집 팝오버 (14-1c): HIVE / FLOWER를 누르면 개수 조절 팝오버, 값은 탭과 같은 초안 + 되돌리기, Esc = 팝오버만 닫기, 빈 자리 = 닫기', async () => {
+    await userEvent.click(button('Open settings'));
+    await userEvent.click(page.getByRole('tab', { name: 'SCENARIO' }));
+    await userEvent.click(button('EDIT ON FIELD').first());
+    const banner = page.getByRole('region', { name: 'SCENARIO ON FIELD' });
+    const canvas = document.querySelector('.field-canvas') as HTMLCanvasElement;
+    const at = (x: number, y: number) => {
+      const k = canvas.getBoundingClientRect().width / 160;
+      return { x: (x + 8) * k, y: (y + 8) * k };
+    };
+    const field = page.elementLocator(canvas);
+    const stepperValue = (scope: ReturnType<typeof page.getByRole>, name: string) => () => scope.getByRole('group', { name }).element().querySelector('.stepper-value')?.textContent;
+    const tab = page.getByRole('tabpanel');
+
+    // 우리 HIVE (RED 셀 가운데) → HIVE 팝오버, POLLEN + 1 → 탭에도 반영
+    await userEvent.click(field, { position: at(59, 60) });
+    const hive = page.getByRole('dialog', { name: 'HIVE' });
+    await expect.element(hive).toBeVisible();
+    await userEvent.click(hive.getByRole('group', { name: 'POLLEN in upward CELL' }).getByRole('button', { name: 'Increase' }));
+    await expect.poll(stepperValue(hive, 'POLLEN in upward CELL')).toBe('1');
+    await expect.poll(stepperValue(tab, 'POLLEN in upward CELL')).toBe('1');
+    // Esc = 팝오버만 닫기 (모드는 그대로), 되돌리기
+    await userEvent.keyboard('{Escape}');
+    await expect.element(hive).not.toBeInTheDocument();
+    await expect.element(banner).toBeVisible();
+    await userEvent.click(banner.getByRole('button', { name: 'UNDO' }));
+    await expect.poll(stepperValue(tab, 'POLLEN in upward CELL')).toBe('0');
+
+    // FLOWER 1 (2, 96) → FLOWER 팝오버, 빈 자리를 누르면 닫힘
+    await userEvent.click(field, { position: at(3, 95) });
+    const flower = page.getByRole('dialog', { name: 'FLOWER 1' });
+    await expect.element(flower).toBeVisible();
+    await userEvent.click(flower.getByRole('button', { name: 'Decrease' }));
+    await expect.poll(stepperValue(tab, 'FLOWER 1')).toBe('3');
+    await userEvent.click(field, { position: at(100, 120) });
+    await expect.element(flower).not.toBeInTheDocument();
+    await expect.element(banner).toBeVisible();
+  });
+
   it('시나리오 REROLL은 APPLY 없이 바로 적용된다', async () => {
     await userEvent.click(button('Open settings'));
     await userEvent.click(page.getByRole('tab', { name: 'SCENARIO' }));

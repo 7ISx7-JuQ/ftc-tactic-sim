@@ -17,8 +17,10 @@
 import type { AppPhase } from '../app/appController';
 import type { RobotId } from '../input/inputConfig';
 import type { LUTPieceType as PieceType } from '../workers/lutProtocol';
-import { FIELD_SIZE, PIECE_PHYSICS, getRobotOBB, testOBBvsCircle } from '../core/collision';
-import { INITIAL_HUMAN_NECTAR_STOCK, PLACEMENT_TOLERANCE, gardenPiecePositions, humanNectarSlots, isFloorPiecePositionValid, validateRobotPlacement } from '../core/simulationEngine';
+import { FIELD_SIZE, FLOWER_CIRCLES, GARDEN_AABB, PIECE_PHYSICS, getRobotOBB, testOBBvsCircle } from '../core/collision';
+import { FIELD_LAYOUT } from '../renderer/canvasRenderer';
+import { flowerGaugeLayout } from '../renderer/gaugeLayout';
+import { FLOWER_MAX_START_PIECES, INITIAL_HUMAN_NECTAR_STOCK, NECTAR_IN_PLAY, PLACEMENT_TOLERANCE, TOTAL_POLLEN, gardenPiecePositions, humanNectarSlots, isFloorPiecePositionValid, validateRobotPlacement } from '../core/simulationEngine';
 import type { FloorPiecePlacement, RobotPose, ScenarioConfig } from '../core/types';
 import type { HeatmapEditScene, ScenarioEditScene, SweetSpotEditScene } from '../renderer/editSceneRenderer';
 import type { SpawnPart, SpawnRobotId } from '../renderer/spawnEditLayout';
@@ -356,6 +358,7 @@ export function badFloorPieces(values: DraftValues): Set<number> {
 }
 
 const roundPoint = (p: Point) => ({ x: round1(p.x), y: round1(p.y) });
+const clampInt = (n: number, max: number) => Math.min(max, Math.max(0, Number.isFinite(n) ? Math.floor(n) : 0));
 
 function withFloorPieces(drafts: ConfigDrafts, pieces: FloorPiecePlacement[]): ConfigDrafts {
   const scenario = { ...drafts.draft.scenario, floorPieces: pieces };
@@ -457,6 +460,61 @@ export function autoTipNectarSpots(values: DraftValues): Point[] {
   return out;
 }
 
+// ------------------------------------------------------------
+// HIVE / FLOWER / GARDEN 팝오버 (14-1c): 클릭한 대상 옆 개수 조절기 (탭과 같은 범위 / 검증)
+// ------------------------------------------------------------
+
+/** 팝오버 대상: 우리 HIVE(상향 셀 / 개수), FLOWER k(FLOWER_CIRCLES 순서), GARDEN 우리 / 상대 */
+export type ScenarioTarget = { kind: 'HIVE' } | { kind: 'FLOWER'; index: number } | { kind: 'GARDEN'; side: 'ally' | 'opponent' };
+
+/** 대상 잡기 여유 (inch): FLOWER 원(반지름 2 in) / GARDEN(폭 2 in)은 작아서 넓혀 잡는다 */
+export const TARGET_HIT_SLOP = 3;
+
+const inBox = (p: Point, box: { minX: number; maxX: number; minY: number; maxY: number }, slop = 0) =>
+  p.x >= box.minX - slop && p.x <= box.maxX + slop && p.y >= box.minY - slop && p.y <= box.maxY + slop;
+
+/** 우리 HIVE 두 셀을 합친 영역 (셀 박스 = 렌더러 hiveCellBox와 같은 칸) */
+export function allyHiveBox(alliance: 'RED' | 'BLUE'): { minX: number; maxX: number; minY: number; maxY: number } {
+  const a = FIELD_LAYOUT.hiveCells[alliance].OPPOSITE_CELL;
+  const b = FIELD_LAYOUT.hiveCells[alliance].AUDIENCE_CELL;
+  return { minX: Math.min(a.x, b.x), maxX: Math.max(a.x + a.width, b.x + b.width), minY: Math.min(a.y, b.y), maxY: Math.max(a.y + a.height, b.y + b.height) };
+}
+
+/** 누른 점의 팝오버 대상 (FLOWER 원 / 게이지 → GARDEN → 우리 HIVE). 없으면 null */
+export function scenarioTargetHitTest(alliance: 'RED' | 'BLUE', p: Point): ScenarioTarget | null {
+  for (let k = 0; k < FLOWER_CIRCLES.length; k++) {
+    const c = FLOWER_CIRCLES[k];
+    if (Math.hypot(p.x - c.center.x, p.y - c.center.y) <= c.radius + TARGET_HIT_SLOP || inBox(p, flowerGaugeLayout(k).rect, 1)) return { kind: 'FLOWER', index: k };
+  }
+  for (const side of ['RED', 'BLUE'] as const) {
+    if (inBox(p, GARDEN_AABB[side], TARGET_HIT_SLOP)) return { kind: 'GARDEN', side: side === alliance ? 'ally' : 'opponent' };
+  }
+  if (inBox(p, allyHiveBox(alliance))) return { kind: 'HIVE' };
+  return null;
+}
+
+/**
+ * 팝오버를 붙일 필드 좌표 + 펼칠 방향: FLOWER / GARDEN = 대상 가운데에서 필드 위쪽 절반이면 아래로 / 아래쪽 절반이면 위로,
+ * HIVE = 우리 셀 아래 가장자리에서 아래로 (위로 펼치면 필드 위쪽의 안내 띠와 겹침)
+ */
+export function scenarioTargetAnchor(alliance: 'RED' | 'BLUE', target: ScenarioTarget): Point & { below: boolean } {
+  const half = FIELD_SIZE / 2;
+  if (target.kind === 'FLOWER') {
+    const c = FLOWER_CIRCLES[target.index].center;
+    return { x: c.x, y: c.y, below: c.y < half };
+  }
+  if (target.kind === 'GARDEN') {
+    const box = GARDEN_AABB[target.side === 'ally' ? alliance : alliance === 'RED' ? 'BLUE' : 'RED'];
+    const y = (box.minY + box.maxY) / 2;
+    return { x: (box.minX + box.maxX) / 2, y, below: y < half };
+  }
+  const box = allyHiveBox(alliance);
+  return { x: (box.minX + box.maxX) / 2, y: box.maxY, below: true };
+}
+
+export const sameTarget = (a: ScenarioTarget | null, b: ScenarioTarget | null): boolean =>
+  a === b || (!!a && !!b && a.kind === b.kind && (a.kind !== 'FLOWER' || a.index === (b as { index: number }).index) && (a.kind !== 'GARDEN' || a.side === (b as { side: string }).side));
+
 /** 두 로봇의 초안 시작 자세 / 크기 (끌기 판정 / 장면) */
 export function spawnRobots(values: DraftValues): Record<SpawnRobotId, { pose: RobotPose; size: { length: number; width: number } }> {
   const view = readScenario(values.scenario, values.robot1.config, values.robot2.config);
@@ -498,6 +556,7 @@ export function placeSpawn(drafts: ConfigDrafts, robot: RobotId, pose: RobotPose
 export interface ScenarioSceneUi {
   floorActive?: { index: number; state: 'HOVER' | 'DRAG' | 'REMOVE' } | null;
   addPreview?: { type: PieceType; x: number; y: number; valid: boolean } | null;
+  target?: ScenarioTarget | null; // 팝오버가 열린 / 마우스를 올린 대상 (14-1c, 주황 점선)
 }
 
 /**
@@ -521,6 +580,11 @@ export function scenarioEditScene(values: DraftValues, active: { robot: SpawnRob
     floorActive: ui.floorActive ?? null,
     autoTipNectar: autoTipNectarSpots(values),
     addPreview: ui.addPreview ?? null,
+    // 14-1c: FLOWER 게이지 / HIVE 상향 셀 내용 / NECTAR 재고 게이지 (엔진과 같이 범위로 자름), 강조 대상
+    flowers: view.flowers.map(n => clampInt(n, FLOWER_MAX_START_PIECES)),
+    hive: { upwardCell: view.hiveUpwardCell, nectar: clampInt(view.hiveNectar, NECTAR_IN_PLAY), pollen: clampInt(view.hivePollen, TOTAL_POLLEN) },
+    stock: INITIAL_HUMAN_NECTAR_STOCK - clampInt(view.autoTipCount, INITIAL_HUMAN_NECTAR_STOCK),
+    target: ui.target ?? null,
   };
 }
 

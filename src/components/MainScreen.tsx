@@ -11,6 +11,7 @@
 // 되돌리기 / 다시 하기(Ctrl / ⌘ + Z, Ctrl / ⌘ + Shift + Z, Ctrl + Y, 안내 띠 버튼).
 // 14-1b: 바닥 기물 — 안내 띠 + POLLEN / + NECTAR(추가 상태, 바닥 클릭 = 하나씩, Esc = 추가 상태만 끝), 끌어 옮기기 / 필드 밖으로 끌어 빼기,
 // 겹친 자리 / 놓을 기물 없음 = 놓지 않고 사유 토스트.
+// 14-1c: HIVE / FLOWER / GARDEN을 누르면 그 옆 팝오버(개수 조절기, 탭과 같은 고치기 · 되돌리기 기록), Esc = 팝오버만 닫기.
 // 09-10c: 스윗스팟 모드(SET ON FIELD) — 필드 클릭 = 초안 스윗스팟, DONE · APPLY = 그 로봇 탭 적용, CANCEL / Esc / START = 들어오기 전 값으로.
 
 import { useEffect, useRef, useState } from 'react';
@@ -73,8 +74,9 @@ import ScrubberBar from './ScrubberBar';
 import SettingsTab from './SettingsTab';
 import RobotTab from './RobotTab';
 import ScenarioTab from './ScenarioTab';
+import ScenarioFieldPopover from './ScenarioFieldPopover';
 import { readSweetSpot } from '../ui/robotForm';
-import { newSeed, readScenario, rerollSeed, scenarioFormIssues, scenarioIssueText } from '../ui/scenarioForm';
+import { issueFieldSet, newSeed, readScenario, rerollSeed, scenarioFormIssues, scenarioIssueText } from '../ui/scenarioForm';
 import { spawnHitTest } from '../renderer/spawnEditLayout';
 import type { SpawnPart, SpawnRobotId } from '../renderer/spawnEditLayout';
 import type { RobotPose } from '../core/types';
@@ -95,6 +97,9 @@ import {
   floorRemaining,
   isOffField,
   moveFloorPiece,
+  sameTarget,
+  scenarioTargetAnchor,
+  scenarioTargetHitTest,
   openScenarioEdit,
   placeSpawn,
   recordScenarioChange,
@@ -115,7 +120,7 @@ import {
   sweetSpotIssueCodes,
   toggleHeatmapEdit,
 } from '../ui/fieldEdit';
-import type { FieldEdit, ScenarioSceneUi, ScenarioSnapshot } from '../ui/fieldEdit';
+import type { FieldEdit, ScenarioSceneUi, ScenarioSnapshot, ScenarioTarget } from '../ui/fieldEdit';
 import { SCENE_WIDTH_PX, canvasToField, cssToCanvas, fieldToCanvas, fitScale } from '../renderer/viewTransform';
 import type { ScrubberActions } from './ScrubberBar';
 import './MainScreen.css';
@@ -185,6 +190,9 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
   const [floorActive, setFloorActive] = useState<ScenarioSceneUi['floorActive']>(null);
   const [addTool, setAddTool] = useState<'POLLEN' | 'NECTAR' | null>(null);
   const [addPreview, setAddPreview] = useState<ScenarioSceneUi['addPreview']>(null);
+  // HIVE / FLOWER / GARDEN 팝오버 (14-1c): 열린 대상 / 마우스를 올린 대상 (강조 · 커서)
+  const [popover, setPopover] = useState<ScenarioTarget | null>(null);
+  const [targetHover, setTargetHover] = useState<ScenarioTarget | null>(null);
   const [spawnDragging, setSpawnDragging] = useState(false);
   const overlayRef = useRef<HTMLDivElement>(null); // 캔버스와 같은 크기 / 위치의 글자 층 (시작 자세 글자를 장면 비율로 배치)
   const servicesRef = useRef(services); // 마운트 때 한 번만 씀 (컨트롤러 / 추적기와 같은 수명)
@@ -572,7 +580,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
       return;
     }
     if (activeEdit.mode === 'SCENARIO') {
-      controller.setEditScene(scenarioEditScene(drafts.draft, spawnActive, { floorActive, addPreview }));
+      controller.setEditScene(scenarioEditScene(drafts.draft, spawnActive, { floorActive, addPreview, target: popover ?? targetHover }));
       return;
     }
     const robot = activeEdit.robot;
@@ -583,16 +591,21 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
         ? heatmapEditScene(editAlliance, drafts.applied[robot], heatmap, piece)
         : sweetSpotEditScene(editAlliance, drafts.draft[robot], drafts.applied[robot], heatmap, spotHover?.cell ?? null, activeEdit.slot),
     );
-  }, [activeEdit, editPiece, editAlliance, drafts.applied, drafts.draft, lutViews, spotHover, spawnActive, floorActive, addPreview]);
+  }, [activeEdit, editPiece, editAlliance, drafts.applied, drafts.draft, lutViews, spotHover, spawnActive, floorActive, addPreview, popover, targetHover]);
   // 편집 중 Esc = 편집 모드 닫기 / 스윗스팟 모드는 취소 (config 창은 그대로, 확인창이 떠 있으면 확인창이 먼저)
   useEffect(() => {
     if (!activeEdit || confirm) return;
     const edit = activeEdit;
     const adding = addTool !== null;
+    const popoverOpen = popover !== null;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
       e.preventDefault();
-      // 바닥 기물 추가 상태면 추가 상태만 끝 (모드는 그대로, 14-1b)
+      // 팝오버가 열려 있으면 팝오버만 닫기 (14-1c), 바닥 기물 추가 상태면 추가 상태만 끝 (모드는 그대로, 14-1b)
+      if (popoverOpen) {
+        setPopover(null);
+        return;
+      }
       if (adding) {
         setAddTool(null);
         setAddPreview(null);
@@ -609,10 +622,12 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
       setFloorActive(null);
       setAddTool(null);
       setAddPreview(null);
+      setPopover(null);
+      setTargetHover(null);
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [activeEdit, confirm, addTool]);
+  }, [activeEdit, confirm, addTool, popover]);
 
   // 시나리오 필드 편집 모드: Ctrl / ⌘ + Z 되돌리기, Ctrl / ⌘ + Shift + Z · Ctrl + Y 다시 하기 (글자 입력칸에서는 브라우저 글자 되돌리기)
   useEffect(() => {
@@ -656,6 +671,8 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
     setFloorActive(null);
     setAddTool(null);
     setAddPreview(null);
+    setPopover(null);
+    setTargetHover(null);
   };
   // CANCEL / Esc: 스윗스팟 / 시작 자세 모드면 들어오기 전 값으로 되돌리고 닫음 (히트맵 모드는 닫기만)
   const cancelEdit = () => {
@@ -694,6 +711,13 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
     const k = rect.width / SCENE_WIDTH_PX;
     return { left: rect.left - areaRect.left + at.x * k, top: rect.top - areaRect.top + at.y * k };
   };
+  // 팝오버 위치 (14-1c): 대상 기준점의 장면 비율(%, 캔버스와 같은 크기의 글자 층 기준) + 펼칠 방향 (scenarioTargetAnchor)
+  const popoverPlacement = (target: ScenarioTarget) => {
+    const anchor = scenarioTargetAnchor(drafts.draft.scenario.allianceColor, target);
+    const view = status ? { angle: status.viewAngle, scale: fitScale(status.viewAngle) } : { angle: 0, scale: 1 };
+    const at = fieldToCanvas(view, anchor.x, anchor.y);
+    return { leftPct: (at.x / SCENE_WIDTH_PX) * 100, topPct: (at.y / SCENE_WIDTH_PX) * 100, below: anchor.below };
+  };
   // 필드 CSS 좌표 → 격자 중심 + 말풍선 위치. 필드 밖이면 null
   const spotAt = (clientX: number, clientY: number) => {
     const p = fieldPointAt(clientX, clientY);
@@ -720,6 +744,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
       setFloorActive({ index: pieceHit, state: 'DRAG' });
       setSpawnActive(null);
       setAddPreview(null);
+      setPopover(null);
       setSpawnDragging(true);
       setConfigNotice(null);
       return;
@@ -730,6 +755,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
       spawnDragRef.current = { ...hit, pointerStart: p, poseStart: robots[hit.robot].pose, before: scenarioSnapshot(drafts), lastPose: null };
       setSpawnActive(hit);
       setAddPreview(null);
+      setPopover(null);
       setSpawnDragging(true);
       setConfigNotice(null);
       return;
@@ -743,7 +769,11 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
         commitScenario(result.drafts);
         setAddPreview(null);
       }
+      return;
     }
+    // HIVE / FLOWER / GARDEN → 팝오버 (같은 대상이면 닫기), 빈 자리 → 닫기 (14-1c)
+    const target = scenarioTargetHitTest(drafts.draft.scenario.allianceColor, p);
+    setPopover(current => (target && !sameTarget(current, target) ? target : null));
   };
   // 놓기: 그 로봇이 겹치는 자리면 끌기 전으로 되돌리고 사유 토스트, 아니면 확정 + 되돌리기 기록 (14-1a)
   const onFieldPointerUp = (e: ReactPointerEvent) => {
@@ -806,6 +836,8 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
           ? { type: addTool, x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10, valid: addFloorPiece(drafts, addTool, p).refusal === null }
           : null;
       if (preview?.x !== addPreview?.x || preview?.y !== addPreview?.y || preview?.valid !== addPreview?.valid || preview?.type !== addPreview?.type) setAddPreview(preview);
+      const target = !overBanner && !robotHover && pieceHover === null && !addTool ? scenarioTargetHitTest(drafts.draft.scenario.allianceColor, p) : null;
+      if (!sameTarget(target, targetHover)) setTargetHover(target);
       return;
     }
     if (!spotEdit) return;
@@ -940,7 +972,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
       {status && <LeftPanel status={status} lang={lang} teams={{ robot1: drafts.applied.robot1, robot2: drafts.applied.robot2 }} />}
       {/* 종료 강조 5초 중 필드를 누르면 건너뛰기 */}
       <div
-        className={`field-area${spotEdit ? ' is-picking' : ''}${scenarioEdit ? ` is-scenario-edit${spawnActive ? ` is-over-${spawnActive.part}` : floorActive ? ' is-over-body' : ''}${spawnDragging ? ' is-dragging' : ''}${addTool ? ' is-adding' : ''}` : ''}`}
+        className={`field-area${spotEdit ? ' is-picking' : ''}${scenarioEdit ? ` is-scenario-edit${spawnActive ? ` is-over-${spawnActive.part}` : floorActive ? ' is-over-body' : ''}${spawnDragging ? ' is-dragging' : ''}${addTool ? ' is-adding' : ''}${targetHover ? ' is-over-target' : ''}` : ''}`}
         ref={areaRef}
         onClick={onFieldClick}
         onPointerDown={onFieldPointerDown}
@@ -953,6 +985,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
             setFloorActive(null);
           }
           setAddPreview(null);
+          setTargetHover(null);
           spotHoverRef.current = null;
           setSpotHover(null);
         }}
@@ -979,12 +1012,25 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
             onAddTool={piece => {
               setAddTool(piece);
               setAddPreview(null);
+              setPopover(null);
             }}
             onDone={doneEdit}
             onCancel={cancelEdit}
           />
         )}
         <div className="field-overlay" ref={overlayRef}>
+          {scenarioEdit && popover && status && (
+            <ScenarioFieldPopover
+              target={popover}
+              scenario={drafts.draft.scenario}
+              view={readScenario(drafts.draft.scenario, drafts.draft.robot1.config, drafts.draft.robot2.config)}
+              red={issueFieldSet(scenarioFormIssues(drafts.draft))}
+              at={popoverPlacement(popover)}
+              lang={lang}
+              onEdit={next => editScenario(next, null, null)}
+              onClose={() => setPopover(null)}
+            />
+          )}
           {scenarioEdit &&
             status &&
             (['robot1', 'robot2'] as const).map(robot => {
