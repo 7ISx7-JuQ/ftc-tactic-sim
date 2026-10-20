@@ -21,9 +21,9 @@ const assert = (c: boolean, m: string) => {
 const cfg = (id: 'robot1' | 'robot2'): RobotConfig => ({
   id, name: id, width: 18, length: 18, maxSpeed: 60, maxTurnRate: 4, maxLinearAccel: 120, maxAngularAccel: 10,
   intakeDelay: 100, canIntakeNectar: true, intakeZones: createIntakeZonePreset('FRONT', { length: 18, width: 18 }),
-  shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0], aimTolerance: 0.05,
+  shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0],
   flowerSetupDelay: 500, flowerDropDelay: 200,
-  shooterSetup: 'SHARED', nectarShooter: { shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0], aimTolerance: 0.05 }, flowerDropZones: [], liftMaxSpeed: 0, maxControlledPieces: 4,
+  shooterSetup: 'SHARED', nectarShooter: { shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0] }, flowerDropZones: [], liftMaxSpeed: 0, maxControlledPieces: 4,
 });
 const C1 = cfg('robot1');
 const C2 = cfg('robot2');

@@ -224,12 +224,12 @@ describe('프리셋 파일 (10-2)', () => {
   // 11-2: v2.0.0 형식 (명세서 3.9 프리셋 파일)
   // ------------------------------------------------------------
 
-  // v2.0.0 항목을 지운 v1 형식 로봇 데이터 (v1 앱이 내보낸 모양)
+  // v2.0.0 항목을 지운 v1 형식 로봇 데이터 (v1 앱이 내보낸 모양, 11-3에서 없앤 허용 조준 오차 aimTolerance 포함)
   const omit = (o: object, keys: readonly string[]): Record<string, unknown> => Object.fromEntries(Object.entries(o).filter(([k]) => !keys.includes(k)));
   const v1Robot = (profile: DraftValues['robot1']) => ({
     teamNumber: profile.teamNumber,
     teamName: profile.teamName,
-    config: omit(profile.config, ['shooterSetup', 'nectarShooter', 'flowerDropZones', 'liftMaxSpeed', 'id']),
+    config: { ...omit(profile.config, ['shooterSetup', 'nectarShooter', 'flowerDropZones', 'liftMaxSpeed', 'id']), aimTolerance: 0.07 },
     ballistics: omit(profile.ballistics, ['shooterLateralOffset', 'nectarShooter']),
   });
   // v2.0.0 항목을 모두 바꾼 로봇
@@ -238,7 +238,7 @@ describe('프리셋 파일 (10-2)', () => {
     config: {
       ...custom.robot1.config,
       shooterSetup: 'PER_PIECE',
-      nectarShooter: { shooterDelay: 450, turretType: 'TURRET', turretRange: [-2, 2], aimTolerance: 0.1 },
+      nectarShooter: { shooterDelay: 450, turretType: 'TURRET', turretRange: [-2, 2] },
       flowerDropZones: [{ side: 'LEFT', offset: 2, width: 6, depth: 1.5 }],
       liftMaxSpeed: 20,
     },
@@ -287,7 +287,7 @@ describe('프리셋 파일 (10-2)', () => {
     expect(profile.config).toEqual({
       ...c,
       shooterSetup: 'SHARED',
-      nectarShooter: { shooterDelay: c.shooterDelay, turretType: 'TURRET', turretRange: [-1, 1], aimTolerance: c.aimTolerance },
+      nectarShooter: { shooterDelay: c.shooterDelay, turretType: 'TURRET', turretRange: [-1, 1] },
       flowerDropZones: [],
       liftMaxSpeed: 0,
     });
@@ -296,8 +296,7 @@ describe('프리셋 파일 (10-2)', () => {
     // NECTAR 슈터는 앱 기본값이 아니라 주 슈터 복사 (기본 탄도와 다름)
     expect(profile.ballistics.nectarShooter.dz).toBe(40);
     expect(defaults.robot1.ballistics.nectarShooter.dz).not.toBe(40);
-    // 있는 항목은 바꾸지 않음
-    expect(upgradeRobotProfileData(v1Robot(v2))).not.toEqual(v1Robot(v2));
+    // 있는 항목은 바꾸지 않음 (v1Robot은 aimTolerance를 넣으므로 v2 로봇에서 직접 만든 데이터로 비교)
     const full = { teamNumber: v2.teamNumber, teamName: v2.teamName, config: { ...v2.config }, ballistics: v2.ballistics };
     expect(upgradeRobotProfileData(full)).toEqual(full);
     // 레코드가 아니면 그대로
@@ -321,7 +320,7 @@ describe('프리셋 파일 (10-2)', () => {
       'robot1',
     );
     expect(profile.config.shooterSetup).toBe('SHARED');
-    expect(profile.config.nectarShooter).toEqual({ ...def.config.nectarShooter, aimTolerance: 0.2 });
+    expect(profile.config.nectarShooter).toEqual(def.config.nectarShooter);
     expect(profile.config.flowerDropZones).toEqual([{ side: 'BACK', offset: 0, width: 5, depth: 1 }]);
     expect(profile.config.liftMaxSpeed).toBe(0);
     expect(profile.ballistics.shooterLateralOffset).toBe(0);
@@ -341,5 +340,21 @@ describe('프리셋 파일 (10-2)', () => {
     expect(scenario).toEqual({ allianceColor: 'RED', r2AutoMovement: 'PARK' });
     // 형식이 맞는 지정 바닥 기물은 모르는 항목을 버리고 복사
     expect(sanitizeScenarioPreset({ floorPieces: [{ type: 'NECTAR', x: 5, y: 6, vx: 1 }] }, { allianceColor: 'RED' }).floorPieces).toEqual([{ type: 'NECTAR', x: 5, y: 6 }]);
+  });
+
+  it('M. (11-3) 허용 조준 오차 aimTolerance 제거: 변환에서 주 / NECTAR 슈터 값을 버림, 원본 불변, 정리 결과에 없음', () => {
+    const raw = { ...v1Robot(v2), config: { ...v1Robot(v2).config, nectarShooter: { ...v2.config.nectarShooter, aimTolerance: 0.1 } } };
+    const snapshot = JSON.stringify(raw);
+    const up = upgradeRobotProfileData(raw) as { config: Record<string, unknown> & { nectarShooter: Record<string, unknown> } };
+    expect(JSON.stringify(raw)).toBe(snapshot);
+    expect('aimTolerance' in up.config || 'aimTolerance' in up.config.nectarShooter).toBe(false);
+    expect(up.config.nectarShooter).toEqual(v2.config.nectarShooter);
+    // NECTAR 슈터가 없는 v1 데이터: 주 슈터 복사에도 들어가지 않음
+    const v1 = upgradeRobotProfileData(v1Robot(custom.robot1)) as { config: Record<string, unknown> & { nectarShooter: Record<string, unknown> } };
+    expect('aimTolerance' in v1.config || 'aimTolerance' in v1.config.nectarShooter).toBe(false);
+    // 정리 / 왕복 결과에도 없음
+    const { profile } = sanitizeRobotPreset(raw, defaults.robot1, 'robot1');
+    expect('aimTolerance' in profile.config || 'aimTolerance' in profile.config.nectarShooter).toBe(false);
+    expect(JSON.parse(buildPresetFile('robot1', { ...custom, robot1: v2 })).data.config).not.toHaveProperty('aimTolerance');
   });
 });

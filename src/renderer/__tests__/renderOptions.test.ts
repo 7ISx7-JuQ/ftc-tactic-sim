@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FLOWER_CIRCLES, PIECE_PHYSICS, createIntakeZonePreset, hiveCellAimPoint } from '../../core/collision';
-import { DEFAULT_SHOOTER_BALLISTICS, bearingTo, planShotFlight, shooterFor } from '../../core/ballistics';
+import { DEFAULT_SHOOTER_BALLISTICS, FIXED_AIM_TOLERANCE, bearingTo, planShotFlight, shooterFor } from '../../core/ballistics';
 import { SimulationEngine } from '../../core/simulationEngine';
 import type { RobotDriveInput } from '../../core/simulationEngine';
 import type { DeepReadonly, RobotConfig, ShotProbabilityResolver, TimelineFrame } from '../../core/types';
@@ -18,9 +18,9 @@ const near = (a: number, b: number, tol = 1e-9) => Math.abs(a - b) < tol;
 const cfg = (id: 'robot1' | 'robot2', over: Partial<RobotConfig> = {}): RobotConfig => ({
   id, name: id, width: 18, length: 18, maxSpeed: 60, maxTurnRate: 4, maxLinearAccel: 120, maxAngularAccel: 10,
   intakeDelay: 100, canIntakeNectar: true, intakeZones: createIntakeZonePreset('FRONT', { length: 18, width: 18 }, 3),
-  shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0], aimTolerance: 0.05,
+  shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0],
   flowerSetupDelay: 500, flowerDropDelay: 200,
-  shooterSetup: 'SHARED', nectarShooter: { shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0], aimTolerance: 0.05 }, flowerDropZones: [], liftMaxSpeed: 0, maxControlledPieces: 4, ...over,
+  shooterSetup: 'SHARED', nectarShooter: { shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0] }, flowerDropZones: [], liftMaxSpeed: 0, maxControlledPieces: 4, ...over,
 });
 const C1 = cfg('robot1'), C2 = cfg('robot2');
 type Frame = DeepReadonly<TimelineFrame>;
@@ -38,7 +38,7 @@ describe('표시 옵션 (명세서 3.7, 08-6)', () => {
     const aim = hiveCellAimPoint('RED', 'AUDIENCE_CELL');
     const bearing = bearingTo(60.5, 130.5, aim.x, aim.y);
     const fixed = aimGuide(robot, C1, 'RED', 'AUDIENCE_CELL')!;
-    assert(near(fixed.sectorStart, 1.2 - 0.05) && near(fixed.sectorEnd, 1.2 + 0.05) && fixed.launchHeading === 1.2 && near(fixed.aim.x, aim.x), 'FIXED: heading ± aimTolerance, launches along the heading');
+    assert(near(fixed.sectorStart, 1.2 - FIXED_AIM_TOLERANCE) && near(fixed.sectorEnd, 1.2 + FIXED_AIM_TOLERANCE) && fixed.launchHeading === 1.2 && near(fixed.aim.x, aim.x), 'FIXED: heading ± FIXED_AIM_TOLERANCE, launches along the heading');
     const half = aimGuide(robot, cfg('robot1', { turretType: 'TURRET', turretRange: [-Math.PI / 2, Math.PI / 2] }), 'RED', 'AUDIENCE_CELL')!;
     assert(near(half.sectorStart, 1.2 - Math.PI / 2) && near(half.sectorEnd, 1.2 + Math.PI / 2), 'TURRET ±90°: sector heading ± 90°');
     const rear = aimGuide(robot, cfg('robot1', { turretType: 'TURRET', turretRange: [2.5, -2.5] }), 'RED', 'AUDIENCE_CELL')!;
@@ -122,7 +122,7 @@ describe('표시 옵션 (명세서 3.7, 08-6)', () => {
       POLLEN: { ...DEFAULT_SHOOTER_BALLISTICS, shooterOffset: 5, shooterLateralOffset: 4 },
       NECTAR: { ...DEFAULT_SHOOTER_BALLISTICS, shooterOffset: 2, shooterLateralOffset: -3 },
     };
-    const PER = cfg('robot1', { shooterSetup: 'PER_PIECE', turretType: 'TURRET', turretRange: [-Math.PI, Math.PI], nectarShooter: { shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0], aimTolerance: 0.2 } });
+    const PER = cfg('robot1', { shooterSetup: 'PER_PIECE', turretType: 'TURRET', turretRange: [-Math.PI, Math.PI], nectarShooter: { shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0] } });
     const planFor = (r: ReturnType<typeof robot>, config: RobotConfig, type: 'POLLEN' | 'NECTAR') =>
       planShotFlight({ robotX: r.x, robotY: r.y, robotHeading: r.heading, shooter: shooterFor(config, type), ballistics: SH[type], pieceType: type, alliance: 'RED', upwardCell: 'AUDIENCE_CELL', hit: false });
 
@@ -148,7 +148,7 @@ describe('표시 옵션 (명세서 3.7, 08-6)', () => {
       const g = aimGuide(r, PER, 'RED', 'AUDIENCE_CELL', SH)!;
       const plan = planFor(r, PER, 'NECTAR');
       assert(g.pieceType === 'NECTAR' && near(g.muzzle.x, plan.from.x) && near(g.muzzle.y, plan.from.y) && g.launchHeading === 1.2 && plan.heading === 1.2, 'NECTAR fixed: muzzle = planShotFlight, launches along the heading');
-      assert(near(g.sectorStart, 1.2 - 0.2) && near(g.sectorEnd, 1.2 + 0.2), 'sector from the NECTAR shooter tolerance');
+      assert(near(g.sectorStart, 1.2 - FIXED_AIM_TOLERANCE) && near(g.sectorEnd, 1.2 + FIXED_AIM_TOLERANCE), 'sector from the NECTAR shooter (fixed ±3°, not the 360° main turret)');
     }
     // 탄도 미지정 = 엔진 기본 슈터 (오프셋 0): 사출구 = 로봇 중심 (v1과 같은 그림)
     {

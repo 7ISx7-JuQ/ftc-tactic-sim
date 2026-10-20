@@ -81,7 +81,6 @@ const LABELS: Readonly<Record<MainFieldKey, MessageKey>> = {
   maxControlledPieces: 'robot.maxControlledPieces',
   intakeDelay: 'robot.intakeDelay',
   shooterDelay: 'robot.shooterDelay',
-  aimTolerance: 'robot.aimTolerance',
   turretLeft: 'robot.turretLeft',
   turretRight: 'robot.turretRight',
   flowerSetupDelay: 'robot.flowerSetupDelay',
@@ -151,16 +150,14 @@ export default function RobotTab({ robotId, profile, fieldText, unit, lang, lock
             label={v => t(lang, `robot.turret.${v}`)}
             disabled={() => locked}
             onChange={v => {
-              // 터렛으로 바꿀 때 범위가 비어 있으면(폭 0) ±90°로 시작. 다른 형식의 값은 버리지 않음. 숨는 칸의 틀린 글자는 지움
+              // 터렛으로 바꿀 때 범위가 비어 있으면(폭 0) ±90°로 시작. 고정형으로 바꿔도 터렛 범위는 버리지 않음. 숨는 칸의 틀린 글자는 지움
               const range = v === 'TURRET' && aim.turretRange[0] === aim.turretRange[1] ? TURRET_PRESETS.half : aim.turretRange;
-              const hidden = v === 'TURRET' ? [key('aimTolerance')] : [key('turretLeft'), key('turretRight')];
+              const hidden = v === 'FIXED' ? [key('turretLeft'), key('turretRight')] : [];
               onEdit(writeSlotAim(profile, slot, { turretType: v, turretRange: [...range] as [number, number] }), null, null, hidden.filter(k => fieldText[k] !== undefined));
             }}
           />
         </div>
-        {aim.turretType === 'FIXED' ? (
-          <div className="form-grid">{num(key('aimTolerance'))}</div>
-        ) : (
+        {aim.turretType === 'TURRET' && (
           <>
             <div className="form-grid">
               {num(key('turretLeft'))}

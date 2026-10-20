@@ -6,6 +6,7 @@ import {
   createAimTrajectory,
   createLUTShotResolver,
   DEFAULT_SHOOTER_BALLISTICS,
+  FIXED_AIM_TOLERANCE,
   createRng,
   descendingDistanceAtHeight,
   estimateHitRate,
@@ -433,8 +434,8 @@ describe('몬테카를로 / LUT 생성 (06-3)', () => {
       robot1: { POLLEN: constSet(0, 0), NECTAR: constSet(0, 1) },
       robot2: { POLLEN: constSet(1, 0), NECTAR: constSet(1, 1) },
     };
-    type Shooter = Pick<RobotConfig, 'turretType' | 'turretRange' | 'aimTolerance'>;
-    const FIXED: Shooter = { turretType: 'FIXED', turretRange: [0, 0], aimTolerance: deg(3) };
+    type Shooter = Pick<RobotConfig, 'turretType' | 'turretRange'>;
+    const FIXED: Shooter = { turretType: 'FIXED', turretRange: [0, 0] };
     const resolver = createLUTShotResolver(luts, FIXED, FIXED);
     const x = 60.5, y = 120.5;
     const facing = (alliance: 'RED' | 'BLUE', cell: 'AUDIENCE_CELL' | 'OPPOSITE_CELL') => { const a = hiveCellAimPoint(alliance, cell); return bearingTo(x, y, a.x, a.y); };
@@ -459,20 +460,20 @@ describe('몬테카를로 / LUT 생성 (06-3)', () => {
       assert(near(r('robot1', 'POLLEN', px, py, bearingTo(px, py, a.x, a.y), 'RED', 'AUDIENCE_CELL'), 0.001 * (px - 0.5) + 0.002 * (py - 0.5), 1e-5), 'bilinear lookup at the robot center');
     }
 
-    // 고정형: |Δψ| ≤ aimTolerance (경계 포함), 각도 감김, 비정상 허용 오차는 0으로 취급
+    // 고정형: |Δψ| ≤ FIXED_AIM_TOLERANCE (±3°, 11-3 임시 상수, 경계 포함), 각도 감김
     {
       const h = facing('RED', 'AUDIENCE_CELL');
-      const p = (heading: number, s: Shooter = FIXED) => createLUTShotResolver(luts, s, s)('robot1', 'POLLEN', x, y, heading, 'RED', 'AUDIENCE_CELL');
+      const p = (heading: number) => createLUTShotResolver(luts, FIXED, FIXED)('robot1', 'POLLEN', x, y, heading, 'RED', 'AUDIENCE_CELL');
       const P = expected(0, 0, 0);
+      assert(FIXED_AIM_TOLERANCE === deg(3), 'fixed aim tolerance = 3° (previous default)');
       assert(near(p(h), P, 1e-6) && near(p(h + deg(3) - 1e-6), P, 1e-6) && near(p(h - deg(3) + 1e-6), P, 1e-6), 'FIXED within tolerance');
       assert(p(h + deg(3) + 1e-6) === 0 && p(h - deg(3) - 1e-6) === 0 && p(h + Math.PI) === 0, 'FIXED outside tolerance -> 0');
       assert(near(p(h + 2 * Math.PI), P, 1e-6) && near(p(h - 4 * Math.PI + deg(1)), P, 1e-6), 'heading wraps around');
-      assert(near(p(h, { ...FIXED, aimTolerance: -1 }), P, 1e-6) && p(h + 1e-6, { ...FIXED, aimTolerance: -1 }) === 0 && p(h + 1e-6, { ...FIXED, aimTolerance: NaN }) === 0, 'invalid tolerance -> exact alignment only');
     }
 
     // 터렛형: Δψ = 조준점 방위 − 헤딩 (+ = 로봇 오른쪽, 캔버스 y-down), [α, β] 정규화, α > β는 ±π를 가로지름
     {
-      const T = (range: [number, number]): Shooter => ({ turretType: 'TURRET', turretRange: range, aimTolerance: 0 });
+      const T = (range: [number, number]): Shooter => ({ turretType: 'TURRET', turretRange: range });
       const within = (dPsi: number, range: [number, number]) => isAimWithinShooterRange(dPsi, T(range));
       assert(within(0, [-Math.PI / 2, Math.PI / 2]) && within(1.2, [-Math.PI / 2, Math.PI / 2]) && !within(Math.PI, [-Math.PI / 2, Math.PI / 2]), 'front half turret');
       assert(within(Math.PI, [2.5, -2.5]) && within(-Math.PI, [2.5, -2.5]) && within(2.6, [2.5, -2.5]) && !within(0, [2.5, -2.5]) && !within(2.4, [2.5, -2.5]), 'rear turret range crossing ±π');
@@ -490,7 +491,8 @@ describe('몬테카를로 / LUT 생성 (06-3)', () => {
       assert(createLUTShotResolver(bad, FIXED, FIXED)('robot2', 'NECTAR', x, y, facing('RED', 'AUDIENCE_CELL'), 'RED', 'AUDIENCE_CELL') === 0, 'NaN LUT value -> 0');
       const mutable: Shooter = { ...FIXED };
       const r = createLUTShotResolver(luts, mutable, mutable);
-      mutable.aimTolerance = 0;
+      mutable.turretType = 'TURRET';
+      mutable.turretRange = [0, Math.PI];
       assert(near(r('robot1', 'POLLEN', x, y, facing('RED', 'AUDIENCE_CELL') + deg(2), 'RED', 'AUDIENCE_CELL'), expected(0, 0, 0), 1e-6), 'shooter settings snapshotted at creation');
     }
   });
@@ -842,8 +844,8 @@ describe('슈터 구성 / 좌우 오프셋 (12-3)', () => {
   });
 
   it('S. 슈터 구성: 발사 가능 기물 / 기물별 슈터 / 다음 발사 기물 (첫 발사 가능 기물)', () => {
-    const base = { shooterDelay: 300, turretType: 'FIXED' as const, turretRange: [0, 0] as [number, number], aimTolerance: deg(3) };
-    const nectar = { shooterDelay: 450, turretType: 'TURRET' as const, turretRange: [-1, 1] as [number, number], aimTolerance: deg(5) };
+    const base = { shooterDelay: 300, turretType: 'FIXED' as const, turretRange: [0, 0] as [number, number] };
+    const nectar = { shooterDelay: 450, turretType: 'TURRET' as const, turretRange: [-1, 1] as [number, number] };
     const fire = (setup: 'NONE' | 'POLLEN_ONLY' | 'SHARED' | 'PER_PIECE' | undefined) => [isPieceFireable({ shooterSetup: setup }, 'POLLEN'), isPieceFireable({ shooterSetup: setup }, 'NECTAR')];
     expect([fire('NONE'), fire('POLLEN_ONLY'), fire('SHARED'), fire('PER_PIECE'), fire(undefined)]).toEqual([[false, false], [true, false], [true, true], [true, true], [true, true]]);
     expect(shooterFor({ ...base, shooterSetup: 'PER_PIECE', nectarShooter: nectar }, 'NECTAR')).toBe(nectar);
@@ -902,7 +904,7 @@ describe('슈터 구성 / 좌우 오프셋 (12-3)', () => {
     const KEYS: HiveCellKey[] = ['RED_AUDIENCE', 'RED_OPPOSITE', 'BLUE_AUDIENCE', 'BLUE_OPPOSITE'];
     const constSet = (v: number) => Object.fromEntries(KEYS.map(k => [k, new Float32Array(n * n).fill(v)])) as HeatmapLUTSet;
     const luts: MatchHeatmapLUTs = { robot1: { POLLEN: constSet(0.4), NECTAR: constSet(0.6) }, robot2: { POLLEN: constSet(0.4), NECTAR: constSet(0.6) } };
-    const FIXED = { shooterDelay: 300, turretType: 'FIXED' as const, turretRange: [0, 0] as [number, number], aimTolerance: deg(3) };
+    const FIXED = { shooterDelay: 300, turretType: 'FIXED' as const, turretRange: [0, 0] as [number, number] };
     const TURRET360 = { ...FIXED, turretType: 'TURRET' as const, turretRange: [-Math.PI, Math.PI] as [number, number] };
     const x = 60.5, y = 130.5;
     const beta = bearingTo(x, y, aim.x, aim.y);

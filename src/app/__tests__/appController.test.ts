@@ -85,8 +85,8 @@ const countingCtx = () => {
 const cfg = (id: 'robot1' | 'robot2'): RobotConfig => ({
   id, name: id, width: 18, length: 18, maxSpeed: 60, maxTurnRate: 4, maxLinearAccel: 120, maxAngularAccel: 10,
   intakeDelay: 100, canIntakeNectar: true, maxControlledPieces: 4, intakeZones: createIntakeZonePreset('FRONT', { length: 18, width: 18 }),
-  shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0], aimTolerance: 0.05, flowerSetupDelay: 500, flowerDropDelay: 200,
-  shooterSetup: 'SHARED', nectarShooter: { shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0], aimTolerance: 0.05 }, flowerDropZones: [], liftMaxSpeed: 0,
+  shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0], flowerSetupDelay: 500, flowerDropDelay: 200,
+  shooterSetup: 'SHARED', nectarShooter: { shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0] }, flowerDropZones: [], liftMaxSpeed: 0,
 });
 let resolverCalls = 0;
 const resolver: ShotProbabilityResolver = (robotId, pieceType) => {

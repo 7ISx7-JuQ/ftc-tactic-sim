@@ -279,6 +279,18 @@ describe('저장 레시피 (10-3)', () => {
     expect([robot1.config.shooterSetup, robot1.config.liftMaxSpeed, robot1.ballistics.shooterLateralOffset]).toEqual(['SHARED', 0, 0]);
   }, TEST_TIMEOUT_MS);
 
+  it('G-2. (11-3) 없어진 허용 조준 오차 aimTolerance: 파일에 있어도(v1 / v2 개발 중 파일) 버리고 통과, 내보낸 파일에는 없음', () => {
+    const v1 = parse(edit(
+      ['setup.robot1.config.aimTolerance', 0.0524], ['setup.robot1.config.nectarShooter', DEL],
+      ['setup.robot2.config.aimTolerance', 0.1], ['setup.robot2.config.nectarShooter.aimTolerance', 0.1],
+    ));
+    expect(v1.ok).toBe(true);
+    if (!v1.ok) return;
+    expect(v1.recipe.setup).toEqual(sample().recipe.setup);
+    const robot1 = (JSON.parse(sample().text) as { setup: { robot1: { config: Record<string, unknown> & { nectarShooter: Record<string, unknown> } } } }).setup.robot1;
+    expect('aimTolerance' in robot1.config || 'aimTolerance' in robot1.config.nectarShooter).toBe(false);
+  }, TEST_TIMEOUT_MS);
+
   it('H. (14-1a) 엔진 버전 1 파일의 BLUE 시나리오: 없는 시작 자세 = v1 BLUE 기본값(로봇 위치 유지), 지금 버전 파일은 그대로', () => {
     const v1 = parse(edit(['engineVersion', 1]));
     expect(v1.ok && v1.recipe.setup.scenario.r2Spawn).toEqual(LEGACY_BLUE_SPAWN_POSES.robot2);

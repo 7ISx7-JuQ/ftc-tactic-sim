@@ -14,12 +14,11 @@ export interface BumperZone {
 // SHARED = 한 슈터로 두 기물 (v1 동작), PER_PIECE = 기물별 슈터 2개 (NECTAR 슈터 = nectarShooter)
 export type ShooterSetup = 'NONE' | 'POLLEN_ONLY' | 'SHARED' | 'PER_PIECE';
 
-// 슈터 1개의 조준 / 발사 런타임 제원 (RobotConfig 주 슈터 항목 4개와 같은 의미)
+// 슈터 1개의 조준 / 발사 런타임 제원 (RobotConfig 주 슈터 항목 3개와 같은 의미)
 export interface ShooterAimConfig {
   shooterDelay: number;     // 한 발 발사 딜레이 (ms)
   turretType: 'FIXED' | 'TURRET';
   turretRange: [number, number]; // 터렛 회전 한계 (rad, RobotConfig.turretRange와 같은 규약)
-  aimTolerance: number;     // 고정형 슈터 허용 조준 오차 (rad)
 }
 
 // 1. 로봇 하드웨어 제원 (UI 입력값, RoadRunner 튜닝 상수 호환)
@@ -44,13 +43,13 @@ export interface RobotConfig {
   // HIVE 득점 (슈터) 런타임 제원
   // 명중률은 로봇 제원이 아니라 탄도 LUT(ShotProbabilityResolver)가 결정 (명세서 2.6.2)
   shooterSetup: ShooterSetup; // 슈터 구성 (기본 SHARED = v1)
-  // 아래 4개 = 주 슈터: SHARED / POLLEN_ONLY = 유일한 슈터, PER_PIECE = POLLEN 슈터, NONE = 쓰지 않음 (값은 보관)
+  // 아래 3개 = 주 슈터: SHARED / POLLEN_ONLY = 유일한 슈터, PER_PIECE = POLLEN 슈터, NONE = 쓰지 않음 (값은 보관)
   shooterDelay: number;     // 한 발 발사 딜레이 (ms)
   turretType: 'FIXED' | 'TURRET';
   // 터렛 회전 한계 [α, β] (rad, 차체 헤딩 기준 상대각 Δψ = 목표 방위 − 헤딩, + = 로봇 오른쪽(캔버스 y-down), [-π, π] 정규화)
   // α ≤ β: α ~ β 구간, α > β: ±π를 가로지르는 구간 (예: 후방 터렛 [2.5, -2.5]), 360° 터렛 = [-π, π]
   turretRange: [number, number];
-  aimTolerance: number;     // 고정형 슈터 허용 조준 오차 (rad, 차체 헤딩 기준 ±, 기본 3° ≈ 0.0524)
+  // 고정형 허용 조준 오차 aimTolerance는 11-3에서 없앰 (실제 궤적 명중 판정, 명세서 5.4)
   nectarShooter: ShooterAimConfig; // PER_PIECE의 NECTAR 슈터. 다른 구성에서는 쓰지 않고 값만 보관
 
   // FLOWER 득점 옵션

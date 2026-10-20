@@ -20,6 +20,7 @@ import {
   DEFAULT_PITCH_NOISE_RAD,
   DEFAULT_SHOOTER_BALLISTICS,
   DEFAULT_V0_NOISE_PERCENT,
+  FIXED_AIM_TOLERANCE,
   sweetSpotFromBasis,
   sweetSpotToBasis,
   validateBallisticsConfig,
@@ -91,16 +92,15 @@ export type NumericConfigKey =
   | 'maxControlledPieces'
   | 'intakeDelay'
   | 'shooterDelay'
-  | 'aimTolerance'
   | 'flowerSetupDelay'
   | 'flowerDropDelay'
   | 'liftMaxSpeed';
 export type BallisticsFieldKey = 'launchHeight' | 'shooterPitch' | 'shooterOffset' | 'shooterLateralOffset' | 'v0NoisePercent' | 'headingNoiseRad' | 'pitchNoiseRad';
 
-/** 슈터 칸 (슈터마다 같은 항목, 13-3): 런타임 제원(발사 딜레이 / 허용 오차 / 터렛 한계) + 탄도 */
-export type ShooterFieldKey = 'shooterDelay' | 'aimTolerance' | 'turretLeft' | 'turretRight' | BallisticsFieldKey;
+/** 슈터 칸 (슈터마다 같은 항목, 13-3): 런타임 제원(발사 딜레이 / 터렛 한계) + 탄도 */
+export type ShooterFieldKey = 'shooterDelay' | 'turretLeft' | 'turretRight' | BallisticsFieldKey;
 export const SHOOTER_FIELD_KEYS: readonly ShooterFieldKey[] = [
-  'shooterDelay', 'aimTolerance', 'turretLeft', 'turretRight',
+  'shooterDelay', 'turretLeft', 'turretRight',
   'launchHeight', 'shooterPitch', 'shooterOffset', 'shooterLateralOffset', 'v0NoisePercent', 'headingNoiseRad', 'pitchNoiseRad',
 ];
 /** 슈터 자리: 주 슈터(v1 항목 위치) / PER_PIECE의 NECTAR 슈터 */
@@ -139,7 +139,6 @@ const MAIN_NUMBER_FIELDS: Readonly<Record<Exclude<NumberFieldKey, NectarFieldKey
   maxControlledPieces: { kind: 'count', min: 1, max: 4, integer: true },
   intakeDelay: { kind: 'timeMs', min: 0, max: 5000, integer: true },
   shooterDelay: { kind: 'timeMs', min: 0, max: 5000, integer: true },
-  aimTolerance: { kind: 'angle', min: deg(0.1), max: deg(45) },
   turretLeft: { kind: 'angle', min: -Math.PI, max: Math.PI },
   turretRight: { kind: 'angle', min: -Math.PI, max: Math.PI },
   flowerSetupDelay: { kind: 'timeMs', min: 0, max: 5000, integer: true },
@@ -219,7 +218,7 @@ const BALLISTICS_KEYS: Readonly<Record<BallisticsFieldKey, Exclude<keyof Profile
 const isBallisticsKey = (key: string): key is BallisticsFieldKey => key in BALLISTICS_KEYS;
 
 // 런타임 조준 제원 1개 (주 슈터 = RobotConfig의 v1 항목, NECTAR = config.nectarShooter)의 칸 읽기 / 쓰기
-type AimKey = 'shooterDelay' | 'aimTolerance' | 'turretLeft' | 'turretRight';
+type AimKey = 'shooterDelay' | 'turretLeft' | 'turretRight';
 function readAim(aim: ShooterAimConfig, key: AimKey): number {
   if (key === 'turretLeft') return aim.turretRange[0];
   if (key === 'turretRight') return aim.turretRange[1];
@@ -252,7 +251,7 @@ export function writeNumber(profile: RobotProfile, key: NumberFieldKey, value: n
   return { ...profile, config: { ...profile.config, [key]: value } };
 }
 
-/** 그 슈터 자리의 런타임 조준 제원 (형식 / 허용 오차 / 터렛 한계) */
+/** 그 슈터 자리의 런타임 조준 제원 (형식 / 터렛 한계) */
 export function slotAim(profile: RobotProfile, slot: ShooterSlot): ShooterAimConfig {
   return slot === 'MAIN' ? profile.config : profile.config.nectarShooter;
 }
@@ -526,9 +525,12 @@ export function previewShooters(profile: RobotProfile): { slot: ShooterSlot; pie
   }));
 }
 
-/** 슈터 조준 가능 범위 (로봇 앞 기준 각도, + = 오른쪽): 고정형 ± 허용 오차, 터렛 왼쪽 → 오른쪽 (왼쪽 > 오른쪽이면 뒤로 돌아 끝에 2π) */
-export function previewAimSector(config: Pick<RobotConfig, 'turretType' | 'turretRange' | 'aimTolerance'>): { start: number; end: number } {
-  if (config.turretType === 'FIXED') return { start: -config.aimTolerance, end: config.aimTolerance };
+/**
+ * 슈터 조준 가능 범위 (로봇 앞 기준 각도, + = 오른쪽): 고정형 ± FIXED_AIM_TOLERANCE(11-3 임시, 13-5에서 발사 방향 선으로 바뀜),
+ * 터렛 왼쪽 → 오른쪽 (왼쪽 > 오른쪽이면 뒤로 돌아 끝에 2π)
+ */
+export function previewAimSector(config: Pick<RobotConfig, 'turretType' | 'turretRange'>): { start: number; end: number } {
+  if (config.turretType === 'FIXED') return { start: -FIXED_AIM_TOLERANCE, end: FIXED_AIM_TOLERANCE };
   const [a, b] = config.turretRange;
   return { start: a, end: a > b ? b + 2 * Math.PI : b };
 }

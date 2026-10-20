@@ -14,9 +14,9 @@ const EXPECTED = { engineVersion: 2, final: '69611bab', all: 'e2652d87' };
 const cfg = (id: 'robot1' | 'robot2', over: Partial<RobotConfig> = {}): RobotConfig => ({
   id, name: id, width: 18, length: 18, maxSpeed: 60, maxTurnRate: 4, maxLinearAccel: 120, maxAngularAccel: 10,
   intakeDelay: 100, canIntakeNectar: true, intakeZones: createIntakeZonePreset('FRONT', { length: 18, width: 18 }, 3),
-  shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0], aimTolerance: 0.05,
+  shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0],
   flowerSetupDelay: 500, flowerDropDelay: 200,
-  shooterSetup: 'SHARED', nectarShooter: { shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0], aimTolerance: 0.05 }, flowerDropZones: [], liftMaxSpeed: 0, maxControlledPieces: 4, ...over,
+  shooterSetup: 'SHARED', nectarShooter: { shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0] }, flowerDropZones: [], liftMaxSpeed: 0, maxControlledPieces: 4, ...over,
 });
 
 // 흡입 / 발사 / 리프트 / 투입이 모두 섞이는 고정 입력 (틱의 순수 함수)

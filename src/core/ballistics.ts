@@ -1055,7 +1055,7 @@ export function generateRobotLUTs(
 // 슈터 구성 (12-3, 명세서 5.4 v2.0.0 항목 규칙): 로봇 제원에서 기물별 슈터를 고르는 규칙의 단일 출처.
 // 엔진 발사 대기열 / 판정 함수 / 비행 계획 / (13-x) 렌더러 · 화면이 같은 함수를 쓴다
 // (판정 함수는 발사 딜레이가 필요 없으므로 shooterDelay는 선택, 없으면 0)
-type ShooterSetupSource = Pick<RobotConfig, 'turretType' | 'turretRange' | 'aimTolerance'> & Partial<Pick<RobotConfig, 'shooterDelay' | 'shooterSetup' | 'nectarShooter'>>;
+type ShooterSetupSource = Pick<RobotConfig, 'turretType' | 'turretRange'> & Partial<Pick<RobotConfig, 'shooterDelay' | 'shooterSetup' | 'nectarShooter'>>;
 
 /** 그 기물을 쏠 수 있는지: NONE 없음 / POLLEN_ONLY POLLEN / SHARED · PER_PIECE 둘 다 (구성 미지정 = SHARED) */
 export function isPieceFireable(config: Partial<Pick<RobotConfig, 'shooterSetup'>>, pieceType: PieceType): boolean {
@@ -1067,7 +1067,7 @@ export function isPieceFireable(config: Partial<Pick<RobotConfig, 'shooterSetup'
 /** 그 기물을 쏘는 슈터의 조준 / 발사 런타임 제원: PER_PIECE + NECTAR → nectarShooter, 그 외 → 주 슈터 */
 export function shooterFor(config: ShooterSetupSource, pieceType: PieceType): ShooterAimConfig {
   if (config.shooterSetup === 'PER_PIECE' && pieceType === 'NECTAR' && config.nectarShooter) return config.nectarShooter;
-  return { shooterDelay: config.shooterDelay ?? 0, turretType: config.turretType, turretRange: config.turretRange, aimTolerance: config.aimTolerance };
+  return { shooterDelay: config.shooterDelay ?? 0, turretType: config.turretType, turretRange: config.turretRange };
 }
 
 /** 적재함에서 다음에 발사할 기물의 위치 = 첫 번째 발사 가능 기물 (없으면 −1). SHARED / PER_PIECE는 항상 0번 (v1과 같음) */
@@ -1081,14 +1081,20 @@ export function hiveCellKey(alliance: 'RED' | 'BLUE', cell: HiveCell): HiveCellK
 }
 
 /**
+ * 고정형 슈터 허용 조준 오차 (rad, ±3°). 11-3에서 로봇 항목 aimTolerance를 없애고 이전 기본값을 상수로 둔 임시 값이다.
+ * 12-11 실제 궤적 명중 판정이 고정형 조준 판정 자체를 없애면서 함께 지운다 (명세서 5.4 실제 궤적 명중 판정)
+ */
+export const FIXED_AIM_TOLERANCE = (3 * Math.PI) / 180;
+
+/**
  * 조준 판정: 조준점 방위와 로봇 헤딩의 상대각 Δψ (rad, [-π, π])가 슈터 조준 가능 범위 안인지
- * - FIXED: |Δψ| ≤ aimTolerance (비유한 / 음수 허용 오차는 0으로 취급 → 정확히 정렬될 때만)
+ * - FIXED: |Δψ| ≤ FIXED_AIM_TOLERANCE (경계 포함)
  * - TURRET: turretRange [α, β]를 [-π, π]로 정규화하여 α ≤ β면 α ≤ Δψ ≤ β,
  *   α > β면 ±π를 가로지르는 구간 (Δψ ≥ α 또는 Δψ ≤ β). 360° 터렛은 [-π, π]
  */
 export function isAimWithinShooterRange(
   deltaPsi: number,
-  config: Pick<RobotConfig, 'turretType' | 'turretRange' | 'aimTolerance'>,
+  config: Pick<RobotConfig, 'turretType' | 'turretRange'>,
 ): boolean {
   if (!Number.isFinite(deltaPsi)) return false;
   if (config.turretType === 'TURRET') {
@@ -1098,8 +1104,7 @@ export function isAimWithinShooterRange(
     const beta = normalizeAngle(rawHi);
     return alpha <= beta ? deltaPsi >= alpha && deltaPsi <= beta : deltaPsi >= alpha || deltaPsi <= beta;
   }
-  const tolerance = Number.isFinite(config.aimTolerance) ? Math.max(0, config.aimTolerance) : 0;
-  return Math.abs(deltaPsi) <= tolerance;
+  return Math.abs(deltaPsi) <= FIXED_AIM_TOLERANCE;
 }
 
 /**
@@ -1179,7 +1184,7 @@ export function shotLaunchHeading(
 ): number {
   if (shooter.turretType !== 'TURRET') return robotHeading;
   const delta = angleDifference(aimBearing, robotHeading);
-  if (isAimWithinShooterRange(delta, { ...shooter, aimTolerance: 0 })) return normalizeAngle(aimBearing);
+  if (isAimWithinShooterRange(delta, shooter)) return normalizeAngle(aimBearing);
   const [rawLo, rawHi] = shooter.turretRange;
   if (!Number.isFinite(rawLo) || !Number.isFinite(rawHi)) return robotHeading;
   const lo = normalizeAngle(rawLo);

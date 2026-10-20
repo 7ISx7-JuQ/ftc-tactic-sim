@@ -3,6 +3,7 @@
 
 import {
   DEFAULT_SHOOTER_BALLISTICS,
+  FIXED_AIM_TOLERANCE,
   PIECE_TYPES,
   bearingTo,
   isPieceFireable,
@@ -61,7 +62,7 @@ export function aimGuidePiece(robot: Pick<Robot, 'controlledPieces'>, config: Pa
  * 조준선 계산 (13-2): 그 기물을 쏘는 슈터(shooterFor)와 탄도(shooters[기물], 없으면 엔진 기본 슈터)로
  * - 발사 방향 = 발사 비행 계획(planShotFlight)과 같은 shotLaunchHeading(좌우 오프셋 보정 ψ, 조준 불가 자리면 조준점 방위)
  * - 사출구 = launchPoint(로봇 중심, 발사 방향, 앞뒤 / 좌우 오프셋) — 비행 공이 출발하는 점
- * - 부채꼴: 고정형 = 헤딩 ± aimTolerance, 터렛 = 헤딩 + turretRange (±π를 가로지르면 끝에 2π 더함)
+ * - 부채꼴: 고정형 = 헤딩 ± FIXED_AIM_TOLERANCE(11-3 임시, 13-5에서 발사 방향 선으로 바뀜), 터렛 = 헤딩 + turretRange (±π를 가로지르면 끝에 2π 더함)
  * 터렛 범위 해석은 엔진 판정(isAimWithinShooterRange)과 같다: 각 끝을 [-π, π]로 정규화하므로 360°는 [-π, π]만 해당.
  * 쏠 수 있는 기물이 없으면(NONE) null
  */
@@ -89,9 +90,8 @@ export function aimGuide(
     hi = normalizeAngle(shooter.turretRange[1]);
     if (lo > hi) hi += Math.PI * 2;
   } else {
-    const tol = Number.isFinite(shooter.aimTolerance) ? Math.max(0, shooter.aimTolerance) : 0;
-    lo = -tol;
-    hi = tol;
+    lo = -FIXED_AIM_TOLERANCE;
+    hi = FIXED_AIM_TOLERANCE;
   }
   return {
     pieceType,

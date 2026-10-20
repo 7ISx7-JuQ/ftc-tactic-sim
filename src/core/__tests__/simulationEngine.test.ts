@@ -9,9 +9,9 @@ import { FLOWER_CIRCLES, GARDEN_AABB, LOADING_ZONE_AABB, testCircleVsAABB, creat
 const cfg = (id: 'robot1' | 'robot2', over: Partial<RobotConfig> = {}): RobotConfig => ({
   id, name: id, width: 18, length: 18, maxSpeed: 60, maxTurnRate: 4, maxLinearAccel: 120, maxAngularAccel: 10,
   intakeDelay: 100, canIntakeNectar: true, intakeZones: createIntakeZonePreset('FRONT', { length: 18, width: 18 }, 3),
-  shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0], aimTolerance: 0.05,
+  shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0],
   flowerSetupDelay: 500, flowerDropDelay: 200,
-  shooterSetup: 'SHARED', nectarShooter: { shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0], aimTolerance: 0.05 }, flowerDropZones: [], liftMaxSpeed: 0, maxControlledPieces: 4, ...over,
+  shooterSetup: 'SHARED', nectarShooter: { shooterDelay: 300, turretType: 'FIXED', turretRange: [0, 0] }, flowerDropZones: [], liftMaxSpeed: 0, maxControlledPieces: 4, ...over,
 });
 const pose = (x: number, y: number, heading = 0): RobotPose => ({ x, y, heading });
 const C1 = cfg('robot1'), C2 = cfg('robot2');
@@ -1321,7 +1321,7 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
     }
     // PER_PIECE: 발사 딜레이 = 다음에 쏠 기물의 슈터, 비행 = 그 기물의 슈터 탄도
     {
-      const c1 = cfg('robot1', { shooterSetup: 'PER_PIECE', shooterDelay: 200, nectarShooter: { shooterDelay: 500, turretType: 'FIXED', turretRange: [0, 0], aimTolerance: 0.05 } });
+      const c1 = cfg('robot1', { shooterSetup: 'PER_PIECE', shooterDelay: 200, nectarShooter: { shooterDelay: 500, turretType: 'FIXED', turretRange: [0, 0] } });
       const shooters = {
         robot1: { POLLEN: { ...DEFAULT_SHOOTER_BALLISTICS, dz: HIVE_RIM_Z - 10 }, NECTAR: { ...DEFAULT_SHOOTER_BALLISTICS, dz: HIVE_RIM_Z - 20 } },
       };

@@ -1,6 +1,7 @@
 // 로봇 제원 탭 폼 규칙 (명세서 3.8 로봇 제원 탭, 09-9a)
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_DRAFT_VALUES } from '../../app/defaultSetup';
+import { FIXED_AIM_TOLERANCE } from '../../core/ballistics';
 import { getBumperZoneOBB } from '../../core/collision';
 import type { BumperSide } from '../../core/types';
 import {
@@ -66,9 +67,7 @@ describe('로봇 제원 폼 (09-9a)', () => {
     expect(parse('maxControlledPieces', '0')).toMatchObject({ ok: false, error: { code: 'RANGE' } });
     expect(parse('intakeDelay', '100.5')).toEqual({ ok: false, error: { code: 'INTEGER' } });
     expect(parse('intakeDelay', '5000')).toEqual({ ok: true, value: 5000 });
-    expect(parse('aimTolerance', '45')).toEqual({ ok: true, value: Math.PI / 4 });
-    expect(parse('aimTolerance', '45.1')).toMatchObject({ ok: false, error: { code: 'RANGE' } });
-    expect(parse('aimTolerance', '0.05')).toMatchObject({ ok: false, error: { code: 'RANGE' } });
+    expect(Object.keys(NUMBER_FIELDS)).not.toContain('aimTolerance'); // 11-3: 허용 조준 오차 칸 없음
     expect(parse('turretLeft', '-180')).toEqual({ ok: true, value: -Math.PI });
     expect(parse('turretRight', '180')).toEqual({ ok: true, value: Math.PI });
     expect(parse('maxTurnRate', '4')).toEqual({ ok: true, value: 4 }); // rad/s 그대로
@@ -78,7 +77,7 @@ describe('로봇 제원 폼 (09-9a)', () => {
   it('C. 엔진 값 → 표시 (in / cm, °, 개수)', () => {
     expect(formatField(NUMBER_FIELDS.width, 18, 'in')).toBe('18.00');
     expect(formatField(NUMBER_FIELDS.width, 18, 'cm')).toBe('45.72');
-    expect(formatField(NUMBER_FIELDS.aimTolerance, (3 * Math.PI) / 180, 'in')).toBe('3.0');
+    expect(formatField(NUMBER_FIELDS.shooterPitch, Math.PI / 3, 'in')).toBe('60.0');
     expect(formatField(NUMBER_FIELDS.maxControlledPieces, 4, 'cm')).toBe('4');
     expect(formatField(NUMBER_FIELDS.turretLeft, -Math.PI, 'in')).toBe('-180.0');
     expect(formatField(NUMBER_FIELDS.maxAngularAccel, 10, 'cm')).toBe('10.00');
@@ -170,9 +169,9 @@ describe('로봇 제원 폼 (09-9a)', () => {
       }
     }
     expect(previewZoneRect({ side: 'FRONT', offset: 0, width: 0, depth: 1 }, config)).toBeNull();
-    expect(previewAimSector({ turretType: 'FIXED', turretRange: [0, 0], aimTolerance: 0.1 })).toEqual({ start: -0.1, end: 0.1 });
-    expect(previewAimSector({ turretType: 'TURRET', turretRange: [-1, 1], aimTolerance: 0.1 })).toEqual({ start: -1, end: 1 });
-    expect(previewAimSector({ turretType: 'TURRET', turretRange: [2.5, -2.5], aimTolerance: 0.1 })).toEqual({ start: 2.5, end: -2.5 + 2 * Math.PI }); // 후방
+    expect(previewAimSector({ turretType: 'FIXED', turretRange: [0, 0] })).toEqual({ start: -FIXED_AIM_TOLERANCE, end: FIXED_AIM_TOLERANCE }); // 11-3 임시 상수
+    expect(previewAimSector({ turretType: 'TURRET', turretRange: [-1, 1] })).toEqual({ start: -1, end: 1 });
+    expect(previewAimSector({ turretType: 'TURRET', turretRange: [2.5, -2.5] })).toEqual({ start: 2.5, end: -2.5 + 2 * Math.PI }); // 후방
   });
 
   it('J. (09-10a) 스윗스팟: 기본값 C, 진영 기준 읽기 / 쓰기(BLUE = 점대칭, 격자 중심으로 맞춤), 범위 / 탄도 검증, 복사', () => {
@@ -249,11 +248,10 @@ describe('로봇 제원 폼 (09-9a)', () => {
     expect(shooterFieldKey('MAIN', 'launchHeight')).toBe('launchHeight');
     expect(shooterFieldKey('NECTAR', 'launchHeight')).toBe('nectar.launchHeight');
     let p = writeNumber(r1, 'nectar.shooterDelay', 450);
-    p = writeNumber(p, 'nectar.aimTolerance', 0.1);
     p = writeNumber(p, 'nectar.launchHeight', 30);
     p = writeNumber(p, 'nectar.shooterLateralOffset', -3);
     p = writeNumber(writeNumber(p, 'nectar.turretLeft', -1), 'nectar.turretRight', 1);
-    expect(p.config.nectarShooter).toEqual({ ...r1.config.nectarShooter, shooterDelay: 450, aimTolerance: 0.1, turretRange: [-1, 1] });
+    expect(p.config.nectarShooter).toEqual({ ...r1.config.nectarShooter, shooterDelay: 450, turretRange: [-1, 1] });
     expect([p.ballistics.nectarShooter.dz, p.ballistics.nectarShooter.shooterLateralOffset]).toEqual([30, -3]);
     expect(p.config.shooterDelay === r1.config.shooterDelay && p.ballistics.dz === r1.ballistics.dz).toBe(true); // 주 슈터는 그대로
     expect(readNumber(p, 'nectar.turretRight') === 1 && readNumber(p, 'nectar.shooterDelay') === 450).toBe(true);

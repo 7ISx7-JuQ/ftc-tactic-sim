@@ -101,7 +101,7 @@ export function presetFileName(row: PresetRow, applied: DraftValues, now: Date):
 // 2. 이전 형식 변환 (v1 → v2.0.0 로봇 프로필, 명세서 3.9 프리셋 파일)
 // ============================================================
 
-const AIM_KEYS = ['shooterDelay', 'turretType', 'turretRange', 'aimTolerance'] as const;
+const AIM_KEYS = ['shooterDelay', 'turretType', 'turretRange'] as const;
 const SHOOTER_BALLISTICS_KEYS = ['dz', 'shooterPitch', 'shooterOffset', 'shooterLateralOffset', 'sweetSpot', 'v0NoisePercent', 'headingNoiseRad', 'pitchNoiseRad'] as const;
 
 /** 있는 항목만 깊은 복사 (없는 항목은 정리 함수가 기본값으로 채움) */
@@ -114,7 +114,7 @@ function pick(r: Record<string, unknown>, keys: readonly string[]): Record<strin
 /**
  * 로봇 프로필 데이터(파일 / 자동 보관의 날 값)의 없는 v2.0.0 항목을 v1 동작 값으로 채운다. 있는 항목은 그대로 둔다
  * (형식 검사는 정리 함수 / 엄격 해석이 함). shooterSetup = SHARED, NECTAR 슈터 = 그 데이터의 주 슈터 복사, 좌우 오프셋 0,
- * 투입 방향 구역 [], 리프트 주행 속도 0. 원본은 바꾸지 않는다
+ * 투입 방향 구역 [], 리프트 주행 속도 0. 없어진 허용 조준 오차 aimTolerance(주 / NECTAR 슈터)는 버린다 (11-3). 원본은 바꾸지 않는다
  */
 export function upgradeRobotProfileData(v: unknown): unknown {
   if (!isRecord(v)) return v;
@@ -125,6 +125,12 @@ export function upgradeRobotProfileData(v: unknown): unknown {
     if (c.nectarShooter === undefined) c.nectarShooter = pick(c, AIM_KEYS);
     if (c.flowerDropZones === undefined) c.flowerDropZones = [];
     if (c.liftMaxSpeed === undefined) c.liftMaxSpeed = 0;
+    delete c.aimTolerance;
+    if (isRecord(c.nectarShooter)) {
+      const nectar: Record<string, unknown> = { ...c.nectarShooter };
+      delete nectar.aimTolerance;
+      c.nectarShooter = nectar;
+    }
     out.config = c;
   }
   if (isRecord(v.ballistics)) {
@@ -154,7 +160,7 @@ const sanitizeZones = (v: unknown, def: BumperZone[]): BumperZone[] =>
 
 /** 슈터 1개의 조준 / 발사 런타임 제원 (주 슈터는 RobotConfig에 바로, NECTAR 슈터는 nectarShooter) */
 function sanitizeAim(r: Record<string, unknown>, def: ShooterAimConfig): ShooterAimConfig {
-  const out: ShooterAimConfig = { shooterDelay: num(r.shooterDelay, def.shooterDelay), turretType: def.turretType, turretRange: [def.turretRange[0], def.turretRange[1]], aimTolerance: num(r.aimTolerance, def.aimTolerance) };
+  const out: ShooterAimConfig = { shooterDelay: num(r.shooterDelay, def.shooterDelay), turretType: def.turretType, turretRange: [def.turretRange[0], def.turretRange[1]] };
   if (r.turretType === 'FIXED' || r.turretType === 'TURRET') out.turretType = r.turretType;
   if (Array.isArray(r.turretRange) && r.turretRange.length === 2 && r.turretRange.every(isNumber)) out.turretRange = [r.turretRange[0], r.turretRange[1]];
   return out;
