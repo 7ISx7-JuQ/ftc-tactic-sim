@@ -42,6 +42,7 @@ export interface SweetSpotEditScene {
   sweetSpotValid: boolean;                // 초안 스윗스팟 검증 통과 (아니면 빨간 윤곽)
   appliedSweetSpot: Point2 | null;        // 확률표를 만든 스윗스팟 (초안과 다를 때만 빈 고리로 표시)
   robotSize: { length: number; width: number }; // 초안 로봇 크기 (몸체 윤곽)
+  lateralOffset?: number;                 // 찍는 슈터의 좌우 오프셋 (13-4: 몸체를 사출구 기준 조준 방향 ψ로 돌림, 스윗스팟 검증과 같은 aimingRobotOBB). 없으면 0
   hover: (Point2 & { valid: boolean }) | null;   // 마우스를 올린 격자 중심 (진영 기준) + 검증 통과
 }
 
@@ -151,8 +152,8 @@ function drawBasisCell(ctx: CanvasRenderingContext2D, alliance: Alliance): void 
   ctx.restore();
 }
 
-function obbCornersPx(center: Point2, aim: Point2, size: { length: number; width: number }): Point2[] {
-  const obb = aimingRobotOBB(center.x, center.y, aim, size);
+function obbCornersPx(center: Point2, aim: Point2, size: { length: number; width: number }, lateral = 0): Point2[] {
+  const obb = aimingRobotOBB(center.x, center.y, aim, size, lateral);
   const [f, r] = obb.axes;
   const [hl, hw] = obb.halfExtents;
   const at = (a: number, b: number) => ({ x: inchToPx(obb.center.x + f.x * a + r.x * b), y: inchToPx(obb.center.y + f.y * a + r.y * b) });
@@ -160,8 +161,8 @@ function obbCornersPx(center: Point2, aim: Point2, size: { length: number; width
 }
 
 // 조준점을 향해 돌린 로봇 몸체 윤곽 (앞 변 굵게)
-function drawAimingBody(ctx: CanvasRenderingContext2D, center: Point2, aim: Point2, size: { length: number; width: number }, stroke: string, fill: string | null, dashed: boolean): void {
-  const pts = obbCornersPx(center, aim, size);
+function drawAimingBody(ctx: CanvasRenderingContext2D, center: Point2, aim: Point2, size: { length: number; width: number }, stroke: string, fill: string | null, dashed: boolean, lateral = 0): void {
+  const pts = obbCornersPx(center, aim, size, lateral);
   ctx.save();
   ctx.beginPath();
   pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
@@ -200,7 +201,7 @@ function drawSweetSpotEdit(ctx: CanvasRenderingContext2D, scene: SweetSpotEditSc
   const h = scene.hover;
   if (h) {
     const stroke = h.valid ? EDIT_COLORS.valid : EDIT_COLORS.invalid;
-    drawAimingBody(ctx, h, aim, scene.robotSize, stroke, null, true);
+    drawAimingBody(ctx, h, aim, scene.robotSize, stroke, null, true, scene.lateralOffset ?? 0);
     ctx.save();
     ctx.fillStyle = h.valid ? EDIT_COLORS.validFill : EDIT_COLORS.invalidFill;
     ctx.strokeStyle = stroke;
@@ -211,7 +212,7 @@ function drawSweetSpotEdit(ctx: CanvasRenderingContext2D, scene: SweetSpotEditSc
     ctx.strokeRect(x, y, PX_PER_INCH, PX_PER_INCH);
     ctx.restore();
   }
-  drawAimingBody(ctx, scene.sweetSpot, aim, scene.robotSize, scene.sweetSpotValid ? EDIT_COLORS.marker : EDIT_COLORS.invalid, null, false);
+  drawAimingBody(ctx, scene.sweetSpot, aim, scene.robotSize, scene.sweetSpotValid ? EDIT_COLORS.marker : EDIT_COLORS.invalid, null, false, scene.lateralOffset ?? 0);
 }
 
 function drawMarkers(ctx: CanvasRenderingContext2D, scene: HeatmapEditScene | SweetSpotEditScene): void {

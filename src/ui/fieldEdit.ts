@@ -8,6 +8,9 @@
 //   0.1 in / 0.1°로 반올림해 칸에 보이는 값 = 보관 값). 겹쳐도 놓이고 빨간 표시 (배치 검증). DONE = SCENARIO 탭 APPLY까지 (09-11 확정 ④),
 //   CANCEL / Esc / START = 들어오기 전 시작 자세로 (그사이 진영을 바꿨으면 들어오기 전 자세를 새 진영으로 좌우 대칭).
 // - 편집 모드를 연 탭을 떠나거나(다른 탭 / 창 닫기 / 다른 모드) 경기 전이 아니게 되면 편집 모드를 끝낸다 (찍은 초안은 그대로).
+// - 13-4 (기물별): 히트맵 기물 버튼은 그 로봇이 쏠 수 있는 기물만, 표시 스윗스팟 = 그 기물을 쏘는 슈터의 스윗스팟.
+//   스윗스팟 모드는 슈터 자리(slot: 주 슈터 / PER_PIECE의 NECTAR 슈터) 하나의 스윗스팟을 찍고, 기물 버튼은 그 슈터가 쏘는 기물만.
+//   몸체 윤곽 / 검증은 그 슈터의 좌우 오프셋으로 (aimingRobotOBB, 사유는 RobotIssue.slot).
 
 import { FIELD_SIZE } from '../core/collision';
 import type { AppPhase } from '../app/appController';
@@ -20,8 +23,9 @@ import type { SpawnPart, SpawnRobotId } from '../renderer/spawnEditLayout';
 import { canApply, editDraft, setFieldText, tabStatus } from './configDraft';
 import type { ConfigDrafts, ConfigTab, DraftTab, DraftValues } from './configDraft';
 import { SPAWN_AXES, SPAWN_FIELD_SPECS, mirrorPose, normalizeHeading, readScenario, setSpawnPose, spawnFieldKey } from './scenarioForm';
-import { SWEET_SPOT_AXES, readSweetSpot, robotProfileIssues, sweetSpotFieldKey, writeSweetSpot } from './robotForm';
-import type { RobotProfile } from './robotForm';
+import { PIECE_TYPES, isPieceFireable } from '../core/ballistics';
+import { SWEET_SPOT_AXES, readSweetSpot, robotProfileIssues, slotBallistics, sweetSpotFieldKey, writeSweetSpot } from './robotForm';
+import type { RobotProfile, ShooterSlot } from './robotForm';
 
 export type FieldEditMode = 'HEATMAP' | 'SWEET_SPOT' | 'SPAWN';
 
@@ -34,7 +38,8 @@ export interface HeatmapFieldEdit {
 export interface SweetSpotFieldEdit {
   mode: 'SWEET_SPOT';
   robot: RobotId;
-  piece: PieceType; // 반투명 히트맵의 기물 종류
+  slot: ShooterSlot; // 찍는 스윗스팟의 슈터 자리 (13-4: 주 슈터 / PER_PIECE의 NECTAR 슈터)
+  piece: PieceType; // 반투명 히트맵의 기물 종류 (그 슈터가 쏘는 기물)
   /** 모드에 들어올 때의 초안 스윗스팟(기준 셀 좌표) + 스윗스팟 칸의 틀린 입력 글자 (CANCEL 복원용) */
   entry: { sweetSpot: { x: number; y: number }; fieldText: Partial<Record<'x' | 'y', string>> };
 }
@@ -54,24 +59,69 @@ export function editTab(edit: FieldEdit): ConfigTab {
 
 type Point = { x: number; y: number };
 
-/** 로봇 탭 SHOW HIT MAP: 그 로봇 히트맵이 이미 열려 있으면 닫고(null), 아니면 연다 (다른 모드는 닫고 전환, 기본 POLLEN) */
-export function toggleHeatmapEdit(current: FieldEdit | null, robot: RobotId): HeatmapFieldEdit | null {
-  if (current?.mode === 'HEATMAP' && current.robot === robot) return null;
-  return { mode: 'HEATMAP', robot, piece: 'POLLEN' };
+// ------------------------------------------------------------
+// 기물 / 슈터 자리 (13-4)
+// ------------------------------------------------------------
+
+/** 그 기물을 쏘는 슈터 자리: PER_PIECE + NECTAR → NECTAR 슈터, 그 외 → 주 슈터 (엔진 shooterFor와 같은 규칙) */
+export function pieceShooterSlot(profile: RobotProfile, piece: PieceType): ShooterSlot {
+  return profile.config.shooterSetup === 'PER_PIECE' && piece === 'NECTAR' ? 'NECTAR' : 'MAIN';
 }
 
-/** 로봇 탭 SET ON FIELD: 지금 초안 스윗스팟 / 틀린 글자를 기억하고 스윗스팟 모드로 (이미 그 로봇 스윗스팟 모드면 그대로) */
-export function openSweetSpotEdit(current: FieldEdit | null, drafts: ConfigDrafts, robot: RobotId): SweetSpotFieldEdit {
-  if (current?.mode === 'SWEET_SPOT' && current.robot === robot) return current;
+/** 히트맵에서 볼 수 있는 기물 = 그 로봇이 쏠 수 있는 기물 (POLLEN_ONLY는 POLLEN만, NONE은 없음) */
+export function heatmapPieces(profile: RobotProfile): PieceType[] {
+  return PIECE_TYPES.filter(piece => isPieceFireable(profile.config, piece));
+}
+
+/** 스윗스팟 모드에서 볼 수 있는 기물 = 그 슈터가 쏘는 기물 (SHARED는 두 기물이 같은 스윗스팟) */
+export function slotPieces(profile: RobotProfile, slot: ShooterSlot): PieceType[] {
+  return heatmapPieces(profile).filter(piece => pieceShooterSlot(profile, piece) === slot);
+}
+
+/** 그 편집 모드의 기물 버튼에서 고를 수 있는 기물 */
+export function editPieces(edit: HeatmapFieldEdit | SweetSpotFieldEdit, profile: RobotProfile): PieceType[] {
+  return edit.mode === 'HEATMAP' ? heatmapPieces(profile) : slotPieces(profile, edit.slot);
+}
+
+/** 로봇 탭 SHOW HIT MAP: 그 로봇 히트맵이 이미 열려 있으면 닫고(null), 아니면 연다 (다른 모드는 닫고 전환, 기본 = 쏠 수 있는 첫 기물, 모르면 POLLEN) */
+export function toggleHeatmapEdit(current: FieldEdit | null, robot: RobotId, profile?: RobotProfile): HeatmapFieldEdit | null {
+  if (current?.mode === 'HEATMAP' && current.robot === robot) return null;
+  return { mode: 'HEATMAP', robot, piece: (profile && heatmapPieces(profile)[0]) ?? 'POLLEN' };
+}
+
+/**
+ * 로봇 탭 SET ON FIELD: 그 슈터 자리의 지금 초안 스윗스팟 / 틀린 글자를 기억하고 스윗스팟 모드로 (이미 그 로봇 · 그 자리 스윗스팟 모드면 그대로).
+ * 기물 = 보고 있던 기물이 그 슈터가 쏘는 기물이면 유지, 아니면 그 슈터의 첫 기물
+ */
+export function openSweetSpotEdit(current: FieldEdit | null, drafts: ConfigDrafts, robot: RobotId, slot: ShooterSlot = 'MAIN'): SweetSpotFieldEdit {
+  if (current?.mode === 'SWEET_SPOT' && current.robot === robot && current.slot === slot) return current;
   const texts = drafts.fieldText[robot];
   const fieldText: Partial<Record<'x' | 'y', string>> = {};
   for (const axis of SWEET_SPOT_AXES) {
-    const text = texts[sweetSpotFieldKey(axis)];
+    const text = texts[sweetSpotFieldKey(axis, slot)];
     if (text !== undefined) fieldText[axis] = text;
   }
-  const spot = drafts.draft[robot].ballistics.sweetSpot;
-  const piece = current && current.mode !== 'SPAWN' ? current.piece : 'POLLEN';
-  return { mode: 'SWEET_SPOT', robot, piece, entry: { sweetSpot: { x: spot.x, y: spot.y }, fieldText } };
+  const profile = drafts.draft[robot];
+  const spot = slotBallistics(profile, slot).sweetSpot;
+  const pieces = slotPieces(profile, slot);
+  const seen = current && current.mode !== 'SPAWN' ? current.piece : null;
+  const piece = seen && pieces.includes(seen) ? seen : (pieces[0] ?? 'POLLEN');
+  return { mode: 'SWEET_SPOT', robot, slot, piece, entry: { sweetSpot: { x: spot.x, y: spot.y }, fieldText } };
+}
+
+/**
+ * 편집 모드가 그 로봇 설정에서 쓸 수 있는지 (13-4): 히트맵 = 적용한 설정에 쏠 수 있는 기물이 있음, 스윗스팟 = 초안에서 그 슈터 자리를 씀.
+ * 슈터 구성을 바꿔 쓸 수 없게 되면(NONE / PER_PIECE를 떠난 NECTAR 슈터) 모드를 보이지 않게 한다
+ */
+export function fieldEditUsable(edit: FieldEdit, values: { draft: DraftValues; applied: DraftValues }): boolean {
+  if (edit.mode === 'SPAWN') return true;
+  if (edit.mode === 'HEATMAP') return heatmapPieces(values.applied[edit.robot]).length > 0;
+  return slotPieces(values.draft[edit.robot], edit.slot).length > 0;
+}
+
+/** 지금 보여 줄 기물: 고른 기물을 고를 수 있으면 그대로, 아니면(구성 변경) 고를 수 있는 첫 기물 */
+export function effectivePiece(piece: PieceType, pieces: readonly PieceType[]): PieceType {
+  return pieces.includes(piece) ? piece : (pieces[0] ?? piece);
 }
 
 /** 편집 모드를 유지할 수 있는지: 경기 전 SETUP + config 창이 펼쳐져 있고 편집을 연 로봇 탭이 보이는 동안 */
@@ -85,35 +135,40 @@ export function fieldGridCell(p: Point): Point | null {
   return { x: Math.floor(p.x) + 0.5, y: Math.floor(p.y) + 0.5 };
 }
 
-/** 진영 기준 격자 중심을 초안 스윗스팟으로 (두 축 모두, 보관은 기준 셀 좌표) */
-export function placeSweetSpot(profile: RobotProfile, alliance: 'RED' | 'BLUE', cell: Point): RobotProfile {
-  return writeSweetSpot(writeSweetSpot(profile, alliance, 'x', cell.x), alliance, 'y', cell.y);
+/** 진영 기준 격자 중심을 그 슈터 자리의 초안 스윗스팟으로 (두 축 모두, 보관은 기준 셀 좌표) */
+export function placeSweetSpot(profile: RobotProfile, alliance: 'RED' | 'BLUE', cell: Point, slot: ShooterSlot = 'MAIN'): RobotProfile {
+  return writeSweetSpot(writeSweetSpot(profile, alliance, 'x', cell.x, slot), alliance, 'y', cell.y, slot);
 }
 
-/** 스윗스팟 검증 사유 (로봇 탭과 같은 규칙: 다른 칸이 모두 올바를 때만 필드 밖 / HIVE / 해 없음). 주 슈터 스윗스팟만 (13-3: NECTAR 슈터는 로봇 탭 카드) */
-export function sweetSpotIssueCodes(profile: RobotProfile): string[] {
+/** 그 슈터 자리의 스윗스팟 검증 사유 (로봇 탭과 같은 규칙: 다른 칸이 모두 올바를 때만 필드 밖 / HIVE / 해 없음 — 좌우 오프셋 포함) */
+export function sweetSpotIssueCodes(profile: RobotProfile, slot: ShooterSlot = 'MAIN'): string[] {
   return robotProfileIssues(profile)
-    .filter(issue => issue.slot === undefined && issue.code.startsWith('SWEET_SPOT_'))
+    .filter(issue => (issue.slot ?? 'MAIN') === slot && issue.code.startsWith('SWEET_SPOT_'))
     .map(issue => issue.code);
 }
 
 /** 마우스를 올린 칸에 찍으면 생기는 사유 (찍기 전 미리 보기) */
-export function sweetSpotCandidateIssues(profile: RobotProfile, alliance: 'RED' | 'BLUE', cell: Point): string[] {
-  return sweetSpotIssueCodes(placeSweetSpot(profile, alliance, cell));
+export function sweetSpotCandidateIssues(profile: RobotProfile, alliance: 'RED' | 'BLUE', cell: Point, slot: ShooterSlot = 'MAIN'): string[] {
+  return sweetSpotIssueCodes(placeSweetSpot(profile, alliance, cell, slot), slot);
 }
 
-/** 필드 클릭: 초안 스윗스팟을 그 칸으로 + 스윗스팟 칸의 틀린 글자 지움 (검증 실패 칸도 찍힘 — 빨간 오류로 표시, 09-10c 확정) */
-export function clickSweetSpot(drafts: ConfigDrafts, robot: RobotId, alliance: 'RED' | 'BLUE', cell: Point): ConfigDrafts {
-  let next = editDraft(drafts, robot, placeSweetSpot(drafts.draft[robot], alliance, cell));
-  for (const axis of SWEET_SPOT_AXES) next = setFieldText(next, robot, sweetSpotFieldKey(axis), null);
+/** 필드 클릭: 그 슈터 자리의 초안 스윗스팟을 그 칸으로 + 그 스윗스팟 칸의 틀린 글자 지움 (검증 실패 칸도 찍힘 — 빨간 오류로 표시, 09-10c 확정) */
+export function clickSweetSpot(drafts: ConfigDrafts, robot: RobotId, alliance: 'RED' | 'BLUE', cell: Point, slot: ShooterSlot = 'MAIN'): ConfigDrafts {
+  let next = editDraft(drafts, robot, placeSweetSpot(drafts.draft[robot], alliance, cell, slot));
+  for (const axis of SWEET_SPOT_AXES) next = setFieldText(next, robot, sweetSpotFieldKey(axis, slot), null);
   return next;
 }
 
-/** CANCEL / Esc / START: 초안 스윗스팟과 스윗스팟 칸의 틀린 글자를 모드에 들어오기 전으로 (다른 칸은 그대로) */
+/** CANCEL / Esc / START: 그 슈터 자리의 초안 스윗스팟과 스윗스팟 칸의 틀린 글자를 모드에 들어오기 전으로 (다른 칸은 그대로) */
 export function cancelSweetSpotEdit(drafts: ConfigDrafts, edit: SweetSpotFieldEdit): ConfigDrafts {
   const profile = drafts.draft[edit.robot];
-  let next = editDraft(drafts, edit.robot, { ...profile, ballistics: { ...profile.ballistics, sweetSpot: { ...edit.entry.sweetSpot } } });
-  for (const axis of SWEET_SPOT_AXES) next = setFieldText(next, edit.robot, sweetSpotFieldKey(axis), edit.entry.fieldText[axis] ?? null);
+  const sweetSpot = { ...edit.entry.sweetSpot };
+  const ballistics =
+    edit.slot === 'MAIN'
+      ? { ...profile.ballistics, sweetSpot }
+      : { ...profile.ballistics, nectarShooter: { ...profile.ballistics.nectarShooter, sweetSpot } };
+  let next = editDraft(drafts, edit.robot, { ...profile, ballistics });
+  for (const axis of SWEET_SPOT_AXES) next = setFieldText(next, edit.robot, sweetSpotFieldKey(axis, edit.slot), edit.entry.fieldText[axis] ?? null);
   return next;
 }
 
@@ -232,24 +287,26 @@ export function spawnEditScene(values: DraftValues, active: { robot: SpawnRobotI
 
 /**
  * 히트맵 모드 장면: 적용한 설정의 기준 셀 LUT(보고 있는 기물, 생성 중이면 조립 중 버퍼)를 진영 기준으로.
- * 스윗스팟 표시도 적용한 값 (LUT와 같은 설정) — 초안이 다르면 화면이 "적용하면 새로 만듦"을 안내한다.
+ * 스윗스팟 표시도 적용한 값 (LUT와 같은 설정, 13-4: 그 기물을 쏘는 슈터의 스윗스팟) — 초안이 다르면 화면이 "적용하면 새로 만듦"을 안내한다.
  */
 export function heatmapEditScene(
   alliance: 'RED' | 'BLUE',
   applied: RobotProfile,
   heatmap: { reference: ArrayLike<number>; rowsDone: ArrayLike<number> } | null,
+  piece: PieceType = 'POLLEN',
 ): HeatmapEditScene {
   return {
     mode: 'HEATMAP',
     alliance,
     reference: heatmap?.reference ?? null,
     rowsDone: heatmap?.rowsDone ?? null,
-    sweetSpot: readSweetSpot(applied, alliance),
+    sweetSpot: readSweetSpot(applied, alliance, pieceShooterSlot(applied, piece)),
   };
 }
 
 /**
- * 스윗스팟 모드 장면: 초안 스윗스팟 / 로봇 크기 / 검증, 마우스를 올린 칸(+ 찍으면 올바른지), 적용한 확률표(반투명)와 그 스윗스팟
+ * 스윗스팟 모드 장면: 그 슈터 자리의 초안 스윗스팟 / 로봇 크기 / 좌우 오프셋(몸체 방향) / 검증, 마우스를 올린 칸(+ 찍으면 올바른지),
+ * 적용한 확률표(반투명)와 그 스윗스팟
  */
 export function sweetSpotEditScene(
   alliance: 'RED' | 'BLUE',
@@ -257,16 +314,19 @@ export function sweetSpotEditScene(
   applied: RobotProfile,
   heatmap: { reference: ArrayLike<number>; rowsDone: ArrayLike<number> } | null,
   hover: Point | null,
+  slot: ShooterSlot = 'MAIN',
 ): SweetSpotEditScene {
+  const lateral = slotBallistics(draft, slot).shooterLateralOffset;
   return {
     mode: 'SWEET_SPOT',
     alliance,
     reference: heatmap?.reference ?? null,
     rowsDone: heatmap?.rowsDone ?? null,
-    sweetSpot: readSweetSpot(draft, alliance),
-    sweetSpotValid: sweetSpotIssueCodes(draft).length === 0,
-    appliedSweetSpot: readSweetSpot(applied, alliance),
+    sweetSpot: readSweetSpot(draft, alliance, slot),
+    sweetSpotValid: sweetSpotIssueCodes(draft, slot).length === 0,
+    appliedSweetSpot: readSweetSpot(applied, alliance, slot),
     robotSize: { length: draft.config.length, width: draft.config.width },
-    hover: hover ? { x: hover.x, y: hover.y, valid: sweetSpotCandidateIssues(draft, alliance, hover).length === 0 } : null,
+    lateralOffset: Number.isFinite(lateral) ? lateral : 0,
+    hover: hover ? { x: hover.x, y: hover.y, valid: sweetSpotCandidateIssues(draft, alliance, hover, slot).length === 0 } : null,
   };
 }

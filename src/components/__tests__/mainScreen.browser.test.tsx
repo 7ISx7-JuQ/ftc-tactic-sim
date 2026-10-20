@@ -123,6 +123,33 @@ describe('config 창', () => {
     await expect.element(button('APPLY')).toBeDisabled();
   });
 
+  it('기물별 확률표 화면 (13-4): NECTAR 슈터 SET ON FIELD → 그 슈터 스윗스팟 모드, POLLEN 전용 적용 → 히트맵 NECTAR 버튼 비활성 · 상태 상자 "쏘지 않음"', async () => {
+    await userEvent.click(button('Open settings'));
+    await userEvent.click(page.getByRole('tab', { name: 'R1' }));
+    const setup = page.getByRole('radiogroup', { name: 'Setup' });
+    await userEvent.click(setup.getByRole('radio', { name: 'Per piece' }));
+    await userEvent.click(button('NECTAR shooter SET ON FIELD'));
+    const spotBanner = page.getByRole('region', { name: 'SWEET SPOT · R1 · NECTAR shooter' });
+    await expect.element(spotBanner).toBeVisible();
+    const pieces = spotBanner.getByRole('radiogroup', { name: 'Hit rate' });
+    await expect.element(pieces.getByRole('radio', { name: 'NECTAR' })).toBeChecked();
+    await expect.element(pieces.getByRole('radio', { name: 'POLLEN' })).toBeDisabled();
+    await expect.element(button('NECTAR shooter SETTING ON FIELD')).toBeDisabled();
+    await userEvent.keyboard('{Escape}'); // 취소
+    await expect.element(spotBanner).not.toBeInTheDocument();
+
+    await userEvent.click(setup.getByRole('radio', { name: 'POLLEN only' }));
+    await userEvent.click(button('APPLY'));
+    await expect.element(page.getByText('NECTAR: not shot by this robot (shooter setup), no hit map')).toBeVisible();
+    await userEvent.click(button('SHOW HIT MAP'));
+    const mapBanner = page.getByRole('region', { name: 'HIT MAP · R1' });
+    await expect.element(mapBanner).toBeVisible();
+    await expect.element(mapBanner.getByRole('radio', { name: 'NECTAR' })).toBeDisabled();
+    await expect.element(mapBanner.getByRole('radio', { name: 'POLLEN' })).toBeChecked();
+    await userEvent.keyboard('{Escape}');
+    await expect.element(mapBanner).not.toBeInTheDocument();
+  });
+
   it('시나리오 REROLL은 APPLY 없이 바로 적용된다', async () => {
     await userEvent.click(button('Open settings'));
     await userEvent.click(page.getByRole('tab', { name: 'SCENARIO' }));

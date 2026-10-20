@@ -3,6 +3,8 @@
 // 히트맵 모드: 기물 종류 전환(POLLEN / NECTAR), 명중률 범례(진영 파스텔 척도), 기준 CELL, 생성 중 / 적용 대기 안내, DONE / Esc = 닫기.
 // 스윗스팟 모드: 같은 범례 + 초안 스윗스팟 좌표 / 검증 사유(빨강) / 반투명 확률표가 적용한 스윗스팟 기준이라는 안내,
 //   CANCEL(Esc) = 들어오기 전 값으로, DONE · APPLY = 그 로봇 탭 적용.
+// 13-4: 기물 버튼은 고를 수 있는 기물만 활성(히트맵 = 그 로봇이 쏘는 기물, 스윗스팟 = 찍는 슈터가 쏘는 기물),
+//   PER_PIECE의 스윗스팟 모드는 제목에 찍는 슈터(POLLEN 슈터 / NECTAR 슈터)를 붙인다.
 import { Check, Crosshair, Map as MapIcon, Move, X } from 'lucide-react';
 import type { CSSProperties } from 'react';
 import { sweetSpotBasisCell } from '../core/ballistics';
@@ -10,6 +12,7 @@ import { heatmapGradientCss } from '../renderer/heatmapView';
 import { t } from '../ui/i18n';
 import type { Language, MessageKey } from '../ui/i18n';
 import type { HeatmapFieldEdit, SweetSpotFieldEdit } from '../ui/fieldEdit';
+import type { ShooterSlot } from '../ui/robotForm';
 import { lutStateText } from '../ui/lutView';
 import type { RobotLutView } from '../ui/lutView';
 import { robotLabel } from '../ui/mainScreenModel';
@@ -28,6 +31,9 @@ export interface SweetSpotBannerInfo {
 
 export default function FieldEditBanner({
   edit,
+  piece,
+  pieces,
+  shooter,
   alliance,
   lut,
   pendingApply,
@@ -39,6 +45,9 @@ export default function FieldEditBanner({
   onCancel,
 }: {
   edit: HeatmapFieldEdit | SweetSpotFieldEdit;
+  piece: PieceType;                 // 보여 주는 기물 (고를 수 없게 된 기물이면 고를 수 있는 첫 기물)
+  pieces: readonly PieceType[];     // 고를 수 있는 기물
+  shooter: ShooterSlot | null;      // PER_PIECE 스윗스팟 모드에서 찍는 슈터 (제목에 표시), 그 외 null
   alliance: 'RED' | 'BLUE';
   lut: RobotLutView;
   pendingApply: boolean;
@@ -51,7 +60,8 @@ export default function FieldEditBanner({
 }) {
   const key = sweetSpotBasisCell(alliance);
   const isSpot = edit.mode === 'SWEET_SPOT';
-  const title = t(lang, isSpot ? 'edit.sweetSpot.title' : 'edit.heatmap.title', { robot: robotLabel(edit.robot) });
+  const base = t(lang, isSpot ? 'edit.sweetSpot.title' : 'edit.heatmap.title', { robot: robotLabel(edit.robot) });
+  const title = shooter ? `${base} · ${t(lang, shooter === 'MAIN' ? 'robot.shooterCard.POLLEN' : 'robot.shooterCard.NECTAR')}` : base;
   return (
     <div className={`field-edit-banner${alliance === 'BLUE' ? ' is-bottom' : ''}`} role="region" aria-label={title} onClick={e => e.stopPropagation()}>
       <div className="field-edit-head">
@@ -69,7 +79,7 @@ export default function FieldEditBanner({
         </button>
       </div>
       <div className="field-edit-legend">
-        <Segmented value={edit.piece} options={PIECES} label={p => p} onChange={onPiece} ariaLabel={t(lang, 'edit.legend')} />
+        <Segmented value={piece} options={PIECES} label={p => p} disabled={p => !pieces.includes(p)} onChange={onPiece} ariaLabel={t(lang, 'edit.legend')} />
         <span>{t(lang, 'edit.legend')}</span>
         <span className="legend-end">0%</span>
         <span className="legend-bar" style={{ background: heatmapGradientCss(alliance) }} aria-hidden />

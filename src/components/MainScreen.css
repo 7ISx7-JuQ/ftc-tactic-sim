@@ -1665,7 +1665,13 @@
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-.lut-piece.is-pending {
+.lut-piece.is-pending,
+.lut-piece.is-not-fired {
+  color: var(--text-muted);
+}
+/* PER_PIECE (13-4): 기물 줄의 슈터 표시 */
+.lut-piece-shooter {
+  font-size: calc(var(--u) * 11);
   color: var(--text-muted);
 }
 .lut-piece .form-warn {
@@ -1705,10 +1711,13 @@
 .field-edit-title {
   font-size: calc(var(--u) * 15);
   font-weight: 800;
-  white-space: nowrap;
+  min-width: 0;
   margin-right: auto;
 }
+/* 제목이 길면(PER_PIECE 스윗스팟 모드의 슈터 이름, 13-4) 제목이 줄바꿈하고 버튼은 띠 안에 남음 */
 .field-edit-head .config-button {
+  flex: none;
+  white-space: nowrap;
   height: calc(var(--u) * 28);
 }
 .field-edit-legend {

@@ -86,7 +86,10 @@ import {
   placeSpawn,
   spawnEditScene,
   spawnRobots,
+  editPieces,
+  effectivePiece,
   fieldEditStays,
+  fieldEditUsable,
   fieldGridCell,
   heatmapEditScene,
   openSweetSpotEdit,
@@ -268,7 +271,12 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
   const canOpen = status ? configCanOpen(status) : false;
   const locked = status ? draftTabsLocked(status.phase) : false;
   // 편집 모드는 연 로봇 탭이 보이는 경기 전 동안만: 탭 이동 / 창 닫기 / START에서 끝내고, 그 밖의 경우도 조건이 깨지면 보이지 않음
-  const activeEdit = fieldEdit && status && fieldEditStays(fieldEdit, { phase: status.phase, configOpen, tab: configTab }) ? fieldEdit : null;
+  // 13-4: 슈터 구성을 바꿔 그 모드를 쓸 수 없게 되면(쏠 기물 없음 / 쓰지 않는 슈터 자리) 보이지 않음
+  const activeEdit =
+    fieldEdit && status && fieldEditStays(fieldEdit, { phase: status.phase, configOpen, tab: configTab }) && fieldEditUsable(fieldEdit, drafts) ? fieldEdit : null;
+  // 편집 모드의 기물 버튼에서 고를 수 있는 기물 (히트맵 = 적용한 설정, 스윗스팟 = 초안의 그 슈터) + 지금 보여 줄 기물
+  const editPieceList = activeEdit && activeEdit.mode !== 'SPAWN' ? editPieces(activeEdit, activeEdit.mode === 'HEATMAP' ? drafts.applied[activeEdit.robot] : drafts.draft[activeEdit.robot]) : [];
+  const editPiece = activeEdit && activeEdit.mode !== 'SPAWN' ? effectivePiece(activeEdit.piece, editPieceList) : null;
   const editAlliance = drafts.draft.scenario.allianceColor;
   const openConfig = (tab?: ConfigTab) => {
     if (!canOpen) return;
@@ -515,13 +523,14 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
       return;
     }
     const robot = activeEdit.robot;
-    const heatmap = trackerRef.current?.heatmap(robot, activeEdit.piece) ?? null;
+    const piece = editPiece ?? activeEdit.piece;
+    const heatmap = trackerRef.current?.heatmap(robot, piece) ?? null;
     controller.setEditScene(
       activeEdit.mode === 'HEATMAP'
-        ? heatmapEditScene(editAlliance, drafts.applied[robot], heatmap)
-        : sweetSpotEditScene(editAlliance, drafts.draft[robot], drafts.applied[robot], heatmap, spotHover?.cell ?? null),
+        ? heatmapEditScene(editAlliance, drafts.applied[robot], heatmap, piece)
+        : sweetSpotEditScene(editAlliance, drafts.draft[robot], drafts.applied[robot], heatmap, spotHover?.cell ?? null, activeEdit.slot),
     );
-  }, [activeEdit, editAlliance, drafts.applied, drafts.draft, lutViews, spotHover, spawnActive]);
+  }, [activeEdit, editPiece, editAlliance, drafts.applied, drafts.draft, lutViews, spotHover, spawnActive]);
   // 편집 중 Esc = 편집 모드 닫기 / 스윗스팟 모드는 취소 (config 창은 그대로, 확인창이 떠 있으면 확인창이 먼저)
   useEffect(() => {
     if (!activeEdit || confirm) return;
@@ -666,7 +675,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
     const hit = spotHoverRef.current ?? spotAt(e.clientX, e.clientY);
     if (!hit) return;
     setConfigNotice(null);
-    setDrafts(d => clickSweetSpot(d, spotEdit.robot, editAlliance, hit.cell));
+    setDrafts(d => clickSweetSpot(d, spotEdit.robot, editAlliance, hit.cell, spotEdit.slot));
   };
 
   // START: 적용 안 된 수정 / 검증 실패 / 명중 확률표 미준비가 있으면 시작하지 않고 첫 문제 탭(R1 → R2 → SCENARIO)으로 펼침
@@ -825,13 +834,16 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
         {activeEdit && activeEdit.mode !== 'SPAWN' && (
           <FieldEditBanner
             edit={activeEdit}
+            piece={editPiece ?? activeEdit.piece}
+            pieces={editPieceList}
+            shooter={activeEdit.mode === 'SWEET_SPOT' && drafts.draft[activeEdit.robot].config.shooterSetup === 'PER_PIECE' ? activeEdit.slot : null}
             alliance={editAlliance}
             lut={luts[activeEdit.robot]}
             pendingApply={lutInputsChanged(drafts.draft[activeEdit.robot], drafts.applied[activeEdit.robot])}
             sweetSpot={
               spotEdit && {
-                spot: readSweetSpot(drafts.draft[spotEdit.robot], editAlliance),
-                issues: sweetSpotIssueCodes(drafts.draft[spotEdit.robot]),
+                spot: readSweetSpot(drafts.draft[spotEdit.robot], editAlliance, spotEdit.slot),
+                issues: sweetSpotIssueCodes(drafts.draft[spotEdit.robot], spotEdit.slot),
                 heatmapStale: lutInputsChanged(drafts.draft[spotEdit.robot], drafts.applied[spotEdit.robot]),
               }
             }
@@ -845,7 +857,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
         {spotEdit && spotHover && (
           <SweetSpotHoverTip
             at={spotHover}
-            issues={sweetSpotCandidateIssues(drafts.draft[spotEdit.robot], editAlliance, spotHover.cell)}
+            issues={sweetSpotCandidateIssues(drafts.draft[spotEdit.robot], editAlliance, spotHover.cell, spotEdit.slot)}
             unit={settings.lengthUnit}
             lang={lang}
           />
@@ -903,15 +915,16 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
                   canCopy={canCopyRobotTab(drafts, configTab)}
                   alliance={drafts.draft.scenario.allianceColor}
                   lut={luts[configTab]}
+                  appliedSetup={drafts.applied[configTab].config.shooterSetup}
                   lutPending={lutInputsChanged(drafts.draft[configTab], drafts.applied[configTab])}
                   onRetry={() => trackerRef.current?.retry(configTab)}
                   heatmapOn={activeEdit?.mode === 'HEATMAP' && activeEdit.robot === configTab}
-                  onHeatmap={() => setFieldEdit(current => toggleHeatmapEdit(current, configTab))}
-                  spotEditOn={spotEdit?.robot === configTab}
-                  onSetOnField={() => {
+                  onHeatmap={() => setFieldEdit(current => toggleHeatmapEdit(current, configTab, drafts.applied[configTab]))}
+                  spotEditSlot={spotEdit?.robot === configTab ? spotEdit.slot : null}
+                  onSetOnField={slot => {
                     spotHoverRef.current = null;
                     setSpotHover(null);
-                    setFieldEdit(current => openSweetSpotEdit(current, drafts, configTab));
+                    setFieldEdit(current => openSweetSpotEdit(current, drafts, configTab, slot));
                   }}
                   onEdit={editRobot(configTab)}
                   onCopy={() => copyRobot(configTab)}

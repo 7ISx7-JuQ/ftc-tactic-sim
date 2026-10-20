@@ -12,6 +12,12 @@ import {
   placeSweetSpot,
   sweetSpotCandidateIssues,
   editDoneAction,
+  editPieces,
+  effectivePiece,
+  fieldEditUsable,
+  heatmapPieces,
+  pieceShooterSlot,
+  slotPieces,
   sweetSpotEditScene,
   sweetSpotIssueCodes,
   toggleHeatmapEdit,
@@ -29,7 +35,8 @@ import {
 } from '../fieldEdit';
 import { DEFAULT_SPAWN_POSES, gardenPiecePositions, validateRobotPlacement } from '../../core/simulationEngine';
 import { editDraft } from '../configDraft';
-import { readSweetSpot } from '../robotForm';
+import { readSweetSpot, writeNumber } from '../robotForm';
+import type { RobotProfile } from '../robotForm';
 
 describe('필드 편집 모드 (09-10b / 09-10c / 09-11b)', () => {
   it('A. SHOW / HIDE HIT MAP: 같은 로봇이면 닫고, 아니면 그 로봇으로 열기 (기본 POLLEN)', () => {
@@ -72,7 +79,7 @@ describe('필드 편집 모드 (09-10b / 09-10c / 09-11b)', () => {
     let drafts = initialDrafts(DEFAULT_DRAFT_VALUES);
     drafts = setFieldText(drafts, 'robot1', 'sweetSpot.x', '12a');
     const edit = openSweetSpotEdit(null, drafts, 'robot1') as SweetSpotFieldEdit;
-    expect(edit).toEqual({ mode: 'SWEET_SPOT', robot: 'robot1', piece: 'POLLEN', entry: { sweetSpot: { x: 59.5, y: 131.5 }, fieldText: { x: '12a' } } });
+    expect(edit).toEqual({ mode: 'SWEET_SPOT', robot: 'robot1', slot: 'MAIN', piece: 'POLLEN', entry: { sweetSpot: { x: 59.5, y: 131.5 }, fieldText: { x: '12a' } } });
     expect(openSweetSpotEdit(edit, clickSweetSpot(drafts, 'robot1', 'RED', GOOD_CELL), 'robot1')).toBe(edit); // 다시 눌러도 기억값 유지
     const fromHeatmap = openSweetSpotEdit({ mode: 'HEATMAP', robot: 'robot1', piece: 'NECTAR' }, drafts, 'robot1');
     expect(fromHeatmap.piece).toBe('NECTAR');
@@ -157,6 +164,7 @@ describe('필드 편집 모드 (09-10b / 09-10c / 09-11b)', () => {
       sweetSpotValid: true,
       appliedSweetSpot: { x: 59.5, y: 131.5 },
       robotSize: { length: 16, width: 14 },
+      lateralOffset: 0,
       hover: { ...HIVE_CELL, valid: false },
     });
     expect(sweetSpotEditScene('RED', draft, applied, null, GOOD_CELL).hover).toEqual({ ...GOOD_CELL, valid: true });
@@ -252,5 +260,69 @@ describe('필드 편집 모드 (09-10b / 09-10c / 09-11b)', () => {
     expect(blue.robots.robot1.pose).toEqual(DEFAULT_SPAWN_POSES.BLUE.robot1);
     expect(blue.robots.robot1.bad || blue.robots.robot2.bad).toBe(false);
     expect(blue.gardenPieces).toEqual(gardenPiecePositions('BLUE', 2));
+  });
+});
+
+describe('기물별 확률표 화면 (13-4)', () => {
+  const base = DEFAULT_DRAFT_VALUES.robot1;
+  const setup = (p: RobotProfile, shooterSetup: RobotProfile['config']['shooterSetup']): RobotProfile => ({ ...p, config: { ...p.config, shooterSetup } });
+  const NECTAR_CELL = { x: 70.5, y: 127.5 };
+
+  it('J. 기물 → 슈터 자리, 히트맵 / 스윗스팟 모드에서 고를 수 있는 기물, 기본 기물', () => {
+    expect(['NONE', 'POLLEN_ONLY', 'SHARED', 'PER_PIECE'].map(v => heatmapPieces(setup(base, v as never)))).toEqual([[], ['POLLEN'], ['POLLEN', 'NECTAR'], ['POLLEN', 'NECTAR']]);
+    const per = setup(base, 'PER_PIECE');
+    expect([pieceShooterSlot(per, 'POLLEN'), pieceShooterSlot(per, 'NECTAR'), pieceShooterSlot(base, 'NECTAR')]).toEqual(['MAIN', 'NECTAR', 'MAIN']);
+    expect([slotPieces(per, 'MAIN'), slotPieces(per, 'NECTAR'), slotPieces(base, 'MAIN'), slotPieces(base, 'NECTAR')]).toEqual([['POLLEN'], ['NECTAR'], ['POLLEN', 'NECTAR'], []]);
+    // 히트맵 기본 기물 = 쏠 수 있는 첫 기물, 프로필이 없으면 POLLEN (v1)
+    expect(toggleHeatmapEdit(null, 'robot1', setup(base, 'POLLEN_ONLY'))).toEqual({ mode: 'HEATMAP', robot: 'robot1', piece: 'POLLEN' });
+    expect(toggleHeatmapEdit(null, 'robot1')!.piece).toBe('POLLEN');
+    expect(editPieces({ mode: 'HEATMAP', robot: 'robot1', piece: 'POLLEN' }, setup(base, 'POLLEN_ONLY'))).toEqual(['POLLEN']);
+    // 구성이 바뀌어 고를 수 없게 된 기물은 첫 기물로
+    expect(effectivePiece('NECTAR', ['POLLEN'])).toBe('POLLEN');
+    expect(effectivePiece('NECTAR', ['POLLEN', 'NECTAR'])).toBe('NECTAR');
+  });
+
+  it('K. NECTAR 슈터 스윗스팟 모드: 그 자리 스윗스팟 / 글자만 기억 · 찍기 · 취소, 기물 = NECTAR, 사유 / 몸체 윤곽은 그 슈터 기준', () => {
+    const per = setup(base, 'PER_PIECE');
+    let drafts = editDraft(initialDrafts(DEFAULT_DRAFT_VALUES), 'robot1', per);
+    drafts = setFieldText(drafts, 'robot1', 'nectar.sweetSpot.y', '9z');
+    const edit = openSweetSpotEdit({ mode: 'HEATMAP', robot: 'robot1', piece: 'POLLEN' }, drafts, 'robot1', 'NECTAR');
+    expect(edit).toEqual({ mode: 'SWEET_SPOT', robot: 'robot1', slot: 'NECTAR', piece: 'NECTAR', entry: { sweetSpot: { x: 59.5, y: 131.5 }, fieldText: { y: '9z' } } });
+    expect(openSweetSpotEdit(edit, drafts, 'robot1', 'NECTAR')).toBe(edit);
+    expect(openSweetSpotEdit(edit, drafts, 'robot1', 'MAIN').slot).toBe('MAIN'); // 다른 자리면 새로 기억
+    // 찍기: NECTAR 슈터 스윗스팟만 바뀌고 그 칸 글자만 지움 (주 슈터 그대로)
+    const clicked = clickSweetSpot(drafts, 'robot1', 'RED', NECTAR_CELL, 'NECTAR');
+    expect(clicked.draft.robot1.ballistics.nectarShooter.sweetSpot).toEqual(NECTAR_CELL);
+    expect(clicked.draft.robot1.ballistics.sweetSpot).toEqual(per.ballistics.sweetSpot);
+    expect(clicked.fieldText.robot1['nectar.sweetSpot.y']).toBeUndefined();
+    // 취소: 들어오기 전 NECTAR 스윗스팟 / 글자로
+    const back = cancelSweetSpotEdit(clicked, edit);
+    expect(back.draft.robot1.ballistics.nectarShooter.sweetSpot).toEqual({ x: 59.5, y: 131.5 });
+    expect(back.fieldText.robot1['nectar.sweetSpot.y']).toBe('9z');
+    // 사유는 그 자리만: NECTAR를 HIVE에 찍으면 NECTAR 사유, 주 슈터 사유는 없음
+    const bad = clickSweetSpot(drafts, 'robot1', 'RED', { x: 60.5, y: 99.5 }, 'NECTAR').draft.robot1;
+    expect(sweetSpotIssueCodes(bad, 'NECTAR')).toEqual(['SWEET_SPOT_IN_HIVE', 'SWEET_SPOT_NO_SOLUTION']);
+    expect(sweetSpotIssueCodes(bad, 'MAIN')).toEqual([]);
+    expect(sweetSpotCandidateIssues(per, 'RED', { x: 60.5, y: 99.5 }, 'NECTAR')).toEqual(['SWEET_SPOT_IN_HIVE', 'SWEET_SPOT_NO_SOLUTION']);
+    // 장면: 그 자리 스윗스팟 + 그 슈터 좌우 오프셋 (몸체 윤곽 방향)
+    const withLateral = writeNumber(clicked.draft.robot1, 'nectar.shooterLateralOffset', -4);
+    const scene = sweetSpotEditScene('RED', withLateral, per, null, null, 'NECTAR');
+    expect(scene.sweetSpot).toEqual(NECTAR_CELL);
+    expect(scene.lateralOffset).toBe(-4);
+    expect(scene.appliedSweetSpot).toEqual(readSweetSpot(per, 'RED', 'NECTAR'));
+    expect(sweetSpotEditScene('RED', withLateral, per, null, null).lateralOffset).toBe(0); // 주 슈터
+  });
+
+  it('L. 히트맵 장면의 스윗스팟 = 그 기물을 쏘는 슈터, 모드를 쓸 수 없게 되면 숨김', () => {
+    const per = { ...setup(base, 'PER_PIECE'), ballistics: { ...base.ballistics, nectarShooter: { ...base.ballistics.nectarShooter, sweetSpot: NECTAR_CELL } } };
+    expect(heatmapEditScene('RED', per, null, 'NECTAR').sweetSpot).toEqual(NECTAR_CELL);
+    expect(heatmapEditScene('RED', per, null, 'POLLEN').sweetSpot).toEqual({ x: 59.5, y: 131.5 });
+    expect(heatmapEditScene('RED', setup(per, 'SHARED'), null, 'NECTAR').sweetSpot).toEqual({ x: 59.5, y: 131.5 }); // 공용 슈터
+    const values = (draft: RobotProfile, applied: RobotProfile) => ({ draft: { ...DEFAULT_DRAFT_VALUES, robot1: draft }, applied: { ...DEFAULT_DRAFT_VALUES, robot1: applied } });
+    const nectarEdit: SweetSpotFieldEdit = { mode: 'SWEET_SPOT', robot: 'robot1', slot: 'NECTAR', piece: 'NECTAR', entry: { sweetSpot: NECTAR_CELL, fieldText: {} } };
+    expect(fieldEditUsable(nectarEdit, values(per, base))).toBe(true);
+    expect(fieldEditUsable(nectarEdit, values(setup(per, 'SHARED'), base))).toBe(false); // PER_PIECE를 떠나면 NECTAR 슈터 모드 숨김
+    expect(fieldEditUsable({ mode: 'HEATMAP', robot: 'robot1', piece: 'POLLEN' }, values(base, setup(base, 'NONE')))).toBe(false); // 적용한 설정에 쏠 기물 없음
+    expect(fieldEditUsable({ mode: 'HEATMAP', robot: 'robot1', piece: 'POLLEN' }, values(setup(base, 'NONE'), base))).toBe(true); // 히트맵은 적용한 설정 기준
   });
 });

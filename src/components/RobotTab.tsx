@@ -58,12 +58,13 @@ export interface RobotTabProps {
   canCopy: boolean;
   alliance: 'RED' | 'BLUE';                         // 스윗스팟 입력 / 표시 기준 (시나리오 초안 진영)
   lut: RobotLutView;                                // 적용한 설정의 명중 확률표 상태
+  appliedSetup: ShooterSetup;                       // 적용한 설정의 슈터 구성 (확률표 상태 상자의 기물별 줄, 13-4)
   lutPending: boolean;                              // 초안의 LUT 입력이 적용 값과 다름
   onRetry: () => void;
   heatmapOn: boolean;                               // 이 로봇의 히트맵 편집 모드가 열려 있음 (09-10b)
   onHeatmap: () => void;                            // SHOW / HIDE HIT MAP
-  spotEditOn: boolean;                              // 이 로봇의 스윗스팟 편집 모드가 열려 있음 (09-10c)
-  onSetOnField: () => void;                         // SET ON FIELD (닫기는 필드 안내 띠의 DONE · APPLY / CANCEL)
+  spotEditSlot: ShooterSlot | null;                 // 이 로봇의 스윗스팟 편집 모드가 열려 있으면 찍는 슈터 자리 (09-10c, 13-4)
+  onSetOnField: (slot: ShooterSlot) => void;        // SET ON FIELD — 주 슈터 / NECTAR 슈터 카드 (닫기는 필드 안내 띠의 DONE · APPLY / CANCEL)
   /** 초안 편집: 새 프로필(없으면 값은 그대로) + 칸 키가 있으면 그 칸의 틀린 글자(null = 지움) + 함께 지울 칸 글자 */
   onEdit: (profile: RobotProfile | null, key: string | null, invalidText: string | null, clearKeys?: readonly string[]) => void;
   onCopy: () => void;
@@ -99,7 +100,7 @@ const labelKey = (key: NumberFieldKey): MessageKey => LABELS[(key.startsWith('ne
 // 숨는 슈터 칸의 틀린 글자 키 (구성 / 형식을 바꿔 칸이 사라질 때 지움 — 보이지 않는 칸이 탭을 막지 않도록)
 const slotTextKeys = (slot: ShooterSlot): string[] => [...SHOOTER_FIELD_KEYS.map(k => shooterFieldKey(slot, k)), ...SWEET_SPOT_AXES.map(a => sweetSpotFieldKey(a, slot))];
 
-export default function RobotTab({ robotId, profile, fieldText, unit, lang, locked, canCopy, alliance, lut, lutPending, onRetry, heatmapOn, onHeatmap, spotEditOn, onSetOnField, onEdit, onCopy }: RobotTabProps) {
+export default function RobotTab({ robotId, profile, fieldText, unit, lang, locked, canCopy, alliance, lut, appliedSetup, lutPending, onRetry, heatmapOn, onHeatmap, spotEditSlot, onSetOnField, onEdit, onCopy }: RobotTabProps) {
   const other: RobotId = robotId === 'robot1' ? 'robot2' : 'robot1';
   const { config } = profile;
   const setup = config.shooterSetup;
@@ -204,6 +205,7 @@ export default function RobotTab({ robotId, profile, fieldText, unit, lang, lock
           <>
             <span className="settings-note">{t(lang, 'robot.sweetSpotBasis', { key: sweetSpotBasisCell(alliance) })}</span>
             <div className="form-grid">{SWEET_SPOT_AXES.map(axis => sweetSpotField(axis, slot, spot[axis]))}</div>
+            {setOnFieldRow(slot)}
             <IssueList issues={slotIssues(slot)} lang={lang} />
             <p className="settings-note">{t(lang, 'robot.nectarSweetSpotHint')}</p>
           </>
@@ -228,6 +230,27 @@ export default function RobotTab({ robotId, profile, fieldText, unit, lang, lock
       onInvalid={text => onEdit(null, sweetSpotFieldKey(axis, slot), text)}
     />
   );
+
+  // SET ON FIELD (09-10c): 그 슈터 자리의 스윗스팟을 필드에서 찍기 (13-4: NECTAR 슈터 카드에도)
+  const setOnFieldRow = (slot: ShooterSlot) => {
+    const on = spotEditSlot === slot;
+    return (
+      <div className="settings-row">
+        <span className="settings-note">{t(lang, 'edit.sweetSpot.hint', { key: sweetSpotBasisCell(alliance) })}</span>
+        <button
+          type="button"
+          className={`config-button${on ? ' is-active' : ''}`}
+          aria-pressed={on}
+          aria-label={slot === 'NECTAR' ? `${t(lang, 'robot.shooterCard.NECTAR')} ${t(lang, on ? 'robot.settingOnField' : 'robot.setOnField')}` : undefined}
+          disabled={locked || on}
+          onClick={() => onSetOnField(slot)}
+        >
+          <Crosshair />
+          {t(lang, on ? 'robot.settingOnField' : 'robot.setOnField')}
+        </button>
+      </div>
+    );
+  };
 
   const zoneEditor = (list: ZoneList) => (
     <ZoneEditor robotId={robotId} profile={profile} list={list} fieldText={fieldText} unit={unit} lang={lang} locked={locked} onEdit={onEdit} />
@@ -299,16 +322,10 @@ export default function RobotTab({ robotId, profile, fieldText, unit, lang, lock
         <Section title={t(lang, setup === 'PER_PIECE' ? 'robot.section.sweetSpotPollen' : 'robot.section.sweetSpot')}>
           <span className="settings-note">{t(lang, 'robot.sweetSpotBasis', { key: sweetSpotBasisCell(alliance) })}</span>
           <div className="form-grid">{SWEET_SPOT_AXES.map(axis => sweetSpotField(axis, 'MAIN', spot[axis]))}</div>
-          <div className="settings-row">
-            <span className="settings-note">{t(lang, 'edit.sweetSpot.hint', { key: sweetSpotBasisCell(alliance) })}</span>
-            <button type="button" className={`config-button${spotEditOn ? ' is-active' : ''}`} aria-pressed={spotEditOn} disabled={locked || spotEditOn} onClick={onSetOnField}>
-              <Crosshair />
-              {t(lang, spotEditOn ? 'robot.settingOnField' : 'robot.setOnField')}
-            </button>
-          </div>
+          {setOnFieldRow('MAIN')}
           <IssueList issues={slotIssues('MAIN')} lang={lang} />
           <p className="settings-note">{t(lang, 'robot.sweetSpotHint')}</p>
-          <LutStatus lut={lut} unit={unit} lang={lang} pendingApply={lutPending} locked={locked} onRetry={onRetry} />
+          <LutStatus lut={lut} setup={appliedSetup} unit={unit} lang={lang} pendingApply={lutPending} locked={locked} onRetry={onRetry} />
           <div className="settings-row">
             <span className="settings-note">{t(lang, 'robot.heatmapHint')}</span>
             <button type="button" className={`config-button${heatmapOn ? ' is-active' : ''}`} aria-pressed={heatmapOn} disabled={locked} onClick={onHeatmap}>
