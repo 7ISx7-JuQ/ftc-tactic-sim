@@ -1417,6 +1417,12 @@
   stroke: rgba(167, 139, 250, 0.85);
   stroke-dasharray: 4 3;
 }
+/* 고정형 슈터 (13-5): 부채꼴 대신 사출구에서 앞으로 발사 방향 선 */
+.preview-aim.is-line {
+  fill: none;
+  stroke-width: 2px;
+  stroke-linecap: round;
+}
 /* 투입 방향 구역 (13-3): FLOWER 분홍 */
 .preview-drop {
   fill: rgba(242, 138, 208, 0.4);

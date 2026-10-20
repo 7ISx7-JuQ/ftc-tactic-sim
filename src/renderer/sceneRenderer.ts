@@ -476,7 +476,7 @@ function pathPolyline(ctx: CanvasRenderingContext2D, pts: Point2[]): void {
   pts.forEach((p, i) => (i === 0 ? ctx.moveTo(inchToPx(p.x), inchToPx(p.y)) : ctx.lineTo(inchToPx(p.x), inchToPx(p.y))));
 }
 
-// 표시 옵션 aimGuide: 다음에 발사할 기물의 슈터 기준 (13-2) — 사출구를 꼭짓점으로 조준 가능 부채꼴
+// 표시 옵션 aimGuide: 다음에 발사할 기물의 슈터 기준 (13-2) — 터렛형은 사출구를 꼭짓점으로 회전 범위 부채꼴 (고정형은 없음, 13-5)
 // + 사출구에서 발사 방향으로 조준점 거리만큼 점선 (로봇 아래) + 사출구 점 (비행 공이 출발하는 점, 몸체 안이라 로봇 위 — drawMuzzleMarks)
 const AIM_SECTOR_RADIUS = 24; // inch
 const MUZZLE_MARK_RADIUS = 0.8; // inch
@@ -492,15 +492,17 @@ function drawAimGuides(ctx: CanvasRenderingContext2D, guides: readonly AimGuide[
   for (const g of guides) {
     const cx = inchToPx(g.muzzle.x);
     const cy = inchToPx(g.muzzle.y);
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.arc(cx, cy, inchToPx(AIM_SECTOR_RADIUS), g.sectorStart, g.sectorEnd);
-    ctx.closePath();
-    ctx.fillStyle = SCENE_COLORS.aimSector;
-    ctx.fill();
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = SCENE_COLORS.aimSectorStroke;
-    ctx.stroke();
+    if (g.sector) {
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, inchToPx(AIM_SECTOR_RADIUS), g.sector.start, g.sector.end);
+      ctx.closePath();
+      ctx.fillStyle = SCENE_COLORS.aimSector;
+      ctx.fill();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = SCENE_COLORS.aimSectorStroke;
+      ctx.stroke();
+    }
     const reach = Math.hypot(g.aim.x - g.muzzle.x, g.aim.y - g.muzzle.y);
     ctx.beginPath();
     ctx.moveTo(cx, cy);

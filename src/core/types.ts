@@ -49,7 +49,7 @@ export interface RobotConfig {
   // 터렛 회전 한계 [α, β] (rad, 차체 헤딩 기준 상대각 Δψ = 목표 방위 − 헤딩, + = 로봇 오른쪽(캔버스 y-down), [-π, π] 정규화)
   // α ≤ β: α ~ β 구간, α > β: ±π를 가로지르는 구간 (예: 후방 터렛 [2.5, -2.5]), 360° 터렛 = [-π, π]
   turretRange: [number, number];
-  // 고정형 허용 조준 오차 aimTolerance는 11-3에서 없앰 (실제 궤적 명중 판정, 명세서 5.4)
+  // 고정형 허용 조준 오차 aimTolerance는 11-3에서 없앰 (명세서 2.6.2 경기 중 명중 판정 — 조준 범위 컷 없음)
   nectarShooter: ShooterAimConfig; // PER_PIECE의 NECTAR 슈터. 다른 구성에서는 쓰지 않고 값만 보관
 
   // FLOWER 득점 옵션
@@ -155,7 +155,7 @@ export type HeatmapLUT = Float32Array;
 export type HeatmapLUTSet = Record<HiveCellKey, HeatmapLUT>;
 // 로봇 1대의 LUT: 기물 종류별 × 4셀 = 8장 (R1, R2 합계 16장)
 export type RobotHeatmapLUTs = Record<GamePiece['type'], HeatmapLUTSet>;
-// 경기 1회분 LUT: 로봇 슬롯별 (createLUTShotResolver 입력)
+// 경기 1회분 LUT: 로봇 슬롯별
 export type MatchHeatmapLUTs = Record<'robot1' | 'robot2', RobotHeatmapLUTs>;
 
 // 엔진 발사 비행 처리용 슈터 탄도 (로봇별 · 기물별, 명세서 2.6.2 발사 비행 처리, 12-3)
@@ -217,8 +217,7 @@ export interface RobotState {
 // 틱별 행동 요청 (입력 계층 → 엔진, 명세서 3.6). FLOWER_READY / FLOWER_LOWERING은 엔진 상태이며 요청 값이 아님
 export type ActionRequest = 'IDLE' | 'INTAKING' | 'SHOOTING' | 'FLOWER_SETUP' | 'FLOWER_DROPPING';
 
-// 명중 확률 함수: 0.0 ~ 1.0 (좌측 패널 명중 확률 표시용, 탄도 LUT 기반 createLUTShotResolver).
-// 12-11부터 엔진 판정에는 쓰지 않는다 (아래 ShotJudge). 13-5에서 지금 자세의 기대 명중률로 바뀐다 (명세서 5.4)
+// 명중 확률 표시 함수: 0.0 ~ 1.0 (좌측 패널, 13-5: 지금 자세의 기대 명중률 createHitRateEstimator). 엔진 판정은 ShotJudge (12-11)
 export type ShotProbabilityResolver = (
   robotId: 'robot1' | 'robot2',
   pieceType: GamePiece['type'], // 발사하는 기물 종류 (종류별 LUT 선택)

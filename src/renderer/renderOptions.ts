@@ -3,7 +3,6 @@
 
 import {
   DEFAULT_SHOOTER_BALLISTICS,
-  FIXED_AIM_TOLERANCE,
   PIECE_TYPES,
   bearingTo,
   isPieceFireable,
@@ -19,7 +18,7 @@ import { FLOWER_DEQ_GRAVITY_COOLDOWN } from '../core/types';
 import type { DeepReadonly, GamePiece, RobotConfig, RobotShooterBallistics, RobotState, ShotProbabilityResolver, TimelineFrame } from '../core/types';
 
 export interface RenderOptions {
-  aimGuide: boolean;       // 조준선 (고정형 허용 오차 부채꼴 / 터렛 범위 부채꼴 + 발사 방향)
+  aimGuide: boolean;       // 조준선 (발사 방향 + 터렛 범위 부채꼴)
   intakeProgress: boolean; // 흡입 접촉 진행 호
   hitProbability: boolean; // 실시간 명중 확률 (좌측 HTML 득점 패널 글자, 09-6d — 캔버스에는 그리지 않음)
   flightTrail: boolean;    // 비행 잔상
@@ -44,8 +43,8 @@ export interface AimGuide {
   muzzle: { x: number; y: number }; // 사출구 바닥 투영 (앞뒤 / 좌우 오프셋, 발사 비행 계획의 발사구와 같은 점)
   aim: { x: number; y: number };  // 상향 셀 조준점 (바닥 투영)
   launchHeading: number;          // 발사 방향 (고정형 = 헤딩, 터렛 = 좌우 오프셋 보정한 조준 방향 ψ, 범위 밖이면 한계각)
-  sectorStart: number;            // 조준 가능 부채꼴 (시작 → 끝, 시계 방향 = 각도 증가, 필드 좌표 rad, 꼭짓점 = 사출구)
-  sectorEnd: number;
+  // 터렛 회전 범위 부채꼴 (시작 → 끝, 시계 방향 = 각도 증가, 필드 좌표 rad, 꼭짓점 = 사출구). 고정형은 null (13-5: 발사 방향 선만)
+  sector: { start: number; end: number } | null;
 }
 
 /**
@@ -62,8 +61,8 @@ export function aimGuidePiece(robot: Pick<Robot, 'controlledPieces'>, config: Pa
  * 조준선 계산 (13-2): 그 기물을 쏘는 슈터(shooterFor)와 탄도(shooters[기물], 없으면 엔진 기본 슈터)로
  * - 발사 방향 = 발사 비행 계획(planShotFlight)과 같은 shotLaunchHeading(좌우 오프셋 보정 ψ, 조준 불가 자리면 조준점 방위)
  * - 사출구 = launchPoint(로봇 중심, 발사 방향, 앞뒤 / 좌우 오프셋) — 비행 공이 출발하는 점
- * - 부채꼴: 고정형 = 헤딩 ± FIXED_AIM_TOLERANCE(11-3 임시, 13-5에서 발사 방향 선으로 바뀜), 터렛 = 헤딩 + turretRange (±π를 가로지르면 끝에 2π 더함)
- * 터렛 범위 해석은 엔진 판정(isAimWithinShooterRange)과 같다: 각 끝을 [-π, π]로 정규화하므로 360°는 [-π, π]만 해당.
+ * - 부채꼴: 터렛 = 헤딩 + turretRange (±π를 가로지르면 끝에 2π 더함), 고정형 = 없음 (13-5 — 엔진 판정에 조준 범위가 없음, 12-11)
+ * 터렛 범위 해석은 발사 방향(isWithinTurretRange)과 같다: 각 끝을 [-π, π]로 정규화하므로 360°는 [-π, π]만 해당.
  * 쏠 수 있는 기물이 없으면(NONE) null
  */
 export function aimGuide(
@@ -83,15 +82,12 @@ export function aimGuide(
   const launchHeading = shotLaunchHeading(shooter, robot.heading, aimHeading);
   const offset = Number.isFinite(ballistics.shooterOffset) ? ballistics.shooterOffset : 0;
   const muzzle = launchPoint(robot.x, robot.y, launchHeading, { dz: 0, shooterOffset: offset, shooterLateralOffset: lateral });
-  let lo: number;
-  let hi: number;
+  let sector: AimGuide['sector'] = null;
   if (shooter.turretType === 'TURRET') {
-    lo = normalizeAngle(shooter.turretRange[0]);
-    hi = normalizeAngle(shooter.turretRange[1]);
+    const lo = normalizeAngle(shooter.turretRange[0]);
+    let hi = normalizeAngle(shooter.turretRange[1]);
     if (lo > hi) hi += Math.PI * 2;
-  } else {
-    lo = -FIXED_AIM_TOLERANCE;
-    hi = FIXED_AIM_TOLERANCE;
+    sector = { start: robot.heading + lo, end: robot.heading + hi };
   }
   return {
     pieceType,
@@ -99,8 +95,7 @@ export function aimGuide(
     muzzle: { x: muzzle.x, y: muzzle.y },
     aim: { x: aim.x, y: aim.y },
     launchHeading,
-    sectorStart: robot.heading + lo,
-    sectorEnd: robot.heading + hi,
+    sector,
   };
 }
 

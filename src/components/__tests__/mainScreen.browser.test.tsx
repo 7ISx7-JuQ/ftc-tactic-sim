@@ -92,11 +92,16 @@ describe('config 창', () => {
 
     // 고정형 슈터 카드에는 허용 조준 오차 칸이 없음 (11-3): NECTAR 카드를 터렛으로 바꾸면 한계 칸, 고정형으로 되돌리면 숨김
     await expect.element(page.getByText('Aim tolerance', { exact: false })).not.toBeInTheDocument();
+    // 미리보기 (13-5): 고정형 슈터 = 사출구에서 앞으로 발사 방향 선, 터렛 = 회전 범위 부채꼴
+    const previewAims = () => [...document.querySelectorAll('.robot-preview .preview-aim')].map(e => `${e.tagName}${e.classList.contains('is-nectar') ? ':NECTAR' : ''}`).sort();
+    expect(previewAims()).toEqual(['line', 'line:NECTAR']);
     const nectarType = page.getByRole('radiogroup', { name: 'NECTAR shooter Type' });
     await userEvent.click(nectarType.getByRole('radio', { name: 'Turret' }));
     await expect.element(page.getByLabelText('Left limit')).toBeVisible();
+    expect(previewAims()).toEqual(['line', 'path:NECTAR']);
     await userEvent.click(nectarType.getByRole('radio', { name: 'Fixed' }));
     await expect.element(page.getByLabelText('Left limit')).not.toBeInTheDocument();
+    expect(previewAims()).toEqual(['line', 'line:NECTAR']);
 
     // NECTAR 카드 좌우 오프셋 (두 번째 칸): 범위 밖이면 오류 + APPLY 막힘
     const lateral = page.getByLabelText('Launcher offset (+ right)').nth(1);

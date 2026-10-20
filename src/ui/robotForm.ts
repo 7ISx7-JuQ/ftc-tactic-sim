@@ -20,7 +20,6 @@ import {
   DEFAULT_PITCH_NOISE_RAD,
   DEFAULT_SHOOTER_BALLISTICS,
   DEFAULT_V0_NOISE_PERCENT,
-  FIXED_AIM_TOLERANCE,
   sweetSpotFromBasis,
   sweetSpotToBasis,
   validateBallisticsConfig,
@@ -526,11 +525,11 @@ export function previewShooters(profile: RobotProfile): { slot: ShooterSlot; pie
 }
 
 /**
- * 슈터 조준 가능 범위 (로봇 앞 기준 각도, + = 오른쪽): 고정형 ± FIXED_AIM_TOLERANCE(11-3 임시, 13-5에서 발사 방향 선으로 바뀜),
- * 터렛 왼쪽 → 오른쪽 (왼쪽 > 오른쪽이면 뒤로 돌아 끝에 2π)
+ * 터렛 회전 범위 부채꼴 (로봇 앞 기준 각도, + = 오른쪽): 왼쪽 → 오른쪽 (왼쪽 > 오른쪽이면 뒤로 돌아 끝에 2π).
+ * 고정형은 null — 미리보기는 사출구에서 앞으로 발사 방향 선만 그린다 (13-5, 엔진 판정에 조준 범위가 없음)
  */
-export function previewAimSector(config: Pick<RobotConfig, 'turretType' | 'turretRange'>): { start: number; end: number } {
-  if (config.turretType === 'FIXED') return { start: -FIXED_AIM_TOLERANCE, end: FIXED_AIM_TOLERANCE };
+export function previewAimSector(config: Pick<RobotConfig, 'turretType' | 'turretRange'>): { start: number; end: number } | null {
+  if (config.turretType === 'FIXED') return null;
   const [a, b] = config.turretRange;
   return { start: a, end: a > b ? b + 2 * Math.PI : b };
 }

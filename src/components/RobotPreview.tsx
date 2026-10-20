@@ -1,5 +1,5 @@
 // 로봇 미리보기 (명세서 3.8 로봇 제원 탭 인테이크 "로봇 기준 앞이 위인 미리보기", 09-9b): 위에서 본 로봇 몸체 + 앞 변,
-// 흡입 구역(초록), 슈터 조준 범위(고정형 ± 허용 오차 / 터렛 왼쪽 → 오른쪽 부채꼴), 발사구(앞 방향 오프셋). 초안이 바뀌면 바로 다시 그림.
+// 흡입 구역(초록), 슈터 조준(고정형 = 사출구에서 앞으로 발사 방향 선 / 터렛 = 왼쪽 → 오른쪽 부채꼴, 13-5), 발사구(앞 방향 오프셋). 초안이 바뀌면 바로 다시 그림.
 // 13-3: 투입 방향 구역(분홍), 쓰는 슈터마다 조준 범위 + 사출구 점(앞뒤 / 좌우 오프셋, 쏘는 기물 색 — PER_PIECE는 2개), 슈터 없음(NONE)이면 둘 다 없음.
 // 배치는 엔진 getBumperZoneOBB와 같은 규칙(previewZoneRect)을 쓴다. SVG 좌표: x = 오른쪽, y = −앞 (inch).
 import { t } from '../ui/i18n';
@@ -35,9 +35,15 @@ export default function RobotPreview({ profile, lang }: { profile: RobotProfile;
   return (
     <figure className="robot-preview">
       <svg viewBox={`${-extent} ${-extent} ${2 * extent} ${2 * extent}`} role="img" aria-label={t(lang, 'robot.preview')}>
-        {shooters.map(s => (
-          <path key={s.slot} d={sectorPath(previewAimSector(s.aim), radius)} className={`preview-aim${s.slot === 'NECTAR' ? ' is-nectar' : ''}`} />
-        ))}
+        {shooters.map(s => {
+          const sector = previewAimSector(s.aim);
+          const className = `preview-aim${s.slot === 'NECTAR' ? ' is-nectar' : ''}`;
+          return sector ? (
+            <path key={s.slot} d={sectorPath(sector, radius)} className={className} />
+          ) : (
+            <line key={s.slot} x1={s.muzzle.right} y1={-s.muzzle.fwd} x2={s.muzzle.right} y2={-Math.max(radius, s.muzzle.fwd + 1)} className={`${className} is-line`} data-slot={s.slot} />
+          );
+        })}
         {intake.map((r, i) => (
           <rect key={`i${i}`} className="preview-zone" x={r.right - r.rightSize / 2} y={-r.fwd - r.fwdSize / 2} width={r.rightSize} height={r.fwdSize} />
         ))}

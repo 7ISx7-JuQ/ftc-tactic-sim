@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FLOWER_CIRCLES, PIECE_PHYSICS, createIntakeZonePreset, hiveCellAimPoint } from '../../core/collision';
-import { DEFAULT_SHOOTER_BALLISTICS, FIXED_AIM_TOLERANCE, bearingTo, fixedRateShotJudge, planShotFlight, shooterFor } from '../../core/ballistics';
+import { DEFAULT_SHOOTER_BALLISTICS, bearingTo, fixedRateShotJudge, planShotFlight, shooterFor } from '../../core/ballistics';
 import { SimulationEngine } from '../../core/simulationEngine';
 import type { RobotDriveInput } from '../../core/simulationEngine';
 import type { DeepReadonly, RobotConfig, ShotJudge, ShotProbabilityResolver, TimelineFrame } from '../../core/types';
@@ -32,22 +32,22 @@ const noopCtx = () =>
 const ALL_ON: RenderOptions = { aimGuide: true, intakeProgress: true, hitProbability: true, flightTrail: true, flightResult: true };
 
 describe('표시 옵션 (명세서 3.7, 08-6)', () => {
-  it('A. 조준선 (고정형 허용 오차 / 터렛 범위 부채꼴, 발사 방향)', () => {
+  it('A. 조준선 (터렛 범위 부채꼴 / 고정형은 부채꼴 없음, 발사 방향)', () => {
     const frame = engine().getFrame(0)!;
     const robot = { ...frame.r1, x: 60.5, y: 130.5, heading: 1.2 };
     const aim = hiveCellAimPoint('RED', 'AUDIENCE_CELL');
     const bearing = bearingTo(60.5, 130.5, aim.x, aim.y);
     const fixed = aimGuide(robot, C1, 'RED', 'AUDIENCE_CELL')!;
-    assert(near(fixed.sectorStart, 1.2 - FIXED_AIM_TOLERANCE) && near(fixed.sectorEnd, 1.2 + FIXED_AIM_TOLERANCE) && fixed.launchHeading === 1.2 && near(fixed.aim.x, aim.x), 'FIXED: heading ± FIXED_AIM_TOLERANCE, launches along the heading');
+    assert(fixed.sector === null && fixed.launchHeading === 1.2 && near(fixed.aim.x, aim.x), 'FIXED (13-5): no sector, launches along the heading');
     const half = aimGuide(robot, cfg('robot1', { turretType: 'TURRET', turretRange: [-Math.PI / 2, Math.PI / 2] }), 'RED', 'AUDIENCE_CELL')!;
-    assert(near(half.sectorStart, 1.2 - Math.PI / 2) && near(half.sectorEnd, 1.2 + Math.PI / 2), 'TURRET ±90°: sector heading ± 90°');
+    assert(near(half.sector!.start, 1.2 - Math.PI / 2) && near(half.sector!.end, 1.2 + Math.PI / 2), 'TURRET ±90°: sector heading ± 90°');
     const rear = aimGuide(robot, cfg('robot1', { turretType: 'TURRET', turretRange: [2.5, -2.5] }), 'RED', 'AUDIENCE_CELL')!;
-    assert(near(rear.sectorEnd - rear.sectorStart, 2 * Math.PI - 5) && near(rear.sectorStart, 1.2 + 2.5), 'rear turret [2.5, −2.5]: sector crosses ±π (length 2π − 5)');
+    assert(near(rear.sector!.end - rear.sector!.start, 2 * Math.PI - 5) && near(rear.sector!.start, 1.2 + 2.5), 'rear turret [2.5, −2.5]: sector crosses ±π (length 2π − 5)');
     const full = aimGuide({ ...robot, heading: bearing + 2 }, cfg('robot1', { turretType: 'TURRET', turretRange: [-Math.PI, Math.PI] }), 'RED', 'AUDIENCE_CELL')!;
-    assert(near(full.sectorEnd - full.sectorStart, 2 * Math.PI) && near(full.launchHeading, bearing), '360° turret [−π, π]: full circle, launches at the aim bearing');
+    assert(near(full.sector!.end - full.sector!.start, 2 * Math.PI) && near(full.launchHeading, bearing), '360° turret [−π, π]: full circle, launches at the aim bearing');
     // 엔진과 같은 해석: [0, 2π]는 정규화하면 [0, 0] (360° 아님) → 폭 0 부채꼴, 발사 방향 = 헤딩 (한계각)
     const zero = aimGuide({ ...robot, heading: bearing + 2 }, cfg('robot1', { turretType: 'TURRET', turretRange: [0, 2 * Math.PI] }), 'RED', 'AUDIENCE_CELL')!;
-    assert(near(zero.sectorEnd - zero.sectorStart, 0) && near(zero.launchHeading, bearing + 2), '[0, 2π] normalizes to [0, 0] like the engine: zero-width sector');
+    assert(near(zero.sector!.end - zero.sector!.start, 0) && near(zero.launchHeading, bearing + 2), '[0, 2π] normalizes to [0, 0] like the engine: zero-width sector');
   });
 
   it('B. 흡입 접촉 진행 (바닥 기물 / FLOWER slot[0], 필요 시간)', () => {
@@ -140,13 +140,13 @@ describe('표시 옵션 (명세서 3.7, 08-6)', () => {
       const toAim = bearingTo(g.muzzle.x, g.muzzle.y, aim.x, aim.y);
       assert(near(toAim, g.launchHeading, 1e-9), 'turret with lateral offset: the line from the muzzle passes the aim point');
     }
-    // NECTAR 다음이면 NECTAR 슈터 (고정형, 허용 오차 0.2, 좌우 −3)
+    // NECTAR 다음이면 NECTAR 슈터 (고정형, 좌우 −3)
     {
       const r = robot(['NECTAR', 'POLLEN']);
       const g = aimGuide(r, PER, 'RED', 'AUDIENCE_CELL', SH)!;
       const plan = planFor(r, PER, 'NECTAR');
       assert(g.pieceType === 'NECTAR' && near(g.muzzle.x, plan.from.x) && near(g.muzzle.y, plan.from.y) && g.launchHeading === 1.2 && plan.heading === 1.2, 'NECTAR fixed: muzzle = planShotFlight, launches along the heading');
-      assert(near(g.sectorStart, 1.2 - FIXED_AIM_TOLERANCE) && near(g.sectorEnd, 1.2 + FIXED_AIM_TOLERANCE), 'sector from the NECTAR shooter (fixed ±3°, not the 360° main turret)');
+      assert(g.sector === null, 'sector from the NECTAR shooter (fixed = none, not the 360° main turret)');
     }
     // 탄도 미지정 = 엔진 기본 슈터 (오프셋 0): 사출구 = 로봇 중심 (v1과 같은 그림)
     {

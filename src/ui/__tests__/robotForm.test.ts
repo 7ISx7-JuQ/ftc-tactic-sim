@@ -1,7 +1,6 @@
 // 로봇 제원 탭 폼 규칙 (명세서 3.8 로봇 제원 탭, 09-9a)
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_DRAFT_VALUES } from '../../app/defaultSetup';
-import { FIXED_AIM_TOLERANCE } from '../../core/ballistics';
 import { getBumperZoneOBB } from '../../core/collision';
 import type { BumperSide } from '../../core/types';
 import {
@@ -169,7 +168,7 @@ describe('로봇 제원 폼 (09-9a)', () => {
       }
     }
     expect(previewZoneRect({ side: 'FRONT', offset: 0, width: 0, depth: 1 }, config)).toBeNull();
-    expect(previewAimSector({ turretType: 'FIXED', turretRange: [0, 0] })).toEqual({ start: -FIXED_AIM_TOLERANCE, end: FIXED_AIM_TOLERANCE }); // 11-3 임시 상수
+    expect(previewAimSector({ turretType: 'FIXED', turretRange: [-1, 1] })).toBeNull(); // 13-5: 고정형은 부채꼴 없음 (발사 방향 선)
     expect(previewAimSector({ turretType: 'TURRET', turretRange: [-1, 1] })).toEqual({ start: -1, end: 1 });
     expect(previewAimSector({ turretType: 'TURRET', turretRange: [2.5, -2.5] })).toEqual({ start: 2.5, end: -2.5 + 2 * Math.PI }); // 후방
   });

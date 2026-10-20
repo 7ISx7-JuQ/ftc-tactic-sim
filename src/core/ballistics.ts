@@ -31,7 +31,6 @@ import type {
   HeatmapLUTSet,
   HiveCellKey,
   HiveCrossing,
-  MatchHeatmapLUTs,
   RobotConfig,
   RobotHeatmapLUTs,
   RobotShooterBallistics,
@@ -40,7 +39,6 @@ import type {
   ShotJudge,
   ShotJudgement,
   ShotNoise,
-  ShotProbabilityResolver,
   ShotTrajectory,
 } from './types';
 
@@ -1109,69 +1107,17 @@ export function hiveCellKey(alliance: 'RED' | 'BLUE', cell: HiveCell): HiveCellK
 }
 
 /**
- * 고정형 슈터 허용 조준 오차 (rad, ±3°). 11-3에서 로봇 항목 aimTolerance를 없애고 이전 기본값을 상수로 둔 임시 값이다.
- * 12-11 실제 궤적 명중 판정이 고정형 조준 판정 자체를 없애면서 함께 지운다 (명세서 5.4 실제 궤적 명중 판정)
+ * 터렛 회전 범위 판정: 조준 방향과 로봇 헤딩의 상대각 Δψ (rad, [-π, π], + = 로봇 오른쪽)가 turretRange [α, β] 안인지.
+ * 각 끝을 [-π, π]로 정규화하여 α ≤ β면 α ≤ Δψ ≤ β, α > β면 ±π를 가로지르는 구간 (Δψ ≥ α 또는 Δψ ≤ β). 360° 터렛은 [-π, π].
+ * 범위 / 각도가 비유한값이면 false. 발사 방향(shotLaunchHeading — 범위 밖이면 한계각)과 조준선 부채꼴이 같은 해석을 쓴다
  */
-export const FIXED_AIM_TOLERANCE = (3 * Math.PI) / 180;
-
-/**
- * 조준 판정: 조준점 방위와 로봇 헤딩의 상대각 Δψ (rad, [-π, π])가 슈터 조준 가능 범위 안인지
- * - FIXED: |Δψ| ≤ FIXED_AIM_TOLERANCE (경계 포함)
- * - TURRET: turretRange [α, β]를 [-π, π]로 정규화하여 α ≤ β면 α ≤ Δψ ≤ β,
- *   α > β면 ±π를 가로지르는 구간 (Δψ ≥ α 또는 Δψ ≤ β). 360° 터렛은 [-π, π]
- */
-export function isAimWithinShooterRange(
-  deltaPsi: number,
-  config: Pick<RobotConfig, 'turretType' | 'turretRange'>,
-): boolean {
+export function isWithinTurretRange(deltaPsi: number, turretRange: readonly [number, number]): boolean {
   if (!Number.isFinite(deltaPsi)) return false;
-  if (config.turretType === 'TURRET') {
-    const [rawLo, rawHi] = config.turretRange;
-    if (!Number.isFinite(rawLo) || !Number.isFinite(rawHi)) return false;
-    const alpha = normalizeAngle(rawLo); // normalizeAngle은 ±π를 보존하므로 360° 터렛 [-π, π] 유지
-    const beta = normalizeAngle(rawHi);
-    return alpha <= beta ? deltaPsi >= alpha && deltaPsi <= beta : deltaPsi >= alpha || deltaPsi <= beta;
-  }
-  return Math.abs(deltaPsi) <= FIXED_AIM_TOLERANCE;
-}
-
-/**
- * LUT 기반 명중 확률 판정 함수 (SimulationEngine 생성자에 주입, 엔진 수정 불필요)
- * P_final = (조준 가능 ? P_spatial : 0), P_spatial = 발사 로봇 · 기물 종류 · 아군 상향 셀 LUT를 로봇 중심에서 쌍선형 보간
- * 조준 방향은 로봇 중심 → 상향 셀 조준점(투입구 오각형 면적 중심) 방위를 그 기물 슈터의 좌우 오프셋으로 보정한 값
- * (shooterAimHeading, 오프셋은 shooters의 기물별 shooterLateralOffset, 미지정 0). 조준 범위(고정형 허용 오차 / 터렛 범위)도
- * 그 기물 슈터의 값(shooterFor). 발사 불가 기물 / 조준 불가 자리는 0. 설정값은 생성 시점에 복사해 고정 (결정론)
- */
-export function createLUTShotResolver(
-  luts: MatchHeatmapLUTs,
-  r1Config: ShooterSetupSource,
-  r2Config: ShooterSetupSource,
-  shooters?: Partial<Record<'robot1' | 'robot2', Partial<Record<PieceType, Pick<ShooterBallistics, 'shooterLateralOffset'>>>>>,
-): ShotProbabilityResolver {
-  const spec = (config: ShooterSetupSource, robotId: 'robot1' | 'robot2') => {
-    const out = {} as Record<PieceType, { fireable: boolean; aim: ShooterAimConfig; lateral: number }>;
-    for (const type of PIECE_TYPES) {
-      const aim = shooterFor(config, type);
-      out[type] = {
-        fireable: isPieceFireable(config, type),
-        aim: { ...aim, turretRange: [aim.turretRange[0], aim.turretRange[1]] },
-        lateral: shooters?.[robotId]?.[type]?.shooterLateralOffset ?? 0,
-      };
-    }
-    return out;
-  };
-  const specs = { robot1: spec(r1Config, 'robot1'), robot2: spec(r2Config, 'robot2') };
-  return (robotId, pieceType, robotX, robotY, heading, alliance, upwardCell) => {
-    const shooter = specs[robotId][pieceType];
-    if (!shooter.fireable) return 0;
-    const aim = hiveCellAimPoint(alliance, upwardCell);
-    const aimHeading = shooterAimHeading(robotX, robotY, aim, shooter.lateral);
-    if (aimHeading === null) return 0;
-    const deltaPsi = angleDifference(aimHeading, heading);
-    if (!isAimWithinShooterRange(deltaPsi, shooter.aim)) return 0;
-    const p = sampleLUT(luts[robotId][pieceType][hiveCellKey(alliance, upwardCell)], robotX, robotY);
-    return Number.isFinite(p) ? Math.min(1, Math.max(0, p)) : 0;
-  };
+  const [rawLo, rawHi] = turretRange;
+  if (!Number.isFinite(rawLo) || !Number.isFinite(rawHi)) return false;
+  const alpha = normalizeAngle(rawLo); // normalizeAngle은 ±π를 보존하므로 360° 터렛 [-π, π] 유지
+  const beta = normalizeAngle(rawHi);
+  return alpha <= beta ? deltaPsi >= alpha && deltaPsi <= beta : deltaPsi >= alpha || deltaPsi <= beta;
 }
 
 // ============================================================
@@ -1213,7 +1159,7 @@ export function shotLaunchHeading(
 ): number {
   if (shooter.turretType !== 'TURRET') return robotHeading;
   const delta = angleDifference(aimBearing, robotHeading);
-  if (isAimWithinShooterRange(delta, shooter)) return normalizeAngle(aimBearing);
+  if (isWithinTurretRange(delta, shooter.turretRange)) return normalizeAngle(aimBearing);
   const [rawLo, rawHi] = shooter.turretRange;
   if (!Number.isFinite(rawLo) || !Number.isFinite(rawHi)) return robotHeading;
   const lo = normalizeAngle(rawLo);
@@ -1312,6 +1258,29 @@ export function fixedRateShotJudge(p: number | ((input: Parameters<ShotJudge>[0]
     const rate = typeof p === 'function' ? p(input) : p;
     return { trajectory: { ...input.nominal }, hit: (input.rolls[0] ?? 0) < rate, crossing: null };
   };
+}
+
+/** 지금 자세의 기대 명중률 샘플 수 (13-5, 좌측 패널): 기본 로봇의 명중 띠 안에서 호출 1회 약 2.5 ms, 표본 오차 약 ±2%p */
+export const HIT_ESTIMATE_SAMPLES = 500;
+/** 기대 명중률의 고정 시드 (자세가 같으면 같은 값, 자세가 조금 바뀌어도 같은 난수라 값이 매끄럽게 변함) */
+export const HIT_ESTIMATE_SEED = 0x13e5;
+
+/**
+ * 지금 자세의 기대 명중률 (13-5, 좌측 패널 명중 확률): 그 자세에서 실제로 쏠 명목 궤적(nominalShot — 고정형 = 헤딩,
+ * 터렛형 = 범위로 제한한 조준 방향)에 엔진 판정과 같은 편차 모델(perturbTrajectory / 투입구 판정)로 고정 시드 몬테카를로.
+ * 엔진 난수와 무관 (표시 전용). 헤딩이 보정 조준 방향이면 확률표(정면 조준)와 같은 기대값
+ */
+export function estimateShotHitRate(input: NominalShotInput, samples = HIT_ESTIMATE_SAMPLES, seed = HIT_ESTIMATE_SEED): number {
+  const n = Math.max(1, Math.floor(samples));
+  const nominal = nominalShot(input).trajectory;
+  const noise = shotNoiseOf(input.ballistics);
+  const radius = PIECE_PHYSICS[input.pieceType].radius;
+  const rng = createRng(seed);
+  let hits = 0;
+  for (let i = 0; i < n; i++) {
+    if (isShotInHiveCell(perturbTrajectory(nominal, noise, rng), input.alliance, input.upwardCell, radius)) hits++;
+  }
+  return hits / n;
 }
 
 /**

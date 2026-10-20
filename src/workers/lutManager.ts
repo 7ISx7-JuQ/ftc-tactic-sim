@@ -309,7 +309,7 @@ export class LUTManager {
     };
   }
 
-  /** 두 로봇이 모두 READY면 경기용 LUT (createLUTShotResolver 입력), 아니면 null */
+  /** 두 로봇이 모두 READY면 경기용 LUT 결과 (기물별 탐색 v0 → 엔진 슈터 탄도), 아니면 null */
   matchLUTs(): MatchHeatmapLUTs | null {
     const r1 = this.runs.robot1.result;
     const r2 = this.runs.robot2.result;

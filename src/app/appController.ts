@@ -53,7 +53,7 @@ export interface MatchSetup {
   r1Config: RobotConfig;
   r2Config: RobotConfig;
   shotJudge: ShotJudge;                 // 엔진 발사 판정 (12-11 실제 궤적 판정)
-  shotResolver: ShotProbabilityResolver; // 좌측 패널 명중 확률 표시용 (13-5에서 지금 자세의 기대 명중률로 바뀜)
+  hitRate: ShotProbabilityResolver;     // 좌측 패널 명중 확률 = 지금 자세의 기대 명중률 (13-5, createHitRateEstimator)
   scenario: ScenarioConfig;
   shooters?: MatchShooterBallistics;
 }
@@ -586,7 +586,7 @@ export class AppController {
       autoTipCount: hive.autoTipCount,
       rpThresholds: resolveRPThresholds(this.setup.scenario),
       rp: { ...frame.rpAchieved },
-      hitProbability: this.options.hitProbability ? hitProbabilities(frame, this.setup.shotResolver, { robot1: this.setup.r1Config, robot2: this.setup.r2Config }) : null,
+      hitProbability: this.options.hitProbability ? hitProbabilities(frame, this.setup.hitRate, { robot1: this.setup.r1Config, robot2: this.setup.r2Config }) : null,
       gamepads: this.adapter.gamepadStatus(),
       input: this.inputStatus(),
     };

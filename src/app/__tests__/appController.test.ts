@@ -98,7 +98,7 @@ const makeSetup = (alliance: 'RED' | 'BLUE', scenario: Partial<ScenarioConfig> =
   r1Config: cfg('robot1'),
   r2Config: cfg('robot2'),
   shotJudge: fixedRateShotJudge(({ robotId, pieceType }) => (robotId === 'robot1' ? (pieceType === 'POLLEN' ? 0.25 : 0.5) : 0.75)),
-  shotResolver: resolver,
+  hitRate: resolver,
   scenario: { allianceColor: alliance, ...scenario },
 });
 
