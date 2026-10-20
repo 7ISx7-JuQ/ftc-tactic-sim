@@ -82,6 +82,47 @@ describe('config 창', () => {
     await expect.element(button('APPLY')).toBeDisabled(); // 적용 값 = 초안
   });
 
+  it('로봇 탭 슈터 구성 (13-3): 기물별 2개 → NECTAR 슈터 카드, NECTAR 흡입을 끄면 오류 / 구성 제한, 없음 → 슈터 · 스윗스팟 숨김, 투입 방향 구역 추가', async () => {
+    await userEvent.click(button('Open settings'));
+    await userEvent.click(page.getByRole('tab', { name: 'R1' }));
+    const setup = page.getByRole('radiogroup', { name: 'Setup' });
+    await userEvent.click(setup.getByRole('radio', { name: 'Per piece' }));
+    await expect.element(page.getByRole('heading', { name: 'NECTAR shooter' })).toBeVisible();
+    await expect.element(page.getByRole('heading', { name: 'POLLEN sweet spot → hit map' })).toBeVisible();
+
+    // NECTAR 카드 좌우 오프셋 (두 번째 칸): 범위 밖이면 오류 + APPLY 막힘
+    const lateral = page.getByLabelText('Launcher offset (+ right)').nth(1);
+    await userEvent.fill(lateral, '25');
+    await expect.element(page.getByRole('alert').filter({ hasText: '18.00' })).toBeVisible();
+    await expect.element(button('APPLY')).toBeDisabled();
+    await userEvent.fill(lateral, '-3');
+    await expect.element(button('APPLY')).toBeEnabled();
+
+    // NECTAR 흡입 끄기: 기물별 2개는 그대로 두고 오류로 알림, 다른 NECTAR 구성은 고를 수 없음
+    await userEvent.click(page.getByText('Can intake NECTAR', { exact: true })); // 토글 줄(label)을 누름 — 체크박스는 스위치 그림 아래
+    await expect.element(page.getByRole('checkbox', { name: 'Can intake NECTAR' })).not.toBeChecked();
+    await expect.element(page.getByText('This shooter setup needs NECTAR intake')).toBeVisible();
+    await expect.element(button('APPLY')).toBeDisabled();
+    await expect.element(setup.getByRole('radio', { name: 'POLLEN only' })).toBeDisabled();
+    await userEvent.click(setup.getByRole('radio', { name: 'Shared' }));
+    await expect.element(page.getByText('This shooter setup needs NECTAR intake')).not.toBeInTheDocument();
+    await expect.element(page.getByRole('heading', { name: 'NECTAR shooter' })).not.toBeInTheDocument();
+    await expect.element(button('APPLY')).toBeEnabled();
+
+    // 없음: 슈터 칸 / 스윗스팟 구역 숨김
+    await userEvent.click(setup.getByRole('radio', { name: 'None' }));
+    await expect.element(page.getByLabelText('Launch angle')).not.toBeInTheDocument();
+    await expect.element(page.getByRole('heading', { name: 'Sweet spot → hit map' })).not.toBeInTheDocument();
+
+    // 리프트: 주행 속도 칸 + 투입 방향 구역 추가
+    await expect.element(page.getByLabelText('Drive speed with lift up')).toBeVisible();
+    await userEvent.click(button('Add drop zone'));
+    await expect.element(page.getByText('Drop zone 1', { exact: true })).toBeVisible();
+    await expect.element(button('APPLY')).toBeEnabled();
+    await userEvent.click(button('APPLY'));
+    await expect.element(button('APPLY')).toBeDisabled();
+  });
+
   it('시나리오 REROLL은 APPLY 없이 바로 적용된다', async () => {
     await userEvent.click(button('Open settings'));
     await userEvent.click(page.getByRole('tab', { name: 'SCENARIO' }));

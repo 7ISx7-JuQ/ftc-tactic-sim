@@ -90,11 +90,11 @@ export function placeSweetSpot(profile: RobotProfile, alliance: 'RED' | 'BLUE', 
   return writeSweetSpot(writeSweetSpot(profile, alliance, 'x', cell.x), alliance, 'y', cell.y);
 }
 
-/** 스윗스팟 검증 사유 (로봇 탭과 같은 규칙: 다른 칸이 모두 올바를 때만 필드 밖 / HIVE / 해 없음) */
+/** 스윗스팟 검증 사유 (로봇 탭과 같은 규칙: 다른 칸이 모두 올바를 때만 필드 밖 / HIVE / 해 없음). 주 슈터 스윗스팟만 (13-3: NECTAR 슈터는 로봇 탭 카드) */
 export function sweetSpotIssueCodes(profile: RobotProfile): string[] {
   return robotProfileIssues(profile)
-    .map(issue => issue.code)
-    .filter(code => code.startsWith('SWEET_SPOT_'));
+    .filter(issue => issue.slot === undefined && issue.code.startsWith('SWEET_SPOT_'))
+    .map(issue => issue.code);
 }
 
 /** 마우스를 올린 칸에 찍으면 생기는 사유 (찍기 전 미리 보기) */

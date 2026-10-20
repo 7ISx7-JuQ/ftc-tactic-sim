@@ -138,17 +138,32 @@ export function intakeProgress(robot: Robot, config: RobotConfig, frame: Frame):
 export interface RobotHitProbability {
   POLLEN: number;
   NECTAR: number;
-  next: GamePiece['type'] | null; // 적재함 0번 (다음에 나갈 기물) 종류, 적재 없음 = null
+  next: GamePiece['type'] | null; // 다음에 발사할 기물 종류 (첫 발사 가능 기물, 13-3 — 엔진 발사 대기열과 같음), 없음 = null
+  fireable: Record<GamePiece['type'], boolean>; // 슈터 구성상 쏠 수 있는 기물 (13-3: 못 쏘는 기물은 패널에 값 대신 —)
 }
 
-export function hitProbabilities(frame: Frame, resolver: ShotProbabilityResolver): Record<'robot1' | 'robot2', RobotHitProbability> {
+/**
+ * 명중 확률 + 다음 발사 기물 (좌측 패널 밝은 줄). configs = 로봇 제원(슈터 구성), 미지정이면 SHARED (v1: 적재함 0번 종류, 둘 다 발사 가능)
+ */
+export function hitProbabilities(
+  frame: Frame,
+  resolver: ShotProbabilityResolver,
+  configs?: Readonly<Record<'robot1' | 'robot2', Partial<Pick<RobotConfig, 'shooterSetup'>>>>,
+): Record<'robot1' | 'robot2', RobotHitProbability> {
   const { allianceColor, hive } = frame.field;
   const of = (id: 'robot1' | 'robot2', robot: Robot): RobotHitProbability => {
     const p = (type: GamePiece['type']) => {
       const raw = resolver(id, type, robot.x, robot.y, robot.heading, allianceColor, hive.upwardCell);
       return Number.isFinite(raw) ? Math.min(1, Math.max(0, raw)) : 0;
     };
-    return { POLLEN: p('POLLEN'), NECTAR: p('NECTAR'), next: robot.controlledPieces[0]?.type ?? null };
+    const config = configs?.[id] ?? {};
+    const next = nextFireablePieceIndex(config, robot.controlledPieces);
+    return {
+      POLLEN: p('POLLEN'),
+      NECTAR: p('NECTAR'),
+      next: next >= 0 ? robot.controlledPieces[next].type : null,
+      fireable: { POLLEN: isPieceFireable(config, 'POLLEN'), NECTAR: isPieceFireable(config, 'NECTAR') },
+    };
   };
   return { robot1: of('robot1', frame.r1), robot2: of('robot2', frame.r2) };
 }

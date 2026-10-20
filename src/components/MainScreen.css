@@ -160,6 +160,10 @@
 .hit-row.is-next {
   color: inherit;
 }
+/* 발사할 수 없는 기물 (슈터 구성, 13-3): 값 대신 — */
+.hit-row.is-unfireable .hit-value {
+  opacity: 0.5;
+}
 .hit-dot {
   width: calc(var(--u) * 10);
   height: calc(var(--u) * 10);
@@ -1408,6 +1412,18 @@
   stroke-width: 1px;
   vector-effect: non-scaling-stroke;
 }
+.preview-aim.is-nectar {
+  fill: rgba(167, 139, 250, 0.16);
+  stroke: rgba(167, 139, 250, 0.85);
+  stroke-dasharray: 4 3;
+}
+/* 투입 방향 구역 (13-3): FLOWER 분홍 */
+.preview-drop {
+  fill: rgba(242, 138, 208, 0.4);
+  stroke: #f28ad0;
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
 .preview-body {
   fill: #3a404c;
   stroke: #9ca3af;
@@ -1434,6 +1450,12 @@
   stroke-width: 1.5px;
   vector-effect: non-scaling-stroke;
 }
+.preview-launcher.is-pollen {
+  fill: #fde047;
+}
+.preview-launcher.is-nectar {
+  fill: #a78bfa;
+}
 .preview-legend {
   display: flex;
   flex-wrap: wrap;
@@ -1459,6 +1481,10 @@
   background: rgba(34, 197, 94, 0.45);
   border: 1px solid var(--ok);
 }
+.legend-item.is-drop::before {
+  background: rgba(242, 138, 208, 0.4);
+  border: 1px solid #f28ad0;
+}
 .legend-item.is-aim::before {
   background: rgba(245, 158, 11, 0.16);
   border: 1px solid rgba(245, 158, 11, 0.6);
@@ -1479,6 +1505,11 @@
   flex-direction: column;
   gap: calc(var(--u) * 8);
 }
+.zone-list + .zone-list,
+.form-grid + .zone-list,
+.settings-note + .zone-list {
+  margin-top: calc(var(--u) * 6);
+}
 .zone-row {
   display: flex;
   flex-direction: column;
@@ -1487,6 +1518,10 @@
   border: 1px solid var(--panel-border);
   border-left: calc(var(--u) * 3) solid rgba(34, 197, 94, 0.7);
   border-radius: calc(var(--u) * 8);
+}
+/* 투입 방향 구역 줄 (13-3): FLOWER 분홍 띠 */
+.zone-row.is-drop {
+  border-left-color: rgba(242, 138, 208, 0.8);
 }
 .zone-head {
   display: flex;
@@ -1519,6 +1554,22 @@
   gap: calc(var(--u) * 8);
 }
 
+/* 슈터 카드 (13-3): PER_PIECE면 기물별 카드 2개에 제목 */
+.shooter-card {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 10);
+}
+.shooter-card.is-titled {
+  padding: calc(var(--u) * 10) calc(var(--u) * 12) calc(var(--u) * 12);
+  border: 1px solid var(--panel-border);
+  border-radius: calc(var(--u) * 8);
+}
+.shooter-card-title {
+  margin: 0;
+  font-size: calc(var(--u) * 13);
+  font-weight: 800;
+}
 .advanced {
   display: flex;
   flex-direction: column;

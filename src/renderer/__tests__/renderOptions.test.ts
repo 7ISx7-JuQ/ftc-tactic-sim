@@ -66,7 +66,7 @@ describe('표시 옵션 (명세서 3.7, 08-6)', () => {
     assert(near(intakeProgress(withTarget(floorPiece.id, 0.5).r1, C1, withTarget(floorPiece.id, 0.5))!.fraction, 1), 'fraction capped at 1');
   });
 
-  it('C. 실시간 명중 확률 (로봇 2 × 기물 2, [0, 1] 제한, 다음 기물 종류)', () => {
+  it('C. 실시간 명중 확률 (로봇 2 × 기물 2, [0, 1] 제한, 다음 발사 기물 종류 / 발사 가능 기물 — 13-3)', () => {
     const frame = engine().getFrame(0)!;
     const calls: string[] = [];
     const resolver: ShotProbabilityResolver = (id, type) => {
@@ -76,6 +76,14 @@ describe('표시 옵션 (명세서 3.7, 08-6)', () => {
     const p = hitProbabilities(frame, resolver);
     assert(calls.length === 4 && p.robot1.POLLEN === 1 && p.robot1.NECTAR === 0 && p.robot2.POLLEN === 0.25 && p.robot2.NECTAR === 0, '4 calls, clamped to [0, 1], non-finite -> 0');
     assert(p.robot1.next === 'POLLEN' && hitProbabilities({ ...frame, r2: { ...frame.r2, controlledPieces: [] } }, resolver).robot2.next === null, 'next piece type from the FIFO head (none when empty)');
+    assert(p.robot1.fireable.POLLEN && p.robot1.fireable.NECTAR, 'no configs = SHARED: both pieces fireable');
+    // 13-3: 밝은 줄 = 다음에 발사할 기물 (슈터 구성의 첫 발사 가능 기물), 못 쏘는 기물 표시
+    const tray = (...types: ('POLLEN' | 'NECTAR')[]) => types.map((type, i) => ({ ...frame.r1.controlledPieces[0], id: `t${i}`, type }));
+    const loaded = { ...frame, r1: { ...frame.r1, controlledPieces: tray('NECTAR', 'POLLEN') }, r2: { ...frame.r2, controlledPieces: tray('NECTAR') } };
+    const q = hitProbabilities(loaded, () => 0.5, { robot1: { shooterSetup: 'POLLEN_ONLY' }, robot2: { shooterSetup: 'NONE' } });
+    assert(q.robot1.next === 'POLLEN' && q.robot1.fireable.POLLEN && !q.robot1.fireable.NECTAR, 'POLLEN_ONLY: next = first POLLEN, NECTAR not fireable');
+    assert(q.robot2.next === null && !q.robot2.fireable.POLLEN && !q.robot2.fireable.NECTAR, 'NONE: nothing to shoot');
+    assert(hitProbabilities(loaded, () => 0.5, { robot1: { shooterSetup: 'PER_PIECE' }, robot2: {} }).robot1.next === 'NECTAR', 'PER_PIECE: FIFO head');
   });
 
   it('D. 장면 그리기: 렌더러는 판정 함수를 호출하지 않음 (09-6b, 명중 확률은 HTML 패널), 풀매치 프레임 전부 그리기', () => {

@@ -27,7 +27,21 @@ import {
   profileLUTShooters,
   readSweetSpot,
   writeSweetSpot,
+  SHOOTER_FIELD_KEYS,
+  SHOOTER_SETUPS,
+  isZoneFieldKey,
+  previewMuzzle,
+  previewShooters,
+  shooterFieldKey,
+  shooterSetupAllowed,
+  slotAim,
+  slotBallistics,
+  sweetSpotFieldKey,
+  usedShooterSlots,
+  writeSlotAim,
+  zoneFieldKey,
 } from '../robotForm';
+import type { RobotProfile } from '../robotForm';
 
 const r1 = DEFAULT_DRAFT_VALUES.robot1;
 const parse = (key: keyof typeof NUMBER_FIELDS, text: string, unit: 'in' | 'cm' = 'in') => parseNumberField(NUMBER_FIELDS[key], text, unit);
@@ -207,5 +221,114 @@ describe('로봇 제원 폼 (09-9a)', () => {
     const per = p('PER_PIECE');
     expect(per.POLLEN).toEqual(profileBallisticsConfig(r1));
     expect([per.NECTAR?.dz, per.NECTAR?.shooterLateralOffset]).toEqual([30, -2]);
+  });
+
+  it('L. (13-3) 슈터 구성: 고를 수 있는 구성(NECTAR 흡입 불가면 NONE / SHARED만), 쓰는 슈터 자리, SHOOTER_SETUP_NECTAR', () => {
+    expect(SHOOTER_SETUPS).toEqual(['NONE', 'POLLEN_ONLY', 'SHARED', 'PER_PIECE']);
+    expect(SHOOTER_SETUPS.filter(v => shooterSetupAllowed(v, false))).toEqual(['NONE', 'SHARED']);
+    expect(SHOOTER_SETUPS.every(v => shooterSetupAllowed(v, true))).toBe(true);
+    expect(SHOOTER_SETUPS.map(usedShooterSlots)).toEqual([[], ['MAIN'], ['MAIN'], ['MAIN', 'NECTAR']]);
+    const with_ = (setup: RobotProfile['config']['shooterSetup'], canIntakeNectar = true): RobotProfile => ({ ...r1, config: { ...r1.config, shooterSetup: setup, canIntakeNectar } });
+    for (const setup of SHOOTER_SETUPS) expect(robotProfileIssues(with_(setup)), `${setup} default profile`).toEqual([]);
+    expect(robotProfileIssues(with_('PER_PIECE', false)).map(i => i.code)).toEqual(['SHOOTER_SETUP_NECTAR']);
+    expect(robotProfileIssues(with_('POLLEN_ONLY', false)).map(i => i.code)).toEqual(['SHOOTER_SETUP_NECTAR']);
+    expect(robotProfileIssues(with_('SHARED', false))).toEqual([]);
+    expect(robotProfileIssues(with_('BOTH' as never)).map(i => i.code)).toEqual(['FIELD_shooterSetup']);
+  });
+
+  it('M. (13-3) 새 칸: 좌우 오프셋 ±18 in, 리프트 주행 속도 0 ~ 200 in/s, NECTAR 슈터 카드(같은 항목 · 범위, 키 nectar.), 쓰는 슈터만 검사', () => {
+    expect(parse('shooterLateralOffset', '-18')).toEqual({ ok: true, value: -18 });
+    expect(parse('shooterLateralOffset', '18.5')).toMatchObject({ ok: false, error: { code: 'RANGE' } });
+    expect(parse('liftMaxSpeed', '0')).toEqual({ ok: true, value: 0 });
+    expect(parse('liftMaxSpeed', '200')).toEqual({ ok: true, value: 200 });
+    expect(parse('liftMaxSpeed', '-1')).toMatchObject({ ok: false });
+    expect(readNumber(writeNumber(r1, 'liftMaxSpeed', 30), 'liftMaxSpeed') === 30 && r1.config.liftMaxSpeed === 0).toBe(true);
+    expect(readNumber(writeNumber(r1, 'shooterLateralOffset', 4), 'shooterLateralOffset') === 4 && r1.ballistics.shooterLateralOffset === 0).toBe(true);
+    // NECTAR 카드: 주 슈터와 같은 항목 / 범위, 값 위치 = config.nectarShooter (조준 제원) / ballistics.nectarShooter (탄도)
+    expect(SHOOTER_FIELD_KEYS.every(k => NUMBER_FIELDS[shooterFieldKey('NECTAR', k)] === NUMBER_FIELDS[k])).toBe(true);
+    expect(shooterFieldKey('MAIN', 'launchHeight')).toBe('launchHeight');
+    expect(shooterFieldKey('NECTAR', 'launchHeight')).toBe('nectar.launchHeight');
+    let p = writeNumber(r1, 'nectar.shooterDelay', 450);
+    p = writeNumber(p, 'nectar.aimTolerance', 0.1);
+    p = writeNumber(p, 'nectar.launchHeight', 30);
+    p = writeNumber(p, 'nectar.shooterLateralOffset', -3);
+    p = writeNumber(writeNumber(p, 'nectar.turretLeft', -1), 'nectar.turretRight', 1);
+    expect(p.config.nectarShooter).toEqual({ ...r1.config.nectarShooter, shooterDelay: 450, aimTolerance: 0.1, turretRange: [-1, 1] });
+    expect([p.ballistics.nectarShooter.dz, p.ballistics.nectarShooter.shooterLateralOffset]).toEqual([30, -3]);
+    expect(p.config.shooterDelay === r1.config.shooterDelay && p.ballistics.dz === r1.ballistics.dz).toBe(true); // 주 슈터는 그대로
+    expect(readNumber(p, 'nectar.turretRight') === 1 && readNumber(p, 'nectar.shooterDelay') === 450).toBe(true);
+    expect(slotAim(p, 'NECTAR')).toBe(p.config.nectarShooter);
+    expect(slotBallistics(p, 'MAIN')).toBe(p.ballistics);
+    expect(writeSlotAim(r1, 'NECTAR', { turretType: 'TURRET' }).config.nectarShooter.turretType).toBe('TURRET');
+    expect(writeSlotAim(r1, 'MAIN', { turretType: 'TURRET' }).config.turretType).toBe('TURRET');
+    // 쓰는 슈터만 검사: NECTAR 카드 칸은 PER_PIECE에서만, 주 슈터 칸은 NONE이면 보관만
+    const badNectar = writeNumber(r1, 'nectar.shooterPitch', 1.6);
+    expect(robotProfileIssues(badNectar)).toEqual([]); // SHARED: NECTAR 카드 미사용
+    const per = (q: RobotProfile): RobotProfile => ({ ...q, config: { ...q.config, shooterSetup: 'PER_PIECE' } });
+    expect(robotProfileIssues(per(badNectar)).map(i => i.code)).toEqual(['FIELD_nectar.shooterPitch']);
+    const badMain = writeNumber(r1, 'shooterPitch', 1.6);
+    expect(robotProfileIssues({ ...badMain, config: { ...badMain.config, shooterSetup: 'NONE' } })).toEqual([]);
+    expect(robotProfileIssues(badMain).map(i => i.code)).toEqual(['FIELD_shooterPitch']);
+    // NECTAR 터렛 폭 0 → TURRET_WIDTH (자리 NECTAR)
+    const nectarTurret = per(writeSlotAim(r1, 'NECTAR', { turretType: 'TURRET', turretRange: [0.5, 0.5] }));
+    expect(robotProfileIssues(nectarTurret).map(i => [i.code, i.slot])).toEqual([['TURRET_WIDTH', 'NECTAR']]);
+  });
+
+  it('N. (13-3) NECTAR 스윗스팟: 키 / 진영 기준 읽기 · 쓰기, 검증은 쓰는 슈터만 (자리 표시)', () => {
+    expect(sweetSpotFieldKey('x')).toBe('sweetSpot.x');
+    expect(sweetSpotFieldKey('y', 'NECTAR')).toBe('nectar.sweetSpot.y');
+    const moved = writeSweetSpot(r1, 'BLUE', 'x', 90.2, 'NECTAR');
+    expect(moved.ballistics.nectarShooter.sweetSpot).toEqual({ x: 53.5, y: 131.5 });
+    expect(moved.ballistics.sweetSpot).toEqual(r1.ballistics.sweetSpot); // 주 슈터 그대로
+    expect(readSweetSpot(moved, 'BLUE', 'NECTAR')).toEqual({ x: 90.5, y: 12.5 });
+    const nectarAt = (x: number, y: number, setup: RobotProfile['config']['shooterSetup']): RobotProfile => ({
+      ...r1,
+      config: { ...r1.config, shooterSetup: setup },
+      ballistics: { ...r1.ballistics, nectarShooter: { ...r1.ballistics.nectarShooter, sweetSpot: { x, y } } },
+    });
+    // SHARED / POLLEN_ONLY: NECTAR 스윗스팟은 쓰지 않으므로 틀려도 막지 않음
+    expect(robotProfileIssues(nectarAt(59.5, 100.5, 'SHARED'))).toEqual([]);
+    expect(robotProfileIssues(nectarAt(-1, 100.5, 'POLLEN_ONLY'))).toEqual([]);
+    // PER_PIECE: 칸 범위 → 탄도 검증, 문제에 NECTAR 자리
+    expect(robotProfileIssues(nectarAt(-1, 131.5, 'PER_PIECE')).map(i => i.code)).toEqual(['FIELD_nectar.sweetSpot.x']);
+    expect(robotProfileIssues(nectarAt(59.5, 108.5, 'PER_PIECE')).map(i => [i.code, i.slot])).toEqual([['SWEET_SPOT_NO_SOLUTION', 'NECTAR']]);
+    // NONE: 주 슈터 스윗스팟도 검사하지 않음
+    const mainBad = { ...r1, config: { ...r1.config, shooterSetup: 'NONE' as const }, ballistics: { ...r1.ballistics, sweetSpot: { x: 59.5, y: 100.5 } } };
+    expect(robotProfileIssues(mainBad)).toEqual([]);
+    // 복사는 NECTAR 슈터도 깊은 복사
+    const copied = copyRobotProfile(moved, DEFAULT_DRAFT_VALUES.robot2, 'robot2');
+    expect(copied.ballistics.nectarShooter).toEqual(moved.ballistics.nectarShooter);
+    expect(copied.ballistics.nectarShooter).not.toBe(moved.ballistics.nectarShooter);
+    expect(copied.config.nectarShooter.turretRange).not.toBe(moved.config.nectarShooter.turretRange);
+  });
+
+  it('O. (13-3) 투입 방향 구역: 흡입 구역과 같은 칸 / 범위, 키 dropZone., 개수 0 ~ 8', () => {
+    expect(zoneFieldKey(2, 'width', 'flowerDropZones')).toBe('dropZone.2.width');
+    expect(zoneFieldKey(2, 'width')).toBe('zone.2.width');
+    expect(isZoneFieldKey('dropZone.0.depth', 'flowerDropZones') && !isZoneFieldKey('zone.0.depth', 'flowerDropZones') && isZoneFieldKey('zone.0.depth', 'intakeZones')).toBe(true);
+    const zone = newIntakeZone(r1.config);
+    const withDrop = writeZone({ ...r1, config: { ...r1.config, flowerDropZones: [zone] } }, 0, { offset: 3 }, 'flowerDropZones');
+    expect(withDrop.config.flowerDropZones).toEqual([{ ...zone, offset: 3 }]);
+    expect(withDrop.config.intakeZones).toEqual(r1.config.intakeZones);
+    expect(robotProfileIssues(withDrop)).toEqual([]);
+    const offSide = writeZone(withDrop, 0, { offset: 10, width: 2 }, 'flowerDropZones'); // 가로 18 → ±9, 폭 최소 3.6
+    expect(robotProfileIssues(offSide).map(i => i.code)).toEqual(['FIELD_dropZone.0.offset', 'FIELD_dropZone.0.width']);
+    const many = { ...r1, config: { ...r1.config, flowerDropZones: Array.from({ length: MAX_INTAKE_ZONES + 1 }, () => zone) } };
+    expect(robotProfileIssues(many).map(i => i.code)).toEqual(['DROP_ZONE_COUNT']);
+  });
+
+  it('P. (13-3) 미리보기 슈터: 쓰는 슈터마다 조준 범위 + 사출구(앞뒤 / 좌우 오프셋), 쏘는 기물', () => {
+    expect(previewMuzzle({ shooterOffset: 5, shooterLateralOffset: -3 })).toEqual({ fwd: 5, right: -3 });
+    const p = (setup: RobotProfile['config']['shooterSetup']): RobotProfile => ({
+      ...r1,
+      config: { ...r1.config, shooterSetup: setup },
+      ballistics: { ...r1.ballistics, shooterOffset: 4, shooterLateralOffset: 2, nectarShooter: { ...r1.ballistics.nectarShooter, shooterOffset: -1, shooterLateralOffset: -5 } },
+    });
+    expect(previewShooters(p('NONE'))).toEqual([]);
+    expect(previewShooters(p('SHARED')).map(s => [s.slot, s.pieces, s.muzzle])).toEqual([['MAIN', ['POLLEN', 'NECTAR'], { fwd: 4, right: 2 }]]);
+    expect(previewShooters(p('POLLEN_ONLY')).map(s => s.pieces)).toEqual([['POLLEN']]);
+    const per = previewShooters(p('PER_PIECE'));
+    expect(per.map(s => [s.slot, s.pieces, s.muzzle])).toEqual([['MAIN', ['POLLEN'], { fwd: 4, right: 2 }], ['NECTAR', ['NECTAR'], { fwd: -1, right: -5 }]]);
+    expect(per[1].aim).toBe(r1.config.nectarShooter);
   });
 });

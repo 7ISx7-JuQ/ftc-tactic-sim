@@ -100,10 +100,10 @@ export default function LeftPanel({ status, lang, teams }: { status: AppStatus; 
               {hit && (
                 <div className="hit-rows" aria-label={t(lang, 'panel.hitProbability')}>
                   {(['POLLEN', 'NECTAR'] as const).map(type => (
-                    <div className={`hit-row${hit.next === type ? ' is-next' : ''}`} key={type}>
+                    <div className={`hit-row${hit.next === type ? ' is-next' : ''}${hit.fireable[type] ? '' : ' is-unfireable'}`} key={type} title={hit.fireable[type] ? undefined : t(lang, 'panel.cannotShoot')}>
                       <span className={`hit-dot ${type === 'POLLEN' ? 'is-pollen' : 'is-nectar'}`} style={type === 'NECTAR' ? { background: colors.base } : undefined} />
                       <span className="hit-type">{type}</span>
-                      <span className="hit-value">{formatPercent(hit[type])}</span>
+                      <span className="hit-value">{hit.fireable[type] ? formatPercent(hit[type]) : '—'}</span>
                     </div>
                   ))}
                 </div>

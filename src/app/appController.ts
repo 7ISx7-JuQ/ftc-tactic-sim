@@ -579,7 +579,7 @@ export class AppController {
       tipCount: hive.tipCount,
       autoTipCount: hive.autoTipCount,
       rp: { ...frame.rpAchieved },
-      hitProbability: this.options.hitProbability ? hitProbabilities(frame, this.setup.shotResolver) : null,
+      hitProbability: this.options.hitProbability ? hitProbabilities(frame, this.setup.shotResolver, { robot1: this.setup.r1Config, robot2: this.setup.r2Config }) : null,
       gamepads: this.adapter.gamepadStatus(),
       input: this.inputStatus(),
     };
