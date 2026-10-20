@@ -9,6 +9,8 @@
 // 09-11b: 시작 자세 모드(EDIT ON FIELD) — 로봇 몸체 / 회전 핸들 끌기(포인터 캡처) = 초안 시작 자세, DONE · APPLY = SCENARIO 탭 적용.
 // 14-1a: 시작 자세 모드 → 시나리오 필드 편집 모드(SCENARIO): 겹친 자리에 놓으면 끌기 전으로 + 사유 토스트, 모드 중 시나리오 변경의
 // 되돌리기 / 다시 하기(Ctrl / ⌘ + Z, Ctrl / ⌘ + Shift + Z, Ctrl + Y, 안내 띠 버튼).
+// 14-1b: 바닥 기물 — 안내 띠 + POLLEN / + NECTAR(추가 상태, 바닥 클릭 = 하나씩, Esc = 추가 상태만 끝), 끌어 옮기기 / 필드 밖으로 끌어 빼기,
+// 겹친 자리 / 놓을 기물 없음 = 놓지 않고 사유 토스트.
 // 09-10c: 스윗스팟 모드(SET ON FIELD) — 필드 클릭 = 초안 스윗스팟, DONE · APPLY = 그 로봇 탭 적용, CANCEL / Esc / START = 들어오기 전 값으로.
 
 import { useEffect, useRef, useState } from 'react';
@@ -83,8 +85,16 @@ import {
   clickSweetSpot,
   dragSpawnPose,
   editDoneAction,
+  addFloorPiece,
+  dragFloorPoint,
   editTab,
+  finishFloorDrag,
   finishRobotDrag,
+  floorPieceHitTest,
+  floorRefusalText,
+  floorRemaining,
+  isOffField,
+  moveFloorPiece,
   openScenarioEdit,
   placeSpawn,
   recordScenarioChange,
@@ -105,7 +115,7 @@ import {
   sweetSpotIssueCodes,
   toggleHeatmapEdit,
 } from '../ui/fieldEdit';
-import type { FieldEdit, ScenarioSnapshot } from '../ui/fieldEdit';
+import type { FieldEdit, ScenarioSceneUi, ScenarioSnapshot } from '../ui/fieldEdit';
 import { SCENE_WIDTH_PX, canvasToField, cssToCanvas, fieldToCanvas, fitScale } from '../renderer/viewTransform';
 import type { ScrubberActions } from './ScrubberBar';
 import './MainScreen.css';
@@ -170,6 +180,11 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
   // 시나리오 필드 편집 모드: 끄는 중(포인터 캡처, 끌기 전 시나리오 탭 스냅샷 / 마지막 자세) / 마우스를 올린 로봇 부분 (강조 · 커서)
   const spawnDragRef = useRef<{ robot: SpawnRobotId; part: SpawnPart; pointerStart: { x: number; y: number }; poseStart: RobotPose; before: ScenarioSnapshot; lastPose: RobotPose | null } | null>(null);
   const [spawnActive, setSpawnActive] = useState<{ robot: SpawnRobotId; part: SpawnPart } | null>(null);
+  // 바닥 기물 (14-1b): 끄는 중(누른 점 / 끌기 전 자리 · 스냅샷 / 마지막 자리 · 포인터), 강조, 추가 상태(켜진 기물) / 추가 미리보기
+  const floorDragRef = useRef<{ index: number; pointerStart: { x: number; y: number }; start: { x: number; y: number }; before: ScenarioSnapshot; lastPoint: { x: number; y: number } | null; lastPointer: { x: number; y: number } | null } | null>(null);
+  const [floorActive, setFloorActive] = useState<ScenarioSceneUi['floorActive']>(null);
+  const [addTool, setAddTool] = useState<'POLLEN' | 'NECTAR' | null>(null);
+  const [addPreview, setAddPreview] = useState<ScenarioSceneUi['addPreview']>(null);
   const [spawnDragging, setSpawnDragging] = useState(false);
   const overlayRef = useRef<HTMLDivElement>(null); // 캔버스와 같은 크기 / 위치의 글자 층 (시작 자세 글자를 장면 비율로 배치)
   const servicesRef = useRef(services); // 마운트 때 한 번만 씀 (컨트롤러 / 추적기와 같은 수명)
@@ -360,7 +375,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
   };
   // 되돌리기 / 다시 하기 (모드 중, 끄는 중에는 무시)
   const stepScenarioHistory = (direction: 'undo' | 'redo') => {
-    if (!scenarioEdit || spawnDragRef.current) return;
+    if (!scenarioEdit || spawnDragRef.current || floorDragRef.current) return;
     const result = (direction === 'undo' ? undoScenarioEdit : redoScenarioEdit)(scenarioEdit, drafts);
     if (!result) return;
     setConfigNotice(null);
@@ -557,7 +572,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
       return;
     }
     if (activeEdit.mode === 'SCENARIO') {
-      controller.setEditScene(scenarioEditScene(drafts.draft, spawnActive));
+      controller.setEditScene(scenarioEditScene(drafts.draft, spawnActive, { floorActive, addPreview }));
       return;
     }
     const robot = activeEdit.robot;
@@ -568,14 +583,21 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
         ? heatmapEditScene(editAlliance, drafts.applied[robot], heatmap, piece)
         : sweetSpotEditScene(editAlliance, drafts.draft[robot], drafts.applied[robot], heatmap, spotHover?.cell ?? null, activeEdit.slot),
     );
-  }, [activeEdit, editPiece, editAlliance, drafts.applied, drafts.draft, lutViews, spotHover, spawnActive]);
+  }, [activeEdit, editPiece, editAlliance, drafts.applied, drafts.draft, lutViews, spotHover, spawnActive, floorActive, addPreview]);
   // 편집 중 Esc = 편집 모드 닫기 / 스윗스팟 모드는 취소 (config 창은 그대로, 확인창이 떠 있으면 확인창이 먼저)
   useEffect(() => {
     if (!activeEdit || confirm) return;
     const edit = activeEdit;
+    const adding = addTool !== null;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
       e.preventDefault();
+      // 바닥 기물 추가 상태면 추가 상태만 끝 (모드는 그대로, 14-1b)
+      if (adding) {
+        setAddTool(null);
+        setAddPreview(null);
+        return;
+      }
       // CANCEL과 같음: 스윗스팟 / 시나리오 필드 편집 모드면 들어오기 전 값으로
       setDrafts(d => cancelFieldEdit(d, edit));
       setFieldEdit(null);
@@ -583,10 +605,14 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
       setSpotHover(null);
       spawnDragRef.current = null;
       setSpawnActive(null);
+      floorDragRef.current = null;
+      setFloorActive(null);
+      setAddTool(null);
+      setAddPreview(null);
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [activeEdit, confirm]);
+  }, [activeEdit, confirm, addTool]);
 
   // 시나리오 필드 편집 모드: Ctrl / ⌘ + Z 되돌리기, Ctrl / ⌘ + Shift + Z · Ctrl + Y 다시 하기 (글자 입력칸에서는 브라우저 글자 되돌리기)
   useEffect(() => {
@@ -626,6 +652,10 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
     spawnDragRef.current = null;
     setSpawnActive(null);
     setSpawnDragging(false);
+    floorDragRef.current = null;
+    setFloorActive(null);
+    setAddTool(null);
+    setAddPreview(null);
   };
   // CANCEL / Esc: 스윗스팟 / 시작 자세 모드면 들어오기 전 값으로 되돌리고 닫음 (히트맵 모드는 닫기만)
   const cancelEdit = () => {
@@ -680,16 +710,56 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
     if (!p) return;
     const robots = spawnRobots(drafts.draft);
     const hit = spawnHitTest(robots, p);
-    if (!hit) return;
-    e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    spawnDragRef.current = { ...hit, pointerStart: p, poseStart: robots[hit.robot].pose, before: scenarioSnapshot(drafts), lastPose: null };
-    setSpawnActive(hit);
-    setSpawnDragging(true);
-    setConfigNotice(null);
+    // 잡기 순서: 로봇 회전 핸들 → 바닥 기물 → 로봇 몸체 → (추가 상태면) 새 바닥 기물
+    const pieces = drafts.draft.scenario.floorPieces ?? [];
+    const pieceHit = hit?.part === 'handle' ? null : floorPieceHitTest(pieces, p);
+    if (pieceHit !== null) {
+      e.preventDefault();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      floorDragRef.current = { index: pieceHit, pointerStart: p, start: { x: pieces[pieceHit].x, y: pieces[pieceHit].y }, before: scenarioSnapshot(drafts), lastPoint: null, lastPointer: null };
+      setFloorActive({ index: pieceHit, state: 'DRAG' });
+      setSpawnActive(null);
+      setAddPreview(null);
+      setSpawnDragging(true);
+      setConfigNotice(null);
+      return;
+    }
+    if (hit) {
+      e.preventDefault();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      spawnDragRef.current = { ...hit, pointerStart: p, poseStart: robots[hit.robot].pose, before: scenarioSnapshot(drafts), lastPose: null };
+      setSpawnActive(hit);
+      setAddPreview(null);
+      setSpawnDragging(true);
+      setConfigNotice(null);
+      return;
+    }
+    if (addTool && !isOffField(p)) {
+      e.preventDefault();
+      setConfigNotice(null);
+      const result = addFloorPiece(drafts, addTool, p);
+      if (result.refusal) showEditToast(floorRefusalText(result.refusal, lang));
+      else {
+        commitScenario(result.drafts);
+        setAddPreview(null);
+      }
+    }
   };
   // 놓기: 그 로봇이 겹치는 자리면 끌기 전으로 되돌리고 사유 토스트, 아니면 확정 + 되돌리기 기록 (14-1a)
   const onFieldPointerUp = (e: ReactPointerEvent) => {
+    // 바닥 기물: 필드 밖이면 빼기, 겹치는 자리면 끌기 전으로 + 사유, 아니면 확정 + 되돌리기 기록 (14-1b)
+    const floorDrag = floorDragRef.current;
+    if (floorDrag) {
+      floorDragRef.current = null;
+      setSpawnDragging(false);
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+      const result = finishFloorDrag(drafts, floorDrag.index, floorDrag.before, floorDrag.lastPoint, floorDrag.lastPointer);
+      setDrafts(result.drafts);
+      if (result.refusal) showEditToast(floorRefusalText(result.refusal, lang));
+      else setFieldEdit(edit => (edit?.mode === 'SCENARIO' ? recordScenarioChange(edit, floorDrag.before, scenarioSnapshot(result.drafts)) : edit));
+      setFloorActive(null);
+      return;
+    }
     const drag = spawnDragRef.current;
     if (!drag) return;
     spawnDragRef.current = null;
@@ -707,6 +777,16 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
     if (scenarioEdit) {
       const p = fieldPointAt(e.clientX, e.clientY);
       if (!p) return;
+      const floorDrag = floorDragRef.current;
+      if (floorDrag) {
+        const at = dragFloorPoint(floorDrag.start, floorDrag.pointerStart, p);
+        floorDrag.lastPoint = at;
+        floorDrag.lastPointer = p;
+        setDrafts(d => moveFloorPiece(d, floorDrag.index, at));
+        const state = isOffField(p) || isOffField(at) ? 'REMOVE' : 'DRAG';
+        if (floorActive?.state !== state) setFloorActive({ index: floorDrag.index, state });
+        return;
+      }
       const drag = spawnDragRef.current;
       if (drag) {
         const pose = dragSpawnPose(drag.poseStart, drag.part, drag.pointerStart, p);
@@ -716,7 +796,16 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
       }
       const overBanner = e.target instanceof Element && e.target.closest('.field-edit-banner');
       const hover = overBanner ? null : spawnHitTest(spawnRobots(drafts.draft), p);
-      if (!sameActive(hover, spawnActive)) setSpawnActive(hover);
+      const pieceHover = overBanner || hover?.part === 'handle' ? null : floorPieceHitTest(drafts.draft.scenario.floorPieces ?? [], p);
+      const robotHover = pieceHover === null ? hover : null;
+      if (!sameActive(robotHover, spawnActive)) setSpawnActive(robotHover);
+      if (pieceHover !== (floorActive?.index ?? null)) setFloorActive(pieceHover === null ? null : { index: pieceHover, state: 'HOVER' });
+      // 추가 상태: 포인터 자리 미리보기 (놓을 수 있으면 초록 / 없으면 빨강)
+      const preview =
+        addTool && !overBanner && !robotHover && pieceHover === null && !isOffField(p)
+          ? { type: addTool, x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10, valid: addFloorPiece(drafts, addTool, p).refusal === null }
+          : null;
+      if (preview?.x !== addPreview?.x || preview?.y !== addPreview?.y || preview?.valid !== addPreview?.valid || preview?.type !== addPreview?.type) setAddPreview(preview);
       return;
     }
     if (!spotEdit) return;
@@ -851,7 +940,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
       {status && <LeftPanel status={status} lang={lang} teams={{ robot1: drafts.applied.robot1, robot2: drafts.applied.robot2 }} />}
       {/* 종료 강조 5초 중 필드를 누르면 건너뛰기 */}
       <div
-        className={`field-area${spotEdit ? ' is-picking' : ''}${scenarioEdit ? ` is-scenario-edit${spawnActive ? ` is-over-${spawnActive.part}` : ''}${spawnDragging ? ' is-dragging' : ''}` : ''}`}
+        className={`field-area${spotEdit ? ' is-picking' : ''}${scenarioEdit ? ` is-scenario-edit${spawnActive ? ` is-over-${spawnActive.part}` : floorActive ? ' is-over-body' : ''}${spawnDragging ? ' is-dragging' : ''}${addTool ? ' is-adding' : ''}` : ''}`}
         ref={areaRef}
         onClick={onFieldClick}
         onPointerDown={onFieldPointerDown}
@@ -859,7 +948,11 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
         onPointerCancel={onFieldPointerUp}
         onPointerMove={onFieldPointerMove}
         onPointerLeave={() => {
-          if (!spawnDragging) setSpawnActive(null);
+          if (!spawnDragging) {
+            setSpawnActive(null);
+            setFloorActive(null);
+          }
+          setAddPreview(null);
           spotHoverRef.current = null;
           setSpotHover(null);
         }}
@@ -877,9 +970,16 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
             issues={[...new Set(scenarioFormIssues(drafts.draft).map(issue => scenarioIssueText(issue, lang)))]}
             canUndo={scenarioEdit.history.past.length > 0}
             canRedo={scenarioEdit.history.future.length > 0}
+            addTool={addTool}
+            remaining={floorRemaining(drafts.draft)}
+            faded={spawnDragging}
             lang={lang}
             onUndo={() => stepScenarioHistory('undo')}
             onRedo={() => stepScenarioHistory('redo')}
+            onAddTool={piece => {
+              setAddTool(piece);
+              setAddPreview(null);
+            }}
             onDone={doneEdit}
             onCancel={cancelEdit}
           />

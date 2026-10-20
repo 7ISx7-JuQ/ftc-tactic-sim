@@ -466,6 +466,21 @@ export interface PlacementIssue {
   message: string;
 }
 
+/**
+ * 휴먼 플레이어 NECTAR 투입 슬롯 (투입 순서대로): RED 로딩 존(좌측 벽)에서 벽쪽 열부터 만들고, BLUE는 필드 중심 (72, 72) 점대칭으로 변환
+ * → 두 진영의 슬롯 배치와 투입 순서가 완전히 대칭 (BLUE 로딩 존 = RED 로딩 존의 점대칭).
+ * 엔진 투입(placePendingHumanNectar)과 시나리오 필드 편집 화면의 오토 TIP NECTAR 표시(14-1b)가 공유
+ */
+export function humanNectarSlots(alliance: 'RED' | 'BLUE'): Vector2D[] {
+  const box = LOADING_ZONE_AABB.RED;
+  const r = PIECE_PHYSICS.NECTAR.radius;
+  const redSlots: Vector2D[] = [];
+  for (let x = box.minX + r; x <= box.maxX - r + EPSILON; x += 2 * r + 0.4) {
+    for (let y = box.minY + r; y <= box.maxY - r + EPSILON; y += 2 * r + 0.4) redSlots.push({ x, y });
+  }
+  return alliance === 'RED' ? redSlots : redSlots.map((p) => ({ x: FIELD_SIZE - p.x, y: FIELD_SIZE - p.y }));
+}
+
 // GARDEN 기물 배치 좌표 (reset과 배치 검증이 공유, GUI 시작 자세 편집 모드 표시도 같은 함수 — 09-11b): 지정 수를 구역 길이에 균등 배치, 벽 밀착
 export function gardenPiecePositions(side: 'RED' | 'BLUE', count: number): Vector2D[] {
   const box = GARDEN_AABB[side];
@@ -1161,17 +1176,8 @@ export class SimulationEngine {
   private placePendingHumanNectar(): void {
     if (this.field.pendingHumanNectar <= 0) return;
 
-    // RED 로딩 존(좌측 벽)에서 벽쪽 열부터 슬롯을 만들고, BLUE는 필드 중심 (72, 72) 점대칭으로 변환
-    // → 두 진영의 슬롯 배치와 투입 순서가 완전히 대칭 (BLUE 로딩 존 = RED 로딩 존의 점대칭)
-    const box = LOADING_ZONE_AABB.RED;
     const r = PIECE_PHYSICS.NECTAR.radius;
-    const redSlots: Vector2D[] = [];
-    for (let x = box.minX + r; x <= box.maxX - r + EPSILON; x += 2 * r + 0.4) {
-      for (let y = box.minY + r; y <= box.maxY - r + EPSILON; y += 2 * r + 0.4) redSlots.push({ x, y });
-    }
-    const slots = this.field.allianceColor === 'RED'
-      ? redSlots
-      : redSlots.map((p) => ({ x: FIELD_SIZE - p.x, y: FIELD_SIZE - p.y }));
+    const slots = humanNectarSlots(this.field.allianceColor);
 
     while (this.field.pendingHumanNectar > 0) {
       const spot = slots.find((s) => !this.overlapsFieldPiece(s.x, s.y, r) && !this.overlapsRobot(s.x, s.y, r));

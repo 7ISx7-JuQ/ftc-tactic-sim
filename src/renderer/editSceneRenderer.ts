@@ -8,12 +8,14 @@
 //   (흡입 구역 / 몸체 / 앞 변 / 헤딩 화살표 / 번호) + 회전 핸들. 배치 검증에 걸린 로봇은 빨간 테두리 + 빨간 덧칠.
 //   HIVE 터널 지붕은 경기 장면과 같은 규칙으로 로봇 위에 (13-1). 히트맵 / 스윗스팟 모드는 로봇 / 기물이 없어 지붕이 늘 불투명 (전체를 한 번에).
 //   바닥 산포 공은 그리지 않는다 (09-11 확정 ④: 로봇 자리를 피해 다시 뿌려지므로 끌 때마다 공이 튀는 것 방지).
+//   14-1b: 지정 바닥 기물(문제면 빨간 테두리, 마우스를 올림 / 끄는 중 주황 점선 고리, 필드 밖 = 빼기 → 흐리게 + 점선),
+//   오토 TIP NECTAR(LOADING ZONE 슬롯), 추가 상태의 미리보기(흐리게, 놓을 수 있으면 초록 / 없으면 빨강 테두리).
 // 히트맵 / 스윗스팟 모드는 로봇 / 기물 / 게이지를 그리지 않는다 (편집 모드의 필드는 비어 있음). 색 / 행 계산은 heatmapView.ts (순수 함수).
 
 import { LUT_GRID_SIZE, aimingRobotOBB } from '../core/ballistics';
 import { PIECE_PHYSICS, getBumperZoneOBB, getRobotOBB } from '../core/collision';
 import type { RobotConfig, RobotPose } from '../core/types';
-import { ALLIANCE_COLORS, COLORS, drawFieldBackground, drawFieldLines, drawFlowers, drawGardens, drawHiveBase, drawLoadingZones, hiveCellBox, inchToPx } from './canvasRenderer';
+import { ALLIANCE_COLORS, COLORS, drawFieldBackground, drawFieldLines, drawFlowers, drawGardens, drawHiveBase, drawLoadingZones, hiveCellBox, inchToPx, pieceColors } from './canvasRenderer';
 import { canvasFont } from './fonts';
 import { headingArrow, localToField, robotLabelOffset } from './robotLayout';
 import { HANDLE_RADIUS, spawnHandlePoint } from './spawnEditLayout';
@@ -52,12 +54,23 @@ export interface SpawnEditRobot {
   bad: boolean;                                   // 배치 검증에 걸림 (빨간 표시)
 }
 
+export interface ScenarioEditFloorPiece {
+  type: 'POLLEN' | 'NECTAR';
+  x: number;
+  y: number;
+  bad: boolean;                                   // 위치 / 겹침 / 바닥 기물 수 초과 (빨간 테두리)
+}
+
 export interface ScenarioEditScene {
   mode: 'SCENARIO';
   alliance: Alliance;
   robots: Record<SpawnRobotId, SpawnEditRobot>;
   gardenPieces: readonly Point2[];                // GARDEN POLLEN (배치 검증 대상, 엔진 gardenPiecePositions)
   active: { robot: SpawnRobotId; part: SpawnPart } | null; // 끄는 중 / 마우스를 올린 로봇 부분 (강조)
+  floorPieces?: readonly ScenarioEditFloorPiece[]; // 지정 바닥 기물 (14-1b, 없으면 빈 목록)
+  floorActive?: { index: number; state: 'HOVER' | 'DRAG' | 'REMOVE' } | null; // 마우스를 올림 / 끄는 중 / 놓으면 빼짐
+  autoTipNectar?: readonly Point2[];              // 오토 TIP NECTAR (LOADING ZONE 슬롯, 엔진과 같은 자리)
+  addPreview?: { type: 'POLLEN' | 'NECTAR'; x: number; y: number; valid: boolean } | null; // 추가 상태: 포인터 자리 미리보기
 }
 
 /** 편집 모드 장면 */
@@ -87,7 +100,11 @@ const SPAWN_COLORS = {
   handle: '#ffffff',
   handleActive: '#f59e0b',
   activeRing: 'rgba(245, 158, 11, 0.9)',
+  pieceBad: '#dc2626',
+  previewOk: '#15803d',
 };
+const REMOVE_ALPHA = 0.4;   // 필드 밖으로 끄는 바닥 기물 (놓으면 빼짐)
+const PREVIEW_ALPHA = 0.55; // 추가 미리보기
 const HATCH_SPACING_PX = 8;
 const AIM_MARK_INCH = 1.6;
 const SWEET_SPOT_MARK_INCH = 2.2;
@@ -358,7 +375,50 @@ function drawSpawnRobot(ctx: CanvasRenderingContext2D, robot: SpawnEditRobot, al
   ctx.restore();
 }
 
-// HIVE는 경기 장면과 같이 기둥 부분 → (GARDEN 기물 / 로봇) → 터널 지붕(지붕 불투명도) 순서 (13-1, 터널 안에 시작 자세를 둘 수 있음)
+function drawPieceCircle(ctx: CanvasRenderingContext2D, type: 'POLLEN' | 'NECTAR', ally: Alliance, x: number, y: number, stroke: string | null, width = 1.5, dash: number[] = []): void {
+  const colors = pieceColors({ type, alliance: type === 'NECTAR' ? ally : 'NONE' });
+  ctx.beginPath();
+  ctx.arc(inchToPx(x), inchToPx(y), inchToPx(PIECE_PHYSICS[type].radius), 0, Math.PI * 2);
+  ctx.fillStyle = colors.fill;
+  ctx.fill();
+  ctx.setLineDash(dash);
+  ctx.lineWidth = width;
+  ctx.strokeStyle = stroke ?? colors.stroke;
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+// 바닥 기물 (14-1b): GARDEN 기물 → 오토 TIP NECTAR → 지정 바닥 기물(문제 = 빨간 테두리, 강조 = 주황 점선 고리, 빼기 = 흐리게) → 추가 미리보기
+function drawScenarioPieces(ctx: CanvasRenderingContext2D, scene: ScenarioEditScene): void {
+  const ally = scene.alliance;
+  ctx.save();
+  for (const p of scene.gardenPieces) drawPieceCircle(ctx, 'POLLEN', ally, p.x, p.y, null);
+  for (const p of scene.autoTipNectar ?? []) drawPieceCircle(ctx, 'NECTAR', ally, p.x, p.y, null);
+  (scene.floorPieces ?? []).forEach((p, k) => {
+    const active = scene.floorActive?.index === k ? scene.floorActive.state : null;
+    ctx.globalAlpha = active === 'REMOVE' ? REMOVE_ALPHA : 1;
+    drawPieceCircle(ctx, p.type, ally, p.x, p.y, p.bad ? SPAWN_COLORS.pieceBad : null, p.bad ? 2.5 : 1.5, active === 'REMOVE' ? [3, 2] : []);
+    ctx.globalAlpha = 1;
+    if (active === 'HOVER' || active === 'DRAG') {
+      ctx.beginPath();
+      ctx.arc(inchToPx(p.x), inchToPx(p.y), inchToPx(PIECE_PHYSICS[p.type].radius + 0.9), 0, Math.PI * 2);
+      ctx.setLineDash([4, 3]);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = SPAWN_COLORS.activeRing;
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  });
+  const a = scene.addPreview;
+  if (a) {
+    ctx.globalAlpha = PREVIEW_ALPHA;
+    drawPieceCircle(ctx, a.type, ally, a.x, a.y, a.valid ? SPAWN_COLORS.previewOk : SPAWN_COLORS.pieceBad, 2.5);
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+}
+
+// HIVE는 경기 장면과 같이 기둥 부분 → (바닥 기물 / 로봇) → 터널 지붕(지붕 불투명도) 순서 (13-1, 터널 안에 시작 자세 / 바닥 기물을 둘 수 있음)
 function renderScenarioField(ctx: CanvasRenderingContext2D, scene: ScenarioEditScene, dpr: number): void {
   const ally = scene.alliance;
   drawFieldBackground(ctx);
@@ -366,23 +426,16 @@ function renderScenarioField(ctx: CanvasRenderingContext2D, scene: ScenarioEditS
   drawLoadingZones(ctx, false, ally);
   drawHiveBase(ctx, ally, 'PILLARS');
   drawFlowers(ctx, false);
-  ctx.save();
-  const r = PIECE_PHYSICS.POLLEN.radius;
-  for (const p of scene.gardenPieces) {
-    ctx.beginPath();
-    ctx.arc(inchToPx(p.x), inchToPx(p.y), inchToPx(r), 0, Math.PI * 2);
-    ctx.fillStyle = COLORS.pollenFill;
-    ctx.fill();
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = COLORS.pollenStroke;
-    ctx.stroke();
-  }
-  ctx.restore();
+  drawScenarioPieces(ctx, scene);
   // 끄는 로봇을 위에 (R1 → R2 순서, 끄는 로봇은 마지막)
   const order: SpawnRobotId[] = scene.active?.robot === 'robot1' ? ['robot2', 'robot1'] : ['robot1', 'robot2'];
   for (const id of order) drawSpawnRobot(ctx, scene.robots[id], ally, scene.active?.robot === id ? scene.active.part : null);
   const robots = order.map((id) => ({ pose: scene.robots[id].pose, size: scene.robots[id].config }));
-  const pieces = scene.gardenPieces.map((p) => ({ type: 'POLLEN' as const, state: 'IN_GARDEN' as const, x: p.x, y: p.y }));
+  const pieces = [
+    ...scene.gardenPieces.map((p) => ({ type: 'POLLEN' as const, state: 'IN_GARDEN' as const, x: p.x, y: p.y })),
+    ...(scene.autoTipNectar ?? []).map((p) => ({ type: 'NECTAR' as const, state: 'ON_FIELD' as const, x: p.x, y: p.y })),
+    ...(scene.floorPieces ?? []).map((p) => ({ type: p.type, state: 'ON_FIELD' as const, x: p.x, y: p.y })),
+  ];
   drawTunnelRoof(ctx, ally, null, tunnelRoofOpacity(robots, pieces), dpr);
 }
 

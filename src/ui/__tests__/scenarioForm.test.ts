@@ -42,6 +42,7 @@ describe('시나리오 탭 폼 (09-11a)', () => {
       flowers: [4, 4, 4, 4],
       garden: { ally: 4, opponent: 4 },
       autoTipCount: 0,
+      floorPieces: [],
       spawn: DEFAULT_SPAWN_POSES.RED,
       spawnIsDefault: { robot1: true, robot2: true },
       seed: DEFAULT_RNG_SEED,
@@ -149,11 +150,17 @@ describe('시나리오 탭 폼 (09-11a)', () => {
     }
   });
 
-  it('F. 바닥 산포 / 재고 요약: 32 − 지정 POLLEN, 3 − (HIVE + 적재 NECTAR), 5 − 오토 TIP', () => {
-    expect(floorSummary(readScenario({ allianceColor: 'RED' }, R1, R2))).toEqual({ floorPollen: 0, floorNectar: 0, stock: 5 });
+  it('F. 바닥 기물 / 재고 요약: 32 − 지정 POLLEN, 3 − (HIVE + 적재 NECTAR), 그중 지정 바닥 기물을 뺀 나머지 = 산포 (14-1b), 5 − 오토 TIP', () => {
+    const none = { placedPollen: 0, placedNectar: 0, scatterPollen: 0, scatterNectar: 0 };
+    expect(floorSummary(readScenario({ allianceColor: 'RED' }, R1, R2))).toEqual({ floorPollen: 0, floorNectar: 0, ...none, stock: 5 });
     const sc: ScenarioConfig = { allianceColor: 'RED', r1Loadout: ['NECTAR'], hiveInitialPieces: { pollenCount: 1, nectarCount: 1 }, flowerPiecesCount: [2, 4, 4, 4], autoTipCount: 2 };
     // 지정 POLLEN = 적재 0 + 4(R2) + FLOWER 14 + HIVE 1 + GARDEN 8 = 27
-    expect(floorSummary(readScenario(sc, R1, R2))).toEqual({ floorPollen: 5, floorNectar: 1, stock: 3 });
+    expect(floorSummary(readScenario(sc, R1, R2))).toEqual({ floorPollen: 5, floorNectar: 1, ...none, scatterPollen: 5, scatterNectar: 1, stock: 3 });
+    const placed = { ...sc, floorPieces: [{ type: 'POLLEN' as const, x: 40, y: 40 }, { type: 'POLLEN' as const, x: 50, y: 40 }, { type: 'NECTAR' as const, x: 60, y: 40 }] };
+    expect(floorSummary(readScenario(placed, R1, R2))).toEqual({ floorPollen: 5, floorNectar: 1, placedPollen: 2, placedNectar: 1, scatterPollen: 3, scatterNectar: 0, stock: 3 });
+    // 지정이 바닥 기물 수를 넘으면 산포 0 (검증은 FLOOR_PIECE_COUNT)
+    const over = { allianceColor: 'RED' as const, floorPieces: [{ type: 'NECTAR' as const, x: 60, y: 40 }] };
+    expect(floorSummary(readScenario(over, R1, R2)).scatterNectar).toBe(0);
   });
 
   it('G. 시드: REROLL = 적용 값과 초안에 바로 (다른 초안 수정은 그대로, 수정 없음이면 여전히 DIRTY 아님), 새 시드는 지금과 다름, RESET TAB은 시드 유지', () => {

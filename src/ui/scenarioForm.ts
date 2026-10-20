@@ -44,6 +44,7 @@ export interface ScenarioView {
   flowers: [number, number, number, number];
   garden: { ally: number; opponent: number };
   autoTipCount: number;
+  floorPieces: FloorPiecePlacement[]; // 지정 바닥 기물 (없으면 빈 목록 = 모두 무작위 산포, 14-1b)
   spawn: Record<RobotId, RobotPose>;
   spawnIsDefault: Record<RobotId, boolean>;
   seed: number;
@@ -73,6 +74,7 @@ export function readScenario(scenario: ScenarioConfig, r1: RobotConfig, r2: Robo
     flowers: [...(scenario.flowerPiecesCount ?? [DEFAULT_FLOWER_PIECES, DEFAULT_FLOWER_PIECES, DEFAULT_FLOWER_PIECES, DEFAULT_FLOWER_PIECES])] as ScenarioView['flowers'],
     garden: { ...(scenario.gardenPiecesCount ?? { ally: DEFAULT_GARDEN_PIECES, opponent: DEFAULT_GARDEN_PIECES }) },
     autoTipCount: scenario.autoTipCount ?? 0,
+    floorPieces: (scenario.floorPieces ?? []).map(p => ({ type: p.type, x: p.x, y: p.y })),
     spawn: { robot1: { ...(spawnOf('robot1') ?? DEFAULT_SPAWN_POSES[a].robot1) }, robot2: { ...(spawnOf('robot2') ?? DEFAULT_SPAWN_POSES[a].robot2) } },
     spawnIsDefault: { robot1: spawnOf('robot1') === undefined, robot2: spawnOf('robot2') === undefined },
     seed: scenario.rngSeed ?? DEFAULT_RNG_SEED,
@@ -312,17 +314,36 @@ export function issueFieldSet(issues: readonly ScenarioFormIssue[]): Set<Scenari
   return new Set(issues.flatMap(i => i.fields));
 }
 
+export interface FloorSummary {
+  floorPollen: number;   // 바닥 POLLEN (지정 + 산포)
+  floorNectar: number;
+  placedPollen: number;  // 지정 바닥 기물 수 (14-1b)
+  placedNectar: number;
+  scatterPollen: number; // 무작위 산포 수 = 바닥 − 지정 (음수는 0 — 넘으면 FLOOR_PIECE_COUNT)
+  scatterNectar: number;
+  stock: number;         // 휴먼 플레이어 재고
+}
+
 /**
- * 바닥 무작위 산포 / 휴먼 플레이어 재고 요약 (2.4 자동 계산, 참고 표시):
- * 바닥 POLLEN = 32 − 지정 POLLEN, 바닥 NECTAR = 3 − (HIVE + 적재 NECTAR), 재고 = 5 − 오토 팁 (음수는 0)
+ * 바닥 기물 / 휴먼 플레이어 재고 요약 (2.4 자동 계산, 참고 표시):
+ * 바닥 POLLEN = 32 − 지정 POLLEN, 바닥 NECTAR = 3 − (HIVE + 적재 NECTAR), 그중 지정 바닥 기물을 뺀 나머지가 무작위 산포 (14-1b),
+ * 재고 = 5 − 오토 팁 (음수는 0)
  */
-export function floorSummary(view: ScenarioView): { floorPollen: number; floorNectar: number; stock: number } {
+export function floorSummary(view: ScenarioView): FloorSummary {
   const loaded = [...view.loadout.robot1, ...view.loadout.robot2];
   const pollen = loaded.filter(p => p === 'POLLEN').length + view.flowers.reduce((a, b) => a + b, 0) + view.hivePollen + view.garden.ally + view.garden.opponent;
   const nectar = loaded.filter(p => p === 'NECTAR').length + view.hiveNectar;
+  const floorPollen = Math.max(0, TOTAL_POLLEN - pollen);
+  const floorNectar = Math.max(0, NECTAR_IN_PLAY - nectar);
+  const placedPollen = view.floorPieces.filter(p => p.type === 'POLLEN').length;
+  const placedNectar = view.floorPieces.filter(p => p.type === 'NECTAR').length;
   return {
-    floorPollen: Math.max(0, TOTAL_POLLEN - pollen),
-    floorNectar: Math.max(0, NECTAR_IN_PLAY - nectar),
+    floorPollen,
+    floorNectar,
+    placedPollen,
+    placedNectar,
+    scatterPollen: Math.max(0, floorPollen - placedPollen),
+    scatterNectar: Math.max(0, floorNectar - placedNectar),
     stock: Math.max(0, INITIAL_HUMAN_NECTAR_STOCK - view.autoTipCount),
   };
 }

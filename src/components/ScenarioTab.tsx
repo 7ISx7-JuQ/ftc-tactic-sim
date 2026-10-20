@@ -167,7 +167,7 @@ export default function ScenarioTab({ scenario, robots, seed, fieldText, issues,
           <Stepper label={t(lang, 'scenario.gardenAlly')} value={view.garden.ally} min={0} max={COUNT_LIMITS.garden} disabled={locked} invalid={red.has('garden.ally')} lang={lang} onChange={v => edit(setGardenCount(scenario, view, 'ally', v))} />
           <Stepper label={t(lang, 'scenario.gardenOpponent')} value={view.garden.opponent} min={0} max={COUNT_LIMITS.garden} disabled={locked} invalid={red.has('garden.opponent')} lang={lang} onChange={v => edit(setGardenCount(scenario, view, 'opponent', v))} />
         </div>
-        <p className="settings-note">{t(lang, 'scenario.floorSummary', { floorPollen: floor.floorPollen, floorNectar: floor.floorNectar, stock: floor.stock })}</p>
+        <p className="settings-note">{t(lang, 'scenario.floorSummary', { ...floor })}</p>
       </Section>
 
       <Section title={t(lang, 'scenario.section.autoTip')}>

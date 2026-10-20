@@ -5,7 +5,7 @@
 //   CANCEL(Esc) = 들어오기 전 값으로, DONE · APPLY = 그 로봇 탭 적용.
 // 13-4: 기물 버튼은 고를 수 있는 기물만 활성(히트맵 = 그 로봇이 쏘는 기물, 스윗스팟 = 찍는 슈터가 쏘는 기물),
 //   PER_PIECE의 스윗스팟 모드는 제목에 찍는 슈터(POLLEN 슈터 / NECTAR 슈터)를 붙인다.
-import { Check, Crosshair, Map as MapIcon, Move, Redo2, Undo2, X } from 'lucide-react';
+import { Check, Crosshair, Map as MapIcon, Move, Plus, Redo2, Undo2, X } from 'lucide-react';
 import type { CSSProperties } from 'react';
 import { sweetSpotBasisCell } from '../core/ballistics';
 import { heatmapGradientCss } from '../renderer/heatmapView';
@@ -136,30 +136,48 @@ export function SweetSpotHoverTip({
 
 /**
  * 시나리오 필드 편집 모드 안내 띠 (14-1a, 09-11b 시작 자세 모드 흡수): 모드 이름 + 되돌리기 / 다시 하기 + CANCEL / DONE · APPLY,
- * 시나리오 검증 사유(빨강), 조작 안내 + Esc. 로봇이 필드 양쪽 벽에 붙어 있어 가운데 위쪽은 비므로 늘 필드 위쪽
+ * 시나리오 검증 사유(빨강), 조작 안내(툴팁) + Esc. 필드 위쪽 (두 줄로 줄여 R1 / R2 기본 자리를 가리지 않음, 끄는 중에는 흐리게).
+ * 14-1b: 바닥 기물 추가 버튼(+ POLLEN / + NECTAR, 켜면 바닥 클릭마다 하나씩 — 다시 누르거나 Esc로 끝), 아직 놓지 않은 바닥 기물 수
+ * (= 더 놓을 수 있는 수 = 적용하면 무작위로 뿌려질 수)
  */
 export function ScenarioEditBanner({
   issues,
   canUndo,
   canRedo,
+  addTool,
+  remaining,
+  faded,
   lang,
   onUndo,
   onRedo,
+  onAddTool,
   onDone,
   onCancel,
 }: {
   issues: readonly string[];
   canUndo: boolean;
   canRedo: boolean;
+  addTool: PieceType | null;                 // 켜진 추가 버튼
+  remaining: Readonly<Record<PieceType, number>>; // 아직 놓지 않은 바닥 기물 수 (더 놓을 수 있음 = 적용하면 무작위 산포)
+  faded: boolean;                            // 끄는 중: 흐리게 + 포인터 통과 (띠 아래 필드를 가리지 않게)
   lang: Language;
   onUndo: () => void;
   onRedo: () => void;
+  onAddTool: (piece: PieceType | null) => void;
   onDone: () => void;
   onCancel: () => void;
 }) {
   const title = t(lang, 'edit.scenario.title');
+  // 필드 위쪽을 덜 가리게 두 줄 (조작 안내는 띠의 툴팁): 제목 / 되돌리기 · 다시 하기 / CANCEL / DONE · APPLY, 추가 버튼 / 남은 수 / Esc
   return (
-    <div className="field-edit-banner" role="region" aria-label={title} onClick={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()}>
+    <div
+      className={`field-edit-banner is-compact${faded ? ' is-faded' : ''}`}
+      role="region"
+      aria-label={title}
+      title={t(lang, 'edit.scenario.hint')}
+      onClick={e => e.stopPropagation()}
+      onPointerDown={e => e.stopPropagation()}
+    >
       <div className="field-edit-head">
         <Move />
         <span className="field-edit-title">{title}</span>
@@ -178,6 +196,25 @@ export function ScenarioEditBanner({
           {t(lang, 'edit.doneApply')}
         </button>
       </div>
+      <div className="field-edit-legend field-edit-floor">
+        {PIECES.map(piece => (
+          <button
+            key={piece}
+            type="button"
+            className={`config-button${addTool === piece ? ' is-active' : ''}`}
+            aria-pressed={addTool === piece}
+            title={t(lang, 'edit.floor.add', { piece })}
+            onClick={() => onAddTool(addTool === piece ? null : piece)}
+          >
+            <Plus />
+            {piece}
+          </button>
+        ))}
+        <span className="field-edit-remaining" title={t(lang, 'edit.floor.remainingHint')}>
+          {t(lang, 'edit.floor.remaining', { pollenLeft: remaining.POLLEN, nectarLeft: remaining.NECTAR })}
+        </span>
+        <span className="field-edit-esc">{t(lang, 'edit.escCancel')}</span>
+      </div>
       {issues.length > 0 && (
         <div className="field-edit-spot">
           {issues.map(text => (
@@ -187,10 +224,6 @@ export function ScenarioEditBanner({
           ))}
         </div>
       )}
-      <div className="field-edit-hint">
-        <span>{t(lang, 'edit.scenario.hint')}</span>
-        <span className="field-edit-esc">{t(lang, 'edit.escCancel')}</span>
-      </div>
     </div>
   );
 }

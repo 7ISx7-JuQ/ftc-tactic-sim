@@ -1720,6 +1720,42 @@
   white-space: nowrap;
   height: calc(var(--u) * 28);
 }
+/* 시나리오 필드 편집 안내 띠: 두 줄로 줄여 필드 위쪽을 덜 가림, 끄는 중에는 흐리게 + 포인터 통과 (14-1b) */
+.field-edit-banner.is-compact {
+  gap: calc(var(--u) * 4);
+  padding: calc(var(--u) * 6) calc(var(--u) * 10);
+}
+.field-edit-banner.is-compact .field-edit-title {
+  white-space: nowrap;
+  font-size: calc(var(--u) * 14);
+}
+.field-edit-banner.is-faded {
+  opacity: 0.3;
+  pointer-events: none;
+  transition: opacity 120ms ease-out;
+}
+.field-edit-banner.is-compact .field-edit-floor {
+  flex-wrap: wrap;
+  row-gap: calc(var(--u) * 4);
+}
+.field-edit-floor .config-button {
+  padding: 0 calc(var(--u) * 8);
+}
+.field-edit-floor .field-edit-remaining {
+  white-space: nowrap;
+}
+.field-edit-floor .field-edit-esc {
+  margin-left: auto;
+}
+/* 시나리오 필드 편집: 바닥 기물 추가 버튼 (14-1b) */
+.field-edit-floor .config-button {
+  flex: none;
+  white-space: nowrap;
+  height: calc(var(--u) * 26);
+}
+.field-area.is-scenario-edit.is-adding .field-canvas {
+  cursor: copy;
+}
 /* 시나리오 필드 편집: 되돌리기 / 다시 하기 아이콘 버튼 (14-1a) */
 .field-edit-head .field-edit-history {
   flex: none;

@@ -71,7 +71,7 @@ describe('편집 모드 장면 그리기 (09-10b / 09-10c)', () => {
     expect(draw(spotScene({ appliedSweetSpot: { x: 40.5, y: 120.5 } }))).not.toContain(APPLIED);
   });
 
-  it('C. (09-11b) 시작 자세 모드: 배치 문제 로봇만 흰 빗금 + 빨간 테두리, 잡은 핸들은 주황, 히트맵 빗금 없음', () => {
+  it('C. (09-11b / 14-1b) 시나리오 필드 편집 모드: 배치 문제 로봇만 흰 빗금 + 빨간 테두리, 잡은 핸들은 주황, 히트맵 빗금 없음', () => {
     const config = { length: 18, width: 18, intakeZones: createIntakeZonePreset('FRONT', { length: 18, width: 18 }) };
     const spawn = (patch: Partial<ScenarioEditScene> = {}): ScenarioEditScene => ({
       mode: 'SCENARIO',
@@ -92,5 +92,17 @@ describe('편집 모드 장면 그리기 (09-10b / 09-10c)', () => {
     expect(bad.strokes).toContain(INVALID);
     expect(drawAll(spawn({ active: { robot: 'robot1', part: 'handle' } })).fills).toContain('#f59e0b');
     expect(drawAll(spawn({ active: { robot: 'robot1', part: 'body' } })).fills).not.toContain('#f59e0b');
+
+    // 14-1b: 지정 바닥 기물(문제 = 빨간 테두리), 강조 고리(주황), 추가 미리보기(놓을 수 있으면 초록), 오토 TIP NECTAR
+    const RING = 'rgba(245, 158, 11, 0.9)';
+    const pieceScene = spawn({ floorPieces: [{ type: 'POLLEN', x: 40, y: 40, bad: false }], autoTipNectar: [{ x: 5, y: 60 }] });
+    const plain = drawAll(pieceScene);
+    expect(plain.strokes).not.toContain(INVALID);
+    expect(plain.strokes).not.toContain(RING);
+    expect(drawAll(spawn({ floorPieces: [{ type: 'POLLEN', x: 40, y: 40, bad: true }] })).strokes).toContain(INVALID);
+    expect(drawAll({ ...pieceScene, floorActive: { index: 0, state: 'HOVER' } }).strokes).toContain(RING);
+    expect(drawAll({ ...pieceScene, floorActive: { index: 0, state: 'REMOVE' } }).strokes).not.toContain(RING);
+    expect(drawAll({ ...pieceScene, addPreview: { type: 'NECTAR', x: 70, y: 20, valid: true } }).strokes).toContain(VALID);
+    expect(drawAll({ ...pieceScene, addPreview: { type: 'NECTAR', x: 70, y: 20, valid: false } }).strokes).toContain(INVALID);
   });
 });

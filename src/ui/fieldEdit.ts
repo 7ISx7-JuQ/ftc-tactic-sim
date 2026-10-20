@@ -14,21 +14,23 @@
 //   스윗스팟 모드는 슈터 자리(slot: 주 슈터 / PER_PIECE의 NECTAR 슈터) 하나의 스윗스팟을 찍고, 기물 버튼은 그 슈터가 쏘는 기물만.
 //   몸체 윤곽 / 검증은 그 슈터의 좌우 오프셋으로 (aimingRobotOBB, 사유는 RobotIssue.slot).
 
-import { FIELD_SIZE } from '../core/collision';
 import type { AppPhase } from '../app/appController';
 import type { RobotId } from '../input/inputConfig';
 import type { LUTPieceType as PieceType } from '../workers/lutProtocol';
-import { gardenPiecePositions, validateRobotPlacement } from '../core/simulationEngine';
-import type { RobotPose, ScenarioConfig } from '../core/types';
+import { FIELD_SIZE, PIECE_PHYSICS, getRobotOBB, testOBBvsCircle } from '../core/collision';
+import { INITIAL_HUMAN_NECTAR_STOCK, PLACEMENT_TOLERANCE, gardenPiecePositions, humanNectarSlots, isFloorPiecePositionValid, validateRobotPlacement } from '../core/simulationEngine';
+import type { FloorPiecePlacement, RobotPose, ScenarioConfig } from '../core/types';
 import type { HeatmapEditScene, ScenarioEditScene, SweetSpotEditScene } from '../renderer/editSceneRenderer';
 import type { SpawnPart, SpawnRobotId } from '../renderer/spawnEditLayout';
 import { canApply, deepEqual, editDraft, setFieldText, tabStatus } from './configDraft';
 import type { ConfigDrafts, ConfigTab, DraftTab, DraftValues } from './configDraft';
-import { SPAWN_AXES, SPAWN_FIELD_SPECS, normalizeHeading, readScenario, scenarioFormIssues, setAlliance, setSpawnPose, spawnFieldKey } from './scenarioForm';
+import { SPAWN_AXES, SPAWN_FIELD_SPECS, floorSummary, normalizeHeading, readScenario, scenarioFormIssues, setAlliance, setSpawnPose, spawnFieldKey } from './scenarioForm';
 import type { ScenarioFormIssue } from './scenarioForm';
 import { PIECE_TYPES, isPieceFireable } from '../core/ballistics';
 import { SWEET_SPOT_AXES, readSweetSpot, robotProfileIssues, slotBallistics, sweetSpotFieldKey, writeSweetSpot } from './robotForm';
 import type { RobotProfile, ShooterSlot } from './robotForm';
+import { t } from './i18n';
+import type { Language } from './i18n';
 
 export type FieldEditMode = 'HEATMAP' | 'SWEET_SPOT' | 'SCENARIO';
 
@@ -305,6 +307,156 @@ export function finishRobotDrag(
   return refused.length > 0 ? { drafts: restoreScenarioSnapshot(drafts, before), refused } : { drafts: placed, refused: [] };
 }
 
+// ------------------------------------------------------------
+// 바닥 기물 (14-1b): 추가 / 끌어 옮기기 / 필드 밖으로 끌어 빼기, 겹친 자리에는 놓지 않음
+// ------------------------------------------------------------
+
+/** 바닥 기물 잡기 여유 (inch): 기물이 작아(POLLEN 반지름 1.4 in ≈ 화면 5 px) 반지름에 더한다 */
+export const FLOOR_PIECE_HIT_SLOP = 1;
+
+/** 놓지 않는 사유: 놓을 기물 없음 / 위치 규칙(필드 밖 · HIVE 기둥 · FLOWER · GARDEN) / 다른 지정 기물 / 로봇 몸체와 겹침 */
+export type FloorRefusal = { code: 'NONE_LEFT'; piece: PieceType } | { code: 'POSITION' } | { code: 'OVERLAP' } | { code: 'ROBOT'; robot: RobotId };
+
+/** 종류별로 바닥에 더 놓을 수 있는 수 = 바닥 기물 수 − 지정 수 (음수는 0) */
+export function floorRemaining(values: DraftValues): Record<PieceType, number> {
+  const f = floorSummary(readScenario(values.scenario, values.robot1.config, values.robot2.config));
+  return { POLLEN: f.scatterPollen, NECTAR: f.scatterNectar };
+}
+
+/** 지정 바닥 기물 k번이 놓일 수 없는 사유 (엔진 검증과 같은 기준: 위치 규칙, 다른 지정 기물과 겹침, 로봇 몸체 파고듦) */
+export function floorPieceRefusal(values: DraftValues, index: number): FloorRefusal | null {
+  const pieces = values.scenario.floorPieces ?? [];
+  const piece = pieces[index];
+  if (!piece || !isFloorPiecePositionValid(piece)) return { code: 'POSITION' };
+  const r = PIECE_PHYSICS[piece.type].radius;
+  if (pieces.some((q, k) => k !== index && Math.hypot(q.x - piece.x, q.y - piece.y) < r + PIECE_PHYSICS[q.type].radius)) return { code: 'OVERLAP' };
+  const robots = spawnRobots(values);
+  const circle = { center: { x: piece.x, y: piece.y }, radius: r };
+  for (const robot of ['robot1', 'robot2'] as const) {
+    const hit = testOBBvsCircle(getRobotOBB(robots[robot].pose, robots[robot].size), circle);
+    if (hit.colliding && hit.depth > PLACEMENT_TOLERANCE) return { code: 'ROBOT', robot };
+  }
+  return null;
+}
+
+/** 문제가 있는 지정 바닥 기물 번호 (빨간 표시): 위치 / 겹침 / 로봇 + 바닥 기물 수 초과(FLOOR_PIECE_COUNT, 뒤에서부터) */
+export function badFloorPieces(values: DraftValues): Set<number> {
+  const bad = new Set<number>();
+  (values.scenario.floorPieces ?? []).forEach((_, k) => {
+    if (floorPieceRefusal(values, k)) bad.add(k);
+  });
+  // 바닥 기물 수 초과(FLOOR_PIECE_COUNT): 그 종류의 넘는 기물만 뒤에서부터 (엔진 acceptedFloorPieces가 빼는 쪽)
+  const f = floorSummary(readScenario(values.scenario, values.robot1.config, values.robot2.config));
+  const capacity: Record<PieceType, number> = { POLLEN: f.floorPollen, NECTAR: f.floorNectar };
+  for (const type of ['POLLEN', 'NECTAR'] as const) {
+    const indices = (values.scenario.floorPieces ?? []).flatMap((p, k) => (p.type === type ? [k] : []));
+    for (const k of indices.slice(capacity[type])) bad.add(k);
+  }
+  return bad;
+}
+
+const roundPoint = (p: Point) => ({ x: round1(p.x), y: round1(p.y) });
+
+function withFloorPieces(drafts: ConfigDrafts, pieces: FloorPiecePlacement[]): ConfigDrafts {
+  const scenario = { ...drafts.draft.scenario, floorPieces: pieces };
+  return editDraft(drafts, 'scenario', scenario);
+}
+
+/** 추가 (추가 상태에서 바닥 클릭): 놓을 기물이 없거나 겹치는 자리면 그대로 + 사유, 아니면 지정 목록 끝에 (0.1 in 반올림) */
+export function addFloorPiece(drafts: ConfigDrafts, type: PieceType, at: Point): { drafts: ConfigDrafts; refusal: FloorRefusal | null } {
+  if (floorRemaining(drafts.draft)[type] <= 0) return { drafts, refusal: { code: 'NONE_LEFT', piece: type } };
+  const pieces = [...(drafts.draft.scenario.floorPieces ?? []), { type, ...roundPoint(at) }];
+  const next = withFloorPieces(drafts, pieces);
+  const refusal = floorPieceRefusal(next.draft, pieces.length - 1);
+  return refusal ? { drafts, refusal } : { drafts: next, refusal: null };
+}
+
+/** 놓지 않은 사유 문구 (토스트): 놓을 기물 없음은 그대로, 나머지는 "놓지 않음 — 사유" */
+export function floorRefusalText(refusal: FloorRefusal, lang: Language): string {
+  if (refusal.code === 'NONE_LEFT') return t(lang, 'edit.floor.noneLeft', { piece: refusal.piece });
+  const reason = t(lang, `edit.floor.reason.${refusal.code}`, { robot: refusal.code === 'ROBOT' ? (refusal.robot === 'robot1' ? 'R1' : 'R2') : '' });
+  return t(lang, 'edit.scenario.refused', { reason });
+}
+
+/** 누른 점이 잡는 지정 바닥 기물 번호 (나중에 놓은 것 우선, 여유 FLOOR_PIECE_HIT_SLOP). 없으면 null */
+export function floorPieceHitTest(pieces: readonly FloorPiecePlacement[], p: Point): number | null {
+  for (let k = pieces.length - 1; k >= 0; k--) {
+    const q = pieces[k];
+    if (Math.hypot(q.x - p.x, q.y - p.y) <= PIECE_PHYSICS[q.type].radius + FLOOR_PIECE_HIT_SLOP) return k;
+  }
+  return null;
+}
+
+/** 필드 밖(여백)에 놓으면 그 기물을 뺀다 */
+export function isOffField(p: Point): boolean {
+  return p.x < 0 || p.x > FIELD_SIZE || p.y < 0 || p.y > FIELD_SIZE;
+}
+
+/** 끄는 중: 누른 점 대비 이동량만큼 옮긴 자리 (0.1 in 반올림, 필드 밖도 그대로 — 놓으면 빼기) */
+export function dragFloorPoint(start: Point, pointerStart: Point, pointer: Point): Point {
+  return roundPoint({ x: start.x + pointer.x - pointerStart.x, y: start.y + pointer.y - pointerStart.y });
+}
+
+/** 끄는 중 초안 (화면 표시용): k번 기물을 그 자리로 */
+export function moveFloorPiece(drafts: ConfigDrafts, index: number, at: Point): ConfigDrafts {
+  const pieces = [...(drafts.draft.scenario.floorPieces ?? [])];
+  if (!pieces[index]) return drafts;
+  pieces[index] = { type: pieces[index].type, x: at.x, y: at.y };
+  return withFloorPieces(drafts, pieces);
+}
+
+/**
+ * 바닥 기물 끌기를 놓음: 움직이지 않았으면 그대로, 필드 밖이면 뺌, 겹치는 자리면 끌기 전(before)으로 + 사유.
+ * pointer = 놓은 포인터의 필드 좌표 (빼기 판정), lastPoint = 끌어서 정한 기물 자리
+ */
+export function finishFloorDrag(
+  drafts: ConfigDrafts,
+  index: number,
+  before: ScenarioSnapshot,
+  lastPoint: Point | null,
+  pointer: Point | null,
+): { drafts: ConfigDrafts; refusal: FloorRefusal | null; removed: boolean } {
+  const base = restoreScenarioSnapshot(drafts, before);
+  if (!lastPoint) return { drafts: base, refusal: null, removed: false };
+  const pieces = [...(base.draft.scenario.floorPieces ?? [])];
+  if ((pointer && isOffField(pointer)) || isOffField(lastPoint)) {
+    pieces.splice(index, 1);
+    return { drafts: withFloorPieces(base, pieces), refusal: null, removed: true };
+  }
+  const moved = moveFloorPiece(base, index, lastPoint);
+  const refusal = floorPieceRefusal(moved.draft, index);
+  return refusal ? { drafts: base, refusal, removed: false } : { drafts: moved, refusal: null, removed: false };
+}
+
+/**
+ * 오토 TIP NECTAR 자리 (14-1b, 표시용): 엔진 reset과 같은 슬롯 순서(humanNectarSlots)로, GARDEN 기물 / 위치가 올바른 지정 바닥 기물 /
+ * 앞서 놓인 NECTAR / 로봇 몸체(초안 자세)와 겹치지 않는 첫 슬롯부터. 빈 슬롯이 모자라면 놓인 것만 (엔진은 남은 수를 대기)
+ */
+export function autoTipNectarSpots(values: DraftValues): Point[] {
+  const view = readScenario(values.scenario, values.robot1.config, values.robot2.config);
+  const count = Math.min(INITIAL_HUMAN_NECTAR_STOCK, Math.max(0, Number.isFinite(view.autoTipCount) ? Math.floor(view.autoTipCount) : 0));
+  if (count === 0) return [];
+  const opponent = view.alliance === 'RED' ? 'BLUE' : 'RED';
+  const gardenCount = (n: number) => Math.min(8, Math.max(0, Number.isFinite(n) ? Math.floor(n) : 0));
+  const occupied = [
+    ...gardenPiecePositions(view.alliance, gardenCount(view.garden.ally)),
+    ...gardenPiecePositions(opponent, gardenCount(view.garden.opponent)),
+  ].map(c => ({ ...c, r: PIECE_PHYSICS.POLLEN.radius }));
+  for (const p of view.floorPieces.filter(isFloorPiecePositionValid)) occupied.push({ x: p.x, y: p.y, r: PIECE_PHYSICS[p.type].radius });
+  const robots = spawnRobots(values);
+  const bodies = (['robot1', 'robot2'] as const).map(id => getRobotOBB(robots[id].pose, robots[id].size));
+  const r = PIECE_PHYSICS.NECTAR.radius;
+  const out: Point[] = [];
+  for (const slot of humanNectarSlots(view.alliance)) {
+    if (out.length >= count) break;
+    if (occupied.some(o => Math.hypot(o.x - slot.x, o.y - slot.y) < o.r + r)) continue;
+    if (bodies.some(body => testOBBvsCircle(body, { center: slot, radius: r }).colliding)) continue;
+    out.push({ x: slot.x, y: slot.y });
+    occupied.push({ x: slot.x, y: slot.y, r });
+  }
+  return out;
+}
+
 /** 두 로봇의 초안 시작 자세 / 크기 (끌기 판정 / 장면) */
 export function spawnRobots(values: DraftValues): Record<SpawnRobotId, { pose: RobotPose; size: { length: number; width: number } }> {
   const view = readScenario(values.scenario, values.robot1.config, values.robot2.config);
@@ -342,19 +494,33 @@ export function placeSpawn(drafts: ConfigDrafts, robot: RobotId, pose: RobotPose
   return next;
 }
 
-/** 시나리오 필드 편집 장면: 초안 진영 / 두 로봇(자세 · 크기 · 흡입 구역 · 배치 검증) / GARDEN 기물(엔진과 같은 좌표) / 강조 부분 */
-export function scenarioEditScene(values: DraftValues, active: { robot: SpawnRobotId; part: SpawnPart } | null): ScenarioEditScene {
+/** 시나리오 필드 편집 장면의 화면 상태 (14-1b): 바닥 기물 강조 / 추가 미리보기 */
+export interface ScenarioSceneUi {
+  floorActive?: { index: number; state: 'HOVER' | 'DRAG' | 'REMOVE' } | null;
+  addPreview?: { type: PieceType; x: number; y: number; valid: boolean } | null;
+}
+
+/**
+ * 시나리오 필드 편집 장면: 초안 진영 / 두 로봇(자세 · 크기 · 흡입 구역 · 배치 검증) / GARDEN 기물(엔진과 같은 좌표) / 강조 부분,
+ * 지정 바닥 기물(문제 표시) / 오토 TIP NECTAR 자리 / 바닥 기물 강조 · 추가 미리보기 (14-1b)
+ */
+export function scenarioEditScene(values: DraftValues, active: { robot: SpawnRobotId; part: SpawnPart } | null, ui: ScenarioSceneUi = {}): ScenarioEditScene {
   const view = readScenario(values.scenario, values.robot1.config, values.robot2.config);
   const bad = new Set(validateRobotPlacement(values.scenario, values.robot1.config, values.robot2.config).flatMap(i => i.robots));
   const opponent = view.alliance === 'RED' ? 'BLUE' : 'RED';
   const count = (n: number) => Math.min(8, Math.max(0, Number.isFinite(n) ? Math.floor(n) : 0));
   const robot = (id: SpawnRobotId) => ({ pose: view.spawn[id], config: values[id].config, bad: bad.has(id) });
+  const badFloor = badFloorPieces(values);
   return {
     mode: 'SCENARIO',
     alliance: view.alliance,
     robots: { robot1: robot('robot1'), robot2: robot('robot2') },
     gardenPieces: [...gardenPiecePositions(view.alliance, count(view.garden.ally)), ...gardenPiecePositions(opponent, count(view.garden.opponent))],
     active,
+    floorPieces: view.floorPieces.map((p, k) => ({ ...p, bad: badFloor.has(k) })),
+    floorActive: ui.floorActive ?? null,
+    autoTipNectar: autoTipNectarSpots(values),
+    addPreview: ui.addPreview ?? null,
   };
 }
 

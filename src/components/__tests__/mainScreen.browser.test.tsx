@@ -196,6 +196,53 @@ describe('config 창', () => {
     await expect.element(button('APPLY')).toBeDisabled();
   });
 
+  it('시나리오 필드 편집 바닥 기물 (14-1b): + POLLEN → 놓을 기물 없음 토스트, GARDEN을 줄이면 바닥 클릭으로 추가, 겹치면 거부, Esc = 추가만 끝, 필드 밖으로 끌어 빼기, 되돌리기', async () => {
+    await userEvent.click(button('Open settings'));
+    await userEvent.click(page.getByRole('tab', { name: 'SCENARIO' }));
+    await userEvent.click(button('EDIT ON FIELD').first());
+    const banner = page.getByRole('region', { name: 'SCENARIO ON FIELD' });
+    const canvas = document.querySelector('.field-canvas') as HTMLCanvasElement;
+    const at = (x: number, y: number) => {
+      const k = canvas.getBoundingClientRect().width / 160;
+      return { x: (x + 8) * k, y: (y + 8) * k };
+    };
+    const field = page.elementLocator(canvas);
+    const summary = () => [...document.querySelectorAll('.settings-note')].map(e => e.textContent ?? '').find(text => text.startsWith('Floor:'));
+    const addPollen = banner.getByRole('button', { name: 'POLLEN' });
+
+    // 기본 시나리오는 바닥 기물 0개 → 놓지 않고 토스트
+    await userEvent.click(addPollen);
+    await expect.element(addPollen).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(field, { position: at(40, 40) });
+    await expect.element(page.getByText(/^No POLLEN left for the floor/)).toBeVisible();
+    await expect.poll(summary).toMatch(/POLLEN \d+ \(placed 0/);
+
+    // 아군 GARDEN 4 → 3 (바닥 POLLEN 1개) → 바닥 클릭으로 추가
+    await userEvent.click(page.getByRole('group', { name: 'Ally GARDEN' }).getByRole('button', { name: 'Decrease' }));
+    await expect.element(banner.getByText(/^Not placed: POLLEN 1 /)).toBeVisible();
+    await userEvent.click(field, { position: at(40, 40) });
+    await expect.poll(summary).toMatch(/POLLEN \d+ \(placed 1/);
+    await expect.element(banner.getByText(/^Not placed: POLLEN 0 /)).toBeVisible();
+    // GARDEN을 하나 더 줄이고 같은 자리 → 겹침 거부
+    await userEvent.click(page.getByRole('group', { name: 'Ally GARDEN' }).getByRole('button', { name: 'Decrease' }));
+    await userEvent.click(field, { position: at(42.6, 40) }); // 기존 기물(잡기 여유 2.4 in) 바로 밖 — 반지름 합 2.8 in 안이라 겹침
+    await expect.element(page.getByText('Not placed — overlaps another placed piece')).toBeVisible();
+    await expect.poll(summary).toMatch(/POLLEN \d+ \(placed 1/);
+    // Esc = 추가 상태만 끝 (모드는 그대로)
+    await userEvent.keyboard('{Escape}');
+    await expect.element(addPollen).toHaveAttribute('aria-pressed', 'false');
+    await expect.element(banner).toBeVisible();
+    // 필드 밖으로 끌어 빼기 → 되돌리기로 다시
+    await userEvent.dragAndDrop(field, field, { sourcePosition: at(40, 40), targetPosition: at(-5, 40) });
+    await expect.poll(summary).toMatch(/POLLEN \d+ \(placed 0/);
+    await userEvent.click(banner.getByRole('button', { name: 'UNDO' }));
+    await expect.poll(summary).toMatch(/POLLEN \d+ \(placed 1/);
+    // DONE · APPLY → 적용
+    await userEvent.click(banner.getByRole('button', { name: 'DONE · APPLY' }));
+    await expect.element(banner).not.toBeInTheDocument();
+    await expect.element(button('APPLY')).toBeDisabled();
+  });
+
   it('시나리오 REROLL은 APPLY 없이 바로 적용된다', async () => {
     await userEvent.click(button('Open settings'));
     await userEvent.click(page.getByRole('tab', { name: 'SCENARIO' }));

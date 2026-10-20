@@ -25,6 +25,17 @@ import {
 import type { ScenarioFieldEdit, SweetSpotFieldEdit } from '../fieldEdit';
 import {
   EDIT_HISTORY_LIMIT,
+  addFloorPiece,
+  autoTipNectarSpots,
+  badFloorPieces,
+  dragFloorPoint,
+  finishFloorDrag,
+  floorPieceHitTest,
+  floorPieceRefusal,
+  floorRefusalText,
+  floorRemaining,
+  isOffField,
+  moveFloorPiece,
   cancelFieldEdit,
   cancelScenarioEdit,
   dragSpawnPose,
@@ -40,7 +51,7 @@ import {
   spawnRobots,
   undoScenarioEdit,
 } from '../fieldEdit';
-import { DEFAULT_SPAWN_POSES, gardenPiecePositions, validateRobotPlacement } from '../../core/simulationEngine';
+import { DEFAULT_SPAWN_POSES, SimulationEngine, gardenPiecePositions, validateRobotPlacement } from '../../core/simulationEngine';
 import { editDraft } from '../configDraft';
 import { readSweetSpot, writeNumber } from '../robotForm';
 import type { RobotProfile } from '../robotForm';
@@ -340,6 +351,103 @@ describe('필드 편집 모드 (09-10b / 09-10c / 09-11b)', () => {
     let d = d0;
     for (let i = 0; i < EDIT_HISTORY_LIMIT + 5; i++) d = step(d, withScenario(d, { autoTipCount: i % 2 === 0 ? 1 : 0 }));
     expect(edit.history.past).toHaveLength(EDIT_HISTORY_LIMIT);
+  });
+});
+
+describe('시나리오 필드 편집 바닥 기물 (14-1b)', () => {
+  // GARDEN을 2개씩 줄여 바닥 POLLEN 4개를 만든 시나리오 (기본은 바닥 기물 0개)
+  const base = () => editDraft(initialDrafts(DEFAULT_DRAFT_VALUES), 'scenario', { allianceColor: 'RED', gardenPiecesCount: { ally: 2, opponent: 2 } });
+  const pieces = (d: ReturnType<typeof initialDrafts>) => d.draft.scenario.floorPieces ?? [];
+
+  it('Q. 추가: 놓을 수 있는 수 = 바닥 기물 − 지정, 없으면 NONE_LEFT, 겹치는 자리(위치 / 다른 기물 / 로봇)는 놓지 않음, 0.1 in 반올림', () => {
+    const d0 = initialDrafts(DEFAULT_DRAFT_VALUES);
+    expect(floorRemaining(d0.draft)).toEqual({ POLLEN: 0, NECTAR: 0 });
+    expect(addFloorPiece(d0, 'POLLEN', { x: 40, y: 40 })).toEqual({ drafts: d0, refusal: { code: 'NONE_LEFT', piece: 'POLLEN' } });
+    let d = base();
+    expect(floorRemaining(d.draft)).toEqual({ POLLEN: 4, NECTAR: 0 });
+    const added = addFloorPiece(d, 'POLLEN', { x: 40.04, y: 40.06 });
+    expect(added.refusal).toBeNull();
+    d = added.drafts;
+    expect(pieces(d)).toEqual([{ type: 'POLLEN', x: 40, y: 40.1 }]);
+    expect(floorRemaining(d.draft)).toEqual({ POLLEN: 3, NECTAR: 0 });
+    expect(addFloorPiece(d, 'NECTAR', { x: 60, y: 30 }).refusal).toEqual({ code: 'NONE_LEFT', piece: 'NECTAR' });
+    // 겹치는 자리: 다른 지정 기물 / HIVE 기둥 / FLOWER / GARDEN / 필드 밖 / 로봇 몸체 (R1 기본 (9, 36))
+    expect(addFloorPiece(d, 'POLLEN', { x: 42, y: 40 }).refusal).toEqual({ code: 'OVERLAP' });
+    expect(addFloorPiece(d, 'POLLEN', { x: 50, y: 70 }).refusal).toEqual({ code: 'POSITION' });
+    expect(addFloorPiece(d, 'POLLEN', { x: 48, y: 3 }).refusal).toEqual({ code: 'POSITION' });
+    expect(addFloorPiece(d, 'POLLEN', { x: 10, y: 143 }).refusal).toEqual({ code: 'POSITION' });
+    expect(addFloorPiece(d, 'POLLEN', { x: 0.5, y: 80 }).refusal).toEqual({ code: 'POSITION' });
+    expect(addFloorPiece(d, 'POLLEN', { x: 12, y: 36 }).refusal).toEqual({ code: 'ROBOT', robot: 'robot1' });
+    // 터널 바닥 / LOADING ZONE은 허용
+    expect(addFloorPiece(d, 'POLLEN', { x: 72, y: 72 }).refusal).toBeNull();
+    expect(addFloorPiece(d, 'POLLEN', { x: 5, y: 60 }).refusal).toBeNull();
+    // 사유 문구
+    expect(floorRefusalText({ code: 'NONE_LEFT', piece: 'NECTAR' }, 'en')).toContain('No NECTAR left');
+    expect(floorRefusalText({ code: 'ROBOT', robot: 'robot2' }, 'en')).toBe('Not placed — overlaps R2');
+    expect(floorRefusalText({ code: 'POSITION' }, 'ko')).toBe('놓지 않음 — 필드 밖이거나 HIVE 기둥 / FLOWER / GARDEN 위');
+  });
+
+  it('R. 끌기: 이동량만큼(0.1 in), 놓기 = 확정 / 겹치면 끌기 전 + 사유 / 필드 밖이면 빼기 / 움직이지 않았으면 그대로', () => {
+    let d = base();
+    d = addFloorPiece(d, 'POLLEN', { x: 40, y: 40 }).drafts;
+    d = addFloorPiece(d, 'POLLEN', { x: 30, y: 100 }).drafts;
+    expect(floorPieceHitTest(pieces(d), { x: 41.5, y: 41 })).toBe(0); // 반지름 1.4 + 여유 1
+    expect(floorPieceHitTest(pieces(d), { x: 43, y: 40 })).toBeNull();
+    expect(dragFloorPoint({ x: 40, y: 40 }, { x: 41, y: 41 }, { x: 60.04, y: 30.96 })).toEqual({ x: 59, y: 30 });
+    const before = scenarioSnapshot(d);
+    const moving = moveFloorPiece(d, 0, { x: 59, y: 30 });
+    expect(pieces(moving)[0]).toEqual({ type: 'POLLEN', x: 59, y: 30 });
+    const moved = finishFloorDrag(moving, 0, before, { x: 59, y: 30 }, { x: 60, y: 31 });
+    expect([moved.refusal, moved.removed, pieces(moved.drafts)]).toEqual([null, false, [{ type: 'POLLEN', x: 59, y: 30 }, { type: 'POLLEN', x: 30, y: 100 }]]);
+    const onRobot = finishFloorDrag(moveFloorPiece(d, 0, { x: 9, y: 108 }), 0, before, { x: 9, y: 108 }, { x: 9, y: 108 });
+    expect(onRobot.refusal).toEqual({ code: 'ROBOT', robot: 'robot2' });
+    expect(scenarioSnapshot(onRobot.drafts)).toEqual(before);
+    const onOther = finishFloorDrag(d, 0, before, { x: 31, y: 100 }, { x: 31, y: 100 });
+    expect(onOther.refusal).toEqual({ code: 'OVERLAP' });
+    expect(isOffField({ x: -1, y: 50 })).toBe(true);
+    expect(isOffField({ x: 144, y: 0 })).toBe(false);
+    const removed = finishFloorDrag(d, 0, before, { x: 1, y: 40 }, { x: -2, y: 40 }); // 포인터가 필드 밖
+    expect([removed.removed, pieces(removed.drafts)]).toEqual([true, [{ type: 'POLLEN', x: 30, y: 100 }]]);
+    expect(finishFloorDrag(d, 1, before, { x: 30, y: 146 }, { x: 30, y: 143 }).removed).toBe(true); // 기물 자리가 필드 밖
+    expect(scenarioSnapshot(finishFloorDrag(moving, 0, before, null, null).drafts)).toEqual(before);
+  });
+
+  it('S. 문제 기물 표시: 위치 / 겹침 / 로봇 / 바닥 기물 수 초과(뒤에서부터), 장면에 지정 기물 · 강조 · 미리보기 전달', () => {
+    const d = editDraft(base(), 'scenario', {
+      ...base().draft.scenario,
+      floorPieces: [{ type: 'POLLEN', x: 40, y: 40 }, { type: 'POLLEN', x: 41, y: 40 }, { type: 'POLLEN', x: 50, y: 70 }, { type: 'POLLEN', x: 100, y: 120 }, { type: 'POLLEN', x: 110, y: 120 }],
+    });
+    expect(floorPieceRefusal(d.draft, 3)).toBeNull();
+    expect([...badFloorPieces(d.draft)].sort()).toEqual([0, 1, 2, 4]); // 0 / 1 겹침, 2 기둥, 4 = 바닥 POLLEN 4개 초과
+    const scene = scenarioEditScene(d.draft, null, { floorActive: { index: 3, state: 'HOVER' }, addPreview: { type: 'POLLEN', x: 70, y: 20, valid: false } });
+    expect(scene.floorPieces!.map(p => p.bad)).toEqual([true, true, true, false, true]);
+    expect(scene.floorActive).toEqual({ index: 3, state: 'HOVER' });
+    expect(scene.addPreview).toEqual({ type: 'POLLEN', x: 70, y: 20, valid: false });
+    expect(scenarioEditScene(base().draft, null).floorPieces).toEqual([]);
+  });
+
+  it('T. 오토 TIP NECTAR 자리 = 엔진 reset과 같음 (슬롯 순서, 로봇 / GARDEN / 지정 바닥 기물을 피함, RED / BLUE)', () => {
+    const engineSpots = (values: ReturnType<typeof initialDrafts>['draft']) => {
+      const e = new SimulationEngine(values.robot1.config, values.robot2.config, () => 0.5, values.scenario.allianceColor, values.scenario);
+      const placed = new Set((values.scenario.floorPieces ?? []).map(p => `${p.x},${p.y}`));
+      // 재고 NECTAR는 배열 뒤에서부터 꺼내 놓으므로 배열 역순 = 놓은 순서
+      return e.pieces.filter(p => p.type === 'NECTAR' && p.state === 'ON_FIELD' && !placed.has(`${p.x},${p.y}`)).map(p => ({ x: p.x, y: p.y })).reverse();
+    };
+    const cases = [
+      { allianceColor: 'RED' as const, autoTipCount: 3 },
+      { allianceColor: 'RED' as const, autoTipCount: 5, gardenPiecesCount: { ally: 3, opponent: 4 }, floorPieces: [{ type: 'POLLEN' as const, x: 2, y: 26 }], r1Spawn: { x: 9, y: 60, heading: 0 } },
+      { allianceColor: 'BLUE' as const, autoTipCount: 4 },
+      { allianceColor: 'BLUE' as const, autoTipCount: 2, r1Spawn: { x: 60, y: 30, heading: 0 } },
+    ];
+    for (const scenario of cases) {
+      const values = { ...DEFAULT_DRAFT_VALUES, scenario };
+      expect(autoTipNectarSpots(values)).toEqual(engineSpots(values));
+    }
+    // R1 기본 자세(LOADING ZONE에 걸침)가 슬롯을 모두 막으면 엔진처럼 놓지 않음 (엔진은 대기), 비키면 그 수만큼
+    expect(autoTipNectarSpots({ ...DEFAULT_DRAFT_VALUES, scenario: cases[0] })).toEqual([]);
+    expect(autoTipNectarSpots({ ...DEFAULT_DRAFT_VALUES, scenario: { ...cases[0], r1Spawn: { x: 40, y: 36, heading: 0 } } })).toHaveLength(3);
+    expect(autoTipNectarSpots({ ...DEFAULT_DRAFT_VALUES, scenario: cases[3] })).toHaveLength(2);
+    expect(autoTipNectarSpots(DEFAULT_DRAFT_VALUES)).toEqual([]);
   });
 });
 
