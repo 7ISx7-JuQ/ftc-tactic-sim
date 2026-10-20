@@ -158,15 +158,22 @@ const OFF_FIELD = -10;
 export const DEFAULT_RNG_SEED = 0x5eed2026;
 
 // 진영별 기본 스폰 (명세서 2.3): ScenarioConfig.r1Spawn / r2Spawn 미지정 시 적용
+// 14-1a: BLUE = RED 기본의 필드 중심 점대칭 (지정 자세의 진영 전환과 같은 대칭 — 두 진영 모두 R1이 LOADING ZONE에 걸침)
 export const DEFAULT_SPAWN_POSES: Readonly<Record<'RED' | 'BLUE', Record<'robot1' | 'robot2', RobotPose>>> = {
   RED: {
     robot1: { x: 9.0, y: 36.0, heading: 0 },
     robot2: { x: 9.0, y: 108.0, heading: 0 },
   },
   BLUE: {
-    robot1: { x: 135.0, y: 36.0, heading: Math.PI },
-    robot2: { x: 135.0, y: 108.0, heading: Math.PI },
+    robot1: { x: 135.0, y: 108.0, heading: Math.PI },
+    robot2: { x: 135.0, y: 36.0, heading: Math.PI },
   },
+};
+
+// v1 BLUE 기본 스폰 (14-1a 이전): 엔진 버전 1 경기 파일 / 프리셋 버전 1 파일의 BLUE 시나리오에 시작 자세가 없으면 이 값으로 채워 로봇 위치 유지
+export const LEGACY_BLUE_SPAWN_POSES: Readonly<Record<'robot1' | 'robot2', RobotPose>> = {
+  robot1: { x: 135.0, y: 36.0, heading: Math.PI },
+  robot2: { x: 135.0, y: 108.0, heading: Math.PI },
 };
 
 // ============================================================

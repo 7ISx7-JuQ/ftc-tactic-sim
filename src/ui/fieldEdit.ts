@@ -4,9 +4,11 @@
 //   편집하는 값이 없으므로 DONE / Esc = 닫기.
 // - 09-10c 스윗스팟(SWEET_SPOT): 로봇 탭 SET ON FIELD. 필드 클릭 = 그 격자 중심으로 스윗스팟 초안 (검증 실패 칸도 찍히고 빨간 오류),
 //   모드는 계속 유지. DONE = 그 로봇 탭 APPLY까지 (적용할 수 없으면 초안에만), CANCEL / Esc / START = 모드에 들어오기 전 값으로 되돌림.
-// - 09-11b 시작 자세(SPAWN): 시나리오 탭 EDIT ON FIELD. 로봇 몸체 끌기 = 위치, 회전 핸들 끌기 = 헤딩 (스냅 없음, 값은 표시 자리수
-//   0.1 in / 0.1°로 반올림해 칸에 보이는 값 = 보관 값). 겹쳐도 놓이고 빨간 표시 (배치 검증). DONE = SCENARIO 탭 APPLY까지 (09-11 확정 ④),
-//   CANCEL / Esc / START = 들어오기 전 시작 자세로 (그사이 진영을 바꿨으면 들어오기 전 자세를 새 진영으로 좌우 대칭).
+// - 14-1a 시나리오 필드 편집(SCENARIO, 09-11b 시작 자세 모드를 흡수): 시나리오 탭 EDIT ON FIELD. 로봇 몸체 끌기 = 위치, 회전 핸들 끌기 = 헤딩
+//   (스냅 없음, 표시 자리수 0.1 in / 0.1°로 반올림해 칸에 보이는 값 = 보관 값). 놓은 자리에서 그 로봇이 겹치면(배치 검증) 끌기 전 자세로 되돌림.
+//   모드 중 시나리오 초안 변경(필드 조작 + 탭 입력)은 되돌리기 기록에 쌓인다 (같은 숫자 칸 연속 입력은 한 단계, 상한 100).
+//   DONE = SCENARIO 탭 APPLY까지, CANCEL / Esc / START = 진영 / RP 기준값 / 시드를 뺀 시나리오와 칸 글자를 들어오기 전으로
+//   (그사이 진영을 바꿨으면 들어오기 전 값을 새 진영으로 점대칭).
 // - 편집 모드를 연 탭을 떠나거나(다른 탭 / 창 닫기 / 다른 모드) 경기 전이 아니게 되면 편집 모드를 끝낸다 (찍은 초안은 그대로).
 // - 13-4 (기물별): 히트맵 기물 버튼은 그 로봇이 쏠 수 있는 기물만, 표시 스윗스팟 = 그 기물을 쏘는 슈터의 스윗스팟.
 //   스윗스팟 모드는 슈터 자리(slot: 주 슈터 / PER_PIECE의 NECTAR 슈터) 하나의 스윗스팟을 찍고, 기물 버튼은 그 슈터가 쏘는 기물만.
@@ -17,17 +19,18 @@ import type { AppPhase } from '../app/appController';
 import type { RobotId } from '../input/inputConfig';
 import type { LUTPieceType as PieceType } from '../workers/lutProtocol';
 import { gardenPiecePositions, validateRobotPlacement } from '../core/simulationEngine';
-import type { RobotPose } from '../core/types';
-import type { HeatmapEditScene, SpawnEditScene, SweetSpotEditScene } from '../renderer/editSceneRenderer';
+import type { RobotPose, ScenarioConfig } from '../core/types';
+import type { HeatmapEditScene, ScenarioEditScene, SweetSpotEditScene } from '../renderer/editSceneRenderer';
 import type { SpawnPart, SpawnRobotId } from '../renderer/spawnEditLayout';
-import { canApply, editDraft, setFieldText, tabStatus } from './configDraft';
+import { canApply, deepEqual, editDraft, setFieldText, tabStatus } from './configDraft';
 import type { ConfigDrafts, ConfigTab, DraftTab, DraftValues } from './configDraft';
-import { SPAWN_AXES, SPAWN_FIELD_SPECS, mirrorPose, normalizeHeading, readScenario, setSpawnPose, spawnFieldKey } from './scenarioForm';
+import { SPAWN_AXES, SPAWN_FIELD_SPECS, normalizeHeading, readScenario, scenarioFormIssues, setAlliance, setSpawnPose, spawnFieldKey } from './scenarioForm';
+import type { ScenarioFormIssue } from './scenarioForm';
 import { PIECE_TYPES, isPieceFireable } from '../core/ballistics';
 import { SWEET_SPOT_AXES, readSweetSpot, robotProfileIssues, slotBallistics, sweetSpotFieldKey, writeSweetSpot } from './robotForm';
 import type { RobotProfile, ShooterSlot } from './robotForm';
 
-export type FieldEditMode = 'HEATMAP' | 'SWEET_SPOT' | 'SPAWN';
+export type FieldEditMode = 'HEATMAP' | 'SWEET_SPOT' | 'SCENARIO';
 
 export interface HeatmapFieldEdit {
   mode: 'HEATMAP';
@@ -44,17 +47,30 @@ export interface SweetSpotFieldEdit {
   entry: { sweetSpot: { x: number; y: number }; fieldText: Partial<Record<'x' | 'y', string>> };
 }
 
-export interface SpawnFieldEdit {
-  mode: 'SPAWN';
-  /** 모드에 들어올 때의 진영 / 지정 시작 자세(없으면 기본 스폰) / 시작 자세 칸의 틀린 입력 글자 (CANCEL 복원용) */
-  entry: { alliance: 'RED' | 'BLUE'; spawn: Partial<Record<RobotId, RobotPose>>; fieldText: Record<string, string> };
+/** 시나리오 탭 스냅샷: 시나리오 초안 + 시나리오 칸의 틀린 입력 글자 (되돌리기 기록 / CANCEL 복원, 14-1a) */
+export interface ScenarioSnapshot {
+  scenario: ScenarioConfig;
+  fieldText: Readonly<Record<string, string>>;
 }
 
-export type FieldEdit = HeatmapFieldEdit | SweetSpotFieldEdit | SpawnFieldEdit;
+/** 되돌리기 기록 (14-1a): past = 되돌릴 스냅샷(오래된 것부터), future = 다시 할 스냅샷, lastKey = 마지막 단계를 만든 숫자 칸 (연속 입력 묶기) */
+export interface EditHistory {
+  past: readonly ScenarioSnapshot[];
+  future: readonly ScenarioSnapshot[];
+  lastKey: string | null;
+}
+
+export interface ScenarioFieldEdit {
+  mode: 'SCENARIO';
+  entry: ScenarioSnapshot; // 모드에 들어올 때 (CANCEL 복원용)
+  history: EditHistory;
+}
+
+export type FieldEdit = HeatmapFieldEdit | SweetSpotFieldEdit | ScenarioFieldEdit;
 
 /** 편집 모드를 연 탭 (그 탭이 보이는 동안만 유지) */
 export function editTab(edit: FieldEdit): ConfigTab {
-  return edit.mode === 'SPAWN' ? 'scenario' : edit.robot;
+  return edit.mode === 'SCENARIO' ? 'scenario' : edit.robot;
 }
 
 type Point = { x: number; y: number };
@@ -104,7 +120,7 @@ export function openSweetSpotEdit(current: FieldEdit | null, drafts: ConfigDraft
   const profile = drafts.draft[robot];
   const spot = slotBallistics(profile, slot).sweetSpot;
   const pieces = slotPieces(profile, slot);
-  const seen = current && current.mode !== 'SPAWN' ? current.piece : null;
+  const seen = current && current.mode !== 'SCENARIO' ? current.piece : null;
   const piece = seen && pieces.includes(seen) ? seen : (pieces[0] ?? 'POLLEN');
   return { mode: 'SWEET_SPOT', robot, slot, piece, entry: { sweetSpot: { x: spot.x, y: spot.y }, fieldText } };
 }
@@ -114,7 +130,7 @@ export function openSweetSpotEdit(current: FieldEdit | null, drafts: ConfigDraft
  * 슈터 구성을 바꿔 쓸 수 없게 되면(NONE / PER_PIECE를 떠난 NECTAR 슈터) 모드를 보이지 않게 한다
  */
 export function fieldEditUsable(edit: FieldEdit, values: { draft: DraftValues; applied: DraftValues }): boolean {
-  if (edit.mode === 'SPAWN') return true;
+  if (edit.mode === 'SCENARIO') return true;
   if (edit.mode === 'HEATMAP') return heatmapPieces(values.applied[edit.robot]).length > 0;
   return slotPieces(values.draft[edit.robot], edit.slot).length > 0;
 }
@@ -175,7 +191,7 @@ export function cancelSweetSpotEdit(drafts: ConfigDrafts, edit: SweetSpotFieldEd
 /** CANCEL / Esc / START 공통: 모드에 따라 들어오기 전 값으로 (히트맵 모드는 바꾼 값이 없음) */
 export function cancelFieldEdit(drafts: ConfigDrafts, edit: FieldEdit): ConfigDrafts {
   if (edit.mode === 'SWEET_SPOT') return cancelSweetSpotEdit(drafts, edit);
-  if (edit.mode === 'SPAWN') return cancelSpawnEdit(drafts, edit);
+  if (edit.mode === 'SCENARIO') return cancelScenarioEdit(drafts, edit);
   return drafts;
 }
 
@@ -189,47 +205,104 @@ export function editDoneAction(drafts: ConfigDrafts, tab: DraftTab): 'APPLY' | '
 }
 
 // ------------------------------------------------------------
-// 시작 자세 모드 (09-11b)
+// 시나리오 필드 편집 모드 (14-1a, 09-11b 시작 자세 모드 흡수)
 // ------------------------------------------------------------
 
-const SPAWN_ROBOTS: readonly SpawnRobotId[] = ['robot1', 'robot2'];
-const spawnOf = (values: DraftValues, robot: RobotId) => (robot === 'robot1' ? values.scenario.r1Spawn : values.scenario.r2Spawn);
+/** 되돌리기 기록 상한 (넘으면 오래된 것부터 버림) */
+export const EDIT_HISTORY_LIMIT = 100;
+const EMPTY_HISTORY: EditHistory = { past: [], future: [], lastKey: null };
 
-/** 시나리오 탭 EDIT ON FIELD: 지금 진영 / 지정 시작 자세 / 시작 자세 칸 틀린 글자를 기억하고 시작 자세 모드로 (이미 그 모드면 그대로) */
-export function openSpawnEdit(current: FieldEdit | null, drafts: ConfigDrafts): SpawnFieldEdit {
-  if (current?.mode === 'SPAWN') return current;
-  const spawn: Partial<Record<RobotId, RobotPose>> = {};
-  for (const robot of SPAWN_ROBOTS) {
-    const pose = spawnOf(drafts.draft, robot);
-    if (pose) spawn[robot] = { ...pose };
-  }
-  const fieldText: Record<string, string> = {};
-  for (const robot of SPAWN_ROBOTS)
-    for (const axis of SPAWN_AXES) {
-      const key = spawnFieldKey(robot, axis);
-      const text = drafts.fieldText.scenario[key];
-      if (text !== undefined) fieldText[key] = text;
-    }
-  return { mode: 'SPAWN', entry: { alliance: drafts.draft.scenario.allianceColor, spawn, fieldText } };
+/** 지금 시나리오 탭 스냅샷 (참조만 — 초안 / 글자는 불변 객체) */
+export function scenarioSnapshot(drafts: ConfigDrafts): ScenarioSnapshot {
+  return { scenario: drafts.draft.scenario, fieldText: drafts.fieldText.scenario };
 }
 
-/** CANCEL / Esc / START: 시작 자세와 그 칸 글자를 들어오기 전으로 (진영을 바꿨으면 들어오기 전 자세를 새 진영으로 좌우 대칭, 다른 칸은 그대로) */
-export function cancelSpawnEdit(drafts: ConfigDrafts, edit: SpawnFieldEdit): ConfigDrafts {
-  const scenario = { ...drafts.draft.scenario };
-  const flip = scenario.allianceColor !== edit.entry.alliance;
-  for (const robot of SPAWN_ROBOTS) {
-    const pose = edit.entry.spawn[robot];
-    const key = robot === 'robot1' ? 'r1Spawn' : 'r2Spawn';
-    if (pose) scenario[key] = flip ? mirrorPose(pose) : { ...pose };
-    else delete scenario[key];
-  }
-  let next = editDraft(drafts, 'scenario', scenario);
-  for (const robot of SPAWN_ROBOTS)
-    for (const axis of SPAWN_AXES) {
-      const key = spawnFieldKey(robot, axis);
-      next = setFieldText(next, 'scenario', key, edit.entry.fieldText[key] ?? null);
-    }
+/** 시드는 되돌리기 / 취소 대상이 아니다 (REROLL은 적용 값까지 바로 바꾸므로 초안만 되돌리면 적용 안 된 수정이 생김) */
+function withSeedOf(scenario: ScenarioConfig, from: ScenarioConfig): ScenarioConfig {
+  const next = { ...scenario };
+  if (from.rngSeed === undefined) delete next.rngSeed;
+  else next.rngSeed = from.rngSeed;
   return next;
+}
+
+/** 스냅샷을 시나리오 탭으로 (시드는 지금 값 유지) */
+export function restoreScenarioSnapshot(drafts: ConfigDrafts, snapshot: ScenarioSnapshot): ConfigDrafts {
+  const next = editDraft(drafts, 'scenario', withSeedOf(snapshot.scenario, drafts.draft.scenario));
+  return { ...next, fieldText: { ...next.fieldText, scenario: { ...snapshot.fieldText } } };
+}
+
+/** 시나리오 탭 EDIT ON FIELD: 지금 시나리오 / 칸 글자를 기억하고 시나리오 필드 편집 모드로 (이미 그 모드면 그대로) */
+export function openScenarioEdit(current: FieldEdit | null, drafts: ConfigDrafts): ScenarioFieldEdit {
+  if (current?.mode === 'SCENARIO') return current;
+  return { mode: 'SCENARIO', entry: scenarioSnapshot(drafts), history: EMPTY_HISTORY };
+}
+
+/**
+ * 모드 중 시나리오 탭 변경을 되돌리기 기록에 남김: before → after가 같으면 그대로. key(숫자 칸 키)가 직전 단계와 같으면
+ * 한 단계로 묶음(처음 입력 전 값이 이미 기록됨). 새 단계는 다시 하기 기록을 지운다
+ */
+export function recordScenarioChange(edit: ScenarioFieldEdit, before: ScenarioSnapshot, after: ScenarioSnapshot, key: string | null = null): ScenarioFieldEdit {
+  if (deepEqual(before, after)) return edit;
+  const { history } = edit;
+  if (key !== null && key === history.lastKey) return history.future.length === 0 ? edit : { ...edit, history: { ...history, future: [] } };
+  const past = [...history.past, before].slice(-EDIT_HISTORY_LIMIT);
+  return { ...edit, history: { past, future: [], lastKey: key } };
+}
+
+/** 되돌리기 (Ctrl / ⌘ + Z): 기록이 없으면 null */
+export function undoScenarioEdit(edit: ScenarioFieldEdit, drafts: ConfigDrafts): { edit: ScenarioFieldEdit; drafts: ConfigDrafts } | null {
+  const { past, future } = edit.history;
+  if (past.length === 0) return null;
+  const target = past[past.length - 1];
+  return {
+    edit: { ...edit, history: { past: past.slice(0, -1), future: [...future, scenarioSnapshot(drafts)], lastKey: null } },
+    drafts: restoreScenarioSnapshot(drafts, target),
+  };
+}
+
+/** 다시 하기 (Ctrl / ⌘ + Shift + Z, Ctrl + Y): 기록이 없으면 null */
+export function redoScenarioEdit(edit: ScenarioFieldEdit, drafts: ConfigDrafts): { edit: ScenarioFieldEdit; drafts: ConfigDrafts } | null {
+  const { past, future } = edit.history;
+  if (future.length === 0) return null;
+  const target = future[future.length - 1];
+  return {
+    edit: { ...edit, history: { past: [...past, scenarioSnapshot(drafts)].slice(-EDIT_HISTORY_LIMIT), future: future.slice(0, -1), lastKey: null } },
+    drafts: restoreScenarioSnapshot(drafts, target),
+  };
+}
+
+/**
+ * CANCEL / Esc / START: 진영 / RP 기준값 / 시드를 뺀 시나리오와 시나리오 칸 글자를 들어오기 전으로.
+ * 모드 중 진영을 바꿨으면 들어오기 전 값을 새 진영으로 점대칭 (지정 시작 자세 / 바닥 기물 / 상향 셀, setAlliance)
+ */
+export function cancelScenarioEdit(drafts: ConfigDrafts, edit: ScenarioFieldEdit): ConfigDrafts {
+  const current = drafts.draft.scenario;
+  const scenario = setAlliance(edit.entry.scenario, current.allianceColor);
+  const next: ScenarioConfig = { ...scenario };
+  if (current.rpThresholds === undefined) delete next.rpThresholds;
+  else next.rpThresholds = current.rpThresholds;
+  return restoreScenarioSnapshot(drafts, { scenario: next, fieldText: edit.entry.fieldText });
+}
+
+/** 그 로봇이 걸린 배치 문제 (놓기 거부 / 사유 토스트, 14-1a): 필드 밖 / HIVE 기둥 / FLOWER / 다른 로봇 / 고정 기물과 겹침 */
+export function robotPlacementIssues(values: DraftValues, robot: RobotId): ScenarioFormIssue[] {
+  return scenarioFormIssues(values).filter(issue => issue.code.startsWith('PLACEMENT_') && issue.fields.includes(`spawn.${robot}`));
+}
+
+/**
+ * 로봇 끌기를 놓음: 끌어서 정한 자세(lastPose, 움직이지 않았으면 null)가 그 로봇을 겹치게 하면 끌기 전(before)으로 되돌리고 사유를 돌려준다.
+ * 끄는 동안의 초안은 화면 표시용이므로 놓을 때 이 결과로 확정한다
+ */
+export function finishRobotDrag(
+  drafts: ConfigDrafts,
+  robot: RobotId,
+  before: ScenarioSnapshot,
+  lastPose: RobotPose | null,
+): { drafts: ConfigDrafts; refused: ScenarioFormIssue[] } {
+  if (!lastPose) return { drafts: restoreScenarioSnapshot(drafts, before), refused: [] };
+  const placed = placeSpawn(restoreScenarioSnapshot(drafts, before), robot, lastPose);
+  const refused = robotPlacementIssues(placed.draft, robot);
+  return refused.length > 0 ? { drafts: restoreScenarioSnapshot(drafts, before), refused } : { drafts: placed, refused: [] };
 }
 
 /** 두 로봇의 초안 시작 자세 / 크기 (끌기 판정 / 장면) */
@@ -269,15 +342,15 @@ export function placeSpawn(drafts: ConfigDrafts, robot: RobotId, pose: RobotPose
   return next;
 }
 
-/** 시작 자세 모드 장면: 초안 진영 / 두 로봇(자세 · 크기 · 흡입 구역 · 배치 검증) / GARDEN 기물(엔진과 같은 좌표) / 강조 부분 */
-export function spawnEditScene(values: DraftValues, active: { robot: SpawnRobotId; part: SpawnPart } | null): SpawnEditScene {
+/** 시나리오 필드 편집 장면: 초안 진영 / 두 로봇(자세 · 크기 · 흡입 구역 · 배치 검증) / GARDEN 기물(엔진과 같은 좌표) / 강조 부분 */
+export function scenarioEditScene(values: DraftValues, active: { robot: SpawnRobotId; part: SpawnPart } | null): ScenarioEditScene {
   const view = readScenario(values.scenario, values.robot1.config, values.robot2.config);
   const bad = new Set(validateRobotPlacement(values.scenario, values.robot1.config, values.robot2.config).flatMap(i => i.robots));
   const opponent = view.alliance === 'RED' ? 'BLUE' : 'RED';
   const count = (n: number) => Math.min(8, Math.max(0, Number.isFinite(n) ? Math.floor(n) : 0));
   const robot = (id: SpawnRobotId) => ({ pose: view.spawn[id], config: values[id].config, bad: bad.has(id) });
   return {
-    mode: 'SPAWN',
+    mode: 'SCENARIO',
     alliance: view.alliance,
     robots: { robot1: robot('robot1'), robot2: robot('robot2') },
     gardenPieces: [...gardenPiecePositions(view.alliance, count(view.garden.ally)), ...gardenPiecePositions(opponent, count(view.garden.opponent))],

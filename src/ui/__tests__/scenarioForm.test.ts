@@ -55,19 +55,31 @@ describe('시나리오 탭 폼 (09-11a)', () => {
     expect(scenarioFormIssues(V)).toEqual([]);
   });
 
-  it('B. 진영 전환: 지정한 시작 자세 좌우 대칭(기본 스폰끼리 맞음), 지정한 상향 셀 반대로, 나머지는 새 진영 기본값', () => {
+  it('B. 진영 전환 (14-1a): 지정한 시작 자세 / 바닥 기물 점대칭(기본 스폰끼리 맞음), 지정한 상향 셀 반대로, 나머지는 새 진영 기본값', () => {
     expect(mirrorPose(DEFAULT_SPAWN_POSES.RED.robot1)).toEqual(DEFAULT_SPAWN_POSES.BLUE.robot1);
     expect(mirrorPose(DEFAULT_SPAWN_POSES.RED.robot2)).toEqual(DEFAULT_SPAWN_POSES.BLUE.robot2);
     const m = mirrorPose({ x: 60, y: 30, heading: Math.PI / 6 });
     expect(m.x).toBe(84);
-    expect(m.y).toBe(30);
-    expect(m.heading).toBeCloseTo((5 * Math.PI) / 6, 12);
+    expect(m.y).toBe(114);
+    expect(m.heading).toBeCloseTo((-5 * Math.PI) / 6, 12);
     expect(normalizeHeading(-Math.PI)).toBeCloseTo(Math.PI, 12);
     expect(normalizeHeading(3 * Math.PI)).toBeCloseTo(Math.PI, 12);
 
-    const base: ScenarioConfig = { allianceColor: 'RED', r1Spawn: { x: 60, y: 30, heading: 0 }, hiveUpwardCell: 'OPPOSITE_CELL', autoTipCount: 2 };
+    const base: ScenarioConfig = {
+      allianceColor: 'RED',
+      r1Spawn: { x: 60, y: 30, heading: 0 },
+      hiveUpwardCell: 'OPPOSITE_CELL',
+      autoTipCount: 2,
+      floorPieces: [{ type: 'POLLEN', x: 30, y: 120 }, { type: 'NECTAR', x: 72, y: 72 }],
+    };
     const blue = setAlliance(base, 'BLUE');
-    expect(blue).toEqual({ allianceColor: 'BLUE', r1Spawn: { x: 84, y: 30, heading: Math.PI }, hiveUpwardCell: 'AUDIENCE_CELL', autoTipCount: 2 });
+    expect(blue).toEqual({
+      allianceColor: 'BLUE',
+      r1Spawn: { x: 84, y: 114, heading: Math.PI },
+      hiveUpwardCell: 'AUDIENCE_CELL',
+      autoTipCount: 2,
+      floorPieces: [{ type: 'POLLEN', x: 114, y: 24 }, { type: 'NECTAR', x: 72, y: 72 }],
+    });
     expect(setAlliance(base, 'RED')).toBe(base);
     const plain = setAlliance({ allianceColor: 'RED' }, 'BLUE');
     expect(plain).toEqual({ allianceColor: 'BLUE' }); // 지정 안 한 항목은 새 진영 기본값 (저장 형식 그대로)
@@ -75,7 +87,9 @@ describe('시나리오 탭 폼 (09-11a)', () => {
     // 두 번 바꾸면 원래대로
     const back = setAlliance(blue, 'RED');
     expect(back.r1Spawn!.x).toBe(60);
+    expect(back.r1Spawn!.y).toBe(30);
     expect(back.r1Spawn!.heading).toBeCloseTo(0, 12);
+    expect(back.floorPieces).toEqual(base.floorPieces);
     expect(back.hiveUpwardCell).toBe('OPPOSITE_CELL');
   });
 

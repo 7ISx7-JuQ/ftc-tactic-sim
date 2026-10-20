@@ -47,7 +47,7 @@ function matchPixel(r1Spawn: RobotPose): number[] {
 function spawnPixel(pose: RobotPose): number[] {
   const ctx = canvas();
   renderEditScene(ctx, {
-    mode: 'SPAWN',
+    mode: 'SCENARIO',
     alliance: 'RED',
     robots: { robot1: { pose, config: C1, bad: false }, robot2: { pose: { x: 9, y: 108, heading: 0 }, config: C2, bad: false } },
     gardenPieces: [],

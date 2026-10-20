@@ -1,6 +1,7 @@
 // 시나리오 탭 (명세서 3.8 시나리오 탭, 2.4 텔레옵 시작 조건, 09-11a): 유효 배지 + 진영 / HIVE / 로봇 적재물 / 잔여 기물 / 오토 TIP /
 // 시작 자세 숫자 칸 / 난수 시드. 값은 초안에만 들어가고 APPLY로 확정한다 (시드 REROLL만 바로 적용 — 09-11 확정). 경기가 있는 동안 읽기 전용.
 // 09-11b: EDIT ON FIELD(필드에서 끌어 시작 자세 정하기 — 모드는 필드 안내 띠의 DONE · APPLY / CANCEL로 끝냄).
+// 14-1a: EDIT ON FIELD = 시나리오 필드 편집 모드 — 탭 맨 위 버튼, 시작 자세 구역의 버튼도 같은 모드를 연다.
 import { CircleAlert, CircleCheck, Dices, Move, RotateCcw } from 'lucide-react';
 import { hiveTipPollenThreshold } from '../core/types';
 import type { RobotPose, ScenarioConfig } from '../core/types';
@@ -49,13 +50,13 @@ export interface ScenarioTabProps {
   /** 초안 편집: 새 시나리오(없으면 값은 그대로) + 칸 키가 있으면 그 칸의 틀린 글자(null = 지움) + 함께 지울 칸 글자 */
   onEdit: (scenario: ScenarioConfig | null, key: string | null, invalidText: string | null, clearKeys?: readonly string[]) => void;
   onReroll: () => void;
-  spawnEditOn: boolean;                             // 시작 자세 편집 모드가 열려 있음 (09-11b)
+  fieldEditOn: boolean;                             // 시나리오 필드 편집 모드가 열려 있음 (14-1a)
   onEditOnField: () => void;
 }
 
 const ALL_SPAWN_KEYS = ROBOTS.flatMap(r => SPAWN_AXES.map(a => spawnFieldKey(r, a)));
 
-export default function ScenarioTab({ scenario, robots, seed, fieldText, issues, unit, lang, locked, onEdit, onReroll, spawnEditOn, onEditOnField }: ScenarioTabProps) {
+export default function ScenarioTab({ scenario, robots, seed, fieldText, issues, unit, lang, locked, onEdit, onReroll, fieldEditOn, onEditOnField }: ScenarioTabProps) {
   const view = readScenario(scenario, robots.robot1.config, robots.robot2.config);
   const red = issueFieldSet(issues);
   const typoCount = Object.keys(fieldText).length;
@@ -63,6 +64,12 @@ export default function ScenarioTab({ scenario, robots, seed, fieldText, issues,
   const edit = (next: ScenarioConfig) => onEdit(next, null, null);
   const floor = floorSummary(view);
   const pieceLabel = (piece: PieceType | null) => piece ?? t(lang, 'scenario.slotEmpty');
+  const editOnFieldButton = (
+    <button type="button" className={`config-button${fieldEditOn ? ' is-active' : ''}`} aria-pressed={fieldEditOn} disabled={locked || fieldEditOn} onClick={onEditOnField}>
+      <Move />
+      {t(lang, fieldEditOn ? 'scenario.editingOnField' : 'scenario.editOnField')}
+    </button>
+  );
 
   return (
     <div className="scenario-tab">
@@ -79,6 +86,11 @@ export default function ScenarioTab({ scenario, robots, seed, fieldText, issues,
           ))}
         </ul>
       )}
+
+      <div className="settings-row scenario-field-edit">
+        <span className="settings-note">{t(lang, 'scenario.editOnFieldHint')}</span>
+        {editOnFieldButton}
+      </div>
 
       <Section title={t(lang, 'scenario.section.alliance')}>
         <Segmented
@@ -200,10 +212,7 @@ export default function ScenarioTab({ scenario, robots, seed, fieldText, issues,
         ))}
         <div className="settings-row">
           <span className="settings-note">{t(lang, 'scenario.spawnHint')}</span>
-          <button type="button" className={`config-button${spawnEditOn ? ' is-active' : ''}`} aria-pressed={spawnEditOn} disabled={locked || spawnEditOn} onClick={onEditOnField}>
-            <Move />
-            {t(lang, spawnEditOn ? 'scenario.editingOnField' : 'scenario.editOnField')}
-          </button>
+          {editOnFieldButton}
         </div>
       </Section>
 

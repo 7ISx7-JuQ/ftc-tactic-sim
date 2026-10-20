@@ -1,6 +1,7 @@
 // 프리셋 파일 내보내기 / 불러오기 (명세서 3.9 프리셋, 10-2)
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_DRAFT_VALUES } from '../../app/defaultSetup';
+import { LEGACY_BLUE_SPAWN_POSES } from '../../core/simulationEngine';
 import { editDraft, initialDrafts, isDirty, setFieldText, tabStatus } from '../configDraft';
 import type { DraftValues } from '../configDraft';
 import {
@@ -261,6 +262,20 @@ describe('프리셋 파일 (10-2)', () => {
     const old = parse(file('ROBOT', v1Robot(custom.robot1), { presetVersion: 1 }), 'robot1');
     expect(old.ok).toBe(true);
     expect(old.ok && old.preset.values.robot1?.config.shooterSetup).toBe('SHARED');
+  });
+
+  it('J-2. (14-1a) presetVersion 1의 BLUE 시나리오: 없는 시작 자세 = v1 BLUE 기본값, 지정한 자세 / RED / 버전 2는 그대로', () => {
+    const scenario = (data: unknown, presetVersion: number) => {
+      const r = parse(file('SCENARIO', data, { presetVersion }), 'scenario');
+      return r.ok ? r.preset.values.scenario : null;
+    };
+    expect(scenario({ allianceColor: 'BLUE' }, 1)).toEqual({ allianceColor: 'BLUE', r1Spawn: LEGACY_BLUE_SPAWN_POSES.robot1, r2Spawn: LEGACY_BLUE_SPAWN_POSES.robot2 });
+    const r1 = { x: 120, y: 60, heading: 0 };
+    expect(scenario({ allianceColor: 'BLUE', r1Spawn: r1 }, 1)).toEqual({ allianceColor: 'BLUE', r1Spawn: r1, r2Spawn: LEGACY_BLUE_SPAWN_POSES.robot2 });
+    expect(scenario({ allianceColor: 'RED' }, 1)).toEqual({ allianceColor: 'RED' });
+    expect(scenario({ allianceColor: 'BLUE' }, 2)).toEqual({ allianceColor: 'BLUE' });
+    const all = parse(file('SETUP', { robot1: v1Robot(custom.robot1), robot2: v1Robot(custom.robot2), scenario: { allianceColor: 'BLUE' } }, { presetVersion: 1 }), 'all');
+    expect(all.ok && all.preset.values.scenario?.r2Spawn).toEqual(LEGACY_BLUE_SPAWN_POSES.robot2);
   });
 
   it('K. (11-2) 이전 형식 변환: 없는 새 항목 = v1 동작 값, NECTAR 슈터 = 그 데이터의 주 슈터 복사, 있는 항목은 그대로, 원본 불변', () => {

@@ -4,7 +4,7 @@
 // 09-10c = 스윗스팟(SWEET_SPOT) 모드: 같은 바닥 위에 적용한 확률표를 반투명(계산된 행만, 빗금 없음)으로 깔고,
 //   마우스를 올린 격자 강조 + 그 자리에서 조준점을 향해 돌린 로봇 몸체 윤곽(올바르면 초록 / 틀리면 빨강),
 //   초안 스윗스팟의 몸체 윤곽 + 조준 점선 + 표시, 확률표를 만든(적용한) 스윗스팟은 초안과 다를 때 빈 고리로.
-// 09-11b = 시작 자세(SPAWN) 모드: 경기 바닥 그대로(타일 / GARDEN / 로딩 존 / HIVE / FLOWER) + GARDEN 기물 + 두 로봇
+// 09-11b / 14-1a = 시나리오 필드 편집(SCENARIO, 시작 자세 모드를 흡수) 모드: 경기 바닥 그대로(타일 / GARDEN / 로딩 존 / HIVE / FLOWER) + GARDEN 기물 + 두 로봇
 //   (흡입 구역 / 몸체 / 앞 변 / 헤딩 화살표 / 번호) + 회전 핸들. 배치 검증에 걸린 로봇은 빨간 테두리 + 빨간 덧칠.
 //   HIVE 터널 지붕은 경기 장면과 같은 규칙으로 로봇 위에 (13-1). 히트맵 / 스윗스팟 모드는 로봇 / 기물이 없어 지붕이 늘 불투명 (전체를 한 번에).
 //   바닥 산포 공은 그리지 않는다 (09-11 확정 ④: 로봇 자리를 피해 다시 뿌려지므로 끌 때마다 공이 튀는 것 방지).
@@ -52,8 +52,8 @@ export interface SpawnEditRobot {
   bad: boolean;                                   // 배치 검증에 걸림 (빨간 표시)
 }
 
-export interface SpawnEditScene {
-  mode: 'SPAWN';
+export interface ScenarioEditScene {
+  mode: 'SCENARIO';
   alliance: Alliance;
   robots: Record<SpawnRobotId, SpawnEditRobot>;
   gardenPieces: readonly Point2[];                // GARDEN POLLEN (배치 검증 대상, 엔진 gardenPiecePositions)
@@ -61,7 +61,7 @@ export interface SpawnEditScene {
 }
 
 /** 편집 모드 장면 */
-export type EditScene = HeatmapEditScene | SweetSpotEditScene | SpawnEditScene;
+export type EditScene = HeatmapEditScene | SweetSpotEditScene | ScenarioEditScene;
 
 const EDIT_COLORS = {
   pageBg: '#15171c', // 필드 둘레 (경기 장면과 같음)
@@ -266,7 +266,7 @@ function drawMarkers(ctx: CanvasRenderingContext2D, scene: HeatmapEditScene | Sw
 }
 
 // ------------------------------------------------------------
-// 시작 자세 모드 (09-11b)
+// 시나리오 필드 편집 모드 (09-11b 시작 자세, 14-1a)
 // ------------------------------------------------------------
 
 function pathCorners(ctx: CanvasRenderingContext2D, pts: readonly Point2[]): void {
@@ -359,7 +359,7 @@ function drawSpawnRobot(ctx: CanvasRenderingContext2D, robot: SpawnEditRobot, al
 }
 
 // HIVE는 경기 장면과 같이 기둥 부분 → (GARDEN 기물 / 로봇) → 터널 지붕(지붕 불투명도) 순서 (13-1, 터널 안에 시작 자세를 둘 수 있음)
-function renderSpawnField(ctx: CanvasRenderingContext2D, scene: SpawnEditScene, dpr: number): void {
+function renderScenarioField(ctx: CanvasRenderingContext2D, scene: ScenarioEditScene, dpr: number): void {
   const ally = scene.alliance;
   drawFieldBackground(ctx);
   drawGardens(ctx, false, ally);
@@ -387,7 +387,7 @@ function renderSpawnField(ctx: CanvasRenderingContext2D, scene: SpawnEditScene, 
 }
 
 // 로봇 번호 (화면 공간, 똑바로)
-function drawSpawnLabels(ctx: CanvasRenderingContext2D, scene: SpawnEditScene, view: ViewTransform): void {
+function drawSpawnLabels(ctx: CanvasRenderingContext2D, scene: ScenarioEditScene, view: ViewTransform): void {
   ctx.save();
   ctx.font = canvasFont(12);
   ctx.textAlign = 'center';
@@ -406,7 +406,7 @@ function drawSpawnLabels(ctx: CanvasRenderingContext2D, scene: SpawnEditScene, v
 }
 
 /**
- * 편집 모드 장면 전체 (히트맵 / 스윗스팟 / 시작 자세 모드). ctx는 경기 장면과 같은 800 × 800 논리 크기 × dpr 버퍼의 캔버스, view는 관중석 시점(경기 전)
+ * 편집 모드 장면 전체 (히트맵 / 스윗스팟 / 시나리오 필드 편집 모드). ctx는 경기 장면과 같은 800 × 800 논리 크기 × dpr 버퍼의 캔버스, view는 관중석 시점(경기 전)
  * 순서: 둘레 배경 → 바닥 회색 → 히트맵(스윗스팟 모드는 반투명) → 미계산 행 빗금(히트맵 모드만) → 타일 / 벽 → HIVE(기준 셀 강조)
  *       → [스윗스팟 모드: 적용한 스윗스팟 고리 / 마우스 격자 + 윤곽 / 초안 몸체 윤곽] → 스윗스팟 → 조준점 점선 / 표시
  */
@@ -422,8 +422,8 @@ export function renderEditScene(ctx: CanvasRenderingContext2D, scene: EditScene,
   ctx.clip();
   ctx.setTransform(...fieldPxMatrix(view, dpr));
 
-  if (scene.mode === 'SPAWN') {
-    renderSpawnField(ctx, scene, dpr);
+  if (scene.mode === 'SCENARIO') {
+    renderScenarioField(ctx, scene, dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawSpawnLabels(ctx, scene, view);
     ctx.restore();

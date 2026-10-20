@@ -15,7 +15,7 @@ import { LOG_RECORD_BYTES } from '../input/inputLog';
 import type { MatchInputs } from '../input/inputLog';
 import { tabIssues } from '../ui/configDraft';
 import type { DraftTab, DraftValues } from '../ui/configDraft';
-import { MATCH_FORMAT, PRESET_FORMAT, robotPresetData, sanitizeRobotPreset, sanitizeScenarioPreset, upgradeRobotProfileData } from '../ui/presetFile';
+import { MATCH_FORMAT, PRESET_FORMAT, pinLegacyBlueSpawns, robotPresetData, sanitizeRobotPreset, sanitizeScenarioPreset, upgradeRobotProfileData } from '../ui/presetFile';
 import type { RobotProfile } from '../ui/robotForm';
 
 export const RECIPE_FORMAT = MATCH_FORMAT;
@@ -253,8 +253,9 @@ export function parseMatchRecipe(text: string, defaults: DraftValues): Parsed {
   if (!robot1) return fail({ code: 'INVALID_FIELD', field: 'setup.robot1' });
   const robot2 = setup && strictRobot(setup.robot2, defaults.robot2, 'robot2');
   if (!robot2) return fail({ code: 'INVALID_FIELD', field: 'setup.robot2' });
-  const scenario = setup && strictScenario(setup.scenario);
-  if (!scenario) return fail({ code: 'INVALID_FIELD', field: 'setup.scenario' });
+  const strict = setup && strictScenario(setup.scenario);
+  if (!strict) return fail({ code: 'INVALID_FIELD', field: 'setup.scenario' });
+  const scenario = data.engineVersion === 1 ? pinLegacyBlueSpawns(strict) : strict; // 엔진 버전 1 파일의 BLUE 기본 시작 자세 유지 (14-1a)
   const lut = data.lut;
   if (!isRecord(lut) || !Number.isInteger(lut.seed) || !isPositiveInt(lut.samples) || !isPositiveInt(lut.searchSamples)) return fail({ code: 'INVALID_FIELD', field: 'lut' });
 

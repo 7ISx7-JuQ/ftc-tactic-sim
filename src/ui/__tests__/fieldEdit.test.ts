@@ -22,16 +22,23 @@ import {
   sweetSpotIssueCodes,
   toggleHeatmapEdit,
 } from '../fieldEdit';
-import type { SpawnFieldEdit, SweetSpotFieldEdit } from '../fieldEdit';
+import type { ScenarioFieldEdit, SweetSpotFieldEdit } from '../fieldEdit';
 import {
+  EDIT_HISTORY_LIMIT,
   cancelFieldEdit,
-  cancelSpawnEdit,
+  cancelScenarioEdit,
   dragSpawnPose,
   editTab,
-  openSpawnEdit,
+  finishRobotDrag,
+  openScenarioEdit,
   placeSpawn,
-  spawnEditScene,
+  recordScenarioChange,
+  redoScenarioEdit,
+  robotPlacementIssues,
+  scenarioEditScene,
+  scenarioSnapshot,
   spawnRobots,
+  undoScenarioEdit,
 } from '../fieldEdit';
 import { DEFAULT_SPAWN_POSES, gardenPiecePositions, validateRobotPlacement } from '../../core/simulationEngine';
 import { editDraft } from '../configDraft';
@@ -177,21 +184,25 @@ describe('필드 편집 모드 (09-10b / 09-10c / 09-11b)', () => {
     expect(blue.reference).toBeNull();
   });
 
-  // ---------------- 09-11b 시작 자세 모드 ----------------
+  // ---------------- 시나리오 필드 편집 모드 (14-1a, 09-11b 시작 자세 모드 흡수) ----------------
   const withScenario = (drafts: ReturnType<typeof initialDrafts>, patch: object) => editDraft(drafts, 'scenario', { ...drafts.draft.scenario, ...patch });
 
-  it('J. EDIT ON FIELD: 연 탭 = SCENARIO, 진영 / 지정 자세 / 칸 글자 기억, 다시 눌러도 그대로', () => {
+  it('J. EDIT ON FIELD: 연 탭 = SCENARIO, 들어올 때 시나리오 / 칸 글자 기억 + 빈 되돌리기 기록, 다시 눌러도 그대로', () => {
     let drafts = withScenario(initialDrafts(DEFAULT_DRAFT_VALUES), { r2Spawn: { x: 20, y: 100, heading: 0.5 } });
     drafts = setFieldText(drafts, 'scenario', 'spawn.robot1.x', 'abc');
-    const edit = openSpawnEdit(null, drafts);
-    expect(edit).toEqual({ mode: 'SPAWN', entry: { alliance: 'RED', spawn: { robot2: { x: 20, y: 100, heading: 0.5 } }, fieldText: { 'spawn.robot1.x': 'abc' } } });
-    expect(openSpawnEdit(edit, drafts)).toBe(edit);
+    const edit = openScenarioEdit(null, drafts);
+    expect(edit).toEqual({
+      mode: 'SCENARIO',
+      entry: { scenario: { allianceColor: 'RED', r2Spawn: { x: 20, y: 100, heading: 0.5 } }, fieldText: { 'spawn.robot1.x': 'abc' } },
+      history: { past: [], future: [], lastKey: null },
+    });
+    expect(openScenarioEdit(edit, drafts)).toBe(edit);
     expect(editTab(edit)).toBe('scenario');
     expect(editTab({ mode: 'HEATMAP', robot: 'robot2', piece: 'POLLEN' })).toBe('robot2');
     expect(fieldEditStays(edit, { phase: 'SETUP', configOpen: true, tab: 'scenario' })).toBe(true);
     expect(fieldEditStays(edit, { phase: 'SETUP', configOpen: true, tab: 'robot1' })).toBe(false);
     // 다른 모드에서 넘어옴 (한 번에 한 모드)
-    expect(openSpawnEdit({ mode: 'HEATMAP', robot: 'robot1', piece: 'POLLEN' }, drafts).mode).toBe('SPAWN');
+    expect(openScenarioEdit({ mode: 'HEATMAP', robot: 'robot1', piece: 'POLLEN' }, drafts).mode).toBe('SCENARIO');
   });
 
   it('K. 끌기: 몸체 = 이동량만큼(0 ~ 144 제한), 핸들 = 중심 → 포인터 방향, 표시 자리수(0.1 in / 0.1°)로만 반올림', () => {
@@ -208,33 +219,60 @@ describe('필드 편집 모드 (09-10b / 09-10c / 09-11b)', () => {
     expect(dragSpawnPose(start, 'handle', { x: 25, y: 36 }, { x: 9, y: 36 })).toBe(start); // 중심 위 = 그대로
   });
 
-  it('L. 놓기: 그 로봇 자세만 초안으로 + 그 로봇 칸 글자 지움, 겹쳐도 놓임', () => {
+  it('L. 끄는 동안 = 그 로봇 자세만 초안으로 + 그 로봇 칸 글자 지움 (겹쳐도 화면에 보임), 놓기 = 겹치면 끌기 전으로 + 사유', () => {
     let drafts = initialDrafts(DEFAULT_DRAFT_VALUES);
     drafts = setFieldText(setFieldText(drafts, 'scenario', 'spawn.robot1.y', 'x'), 'scenario', 'spawn.robot2.x', 'y');
-    const placed = placeSpawn(drafts, 'robot1', { x: 9, y: 100, heading: 0 });
-    expect(placed.draft.scenario).toEqual({ allianceColor: 'RED', r1Spawn: { x: 9, y: 100, heading: 0 } });
+    const placed = placeSpawn(drafts, 'robot1', { x: 20, y: 100, heading: 0 });
+    expect(placed.draft.scenario).toEqual({ allianceColor: 'RED', r1Spawn: { x: 20, y: 100, heading: 0 } });
     expect(placed.fieldText.scenario).toEqual({ 'spawn.robot2.x': 'y' });
     expect(validateRobotPlacement(placed.draft.scenario, placed.draft.robot1.config, placed.draft.robot2.config).map(i => i.code)).toContain('PLACEMENT_ROBOT_OVERLAP');
-    expect(spawnRobots(placed.draft).robot1.pose).toEqual({ x: 9, y: 100, heading: 0 });
+    expect(spawnRobots(placed.draft).robot1.pose).toEqual({ x: 20, y: 100, heading: 0 });
     expect(spawnRobots(placed.draft).robot2.pose).toEqual(DEFAULT_SPAWN_POSES.RED.robot2);
+    expect(robotPlacementIssues(placed.draft, 'robot1').map(i => i.code)).toEqual(['PLACEMENT_ROBOT_OVERLAP']);
+
+    // 놓기: 겹치는 자리 → 끌기 전(초안 / 칸 글자)으로 + 사유, 올바른 자리 → 확정, 움직이지 않음 → 그대로
+    const before = scenarioSnapshot(drafts);
+    const refused = finishRobotDrag(placed, 'robot1', before, { x: 20, y: 100, heading: 0 });
+    expect(refused.refused.map(i => i.code)).toEqual(['PLACEMENT_ROBOT_OVERLAP']);
+    expect(scenarioSnapshot(refused.drafts)).toEqual(before);
+    const inHive = finishRobotDrag(drafts, 'robot2', before, { x: 50, y: 72, heading: 0 });
+    expect(inHive.refused.map(i => i.code)).toEqual(['PLACEMENT_IN_HIVE']);
+    const ok = finishRobotDrag(placed, 'robot1', before, { x: 40, y: 40, heading: 0.5 });
+    expect(ok.refused).toEqual([]);
+    expect(ok.drafts.draft.scenario.r1Spawn).toEqual({ x: 40, y: 40, heading: 0.5 });
+    expect(ok.drafts.fieldText.scenario).toEqual({ 'spawn.robot2.x': 'y' });
+    const tunnel = finishRobotDrag(drafts, 'robot1', before, { x: 72, y: 72, heading: Math.PI / 2 }); // 터널 안 시작 자세 허용
+    expect(tunnel.refused).toEqual([]);
+    const still = finishRobotDrag(placed, 'robot1', before, null);
+    expect(scenarioSnapshot(still.drafts)).toEqual(before);
   });
 
-  it('M. CANCEL / Esc / START: 시작 자세 / 칸 글자만 되돌림 (지정 안 했으면 지정 해제), 진영을 바꿨으면 들어오기 전 자세를 좌우 대칭', () => {
-    let drafts = withScenario(initialDrafts(DEFAULT_DRAFT_VALUES), { r2Spawn: { x: 20, y: 100, heading: 0 } });
+  it('M. CANCEL / Esc / START: 진영 / RP 기준값 / 시드를 뺀 시나리오와 칸 글자를 들어오기 전으로, 진영을 바꿨으면 들어오기 전 값을 점대칭', () => {
+    let drafts = withScenario(initialDrafts(DEFAULT_DRAFT_VALUES), { r2Spawn: { x: 20, y: 100, heading: 0 }, floorPieces: [{ type: 'POLLEN', x: 30, y: 120 }] });
     drafts = setFieldText(drafts, 'scenario', 'spawn.robot2.y', 'bad');
-    const edit = openSpawnEdit(null, drafts) as SpawnFieldEdit;
+    const edit = openScenarioEdit(null, drafts);
     let during = placeSpawn(drafts, 'robot1', { x: 60, y: 60, heading: 1 });
     during = placeSpawn(during, 'robot2', { x: 70, y: 20, heading: 0 });
-    during = withScenario(during, { autoTipCount: 2 });
-    const back = cancelSpawnEdit(during, edit);
-    expect(back.draft.scenario).toEqual({ allianceColor: 'RED', r2Spawn: { x: 20, y: 100, heading: 0 }, autoTipCount: 2 });
+    during = withScenario(during, { autoTipCount: 2, rngSeed: 99, rpThresholds: { swarmPoints: 14, pollinator1Tips: 3, pollinator2Tips: 6 } });
+    const back = cancelScenarioEdit(during, edit);
+    expect(back.draft.scenario).toEqual({
+      allianceColor: 'RED',
+      r2Spawn: { x: 20, y: 100, heading: 0 },
+      floorPieces: [{ type: 'POLLEN', x: 30, y: 120 }],
+      rngSeed: 99,
+      rpThresholds: { swarmPoints: 14, pollinator1Tips: 3, pollinator2Tips: 6 },
+    });
     expect(back.draft.scenario).not.toHaveProperty('r1Spawn');
     expect(back.fieldText.scenario).toEqual({ 'spawn.robot2.y': 'bad' });
     expect(cancelFieldEdit(during, edit)).toEqual(back);
-    // 모드 중 진영 전환 → 들어오기 전 자세를 새 진영으로
+    // 모드 중 진영 전환 → 들어오기 전 값을 새 진영으로 (점대칭)
     const blue = withScenario(during, { allianceColor: 'BLUE' });
-    const backBlue = cancelSpawnEdit(blue, edit);
-    expect(backBlue.draft.scenario.r2Spawn).toEqual({ x: 124, y: 100, heading: Math.PI });
+    const backBlue = cancelScenarioEdit(blue, edit);
+    expect(backBlue.draft.scenario.allianceColor).toBe('BLUE');
+    expect(backBlue.draft.scenario.r2Spawn!.x).toBe(124);
+    expect(backBlue.draft.scenario.r2Spawn!.y).toBe(44);
+    expect(backBlue.draft.scenario.r2Spawn!.heading).toBeCloseTo(Math.PI, 12);
+    expect(backBlue.draft.scenario.floorPieces).toEqual([{ type: 'POLLEN', x: 114, y: 24 }]);
     expect(backBlue.draft.scenario).not.toHaveProperty('r1Spawn');
     // 히트맵 모드는 바꾼 값 없음
     expect(cancelFieldEdit(during, { mode: 'HEATMAP', robot: 'robot1', piece: 'POLLEN' })).toBe(during);
@@ -247,19 +285,61 @@ describe('필드 편집 모드 (09-10b / 09-10c / 09-11b)', () => {
     expect(editDoneAction(placeSpawn(drafts, 'robot1', { x: 9, y: 105, heading: 0 }), 'scenario')).toBe('KEEP_DRAFT');
   });
 
-  it('O. 시작 자세 장면: 초안 진영 / 자세 / 제원, 배치 문제 로봇, GARDEN 기물 = 엔진 좌표, 강조 부분 전달', () => {
+  it('O. 시나리오 필드 편집 장면: 초안 진영 / 자세 / 제원, 배치 문제 로봇, GARDEN 기물 = 엔진 좌표, 강조 부분 전달', () => {
     const drafts = placeSpawn(initialDrafts(DEFAULT_DRAFT_VALUES), 'robot2', { x: 9, y: 40, heading: 0 });
-    const scene = spawnEditScene(drafts.draft, { robot: 'robot2', part: 'handle' });
-    expect(scene.mode).toBe('SPAWN');
+    const scene = scenarioEditScene(drafts.draft, { robot: 'robot2', part: 'handle' });
+    expect(scene.mode).toBe('SCENARIO');
     expect(scene.alliance).toBe('RED');
     expect(scene.robots.robot1).toEqual({ pose: DEFAULT_SPAWN_POSES.RED.robot1, config: drafts.draft.robot1.config, bad: true });
     expect(scene.robots.robot2.bad).toBe(true);
     expect(scene.active).toEqual({ robot: 'robot2', part: 'handle' });
     expect(scene.gardenPieces).toEqual([...gardenPiecePositions('RED', 4), ...gardenPiecePositions('BLUE', 4)]);
-    const blue = spawnEditScene(withScenario(initialDrafts(DEFAULT_DRAFT_VALUES), { allianceColor: 'BLUE', gardenPiecesCount: { ally: 2, opponent: 0 } }).draft, null);
+    const blue = scenarioEditScene(withScenario(initialDrafts(DEFAULT_DRAFT_VALUES), { allianceColor: 'BLUE', gardenPiecesCount: { ally: 2, opponent: 0 } }).draft, null);
     expect(blue.robots.robot1.pose).toEqual(DEFAULT_SPAWN_POSES.BLUE.robot1);
     expect(blue.robots.robot1.bad || blue.robots.robot2.bad).toBe(false);
     expect(blue.gardenPieces).toEqual(gardenPiecePositions('BLUE', 2));
+  });
+
+  it('P. 되돌리기 기록: 바뀐 것만 한 단계, 같은 숫자 칸 연속 입력은 한 단계, 되돌리기 / 다시 하기, 새 단계는 다시 하기를 지움, 시드는 그대로, 상한', () => {
+    const d0 = initialDrafts(DEFAULT_DRAFT_VALUES);
+    let edit: ScenarioFieldEdit = openScenarioEdit(null, d0);
+    const step = (from: ReturnType<typeof initialDrafts>, to: ReturnType<typeof initialDrafts>, key: string | null = null) => {
+      edit = recordScenarioChange(edit, scenarioSnapshot(from), scenarioSnapshot(to), key);
+      return to;
+    };
+    expect(recordScenarioChange(edit, scenarioSnapshot(d0), scenarioSnapshot(d0))).toBe(edit); // 바뀐 것 없음
+    const d1 = step(d0, placeSpawn(d0, 'robot1', { x: 30, y: 40, heading: 0 }));
+    // 같은 칸(spawn.robot2.x) 연속 입력: 3 → 30 → 30.5 = 한 단계
+    const d2 = step(d1, withScenario(d1, { r2Spawn: { x: 3, y: 108, heading: 0 } }), 'spawn.robot2.x');
+    const d3 = step(d2, withScenario(d2, { r2Spawn: { x: 30, y: 108, heading: 0 } }), 'spawn.robot2.x');
+    const d4 = step(d3, withScenario(d3, { r2Spawn: { x: 30.5, y: 108, heading: 0 } }), 'spawn.robot2.x');
+    expect(edit.history.past.map(p => p.scenario)).toEqual([d0.draft.scenario, d1.draft.scenario]);
+    // REROLL로 시드가 바뀐 뒤 되돌려도 시드는 그대로
+    const rerolled = withScenario(d4, { rngSeed: 1234 });
+    const u1 = undoScenarioEdit(edit, rerolled)!;
+    expect(u1.drafts.draft.scenario).toEqual({ ...d1.draft.scenario, rngSeed: 1234 });
+    const u2 = undoScenarioEdit(u1.edit, u1.drafts)!;
+    expect(u2.drafts.draft.scenario).toEqual({ ...d0.draft.scenario, rngSeed: 1234 });
+    expect(undoScenarioEdit(u2.edit, u2.drafts)).toBeNull();
+    const r1 = redoScenarioEdit(u2.edit, u2.drafts)!;
+    expect(r1.drafts.draft.scenario).toEqual({ ...d1.draft.scenario, rngSeed: 1234 });
+    expect(r1.edit.history.future).toHaveLength(1);
+    // 새 단계 → 다시 하기 기록 지움, 되돌린 뒤 같은 칸을 다시 쳐도 새 단계 (lastKey 초기화)
+    edit = r1.edit;
+    step(r1.drafts, withScenario(r1.drafts, { autoTipCount: 1 }));
+    expect(edit.history.future).toEqual([]);
+    expect(edit.history.past).toHaveLength(2);
+    expect(redoScenarioEdit(edit, d0)).toBeNull();
+    // 칸 글자도 함께 되돌림
+    const typo = setFieldText(d0, 'scenario', 'spawn.robot1.x', 'abc');
+    edit = openScenarioEdit(null, d0);
+    step(d0, typo, 'spawn.robot1.x');
+    expect(undoScenarioEdit(edit, typo)!.drafts.fieldText.scenario).toEqual({});
+    // 상한: 오래된 것부터 버림
+    edit = openScenarioEdit(null, d0);
+    let d = d0;
+    for (let i = 0; i < EDIT_HISTORY_LIMIT + 5; i++) d = step(d, withScenario(d, { autoTipCount: i % 2 === 0 ? 1 : 0 }));
+    expect(edit.history.past).toHaveLength(EDIT_HISTORY_LIMIT);
   });
 });
 

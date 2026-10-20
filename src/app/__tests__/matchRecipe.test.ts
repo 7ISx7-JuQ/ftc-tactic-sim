@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { BALLISTICS_MODEL_VERSION } from '../../core/ballistics';
 import { CHECKPOINT_COUNT, compareCheckpoints, fnv1a32, frameChecksum, timelineCheckpoints } from '../../core/checksum';
-import { DEFAULT_RNG_SEED, ENGINE_VERSION, MATCH_TICKS, SimulationEngine } from '../../core/simulationEngine';
+import { DEFAULT_RNG_SEED, DEFAULT_SPAWN_POSES, ENGINE_VERSION, LEGACY_BLUE_SPAWN_POSES, MATCH_TICKS, SimulationEngine } from '../../core/simulationEngine';
 import type { TickControls } from '../../input/controls';
 import { LOG_RECORD_BYTES, MatchInputs, createInputRecordProvider } from '../../input/inputLog';
 import type { RobotId } from '../../input/inputConfig';
@@ -29,7 +29,7 @@ const defaults = DEFAULT_DRAFT_VALUES;
 const values: DraftValues = {
   robot1: { ...defaults.robot1, teamNumber: '12345', teamName: 'Bumblebots' },
   robot2: { ...defaults.robot2, teamName: 'Hive Mind', config: { ...defaults.robot2.config, maxSpeed: 50 } },
-  scenario: { allianceColor: 'BLUE', autoTipCount: 2, rngSeed: 4242, r1Spawn: { x: 135, y: 30, heading: Math.PI } },
+  scenario: { allianceColor: 'BLUE', autoTipCount: 2, rngSeed: 4242, r1Spawn: { x: 135, y: 80, heading: Math.PI } },
 };
 const engineFor = (v: DraftValues) => {
   const s = setupFromDrafts(v);
@@ -219,7 +219,7 @@ describe('저장 레시피 (10-3)', () => {
     // 형식은 맞지만 검증 실패: 최고 속도 범위 밖 / 시작 자세 겹침
     const bad = parse(edit(['setup.robot1.config.maxSpeed', 999]));
     expect(!bad.ok && bad.error.code === 'INVALID_SETUP' && bad.error.issues).toContain('FIELD_maxSpeed');
-    const overlap = parse(edit(['setup.scenario.r2Spawn', { x: 135, y: 30, heading: 0 }]));
+    const overlap = parse(edit(['setup.scenario.r2Spawn', { x: 135, y: 80, heading: 0 }]));
     expect(!overlap.ok && overlap.error.code === 'INVALID_SETUP' && overlap.error.issues).toContain('PLACEMENT_ROBOT_OVERLAP');
   }, TEST_TIMEOUT_MS);
 
@@ -277,5 +277,14 @@ describe('저장 레시피 (10-3)', () => {
     // 내보낸 파일에는 새 로봇 항목이 들어 있음
     const robot1 = (JSON.parse(sample().text) as { setup: { robot1: { config: Record<string, unknown>; ballistics: Record<string, unknown> } } }).setup.robot1;
     expect([robot1.config.shooterSetup, robot1.config.liftMaxSpeed, robot1.ballistics.shooterLateralOffset]).toEqual(['SHARED', 0, 0]);
+  }, TEST_TIMEOUT_MS);
+
+  it('H. (14-1a) 엔진 버전 1 파일의 BLUE 시나리오: 없는 시작 자세 = v1 BLUE 기본값(로봇 위치 유지), 지금 버전 파일은 그대로', () => {
+    const v1 = parse(edit(['engineVersion', 1]));
+    expect(v1.ok && v1.recipe.setup.scenario.r2Spawn).toEqual(LEGACY_BLUE_SPAWN_POSES.robot2);
+    expect(v1.ok && v1.recipe.setup.scenario.r1Spawn).toEqual(values.scenario.r1Spawn); // 지정한 자세는 그대로
+    const current = parse(sample().text);
+    expect(current.ok && current.recipe.setup.scenario).not.toHaveProperty('r2Spawn');
+    expect(LEGACY_BLUE_SPAWN_POSES.robot2).not.toEqual(DEFAULT_SPAWN_POSES.BLUE.robot2);
   }, TEST_TIMEOUT_MS);
 });

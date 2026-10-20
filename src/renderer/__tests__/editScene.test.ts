@@ -1,7 +1,7 @@
 // 필드 편집 모드 장면 그리기 (명세서 3.8 필드 편집 모드, 09-10b / 09-10c): 가짜 캔버스로 모드별로 그리는 표시만 확인
 import { describe, expect, it } from 'vitest';
 import { renderEditScene } from '../editSceneRenderer';
-import type { EditScene, SpawnEditScene, SweetSpotEditScene } from '../editSceneRenderer';
+import type { EditScene, ScenarioEditScene, SweetSpotEditScene } from '../editSceneRenderer';
 import { createIntakeZonePreset } from '../../core/collision';
 import { DEFAULT_SPAWN_POSES } from '../../core/simulationEngine';
 import { restingView } from '../viewTransform';
@@ -73,8 +73,8 @@ describe('편집 모드 장면 그리기 (09-10b / 09-10c)', () => {
 
   it('C. (09-11b) 시작 자세 모드: 배치 문제 로봇만 흰 빗금 + 빨간 테두리, 잡은 핸들은 주황, 히트맵 빗금 없음', () => {
     const config = { length: 18, width: 18, intakeZones: createIntakeZonePreset('FRONT', { length: 18, width: 18 }) };
-    const spawn = (patch: Partial<SpawnEditScene> = {}): SpawnEditScene => ({
-      mode: 'SPAWN',
+    const spawn = (patch: Partial<ScenarioEditScene> = {}): ScenarioEditScene => ({
+      mode: 'SCENARIO',
       alliance: 'RED',
       robots: { robot1: { pose: DEFAULT_SPAWN_POSES.RED.robot1, config, bad: false }, robot2: { pose: DEFAULT_SPAWN_POSES.RED.robot2, config, bad: false } },
       gardenPieces: [],

@@ -6,6 +6,7 @@
 // - 파일 자체가 틀리면 거부 (JSON 아님 / format 다름 / kind가 그 줄과 다름 / 더 새 버전). 항목이 없거나 형식이 틀리면 그 항목만 기본값.
 //   범위 검증에 걸리는 값은 버리지 않고 초안에 넣어 빨간 오류로 보여 준다 (숫자 칸은 폼이 값으로 판정, 팀 번호 / 팀명은 틀린 입력 글자로 보관).
 
+import { LEGACY_BLUE_SPAWN_POSES } from '../core/simulationEngine';
 import type { AutoMovement, BumperZone, FloorPiecePlacement, RobotConfig, RobotPose, ScenarioConfig, ShooterAimConfig, ShooterSetup } from '../core/types';
 import type { RobotId } from '../input/inputConfig';
 import { TAB_LABEL_KEYS, editDraft, setFieldText, tabStatus } from './configDraft';
@@ -220,6 +221,19 @@ export function sanitizeRobotPreset(v: unknown, def: RobotProfile, id: RobotId):
   return { profile, invalidTexts };
 }
 
+/**
+ * 이전 형식 변환 (14-1a): v1의 BLUE 기본 시작 자세(R1 (135, 36), R2 (135, 108))는 v2.0.0에서 RED 기본의 점대칭으로 바뀌었다.
+ * 프리셋 버전 1 / 엔진 버전 1 경기 파일의 BLUE 시나리오에 시작 자세가 없으면 이전 기본값을 명시 값으로 채워 v1의 로봇 위치를 유지한다
+ */
+export function pinLegacyBlueSpawns(scenario: ScenarioConfig): ScenarioConfig {
+  if (scenario.allianceColor !== 'BLUE' || (scenario.r1Spawn && scenario.r2Spawn)) return scenario;
+  return {
+    ...scenario,
+    r1Spawn: scenario.r1Spawn ?? { ...LEGACY_BLUE_SPAWN_POSES.robot1 },
+    r2Spawn: scenario.r2Spawn ?? { ...LEGACY_BLUE_SPAWN_POSES.robot2 },
+  };
+}
+
 const PIECE_TYPES = ['POLLEN', 'NECTAR'] as const;
 const AUTO_MOVEMENTS: readonly AutoMovement[] = ['NONE', 'LEAVE', 'PARK'];
 const isPose = (v: unknown): v is RobotPose => isRecord(v) && isNumber(v.x) && isNumber(v.y) && isNumber(v.heading);
@@ -290,12 +304,17 @@ export function parsePresetFile(text: string, row: PresetRow, defaults: DraftVal
     preset.values[id] = profile;
     if (Object.keys(invalidTexts).length > 0) preset.invalidTexts[id] = invalidTexts;
   };
+  // 프리셋 버전 1의 BLUE 시나리오: 시작 자세가 없으면 v1 BLUE 기본값으로 (14-1a)
+  const scenario = (v: unknown) => {
+    const sc = sanitizeScenarioPreset(v, defaults.scenario);
+    return data.presetVersion === 1 ? pinLegacyBlueSpawns(sc) : sc;
+  };
   if (row === 'robot1' || row === 'robot2') robot(row, body);
-  else if (row === 'scenario') preset.values.scenario = sanitizeScenarioPreset(body, defaults.scenario);
+  else if (row === 'scenario') preset.values.scenario = scenario(body);
   else {
     robot('robot1', body.robot1);
     robot('robot2', body.robot2);
-    preset.values.scenario = sanitizeScenarioPreset(body.scenario, defaults.scenario);
+    preset.values.scenario = scenario(body.scenario);
   }
   return { ok: true, preset };
 }

@@ -57,7 +57,7 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       const e = new SimulationEngine(C1, C2, ALWAYS_HIT); // 시나리오 없음 → RED 기본
       assert(e.r1.x === 9 && e.r1.y === 36 && e.r1.heading === 0 && e.r2.x === 9 && e.r2.y === 108, 'no scenario -> RED default spawn');
       const b = eng({ allianceColor: 'BLUE' });
-      assert(b.r1.x === 135 && b.r1.y === 36 && b.r1.heading === Math.PI && b.r2.y === 108, 'BLUE alliance -> BLUE default spawn (auto)');
+      assert(b.r1.x === 135 && b.r1.y === 108 && b.r1.heading === Math.PI && b.r2.y === 36, 'BLUE alliance -> BLUE default spawn (auto, RED 기본의 점대칭 — 14-1a)');
       const c = eng({ r1Spawn: pose(40, 20, 1.2) });
       assert(c.r1.x === 40 && c.r1.y === 20 && c.r1.heading === 1.2, 'custom r1Spawn applied');
       assert(c.r2.x === 9 && c.r2.y === 108, 'r2 unspecified -> default');
@@ -137,7 +137,7 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       const before = fin({ r1Spawn: pose(20, 36), r2Spawn: pose(60, 120) }).totalScore;
       const after = fin({ r1Spawn: pose(19.9, 36), r2Spawn: pose(60, 120) }).totalScore;
       assert(after - before === 5, `edge touch no, 0.1in overlap +5 (${before}->${after})`);
-      assert(fin({ allianceColor: 'BLUE', r1Spawn: pose(135, 89, Math.PI) }).rpAchieved.swarm, 'blue swarm');
+      assert(fin({ allianceColor: 'BLUE', r2Spawn: pose(135, 89, Math.PI) }).rpAchieved.swarm, 'blue swarm');
     }
   }, TEST_TIMEOUT_MS);
 
@@ -1002,7 +1002,7 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
   }, TEST_TIMEOUT_MS);
 
   it('U. 경기 종료 득점 내역 (scoreBreakdown, 08-3)', () => {
-    // 기본 경기 (입력 없음): RED는 R1이 로딩 존 스폰(주차), BLUE는 R2가 로딩 존 스폰 / 아군 GARDEN 4개, 팁 / FLOWER 없음
+    // 기본 경기 (입력 없음): 두 진영 모두 R1이 로딩 존 스폰(주차, BLUE 기본 = RED 기본의 점대칭 — 14-1a) / 아군 GARDEN 4개, 팁 / FLOWER 없음
     for (const alliance of ['RED', 'BLUE'] as const) {
       const e = eng({ allianceColor: alliance });
       e.runFullMatch();
@@ -1011,7 +1011,7 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       const allyGarden = e.pieces.filter(p => p.state === 'IN_GARDEN' && testCircleVsAABB({ center: { x: p.x, y: p.y }, radius: PIECE_PHYSICS[p.type].radius }, GARDEN_AABB[alliance]).colliding).map(p => p.id);
       assert(e.timeline.slice(0, 6000).every(f => f.scoreBreakdown === null), `${alliance}: no breakdown before the final tick`);
       assert(b !== null && b.hive === 0 && b.flower === 0 && b.garden === 4 && b.park === 5 && last.totalScore === 9, `${alliance}: garden 4 + park 5 = 9`);
-      assert(b.parkedRobots.join() === (alliance === 'RED' ? 'robot1' : 'robot2') && b.gardenPieceIds.slice().sort().join() === allyGarden.sort().join(), `${alliance}: parked robot / counted garden pieces identified`);
+      assert(b.parkedRobots.join() === 'robot1' && b.gardenPieceIds.slice().sort().join() === allyGarden.sort().join(), `${alliance}: parked robot / counted garden pieces identified`);
       assert(b.flowers.map(f => f.id).join() === e.field.flowers.map(f => f.id).join() && b.flowers.every(f => !f.owned && f.points === 0 && f.scoringPieces === 3), `${alliance}: 4 FLOWERs (POLLEN only, slot[1..] 3) not owned`);
     }
     // 전 항목: 팁 1회(20) + FLOWER 1개 소유(slot[1..] 2개 × 2 + 5 = 9) + GARDEN 4 + 주차 1대(5) = 38
@@ -1387,7 +1387,7 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
     }
     assert(codes({ r1AutoMovement: 'PARK' }) === '', 'RED R1 default start pose touches the LOADING ZONE -> PARK allowed');
     assert(codes({ r2AutoMovement: 'PARK' }) === 'AUTO_PARK_NOT_IN_ZONE:robot2', 'RED R2 default start pose is outside the LOADING ZONE');
-    assert(codes({ allianceColor: 'BLUE', r1AutoMovement: 'PARK', r2AutoMovement: 'PARK' }) === 'AUTO_PARK_NOT_IN_ZONE:robot1', 'BLUE: zone is the BLUE LOADING ZONE');
+    assert(codes({ allianceColor: 'BLUE', r1AutoMovement: 'PARK', r2AutoMovement: 'PARK' }) === 'AUTO_PARK_NOT_IN_ZONE:robot2', 'BLUE: zone is the BLUE LOADING ZONE (R1 default touches it, 14-1a)');
     assert(codes({ r2AutoMovement: 'PARK', r2Spawn: pose(9, 46) }) === '', 'start pose partly in the zone is enough');
     assert(codes({ r2AutoMovement: 'LEAVE' }) === '' && codes({ r2AutoMovement: 'NONE' }) === '', 'LEAVE / NONE need no zone');
     // 경고: 로봇 2대로 도달할 수 없는 SWARM 기준

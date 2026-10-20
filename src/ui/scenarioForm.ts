@@ -1,8 +1,9 @@
 // 시나리오 탭 폼 규칙 (명세서 3.8 시나리오 탭, 2.4 텔레옵 시작 조건, 09-11a): React / DOM 비의존 순수 함수
 // - 초안은 엔진 ScenarioConfig 그대로. 읽을 때는 지정하지 않은 항목을 엔진 기본값으로 풀어 보여 주고(readScenario),
 //   고칠 때만 그 항목을 명시 값으로 쓴다 → 기본 시나리오 { allianceColor: 'RED' }와 저장값 호환이 그대로 유지된다.
-// - 진영 전환 (09-11 확정): 직접 지정한 시작 자세는 좌우 대칭(x → 144 − x, 헤딩 → 180° − 헤딩, RED R1 기본 ↔ BLUE B1 기본),
-//   직접 지정한 상향 셀은 반대 셀로 (RED 기본 AUDIENCE ↔ BLUE 기본 OPPOSITE). 지정하지 않은 항목은 새 진영 기본값을 따른다.
+// - 진영 전환 (14-1a): 직접 지정한 시작 자세 / 바닥 기물은 필드 중심 점대칭((x, y) → (144 − x, 144 − y), 헤딩 + 180° —
+//   FLOWER / GARDEN / LOADING ZONE / HIVE 셀과 같은 대칭, RED 기본 스폰 ↔ BLUE 기본 스폰), 직접 지정한 상향 셀은 반대 셀로
+//   (RED 기본 AUDIENCE ↔ BLUE 기본 OPPOSITE). 지정하지 않은 항목은 새 진영 기본값을 따른다.
 // - 시드 (09-11 확정): REROLL은 초안 / 적용을 거치지 않고 적용 값과 초안에 바로 반영 (RESET TAB도 시드는 유지).
 // - 검증 = validateScenario + validateRobotPlacement (configDraft.tabIssues와 같은 결과). 화면용으로 로봇 / 빨간 칸을 붙인다.
 
@@ -22,7 +23,7 @@ import {
   validateRobotPlacement,
   validateScenario,
 } from '../core/simulationEngine';
-import type { GamePiece, RobotConfig, RobotPose, ScenarioConfig } from '../core/types';
+import type { FloorPiecePlacement, GamePiece, RobotConfig, RobotPose, ScenarioConfig } from '../core/types';
 import type { RobotId } from '../input/inputConfig';
 import type { ConfigDrafts, DraftValues } from './configDraft';
 import type { NumberFieldSpec } from './robotForm';
@@ -90,17 +91,23 @@ export function normalizeHeading(h: number): number {
   return v;
 }
 
-/** 좌우 대칭 자세: x → 144 − x, 헤딩 → π − 헤딩 (RED 기본 스폰 ↔ BLUE 기본 스폰) */
+/** 필드 중심 점대칭 자세: (x, y) → (144 − x, 144 − y), 헤딩 + π (14-1a, RED 기본 스폰 ↔ BLUE 기본 스폰) */
 export function mirrorPose(p: RobotPose): RobotPose {
-  return { x: FIELD_SIZE - p.x, y: p.y, heading: normalizeHeading(Math.PI - p.heading) };
+  return { x: FIELD_SIZE - p.x, y: FIELD_SIZE - p.y, heading: normalizeHeading(p.heading + Math.PI) };
 }
 
-/** 진영 전환 (09-11 확정): 지정한 시작 자세 좌우 대칭, 지정한 상향 셀 반대로, 나머지는 새 진영 기본값을 따름 */
+/** 필드 중심 점대칭 바닥 기물 (14-1a) */
+export function mirrorFloorPiece(p: FloorPiecePlacement): FloorPiecePlacement {
+  return { type: p.type, x: FIELD_SIZE - p.x, y: FIELD_SIZE - p.y };
+}
+
+/** 진영 전환 (14-1a): 지정한 시작 자세 / 바닥 기물 점대칭, 지정한 상향 셀 반대로, 나머지는 새 진영 기본값을 따름 */
 export function setAlliance(scenario: ScenarioConfig, alliance: 'RED' | 'BLUE'): ScenarioConfig {
   if (scenario.allianceColor === alliance) return scenario;
   const next: ScenarioConfig = { ...scenario, allianceColor: alliance };
   if (scenario.r1Spawn) next.r1Spawn = mirrorPose(scenario.r1Spawn);
   if (scenario.r2Spawn) next.r2Spawn = mirrorPose(scenario.r2Spawn);
+  if (scenario.floorPieces) next.floorPieces = scenario.floorPieces.map(mirrorFloorPiece);
   if (scenario.hiveUpwardCell) next.hiveUpwardCell = scenario.hiveUpwardCell === 'AUDIENCE_CELL' ? 'OPPOSITE_CELL' : 'AUDIENCE_CELL';
   return next;
 }

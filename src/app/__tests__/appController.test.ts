@@ -203,7 +203,7 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     const hp = h.status().hitProbability;
     assert(!!hp && resolverCalls === 4 && hp.robot1.POLLEN === 0.25 && hp.robot1.NECTAR === 0.5 && hp.robot2.POLLEN === 0.75 && hp.robot1.next === 'POLLEN', `hit probability on -> 4 resolver calls (${resolverCalls}), values from the injected resolver`);
     // 경기 전 설정 교체: 새 0틱 엔진, 진영 / 시작 자세 반영
-    assert(h.setSetup(makeSetup('BLUE', { r1Spawn: { x: 120, y: 40, heading: Math.PI } })), 'setup accepted in SETUP');
+    assert(h.setSetup(makeSetup('BLUE', { r1Spawn: { x: 120, y: 70, heading: Math.PI } })), 'setup accepted in SETUP');
     assert(h.status().alliance === 'BLUE' && h.currentFrame().r1.x === 120 && h.status().autoTipCount === 0, 'new engine from the replaced setup');
     // 경기 중에는 거부, 리셋은 같은 설정으로 0틱
     h.start();

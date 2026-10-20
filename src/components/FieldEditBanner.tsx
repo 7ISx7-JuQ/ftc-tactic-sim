@@ -5,7 +5,7 @@
 //   CANCEL(Esc) = 들어오기 전 값으로, DONE · APPLY = 그 로봇 탭 적용.
 // 13-4: 기물 버튼은 고를 수 있는 기물만 활성(히트맵 = 그 로봇이 쏘는 기물, 스윗스팟 = 찍는 슈터가 쏘는 기물),
 //   PER_PIECE의 스윗스팟 모드는 제목에 찍는 슈터(POLLEN 슈터 / NECTAR 슈터)를 붙인다.
-import { Check, Crosshair, Map as MapIcon, Move, X } from 'lucide-react';
+import { Check, Crosshair, Map as MapIcon, Move, Redo2, Undo2, X } from 'lucide-react';
 import type { CSSProperties } from 'react';
 import { sweetSpotBasisCell } from '../core/ballistics';
 import { heatmapGradientCss } from '../renderer/heatmapView';
@@ -135,16 +135,40 @@ export function SweetSpotHoverTip({
 }
 
 /**
- * 시작 자세 모드 안내 띠 (09-11b): 모드 이름 + CANCEL / DONE · APPLY, 배치 검증 사유(빨강), 조작 안내 + Esc.
- * 로봇이 필드 양쪽 벽에 붙어 있어 가운데 위쪽은 비므로 늘 필드 위쪽
+ * 시나리오 필드 편집 모드 안내 띠 (14-1a, 09-11b 시작 자세 모드 흡수): 모드 이름 + 되돌리기 / 다시 하기 + CANCEL / DONE · APPLY,
+ * 시나리오 검증 사유(빨강), 조작 안내 + Esc. 로봇이 필드 양쪽 벽에 붙어 있어 가운데 위쪽은 비므로 늘 필드 위쪽
  */
-export function SpawnEditBanner({ issues, lang, onDone, onCancel }: { issues: readonly string[]; lang: Language; onDone: () => void; onCancel: () => void }) {
-  const title = t(lang, 'edit.spawn.title');
+export function ScenarioEditBanner({
+  issues,
+  canUndo,
+  canRedo,
+  lang,
+  onUndo,
+  onRedo,
+  onDone,
+  onCancel,
+}: {
+  issues: readonly string[];
+  canUndo: boolean;
+  canRedo: boolean;
+  lang: Language;
+  onUndo: () => void;
+  onRedo: () => void;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const title = t(lang, 'edit.scenario.title');
   return (
     <div className="field-edit-banner" role="region" aria-label={title} onClick={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()}>
       <div className="field-edit-head">
         <Move />
         <span className="field-edit-title">{title}</span>
+        <button type="button" className="icon-button field-edit-history" title={t(lang, 'edit.undoKey')} aria-label={t(lang, 'edit.undo')} disabled={!canUndo} onClick={onUndo}>
+          <Undo2 />
+        </button>
+        <button type="button" className="icon-button field-edit-history" title={t(lang, 'edit.redoKey')} aria-label={t(lang, 'edit.redo')} disabled={!canRedo} onClick={onRedo}>
+          <Redo2 />
+        </button>
         <button type="button" className="config-button" onClick={onCancel}>
           <X />
           {t(lang, 'edit.cancel')}
@@ -164,14 +188,14 @@ export function SpawnEditBanner({ issues, lang, onDone, onCancel }: { issues: re
         </div>
       )}
       <div className="field-edit-hint">
-        <span>{t(lang, 'edit.spawn.hint')}</span>
+        <span>{t(lang, 'edit.scenario.hint')}</span>
         <span className="field-edit-esc">{t(lang, 'edit.escCancel')}</span>
       </div>
     </div>
   );
 }
 
-/** 시작 자세 모드: 로봇 위 좌표 / 헤딩 글자 (문제면 빨간 테두리) */
+/** 시나리오 필드 편집 모드: 로봇 위 좌표 / 헤딩 글자 (문제면 빨간 테두리) */
 export function SpawnPoseTag({ at, label, pose, bad, unit }: { at: { left: string; top: string }; label: string; pose: { x: number; y: number; heading: number }; bad: boolean; unit: LengthUnit }) {
   return (
     // 가로 기준점을 위치 비율만큼 옮겨(왼쪽 벽 = 글자 왼쪽 끝, 가운데 = 가운데) 필드 가장자리에서 잘리지 않게

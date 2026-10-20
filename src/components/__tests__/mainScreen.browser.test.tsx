@@ -150,6 +150,52 @@ describe('config 창', () => {
     await expect.element(mapBanner).not.toBeInTheDocument();
   });
 
+  it('시나리오 필드 편집 (14-1a): EDIT ON FIELD → 탭 변경 되돌리기 / 다시 하기, 겹친 자리에 끌어 놓으면 원래 자리 + 사유 토스트, Ctrl+Z, CANCEL', async () => {
+    await userEvent.click(button('Open settings'));
+    await userEvent.click(page.getByRole('tab', { name: 'SCENARIO' }));
+    await userEvent.click(button('EDIT ON FIELD').first());
+    const banner = page.getByRole('region', { name: 'SCENARIO ON FIELD' });
+    await expect.element(banner).toBeVisible();
+    await expect.element(banner.getByRole('button', { name: 'UNDO' })).toBeDisabled();
+    // 탭에서 바꾼 값도 되돌리기 기록에 남음
+    const alliance = page.getByRole('radiogroup', { name: 'ALLIANCE' });
+    await userEvent.click(alliance.getByRole('radio', { name: 'BLUE' }));
+    await expect.element(alliance.getByRole('radio', { name: 'BLUE' })).toBeChecked();
+    await userEvent.click(banner.getByRole('button', { name: 'UNDO' }));
+    await expect.element(alliance.getByRole('radio', { name: 'RED' })).toBeChecked();
+    await userEvent.click(banner.getByRole('button', { name: 'REDO' }));
+    await expect.element(alliance.getByRole('radio', { name: 'BLUE' })).toBeChecked();
+    await userEvent.click(banner.getByRole('button', { name: 'UNDO' }));
+
+    // 필드 좌표 → 캔버스 안 위치 (관중석 시점: 여백 8 in, 160 in = 캔버스 한 변)
+    const canvas = document.querySelector('.field-canvas') as HTMLCanvasElement;
+    const at = (x: number, y: number) => {
+      const k = canvas.getBoundingClientRect().width / 160;
+      return { x: (x + 8) * k, y: (y + 8) * k };
+    };
+    const field = page.elementLocator(canvas);
+    const x1 = page.getByLabelText('X').first(); // R1 시작 자세 X 칸
+    await expect.element(x1).toHaveValue('9.0');
+    // R1을 R2 위로 끌어 놓음 → 놓지 않음 (원래 자리) + 사유 토스트
+    await userEvent.dragAndDrop(field, field, { sourcePosition: at(9, 36), targetPosition: at(20, 100) });
+    await expect.element(page.getByText(/^Not placed — /)).toBeVisible();
+    await expect.element(x1).toHaveValue('9.0');
+    await expect.element(banner.getByRole('button', { name: 'UNDO' })).toBeDisabled();
+    // 빈 자리로 끌기 → 확정 + 되돌리기 기록, Ctrl+Z로 원래 자리
+    await userEvent.dragAndDrop(field, field, { sourcePosition: at(9, 36), targetPosition: at(30, 40) });
+    await expect.element(x1).not.toHaveValue('9.0');
+    await expect.element(banner.getByRole('button', { name: 'UNDO' })).toBeEnabled();
+    await userEvent.keyboard('{Control>}z{/Control}');
+    await expect.element(x1).toHaveValue('9.0');
+    await userEvent.keyboard('{Control>}{Shift>}z{/Shift}{/Control}');
+    await expect.element(x1).not.toHaveValue('9.0');
+    // CANCEL = 들어오기 전으로 + 모드 닫힘
+    await userEvent.click(banner.getByRole('button', { name: 'CANCEL' }));
+    await expect.element(banner).not.toBeInTheDocument();
+    await expect.element(x1).toHaveValue('9.0');
+    await expect.element(button('APPLY')).toBeDisabled();
+  });
+
   it('시나리오 REROLL은 APPLY 없이 바로 적용된다', async () => {
     await userEvent.click(button('Open settings'));
     await userEvent.click(page.getByRole('tab', { name: 'SCENARIO' }));
