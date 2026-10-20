@@ -347,6 +347,17 @@ describe('config 창', () => {
     await expect.element(button('APPLY')).toBeDisabled();
   });
 
+  it('TIP 진행 목표 (14-3): 좌측 패널 TIP 목표 = 적용한 시나리오의 POLLINATOR 1 기준 (기본 4)', async () => {
+    const tipTarget = () => document.querySelector('.tip-target')?.textContent?.trim();
+    await expect.poll(tipTarget).toBe('/ 4');
+    await userEvent.click(button('Open settings'));
+    await userEvent.click(page.getByRole('tab', { name: 'SCENARIO' }));
+    await userEvent.fill(page.getByLabelText('POLLINATOR 1 TIPs'), '3');
+    await expect.poll(tipTarget).toBe('/ 4'); // 초안만 바뀜
+    await userEvent.click(button('APPLY'));
+    await expect.poll(tipTarget).toBe('/ 3');
+  });
+
   it('시나리오 REROLL은 APPLY 없이 바로 적용된다', async () => {
     await userEvent.click(button('Open settings'));
     await userEvent.click(page.getByRole('tab', { name: 'SCENARIO' }));

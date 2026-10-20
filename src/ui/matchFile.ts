@@ -13,7 +13,7 @@ import type { Language, MessageKey } from './i18n';
 import type { RobotLutView } from './lutView';
 import { robotLabel } from './mainScreenModel';
 import { fileTimestamp, safeFileName } from './presetFile';
-import { resultBasisText, resultRows, rpCards } from './resultModel';
+import { resultBasisText, resultRows, rpCardProgressText, rpCards } from './resultModel';
 import { formatMatchTime } from './units';
 
 const ROBOTS: readonly RobotId[] = ['robot1', 'robot2'];
@@ -118,7 +118,7 @@ export function matchSummaryText(s: SummaryInput): string {
     `${t(s.lang, 'result.total')} ${s.result.total}`,
     ...resultRows(s.result).map(row => `${row.key.padEnd(7)}${String(row.points).padStart(3)}  ${resultBasisText(row, s.lang)}`),
     `${t(s.lang, 'result.rp')}  ${rpCards(s.result)
-      .map(c => `${c.key}${c.achieved ? ' ✓' : ''} ${t(s.lang, 'result.rp.progress', { unit: c.unit, current: c.current, target: c.target })}`)
+      .map(c => `${c.key}${c.achieved ? ' ✓' : ''} ${rpCardProgressText(c, s.lang)}`)
       .join(' · ')}`,
     t(s.lang, 'summary.footer', { seed: s.seed, engine: ENGINE_VERSION, ballistics: BALLISTICS_MODEL_VERSION }),
   ];

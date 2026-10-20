@@ -15,13 +15,14 @@
 // 시계 / 프레임 스케줄러 / 브라우저 환경을 주입받아 Node에서 가짜 시간으로 테스트한다.
 
 import { liftDriveRatio } from '../core/kinematics';
-import { DT, MATCH_TICKS, SimulationEngine } from '../core/simulationEngine';
+import { DT, MATCH_TICKS, SimulationEngine, autoMovementPoints, resolveRPThresholds } from '../core/simulationEngine';
 import type { EngineTimeline } from '../core/simulationEngine';
 import type {
   DeepReadonly,
   MatchShooterBallistics,
   RobotConfig,
   RPState,
+  RPThresholds,
   ScenarioConfig,
   ScoreBreakdown,
   ShotProbabilityResolver,
@@ -103,6 +104,7 @@ export interface AppStatus {
   score: number;                // 확정 점수 (경기 중 = 텔레옵 TIP × 20, 종료 프레임 = 최종 합계)
   tipCount: number;             // 텔레옵 TIP 횟수
   autoTipCount: number;         // 오토 TIP 횟수 (좌측 패널 TIP 표시 = 오토 + 텔레옵, 점수에는 미포함)
+  rpThresholds: RPThresholds;   // 이 경기 RP 기준값 (시나리오 값, 틀리면 엔진처럼 기본값 — resolveRPThresholds, 14-3: TIP 진행 목표)
   rp: RPState;
   // 표시 옵션 hitProbability가 켜져 있을 때만 (좌측 패널 명중 확률, 상태 알림마다 판정 함수 4회 호출), 꺼져 있으면 null
   hitProbability: Record<'robot1' | 'robot2', RobotHitProbability> | null;
@@ -158,6 +160,8 @@ export interface MatchResult {
   tips: number;                 // 오토 + 텔레옵 TIP 횟수 (RP 카드용, 점수에는 오토 미포함)
   autoTips: number;             // 오토 TIP 횟수 (결과 팝업 근거: RP에만 합산, 09-12)
   teleopTips: number;           // 텔레옵 TIP 횟수 (HIVE 점수 = × 20)
+  thresholds: RPThresholds;     // 이 경기 RP 기준값 (엔진 판정과 같은 값, 14-3: RP 카드)
+  autoMovementPoints: number;   // 오토 이동 점수 (LEAVE 3 / PARK 5 합, RP에만 — SWARM = 이 점수 + TELEOP PARK, 14-3)
 }
 
 export interface AppControllerDeps {
@@ -578,6 +582,7 @@ export class AppController {
       score: frame.totalScore,
       tipCount: hive.tipCount,
       autoTipCount: hive.autoTipCount,
+      rpThresholds: resolveRPThresholds(this.setup.scenario),
       rp: { ...frame.rpAchieved },
       hitProbability: this.options.hitProbability ? hitProbabilities(frame, this.setup.shotResolver, { robot1: this.setup.r1Config, robot2: this.setup.r2Config }) : null,
       gamepads: this.adapter.gamepadStatus(),
@@ -629,6 +634,8 @@ export class AppController {
       tips: hive.autoTipCount + hive.tipCount,
       autoTips: hive.autoTipCount,
       teleopTips: hive.tipCount,
+      thresholds: resolveRPThresholds(this.setup.scenario),
+      autoMovementPoints: autoMovementPoints(this.setup.scenario),
     };
   }
 

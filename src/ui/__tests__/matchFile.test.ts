@@ -37,6 +37,8 @@ const result: MatchResult = {
   tips: 6,
   autoTips: 5,
   teleopTips: 1,
+  thresholds: { swarmPoints: 16, pollinator1Tips: 4, pollinator2Tips: 7 },
+  autoMovementPoints: 6,
 };
 const teams = { robot1: { teamNumber: '12345', teamName: 'Bumblebots' }, robot2: { teamNumber: '', teamName: 'Hive Mind' } };
 const date = new Date(2026, 8, 30, 14, 32, 5);
@@ -120,8 +122,8 @@ describe('경기 파일 화면 규칙 (10-4)', () => {
         'HIVE    20  TELEOP TIP 1 × 20 · auto TIP 5 counts for RP only',
         'FLOWER   9  FLOWER 2: 2 × 2 + bottom bonus 5',
         'GARDEN   4  POLLEN 4 × 1',
-        'PARK     5  R1 parked × 5',
-        'RP  SWARM PARK 5 / 10 · POLLINATOR 1 ✓ TIP 6 / 4 · POLLINATOR 2 TIP 6 / 7',
+        'PARK     5  R1 parked × 5 · auto LEAVE / PARK 6 counts for RP only',
+        'RP  SWARM AUTO 6 + PARK 5 = 11 / 16 · POLLINATOR 1 ✓ TIP 6 / 4 · POLLINATOR 2 TIP 6 / 7',
         `SEED 12194135 · ENGINE v${ENGINE_VERSION} · BALLISTICS v${BALLISTICS_MODEL_VERSION}`,
         '',
       ].join('\n'),
@@ -133,6 +135,7 @@ describe('경기 파일 화면 규칙 (10-4)', () => {
     expect(lines[2]).toBe('R1 · R2 Hive Mind');
     expect(lines[3]).toBe('총점 38');
     expect(lines[4]).toContain('TELEOP TIP 1회 × 20');
+    expect(lines[7]).toBe('PARK     5  R1 주차 × 5 · 오토 LEAVE · PARK 6점은 RP에만');
     expect(lines[9]).toBe(`시드 7 · 엔진 v${ENGINE_VERSION} · 탄도 모델 v${BALLISTICS_MODEL_VERSION}`);
   });
 });

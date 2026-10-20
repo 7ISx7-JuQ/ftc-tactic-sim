@@ -9,7 +9,7 @@ import { ALLIANCE_COLORS } from '../renderer/canvasRenderer';
 import { t } from '../ui/i18n';
 import type { Language } from '../ui/i18n';
 import { robotLabel } from '../ui/mainScreenModel';
-import { resultBasisText, resultRows, rpCards } from '../ui/resultModel';
+import { resultBasisText, resultRows, rpCardProgressText, rpCards } from '../ui/resultModel';
 
 type RobotId = 'robot1' | 'robot2';
 const ROBOTS: readonly RobotId[] = ['robot1', 'robot2'];
@@ -107,7 +107,7 @@ export default function ResultPopup({
                   {card.achieved && <Check />}
                   {card.key}
                 </span>
-                <span className="result-rp-progress">{t(lang, 'result.rp.progress', { unit: card.unit, current: card.current, target: card.target })}</span>
+                <span className="result-rp-progress">{rpCardProgressText(card, lang)}</span>
               </div>
             ))}
           </div>

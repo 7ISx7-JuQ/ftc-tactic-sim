@@ -72,6 +72,11 @@ describe('B. 좌측 패널', () => {
     expect(tipDisplay(3, 4)).toEqual({ count: 7, target: 7, allDone: true });
     expect(tipDisplay(5, 9)).toEqual({ count: 14, target: 7, allDone: true });
     expect(tipDisplay(-1, 2).count).toBe(2);
+    // 14-3: 이 경기 시나리오의 RP 기준값 (POLLINATOR 1 = 3, 2 = 5)
+    const th = { pollinator1Tips: 3, pollinator2Tips: 5 };
+    expect(tipDisplay(1, 1, th)).toEqual({ count: 2, target: 3, allDone: false });
+    expect(tipDisplay(1, 2, th)).toEqual({ count: 3, target: 5, allDone: false });
+    expect(tipDisplay(5, 0, th)).toEqual({ count: 5, target: 5, allDone: true });
   });
 
   it('로봇 이름: 팀 번호가 있으면 #번호, 없으면 R1 / R2', () => {

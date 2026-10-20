@@ -314,7 +314,9 @@ const en = {
   'result.basis.garden': 'POLLEN {count} × 1',
   'result.basis.park': '{robots} parked × 5',
   'result.basis.parkNone': 'No robot parked',
-  'result.rp.progress': '{unit} {current} / {target}',
+  'result.basis.parkAuto': 'auto LEAVE / PARK {points} counts for RP only',
+  'result.rp.swarm': 'AUTO {autoPoints} + PARK {parkPoints} = {current} / {target}',
+  'result.rp.tips': 'TIP {current} / {target}',
 
   // 좌측 득점 패널
   'panel.timeRemaining': 'Time remaining',
@@ -788,7 +790,9 @@ const ko: Record<MessageKey, string> = {
   'result.basis.garden': 'POLLEN {count} × 1',
   'result.basis.park': '{robots} 주차 × 5',
   'result.basis.parkNone': '주차한 로봇 없음',
-  'result.rp.progress': '{unit} {current} / {target}',
+  'result.basis.parkAuto': '오토 LEAVE · PARK {points}점은 RP에만',
+  'result.rp.swarm': 'AUTO {autoPoints} + PARK {parkPoints} = {current} / {target}',
+  'result.rp.tips': 'TIP {current} / {target}',
 
   'panel.timeRemaining': '남은 시간',
   'panel.score': '점수',

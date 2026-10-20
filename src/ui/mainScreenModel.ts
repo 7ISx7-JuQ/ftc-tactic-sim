@@ -1,6 +1,8 @@
 // 메인 화면 표시 규칙 (명세서 3.8 화면 구성, 09-6d): React 컴포넌트가 쓰는 순수 계산. DOM / React 비의존
 import type { AppStatus } from '../app/appController';
 import type { GamepadSlotStatus } from '../input/browserInput';
+import { DEFAULT_RP_THRESHOLDS } from '../core/simulationEngine';
+import type { RPThresholds } from '../core/types';
 
 // ------------------------------------------------------------
 // 화면 비례 단위 (명세서 3.8 기본 원칙): --u = min(창 폭 / 1366, 창 높이 / 650), 1u = 기준 화면에서 1 px.
@@ -48,13 +50,13 @@ export function fieldCanvasSize(areaWidth: number, areaHeight: number, devicePix
 // 좌측 패널
 // ------------------------------------------------------------
 
-export const POLLINATOR_1_TIPS = 4;
-export const POLLINATOR_2_TIPS = 7;
-
-/** TIP 표시: {오토 + 텔레옵} / {다음 RP 목표} — 4(POLLINATOR 1) → 달성 후 7(POLLINATOR 2) → 7 달성 후 n / 7 + 달성 */
-export function tipDisplay(autoTips: number, teleopTips: number): { count: number; target: number; allDone: boolean } {
+/**
+ * TIP 표시: {오토 + 텔레옵} / {다음 RP 목표} — POLLINATOR 1 기준 → 달성 후 POLLINATOR 2 기준 → 달성 후 n / 기준 + 달성.
+ * 기준은 이 경기 시나리오의 RP 기준값 (14-3, 기본 4 → 7)
+ */
+export function tipDisplay(autoTips: number, teleopTips: number, thresholds: Pick<RPThresholds, 'pollinator1Tips' | 'pollinator2Tips'> = DEFAULT_RP_THRESHOLDS): { count: number; target: number; allDone: boolean } {
   const count = Math.max(0, autoTips) + Math.max(0, teleopTips);
-  return { count, target: count < POLLINATOR_1_TIPS ? POLLINATOR_1_TIPS : POLLINATOR_2_TIPS, allDone: count >= POLLINATOR_2_TIPS };
+  return { count, target: count < thresholds.pollinator1Tips ? thresholds.pollinator1Tips : thresholds.pollinator2Tips, allDone: count >= thresholds.pollinator2Tips };
 }
 
 /** 로봇 표시 이름: 팀 번호가 있으면 #번호, 없으면 R1 / R2 (09-6d 확정) */

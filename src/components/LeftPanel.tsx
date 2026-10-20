@@ -54,7 +54,7 @@ export interface PanelTeam {
 }
 
 export default function LeftPanel({ status, lang, teams }: { status: AppStatus; lang: Language; teams?: Readonly<Record<'robot1' | 'robot2', PanelTeam>> }) {
-  const tip = tipDisplay(status.autoTipCount, status.tipCount);
+  const tip = tipDisplay(status.autoTipCount, status.tipCount, status.rpThresholds);
   const colors = ALLIANCE_COLORS[status.alliance];
 
   return (

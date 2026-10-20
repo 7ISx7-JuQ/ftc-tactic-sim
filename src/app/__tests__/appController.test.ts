@@ -205,6 +205,11 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     // 경기 전 설정 교체: 새 0틱 엔진, 진영 / 시작 자세 반영
     assert(h.setSetup(makeSetup('BLUE', { r1Spawn: { x: 120, y: 70, heading: Math.PI } })), 'setup accepted in SETUP');
     assert(h.status().alliance === 'BLUE' && h.currentFrame().r1.x === 120 && h.status().autoTipCount === 0, 'new engine from the replaced setup');
+    // 14-3: RP 기준값 = 이 경기 시나리오 값 (없거나 틀리면 엔진처럼 기본값)
+    assert(JSON.stringify(s0.rpThresholds) === JSON.stringify({ swarmPoints: 16, pollinator1Tips: 4, pollinator2Tips: 7 }), 'default RP thresholds in the status');
+    const custom = { swarmPoints: 13, pollinator1Tips: 3, pollinator2Tips: 5 };
+    assert(h.setSetup(makeSetup('BLUE', { r1Spawn: { x: 120, y: 70, heading: Math.PI }, rpThresholds: custom })) && JSON.stringify(h.status().rpThresholds) === JSON.stringify(custom), 'scenario RP thresholds in the status');
+    assert(h.setSetup(makeSetup('BLUE', { r1Spawn: { x: 120, y: 70, heading: Math.PI }, rpThresholds: { swarmPoints: 13, pollinator1Tips: 6, pollinator2Tips: 5 } })) && h.status().rpThresholds.pollinator1Tips === 4, 'invalid thresholds -> engine defaults');
     // 경기 중에는 거부, 리셋은 같은 설정으로 0틱
     h.start();
     frames.advance(VIEW_ANIMATION_MS + 50);
@@ -311,6 +316,9 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     const r = s.result!;
     const b = r.breakdown;
     assert(r.total === b.hive + b.flower + b.garden + b.park && r.total === s.score, 'result total = breakdown sum = final score');
+    // 14-3: RP 카드 재료 = 이 경기 기준값 + 오토 이동 점수 (기본 LEAVE · LEAVE = 6)
+    assert(r.thresholds.swarmPoints === 16 && r.thresholds.pollinator2Tips === 7 && r.autoMovementPoints === 6, 'result carries thresholds / auto movement points');
+    assert(r.rp.swarm === r.autoMovementPoints + b.park >= r.thresholds.swarmPoints, 'SWARM = auto movement + TELEOP PARK >= threshold');
 
     // 5초 대기 후 결과 팝업 (Space로 건너뛰기는 아래 분기 뒤에서 확인)
     frames.advance(END_HIGHLIGHT_MS - 200, 20);
