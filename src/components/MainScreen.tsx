@@ -77,7 +77,7 @@ import RobotTab from './RobotTab';
 import ScenarioTab from './ScenarioTab';
 import ScenarioFieldPopover from './ScenarioFieldPopover';
 import { readSweetSpot } from '../ui/robotForm';
-import { issueFieldSet, newSeed, readScenario, rerollSeed, scenarioFormIssues, scenarioIssueText } from '../ui/scenarioForm';
+import { issueFieldSet, newSeed, readScenario, rerollSeed, scenarioFormIssues, scenarioFormWarnings, scenarioIssueText } from '../ui/scenarioForm';
 import { spawnHitTest } from '../renderer/spawnEditLayout';
 import type { SpawnPart, SpawnRobotId } from '../renderer/spawnEditLayout';
 import type { RobotPose } from '../core/types';
@@ -1154,6 +1154,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
                   seed={readScenario(drafts.applied.scenario, drafts.applied.robot1.config, drafts.applied.robot2.config).seed}
                   fieldText={drafts.fieldText.scenario}
                   issues={scenarioFormIssues(drafts.draft)}
+                  warnings={scenarioFormWarnings(drafts.draft)}
                   unit={settings.lengthUnit}
                   lang={lang}
                   locked={locked}

@@ -21,10 +21,14 @@ import {
   TOTAL_POLLEN,
   getCarryCapacity,
   resolveAutoMovement,
+  DEFAULT_RP_THRESHOLDS,
+  RP_THRESHOLD_MAX,
+  scenarioWarnings,
   validateRobotPlacement,
   validateScenario,
 } from '../core/simulationEngine';
-import type { AutoMovement, FloorPiecePlacement, GamePiece, RobotConfig, RobotPose, ScenarioConfig } from '../core/types';
+import type { ScenarioWarning } from '../core/simulationEngine';
+import type { AutoMovement, FloorPiecePlacement, GamePiece, RPThresholds, RobotConfig, RobotPose, ScenarioConfig } from '../core/types';
 import type { RobotId } from '../input/inputConfig';
 import type { ConfigDrafts, DraftValues } from './configDraft';
 import type { NumberFieldSpec } from './robotForm';
@@ -47,6 +51,8 @@ export interface ScenarioView {
   autoTipCount: number;
   floorPieces: FloorPiecePlacement[]; // 지정 바닥 기물 (없으면 빈 목록 = 모두 무작위 산포, 14-1b)
   autoMovement: Record<RobotId, AutoMovement>; // 로봇별 오토 이동 (없거나 모르는 값 = LEAVE, 엔진 resolveAutoMovement, 14-1d)
+  rpThresholds: RPThresholds;   // RP 기준값 (지정 안 했으면 기본값, 지정한 값은 틀려도 그대로 보여 고치게 함 — 14-2)
+  rpIsDefault: boolean;
   spawn: Record<RobotId, RobotPose>;
   spawnIsDefault: Record<RobotId, boolean>;
   seed: number;
@@ -78,6 +84,8 @@ export function readScenario(scenario: ScenarioConfig, r1: RobotConfig, r2: Robo
     autoTipCount: scenario.autoTipCount ?? 0,
     floorPieces: (scenario.floorPieces ?? []).map(p => ({ type: p.type, x: p.x, y: p.y })),
     autoMovement: { robot1: resolveAutoMovement(scenario.r1AutoMovement), robot2: resolveAutoMovement(scenario.r2AutoMovement) },
+    rpThresholds: { ...(scenario.rpThresholds ?? DEFAULT_RP_THRESHOLDS) },
+    rpIsDefault: scenario.rpThresholds === undefined,
     spawn: { robot1: { ...(spawnOf('robot1') ?? DEFAULT_SPAWN_POSES[a].robot1) }, robot2: { ...(spawnOf('robot2') ?? DEFAULT_SPAWN_POSES[a].robot2) } },
     spawnIsDefault: { robot1: spawnOf('robot1') === undefined, robot2: spawnOf('robot2') === undefined },
     seed: scenario.rngSeed ?? DEFAULT_RNG_SEED,
@@ -147,6 +155,32 @@ export function setAutoMovement(scenario: ScenarioConfig, robot: RobotId, moveme
 
 /** 오토 이동 선택지 (점수: NONE 0 / LEAVE 3 / PARK 5, RP에만) */
 export const AUTO_MOVEMENTS: readonly AutoMovement[] = ['NONE', 'LEAVE', 'PARK'];
+
+// ------------------------------------------------------------
+// RP 기준값 (14-2): 세 값을 묶어 저장 (부분 지정 없음) — 한 칸을 고치면 나머지는 보이는 값(기본값)으로 함께 지정
+// ------------------------------------------------------------
+
+export const RP_KEYS: readonly (keyof RPThresholds)[] = ['swarmPoints', 'pollinator1Tips', 'pollinator2Tips'];
+/** RP 기준값 칸: 정수 1 ~ 99 (엔진 RP_THRESHOLD_MAX, 검증 RP_THRESHOLDS) */
+export const RP_FIELD_SPEC: NumberFieldSpec = { kind: 'count', min: 1, max: RP_THRESHOLD_MAX, integer: true };
+/** 틀린 입력 글자 키: rp.swarmPoints 등 */
+export const rpFieldKey = (key: keyof RPThresholds) => `rp.${key}`;
+
+export function setRpThreshold(scenario: ScenarioConfig, view: ScenarioView, key: keyof RPThresholds, value: number): ScenarioConfig {
+  return { ...scenario, rpThresholds: { ...view.rpThresholds, [key]: value } };
+}
+
+/** RP 기준값 기본값으로 (지정 해제 → DEFAULT_RP_THRESHOLDS) */
+export function resetRpThresholds(scenario: ScenarioConfig): ScenarioConfig {
+  const next = { ...scenario };
+  delete next.rpThresholds;
+  return next;
+}
+
+/** 시나리오 경고 (적용은 허용, 14-2): SWARM_UNREACHABLE = 로봇 2대로 도달할 수 없는 SWARM 기준 (> 20점) */
+export function scenarioFormWarnings(values: DraftValues): ScenarioWarning[] {
+  return scenarioWarnings(values.scenario);
+}
 
 /** 적재 칸 순환 (칸 클릭): POLLEN → NECTAR(흡입 가능 로봇만) → 빈 칸 → POLLEN */
 export function nextSlotPiece(current: PieceType | null, canIntakeNectar: boolean): PieceType | null {

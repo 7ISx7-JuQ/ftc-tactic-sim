@@ -280,6 +280,9 @@ describe('필드 편집 모드 (09-10b / 09-10c / 09-11b)', () => {
     expect(back.draft.scenario).not.toHaveProperty('r1Spawn');
     expect(back.fieldText.scenario).toEqual({ 'spawn.robot2.y': 'bad' });
     expect(cancelFieldEdit(during, edit)).toEqual(back);
+    // RP 기준값 칸의 틀린 글자도 지금 그대로 (14-2)
+    const rpTypo = setFieldText(during, 'scenario', 'rp.swarmPoints', '0');
+    expect(cancelScenarioEdit(rpTypo, edit).fieldText.scenario).toEqual({ 'spawn.robot2.y': 'bad', 'rp.swarmPoints': '0' });
     // 모드 중 진영 전환 → 들어오기 전 값을 새 진영으로 (점대칭)
     const blue = withScenario(during, { allianceColor: 'BLUE' });
     const backBlue = cancelScenarioEdit(blue, edit);

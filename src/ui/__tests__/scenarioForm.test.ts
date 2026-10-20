@@ -17,9 +17,14 @@ import {
   resetSpawn,
   scenarioFormIssues,
   scenarioIssueText,
+  RP_FIELD_SPEC,
+  resetRpThresholds,
+  rpFieldKey,
+  scenarioFormWarnings,
   setAlliance,
   setAutoMovement,
   setFlowerCount,
+  setRpThreshold,
   setHivePieces,
   setLoadoutSlot,
   setSpawnAxis,
@@ -45,6 +50,8 @@ describe('시나리오 탭 폼 (09-11a)', () => {
       autoTipCount: 0,
       floorPieces: [],
       autoMovement: { robot1: 'LEAVE', robot2: 'LEAVE' },
+      rpThresholds: { swarmPoints: 16, pollinator1Tips: 4, pollinator2Tips: 7 },
+      rpIsDefault: true,
       spawn: DEFAULT_SPAWN_POSES.RED,
       spawnIsDefault: { robot1: true, robot2: true },
       seed: DEFAULT_RNG_SEED,
@@ -119,6 +126,31 @@ describe('시나리오 탭 폼 (09-11a)', () => {
     expect(sc).toEqual({ allianceColor: 'RED', r2AutoMovement: 'PARK' });
     expect(readScenario(setAutoMovement(sc, 'robot1', 'NONE'), R1, R2).autoMovement).toEqual({ robot1: 'NONE', robot2: 'PARK' });
     expect(readScenario({ allianceColor: 'RED', r1AutoMovement: 'FLY' as never }, R1, R2).autoMovement.robot1).toBe('LEAVE');
+  });
+
+  it('D-3. RP 기준값 (14-2): 한 칸을 고치면 세 값을 묶어 지정, DEFAULT = 지정 해제, 틀린 값은 그대로 보임 + rp 묶음 빨강, SWARM > 20은 경고만', () => {
+    const sc: ScenarioConfig = { allianceColor: 'RED' };
+    const view = readScenario(sc, R1, R2);
+    const swarm = setRpThreshold(sc, view, 'swarmPoints', 13);
+    expect(swarm.rpThresholds).toEqual({ swarmPoints: 13, pollinator1Tips: 4, pollinator2Tips: 7 });
+    expect(readScenario(swarm, R1, R2)).toMatchObject({ rpThresholds: { swarmPoints: 13, pollinator1Tips: 4, pollinator2Tips: 7 }, rpIsDefault: false });
+    expect(resetRpThresholds(swarm)).toEqual(sc);
+    expect(rpFieldKey('pollinator2Tips')).toBe('rp.pollinator2Tips');
+    expect([RP_FIELD_SPEC.min, RP_FIELD_SPEC.max, RP_FIELD_SPEC.integer]).toEqual([1, 99, true]);
+    // POLLINATOR 1 > 2: 보이는 값 그대로 + RP_THRESHOLDS (rp 묶음)
+    const bad = setRpThreshold(sc, view, 'pollinator1Tips', 8);
+    expect(readScenario(bad, R1, R2).rpThresholds.pollinator1Tips).toBe(8);
+    const issues = scenarioFormIssues(withScenario(bad));
+    expect(issues.map(i => i.code)).toEqual(['RP_THRESHOLDS']);
+    expect([...issueFieldSet(issues)]).toEqual(['rp']);
+    // 도달할 수 없는 SWARM: 경고만 (적용 가능)
+    const far = withScenario(setRpThreshold(sc, view, 'swarmPoints', 21));
+    expect(scenarioFormIssues(far)).toEqual([]);
+    expect(scenarioFormWarnings(far)).toEqual(['SWARM_UNREACHABLE']);
+    expect(scenarioFormWarnings(withScenario(swarm))).toEqual([]);
+    // 오토 이동 PARK 밖 = autoMove + spawn 묶음
+    const park = scenarioFormIssues(withScenario(setAutoMovement(sc, 'robot2', 'PARK')));
+    expect(park).toEqual([{ code: 'AUTO_PARK_NOT_IN_ZONE', robot: 'robot2', fields: ['autoMove.robot2', 'spawn.robot2'] }]);
   });
 
   it('D. 시작 자세 / 개수: 한 축만 고치면 기본 스폰에서 시작, 기본값 = 지정 해제, 개수는 나머지 칸 유지', () => {

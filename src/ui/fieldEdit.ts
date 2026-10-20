@@ -286,7 +286,13 @@ export function cancelScenarioEdit(drafts: ConfigDrafts, edit: ScenarioFieldEdit
   const next: ScenarioConfig = { ...scenario };
   if (current.rpThresholds === undefined) delete next.rpThresholds;
   else next.rpThresholds = current.rpThresholds;
-  return restoreScenarioSnapshot(drafts, { scenario: next, fieldText: edit.entry.fieldText });
+  // RP 기준값 칸(rp.*)의 틀린 글자도 지금 그대로 (14-2), 나머지 칸 글자는 들어오기 전으로
+  const isRp = (key: string) => key.startsWith('rp.');
+  const fieldText = {
+    ...Object.fromEntries(Object.entries(edit.entry.fieldText).filter(([key]) => !isRp(key))),
+    ...Object.fromEntries(Object.entries(drafts.fieldText.scenario).filter(([key]) => isRp(key))),
+  };
+  return restoreScenarioSnapshot(drafts, { scenario: next, fieldText });
 }
 
 /** 그 로봇이 걸린 배치 문제 (놓기 거부 / 사유 토스트, 14-1a): 필드 밖 / HIVE 기둥 / FLOWER / 다른 로봇 / 고정 기물과 겹침 */

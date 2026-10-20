@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { ScenarioWarning } from '../../core/simulationEngine';
 import type { BallisticsIssue } from '../../core/ballistics';
 import type { PlacementIssue, ScenarioIssue } from '../../core/simulationEngine';
 import type { PauseReason } from '../../input/realtimeLoop';
@@ -56,6 +57,8 @@ describe('화면 문구 사전 (09-6a)', () => {
     for (const code of Object.keys(ISSUE_CODES)) assert(`issue.${code}` in MESSAGES.en, `issue.${code} message exists`);
     for (const state of Object.keys(LUT_STATES)) assert(`lut.${state}` in MESSAGES.en, `lut.${state} message exists`);
     for (const reason of Object.keys(PAUSE_REASONS)) assert(`pause.${reason}` in MESSAGES.en, `pause.${reason} message exists`);
+    // 시나리오 경고 (14-2): 엔진 scenarioWarnings 코드마다 문구
+    for (const code of ['SWARM_UNREACHABLE'] satisfies ScenarioWarning[]) assert(`warning.${code}` in MESSAGES.en, `warning.${code} message exists`);
   });
 
   it('C. 조회 / 자리표시자 치환 / 대체', () => {

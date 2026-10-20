@@ -2,6 +2,8 @@
 // 시작 자세 숫자 칸 / 난수 시드. 값은 초안에만 들어가고 APPLY로 확정한다 (시드 REROLL만 바로 적용 — 09-11 확정). 경기가 있는 동안 읽기 전용.
 // 09-11b: EDIT ON FIELD(필드에서 끌어 시작 자세 정하기 — 모드는 필드 안내 띠의 DONE · APPLY / CANCEL로 끝냄).
 // 14-1a: EDIT ON FIELD = 시나리오 필드 편집 모드 — 탭 맨 위 버튼, 시작 자세 구역의 버튼도 같은 모드를 연다.
+// 14-2: 오토 이동(로봇별 NONE / LEAVE / PARK) + RP 기준값(SWARM 점수 / POLLINATOR 1 · 2 TIP 수, 정수 1 ~ 99, DEFAULT = 지정 해제),
+//   로봇 2대로 도달할 수 없는 SWARM 기준은 경고(주황, 적용 허용).
 import { CircleAlert, CircleCheck, Dices, Move, RotateCcw } from 'lucide-react';
 import { hiveTipPollenThreshold } from '../core/types';
 import type { RobotConfig, RobotPose, ScenarioConfig } from '../core/types';
@@ -11,7 +13,14 @@ import type { Language } from '../ui/i18n';
 import { robotLabel } from '../ui/mainScreenModel';
 import type { RobotProfile } from '../ui/robotForm';
 import {
+  AUTO_MOVEMENTS,
   COUNT_LIMITS,
+  RP_FIELD_SPEC,
+  RP_KEYS,
+  resetRpThresholds,
+  rpFieldKey,
+  setAutoMovement,
+  setRpThreshold,
   SPAWN_AXES,
   SPAWN_FIELD_SPECS,
   floorSummary,
@@ -31,7 +40,8 @@ import {
   spawnFieldKey,
 } from '../ui/scenarioForm';
 import type { HiveCellChoice, PieceType, ScenarioFormIssue, ScenarioView } from '../ui/scenarioForm';
-import { getCarryCapacity } from '../core/simulationEngine';
+import { SWARM_MAX_POINTS, getCarryCapacity } from '../core/simulationEngine';
+import type { ScenarioWarning } from '../core/simulationEngine';
 import type { LengthUnit } from '../ui/units';
 import { NumberField, Section, Segmented, Stepper } from './FormControls';
 
@@ -44,6 +54,7 @@ export interface ScenarioTabProps {
   seed: number;                                     // 지금 경기 시드 (적용 값)
   fieldText: Readonly<Record<string, string>>;      // 틀린 입력 글자
   issues: readonly ScenarioFormIssue[];
+  warnings: readonly ScenarioWarning[];             // 적용은 허용하는 경고 (14-2: SWARM_UNREACHABLE)
   unit: LengthUnit;
   lang: Language;
   locked: boolean;
@@ -56,7 +67,7 @@ export interface ScenarioTabProps {
 
 const ALL_SPAWN_KEYS = ROBOTS.flatMap(r => SPAWN_AXES.map(a => spawnFieldKey(r, a)));
 
-export default function ScenarioTab({ scenario, robots, seed, fieldText, issues, unit, lang, locked, onEdit, onReroll, fieldEditOn, onEditOnField }: ScenarioTabProps) {
+export default function ScenarioTab({ scenario, robots, seed, fieldText, issues, warnings, unit, lang, locked, onEdit, onReroll, fieldEditOn, onEditOnField }: ScenarioTabProps) {
   const view = readScenario(scenario, robots.robot1.config, robots.robot2.config);
   const red = issueFieldSet(issues);
   const typoCount = Object.keys(fieldText).length;
@@ -149,6 +160,23 @@ export default function ScenarioTab({ scenario, robots, seed, fieldText, issues,
         <p className="settings-note">{t(lang, 'scenario.autoTipHint')}</p>
       </Section>
 
+      <Section title={t(lang, 'scenario.autoMovement')}>
+        {ROBOTS.map(robot => (
+          <div key={robot} className={`settings-row auto-move-row${red.has(`autoMove.${robot}`) ? ' has-error' : ''}`}>
+            <span className="loadout-robot">{robotLabel(robot)}</span>
+            <Segmented
+              value={view.autoMovement[robot]}
+              options={AUTO_MOVEMENTS}
+              label={m => t(lang, `scenario.autoMovement.${m}`)}
+              disabled={() => locked}
+              onChange={m => edit(setAutoMovement(scenario, robot, m))}
+              ariaLabel={`${robotLabel(robot)} ${t(lang, 'scenario.autoMovement')}`}
+            />
+          </div>
+        ))}
+        <p className="settings-note">{t(lang, 'scenario.autoMovementHint')}</p>
+      </Section>
+
       <Section title={t(lang, 'scenario.section.spawn')}>
         {ROBOTS.map(robot => (
           <div key={robot} className={`spawn-card${red.has(`spawn.${robot}`) ? ' has-error' : ''}`}>
@@ -187,6 +215,46 @@ export default function ScenarioTab({ scenario, robots, seed, fieldText, issues,
         <div className="settings-row">
           <span className="settings-note">{t(lang, 'scenario.spawnHint')}</span>
           {editOnFieldButton}
+        </div>
+      </Section>
+
+      <Section title={t(lang, 'scenario.section.rp')}>
+        <div className={`scenario-group rp-group${red.has('rp') ? ' has-error' : ''}`}>
+          <div className="spawn-head">
+            {view.rpIsDefault && <span className="spawn-tag">{t(lang, 'scenario.rpIsDefault')}</span>}
+            <button
+              type="button"
+              className="config-button"
+              disabled={locked || (view.rpIsDefault && RP_KEYS.every(k => fieldText[rpFieldKey(k)] === undefined))}
+              onClick={() => onEdit(resetRpThresholds(scenario), null, null, RP_KEYS.map(rpFieldKey))}
+            >
+              <RotateCcw />
+              {t(lang, 'scenario.spawnDefault')}
+            </button>
+          </div>
+          <div className="form-grid rp-fields">
+            {RP_KEYS.map(key => (
+              <NumberField
+                key={key}
+                id={`scenario-rp-${key}`}
+                label={t(lang, `scenario.rp.${key}`)}
+                spec={RP_FIELD_SPEC}
+                value={view.rpThresholds[key]}
+                invalidText={fieldText[rpFieldKey(key)]}
+                unit={unit}
+                lang={lang}
+                disabled={locked}
+                onValue={v => onEdit(setRpThreshold(scenario, view, key, v), rpFieldKey(key), null)}
+                onInvalid={text => onEdit(null, rpFieldKey(key), text)}
+              />
+            ))}
+          </div>
+          {warnings.map(code => (
+            <p key={code} className="form-warning" role="status">
+              {t(lang, `warning.${code}`, { points: view.rpThresholds.swarmPoints, max: SWARM_MAX_POINTS })}
+            </p>
+          ))}
+          <p className="settings-note">{t(lang, 'scenario.rpHint')}</p>
         </div>
       </Section>
 

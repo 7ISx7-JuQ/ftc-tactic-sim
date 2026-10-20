@@ -312,6 +312,41 @@ describe('config 창', () => {
     await expect.element(popover).not.toBeInTheDocument();
   });
 
+  it('시나리오 탭 RP 기준값 / 오토 이동 (14-2): POLLINATOR 1 > 2 = 오류 + APPLY 막힘, SWARM 21 = 경고만, DEFAULT, PARK가 LOADING ZONE 밖이면 오류', async () => {
+    await userEvent.click(button('Open settings'));
+    await userEvent.click(page.getByRole('tab', { name: 'SCENARIO' }));
+    const p1 = page.getByLabelText('POLLINATOR 1 TIPs');
+    const swarm = page.getByLabelText('SWARM points');
+    await expect.element(p1).toHaveValue('4');
+    await expect.element(page.getByText('Default thresholds')).toBeVisible();
+    // POLLINATOR 1 = 8 > POLLINATOR 2 = 7 → 오류, APPLY 막힘
+    await userEvent.fill(p1, '8');
+    await expect.element(page.getByText('RP thresholds must be integers from 1 to 99, POLLINATOR 1 ≤ POLLINATOR 2').first()).toBeVisible();
+    await expect.element(button('APPLY')).toBeDisabled();
+    await userEvent.fill(p1, '3');
+    // 범위 밖 글자 → 칸 오류 (글자 보관)
+    await userEvent.fill(swarm, '0');
+    await expect.element(button('APPLY')).toBeDisabled();
+    // SWARM 21 → 경고만, 적용 가능
+    await userEvent.fill(swarm, '21');
+    await expect.element(page.getByText(/^SWARM 21 points cannot be reached with 2 robots/)).toBeVisible();
+    await expect.element(button('APPLY')).toBeEnabled();
+    // DEFAULT = 기본 기준으로 (지정 해제)
+    await userEvent.click(page.getByRole('button', { name: 'DEFAULT' }).last());
+    await expect.element(swarm).toHaveValue('16');
+    await expect.element(p1).toHaveValue('4');
+    await expect.element(page.getByText('Default thresholds')).toBeVisible();
+    // 오토 이동: R2 PARK (기본 자세는 LOADING ZONE 밖) → 오류, R1 PARK는 통과
+    await userEvent.click(page.getByRole('radiogroup', { name: 'R2 Auto movement' }).getByRole('radio', { name: 'PARK' }));
+    await expect.element(page.getByText('R2 auto PARK needs a start pose in the LOADING ZONE').first()).toBeVisible();
+    await expect.element(button('APPLY')).toBeDisabled();
+    await userEvent.click(page.getByRole('radiogroup', { name: 'R2 Auto movement' }).getByRole('radio', { name: 'LEAVE' }));
+    await userEvent.click(page.getByRole('radiogroup', { name: 'R1 Auto movement' }).getByRole('radio', { name: 'PARK' }));
+    await expect.element(button('APPLY')).toBeEnabled();
+    await userEvent.click(button('APPLY'));
+    await expect.element(button('APPLY')).toBeDisabled();
+  });
+
   it('시나리오 REROLL은 APPLY 없이 바로 적용된다', async () => {
     await userEvent.click(button('Open settings'));
     await userEvent.click(page.getByRole('tab', { name: 'SCENARIO' }));
