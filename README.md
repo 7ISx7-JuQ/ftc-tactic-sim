@@ -9,7 +9,7 @@ A 2D tactic simulator for the **FTC BioBuzz TELEOP period** (2:00). Drive your t
 - 50 Hz deterministic engine: the same setup and inputs always give the same match.
 - Your robot specs: size, speed, intake zones and shooter (launch height, angle, sweet spot). Hit maps are generated automatically and cached.
 - Scenario: ALLIANCE, what autonomous left behind (HIVE, loadouts, remaining pieces, auto TIPs) and start poses.
-- Review and branches: scrub, replay at 0.25–2×, branch from an earlier moment (up to 8 branches) and compare results.
+- Review and branches: scrub, replay at 0.25–2×, branch from an earlier moment (up to 16 branches) and compare results.
 - Save and share: robot / scenario presets and small replay files of whole matches (JSON).
 
 > Simulation only: opponent robots and the autonomous period are not simulated, and some physics values are estimates. Use it to compare plans, not to predict exact scores.
@@ -65,7 +65,7 @@ Free for **non-commercial** use under the [PolyForm Noncommercial License 1.0.0]
 - 50 Hz 결정론적 엔진: 같은 설정과 입력이면 항상 같은 경기가 나옵니다.
 - 우리 로봇 제원: 크기, 속도, 흡입 구역, 슈터(발사구 높이 · 발사각 · 스윗스팟). 명중 확률표는 자동으로 만들어지고 저장됩니다.
 - 시나리오: ALLIANCE, 오토가 남긴 상태(HIVE, 적재물, 남은 기물, 오토 TIP), 시작 자세.
-- 복기와 가지: 타임라인 이동, 0.25 ~ 2배속 재생, 이전 시점에서 분기(최대 8개)와 결과 비교.
+- 복기와 가지: 타임라인 이동, 0.25 ~ 2배속 재생, 이전 시점에서 분기(최대 16개)와 결과 비교.
 - 저장과 공유: 로봇 / 시나리오 프리셋, 경기 전체를 담은 작은 재생 파일(JSON).
 
 > 시뮬레이션 전용입니다. 상대 로봇과 오토 구간은 시뮬레이션하지 않으며 일부 물리 값은 추정치입니다. 정확한 점수 예측보다 작전 비교에 활용하세요.

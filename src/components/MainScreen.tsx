@@ -16,6 +16,7 @@
 // 09-10c: 스윗스팟 모드(SET ON FIELD) — 필드 클릭 = 초안 스윗스팟, DONE · APPLY = 그 로봇 탭 적용, CANCEL / Esc / START = 들어오기 전 값으로.
 
 import { useEffect, useRef, useState } from 'react';
+import { LoaderCircle } from 'lucide-react';
 import type { CSSProperties, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { AppController } from '../app/appController';
 import type { AppStatus, LiftToast, MatchLoadJob } from '../app/appController';
@@ -30,8 +31,9 @@ import type { LUTWorkerLike } from '../workers/lutManager';
 import { PENDING_LUT_VIEW, lutInputsChanged, startBlocker } from '../ui/lutView';
 import type { RobotLutView } from '../ui/lutView';
 import { DEFAULT_RNG_SEED } from '../core/simulationEngine';
+import { compareCheckpoints } from '../core/checksum';
 import type { CheckpointComparison } from '../core/checksum';
-import { buildMatchRecipe, parseMatchRecipe, recipeLoadTree, serializeMatchRecipe, verifyRecipe } from '../app/matchRecipe';
+import { buildMatchRecipe, parseMatchRecipe, recipeLoadTree, serializeMatchRecipe } from '../app/matchRecipe';
 import type { MatchRecipe, RecipeWarning } from '../app/matchRecipe';
 import { matchComputingText, matchFileName, matchImportConfirmMessage, matchImportErrorMessage, matchImportProgress, matchSummaryText, mismatchBanner, summaryFileName } from '../ui/matchFile';
 import type { MatchImportError } from '../ui/matchFile';
@@ -42,7 +44,7 @@ import type { PresetError, PresetRow } from '../ui/presetFile';
 import { downloadTextFile, pickTextFile } from '../ui/fileTransfer';
 import type { UiSettings } from '../ui/settings';
 import { fieldCanvasSize, layoutCssVars, robotLabel } from '../ui/mainScreenModel';
-import { branchComparison, branchConfirmText, branchFullText, branchLabel, branchMenuEnabled, currentBranchInfo, deleteConfirmText, fileBranchNumber, newMatchConfirmText, shownBranchName } from '../ui/branchView';
+import { branchComparison, branchConfirmText, branchFullText, branchLabel, branchMenuEnabled, currentBranchInfo, deleteConfirmText, fileBranchNumber, newMatchConfirmText, shownBranchName, switchNeedsBusy } from '../ui/branchView';
 import {
   DRAFT_TABS,
   TAB_LABEL_KEYS,
@@ -174,6 +176,9 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
     warnings: RecipeWarning[];
     branch: { name: string | null; number: number; parentId: number | null; others: number } | null;
   } | null>(null);
+  // 가지 전환 계산 중 (16-2): 다른 가지 프레임은 해제되어 있어 전환할 때 다시 계산한다 (길면 표시를 먼저 그림)
+  const [branchBusy, setBranchBusy] = useState(false);
+  const branchBusyRef = useRef(false);
   const importJobRef = useRef<MatchLoadJob | null>(null); // 진행 중인 재계산 작업 (CANCEL = 버림)
   const pendingMatchRef = useRef<{ recipe: MatchRecipe; warnings: RecipeWarning[] } | null>(null);
   const completeImportRef = useRef<(results: MatchLUTResults) => void>(() => {});
@@ -559,7 +564,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
           const mismatches = loaded
             .map(b => {
               const branch = recipe.branches.find(r => r.number === b.number)!;
-              return { branch, comparison: verifyRecipe(branch, b.timeline) };
+              return { branch, comparison: compareCheckpoints(branch.checksums, b.checksums) };
             })
             .filter(m => !m.comparison.match);
           const first = mismatches[0];
@@ -975,15 +980,36 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
       if (ok) controller.branch();
     });
   };
+  // 가지 전환 / 삭제 (16-2): 다시 계산할 틱이 많으면 "가지 계산 중"을 먼저 그린 뒤(rAF → 다음 작업) 계산한다. 계산 중에는 다른 전환을 받지 않음
+  const runBranchSwitch = (cost: number, run: () => void) => {
+    if (branchBusyRef.current) return;
+    if (!switchNeedsBusy(cost)) {
+      run();
+      return;
+    }
+    branchBusyRef.current = true;
+    setBranchBusy(true);
+    requestAnimationFrame(() =>
+      window.setTimeout(() => {
+        run();
+        branchBusyRef.current = false;
+        setBranchBusy(false);
+      }, 0),
+    );
+  };
+  const switchBranch = (id: number) => {
+    const controller = c();
+    if (controller) runBranchSwitch(controller.switchCost(id), () => controller.switchBranch(id));
+  };
   // 가지 목록 (10-6): 전환 / 이름 바꾸기는 바로, 삭제는 확인창 (하위 가지 수 포함)
   const branchActions = {
-    switchBranch: (id: number) => c()?.switchBranch(id),
+    switchBranch,
     renameBranch: (id: number, name: string) => c()?.renameBranch(id, name),
     deleteBranch: (id: number) => {
       const controller = c();
       if (!controller) return;
       void ask(deleteConfirmText(lang, controller.status(), id), t(lang, 'branch.delete')).then(ok => {
-        if (ok) controller.deleteBranch(id);
+        if (ok) runBranchSwitch(controller.deleteCost(id), () => controller.deleteBranch(id));
       });
     },
     exportMatch,
@@ -1219,13 +1245,19 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
           onRestart={newMatch}
           onExportMatch={exportMatch}
           onExportSummary={exportSummary}
-          onSwitchBranch={id => c()?.switchBranch(id)}
+          onSwitchBranch={switchBranch}
           branchName={shownBranchName(lang, status)}
           comparison={branchComparison(lang, status)}
         />
       )}
       {confirm && <ConfirmDialog request={confirm.request} anchor={confirm.anchor} onClose={closeConfirm} />}
       {helpOpen && <HelpDialog lang={lang} onClose={closeHelp} />}
+      {branchBusy && (
+        <div className="branch-busy" role="status">
+          <LoaderCircle />
+          {t(lang, 'branch.computing')}
+        </div>
+      )}
     </div>
   );
 }

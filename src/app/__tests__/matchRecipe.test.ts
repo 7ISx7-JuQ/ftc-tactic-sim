@@ -20,6 +20,7 @@ import {
   parseMatchRecipe,
   recipeWarnings,
   serializeMatchRecipe,
+  timelineRecord,
   verifyRecipe,
 } from '../matchRecipe';
 import type { MatchRecipe, RecipeBranchSource } from '../matchRecipe';
@@ -68,7 +69,7 @@ let cached: { recipe: MatchRecipe; text: string; engine: SimulationEngine } | nu
 function sample() {
   if (!cached) {
     const { engine, inputs } = playOverdubMatch();
-    const root: RecipeBranchSource = { number: 1, parent: null, forkTick: 0, name: 'Branch 3', inputs: appliedInputRecords(inputs), timeline: engine.timeline };
+    const root: RecipeBranchSource = { number: 1, parent: null, forkTick: 0, name: 'Branch 3', inputs: appliedInputRecords(inputs), record: timelineRecord(engine.timeline) };
     const recipe = buildMatchRecipe({ setup: values, branches: [root], current: 1, nextNumber: 2, createdAt: new Date(2026, 8, 30, 14, 32, 5) });
     cached = { recipe, text: serializeMatchRecipe(recipe), engine };
   }
@@ -185,7 +186,7 @@ describe('저장 레시피 (10-3)', () => {
   it('D. 만들기: 입력 부족 / 트리 구조가 틀리면 오류, 끝나지 않은 가지도 저장, 시드가 비어 있으면 엔진 기본 시드, 로컬 시각 + 시간대', () => {
     const e = engineFor(defaults);
     const inputs: Record<RobotId, Int8Array> = { robot1: new Int8Array(MATCH_TICKS * 4), robot2: new Int8Array(MATCH_TICKS * 4) };
-    const root = (timeline: RecipeBranchSource['timeline'], over: Partial<RecipeBranchSource> = {}): RecipeBranchSource => ({ number: 1, parent: null, forkTick: 0, name: null, inputs, timeline, ...over });
+    const root = (timeline: Parameters<typeof timelineRecord>[0], over: Partial<RecipeBranchSource> = {}): RecipeBranchSource => ({ number: 1, parent: null, forkTick: 0, name: null, inputs, record: timelineRecord(timeline), ...over });
     const build = (b: RecipeBranchSource[], current = 1, nextNumber = 2) => buildMatchRecipe({ setup: defaults, branches: b, current, nextNumber, createdAt: new Date(2026, 0, 2, 3, 4, 5) });
     for (let i = 0; i < 120; i++) e.step();
     const early = build([root(e.timeline)]); // 끝나지 않은 가지: 머리 120, 체크포인트 0 / 50 / 100, 결과 없음
@@ -363,10 +364,10 @@ describe('저장 레시피 (10-3)', () => {
       6: compose(4000, [[0, rec(1)]]),
     };
     const src: RecipeBranchSource[] = [
-      { number: 1, parent: null, forkTick: 0, name: null, inputs: full[1], timeline: run(full[1], 6000) },
-      { number: 2, parent: 1, forkTick: 2000, name: '  Plan B  ', inputs: full[2], timeline: run(full[2], 3500) },
-      { number: 5, parent: 2, forkTick: 1000, name: null, inputs: full[5], timeline: run(full[5], 6000) },
-      { number: 6, parent: 1, forkTick: 4000, name: null, inputs: full[6], timeline: run(full[6], 4000) },
+      { number: 1, parent: null, forkTick: 0, name: null, inputs: full[1], record: timelineRecord(run(full[1], 6000)) },
+      { number: 2, parent: 1, forkTick: 2000, name: '  Plan B  ', inputs: full[2], record: timelineRecord(run(full[2], 3500)) },
+      { number: 5, parent: 2, forkTick: 1000, name: null, inputs: full[5], record: timelineRecord(run(full[5], 6000)) },
+      { number: 6, parent: 1, forkTick: 4000, name: null, inputs: full[6], record: timelineRecord(run(full[6], 4000)) },
     ];
     const recipe = buildMatchRecipe({ setup: values, branches: src, current: 2, nextNumber: 7, createdAt: new Date(2026, 9, 21, 10, 0, 0) });
     expect(recipe.branches.map(b => [b.number, b.parent, b.forkTick, b.headTick, b.name, b.inputs.robot1.length / 4, b.checksums.length, b.result !== null]))
@@ -408,7 +409,7 @@ describe('저장 레시피 (10-3)', () => {
     expect(code([['branches.3.inputs.robot1', 'AAAA']])).toEqual({ code: 'INVALID_INPUTS', field: 'branches[3].robot1' }); // 빈 가지에 입력
     expect(code([['branches.1.checksums', (old: unknown) => (old as string[]).concat('00000000')]])).toEqual({ code: 'INVALID_CHECKSUMS', field: 'branches[1]' });
 
-    // 크기: 가지 8개가 모두 0틱에서 갈라져 끝까지, 매 틱 다른 입력(최악)이어도 불러오기 한도(1 MB) 안
+    // 크기: 가지 MAX_BRANCHES(16)개가 모두 0틱에서 갈라져 끝까지, 매 틱 다른 입력(최악)이어도 불러오기 한도(2 MB, 16-2) 안
     const worst: MatchRecipe = {
       ...recipe,
       branches: Array.from({ length: MAX_BRANCHES }, (_, i) => ({

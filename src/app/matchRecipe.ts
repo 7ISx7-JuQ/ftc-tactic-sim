@@ -160,6 +160,20 @@ export function isoLocal(date: Date): string {
   return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}T${p(date.getHours())}:${p(date.getMinutes())}:${p(date.getSeconds())}${sign}${p(off / 60)}:${p(off % 60)}`;
 }
 
+/** 가지 기록 요약 (16-2): 머리 틱 / 전체 타임라인의 체크포인트 / 종료 결과. 프레임을 해제한 가지도 목록 · 비교 · 내보내기에 쓴다 */
+export type BranchRecord = Pick<RecipeBranch, 'headTick' | 'checksums' | 'result'>;
+
+/** 0 ~ 머리 틱 프레임 → 가지 기록 요약 (체크포인트 121개 해시, 약 10 ms) */
+export function timelineRecord(timeline: readonly DeepReadonly<TimelineFrame>[]): BranchRecord {
+  const headTick = timeline.length - 1;
+  const last = timeline[headTick];
+  return {
+    headTick,
+    checksums: timelineCheckpoints(timeline),
+    result: headTick >= MATCH_TICKS && last ? { totalScore: last.totalScore, rp: { ...last.rpAchieved } } : null,
+  };
+}
+
 /** 내보낼 가지 하나의 재료 (컨트롤러 가지 트리) */
 export interface RecipeBranchSource {
   number: number;
@@ -167,7 +181,7 @@ export interface RecipeBranchSource {
   forkTick: number;
   name: string | null;
   inputs: Readonly<Record<RobotId, ArrayLike<number>>>; // 로봇별 적용 입력 기록 0 ~ 머리 틱 − 1 (조상 구간 포함 전체)
-  timeline: readonly DeepReadonly<TimelineFrame>[];   // 0 ~ 머리 틱 프레임
+  record: BranchRecord;                                 // 머리 틱 / 체크포인트 / 결과 (16-2: 프레임 대신, timelineRecord)
 }
 
 export interface RecipeSource {
@@ -182,12 +196,11 @@ export interface RecipeSource {
 /** 분기 트리 → 레시피. 입력이 머리 틱보다 짧거나 트리 구조가 틀리면 RangeError */
 export function buildMatchRecipe(src: RecipeSource): MatchRecipe {
   const branches = src.branches.map((b): RecipeBranch => {
-    const headTick = b.timeline.length - 1;
+    const { headTick } = b.record;
     const cut = (data: ArrayLike<number>) => {
       if (data.length < headTick * LOG_RECORD_BYTES) throw new RangeError(`branch ${b.number}: input record shorter than its head tick`);
       return Int8Array.from({ length: (headTick - b.forkTick) * LOG_RECORD_BYTES }, (_, i) => data[b.forkTick * LOG_RECORD_BYTES + i]);
     };
-    const last = b.timeline[headTick];
     return {
       number: b.number,
       parent: b.parent,
@@ -195,8 +208,8 @@ export function buildMatchRecipe(src: RecipeSource): MatchRecipe {
       name: normalizeName(b.name),
       headTick,
       inputs: { robot1: cut(b.inputs.robot1), robot2: cut(b.inputs.robot2) },
-      checksums: timelineCheckpoints(b.timeline),
-      result: headTick >= MATCH_TICKS && last ? { totalScore: last.totalScore, rp: { ...last.rpAchieved } } : null,
+      checksums: [...b.record.checksums],
+      result: b.record.result && { totalScore: b.record.result.totalScore, rp: { ...b.record.result.rp } },
     };
   });
   const problem = branchTreeProblem(branches, src.current, src.nextNumber);

@@ -10,7 +10,9 @@ import { VIEW_ANIMATION_MS, viewAngle } from '../../renderer/viewTransform';
 import { MATCH_TICKS, SimulationEngine } from '../../core/simulationEngine';
 import { createInputRecordProvider } from '../../input/inputLog';
 import { AppController, END_HIGHLIGHT_MS, LIFT_TOAST_COOLDOWN_MS } from '../appController';
-import { buildMatchRecipe, recipeLoadTree, verifyRecipe } from '../matchRecipe';
+import { buildMatchRecipe, recipeLoadTree } from '../matchRecipe';
+import { MAX_BRANCHES } from '../branchTree';
+import { compareCheckpoints, frameChecksum, timelineCheckpoints } from '../../core/checksum';
 import { DEFAULT_DRAFT_VALUES } from '../defaultSetup';
 import type { AppStatus, LiftToast, MatchSetup } from '../appController';
 import type { EditScene } from '../../renderer/editSceneRenderer';
@@ -24,6 +26,17 @@ const assert = (c: boolean, m: string) => {
   expect(c, m).toBe(true);
 };
 const near = (a: number, b: number, tol = 1e-9) => Math.abs(a - b) < tol;
+// 지금 가지의 체크포인트 (보는 틱을 옮겨 읽고 되돌림, 일시정지 / 복기 중에만)
+const viewCheckpoints = (h: AppController): string[] => {
+  const { tick, headTick } = h.status();
+  const out: string[] = [];
+  for (let t = 0; t <= headTick; t += 50) {
+    h.setViewTick(t);
+    out.push(frameChecksum(h.currentFrame()));
+  }
+  h.setViewTick(tick);
+  return out;
+};
 // 풀매치를 재계산 / 진행하는 테스트(J, K)의 제한 시간 (기본 5초는 전체 병렬 실행 부하에서 부족, 다른 풀매치 테스트와 같은 값)
 const FULL_MATCH_TIMEOUT_MS = 120_000;
 
@@ -624,12 +637,12 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     const { h, frames, statuses } = setup();
     frames.advance(16);
     const loaded = h.loadMatch(loadSetup, single);
-    const timeline = loaded?.[0].timeline;
-    assert(!!timeline && loaded!.length === 1 && timeline.length === MATCH_TICKS + 1, 'loadMatch recomputed the whole match');
+    const checksums = loaded?.[0].checksums;
+    assert(!!checksums && loaded!.length === 1 && checksums.length === 121, 'loadMatch recomputed the whole match');
     const ref = new SimulationEngine(loadSetup.r1Config, loadSetup.r2Config, loadSetup.shotJudge, 'BLUE', loadSetup.scenario);
     ref.inputProvider = createInputRecordProvider(records);
     ref.runFullMatch();
-    assert(JSON.stringify(timeline![MATCH_TICKS]) === JSON.stringify(ref.getFrame(MATCH_TICKS)), 'same result as an independent engine replaying the records');
+    assert(checksums!.join() === timelineCheckpoints(ref.timeline).join(), 'same result as an independent engine replaying the records');
     let s = h.status();
     assert(s.phase === 'ROTATING_IN' && s.alliance === 'BLUE' && s.branchName === 'Branch 3', 'rotating into the match view (file setup / branch name)');
 
@@ -648,7 +661,7 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     // 내보내기 재료 = 불러온 기록 그대로 (트리 = 원본 하나)
     const src = h.recipeSource();
     const root = src?.branches[0];
-    assert(!!src && src.branches.length === 1 && src.current === 1 && src.nextNumber === 2 && root!.name === 'Branch 3' && root!.parent === null && root!.timeline.length === MATCH_TICKS + 1, 'recipe source available after the end');
+    assert(!!src && src.branches.length === 1 && src.current === 1 && src.nextNumber === 2 && root!.name === 'Branch 3' && root!.parent === null && root!.record.headTick === MATCH_TICKS && root!.record.result!.totalScore === ref.getFrame(MATCH_TICKS)!.totalScore, 'recipe source available after the end');
     assert(Array.from(root!.inputs.robot1).join() === Array.from(records.robot1).join() && Array.from(root!.inputs.robot2).join() === Array.from(records.robot2).join(), 'recipe inputs = loaded records');
 
     // 분기: 두 로봇 REPLAY로 끝까지 → 같은 결과 (녹화 덧입히기 재료 확인), 이번에는 실제 종료 → 종료 연출
@@ -673,11 +686,11 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     assert(h.status().loopState === 'RUNNING' && h.recipeSource() === null, 'running: no recipe source');
     h.pause();
     const paused = h.recipeSource();
-    assert(!!paused && paused.branches[0].timeline.length - 1 === h.status().headTick && paused.branches[0].inputs.robot1.length === h.status().headTick * 4, 'paused unfinished match: recipe source up to the head');
+    assert(!!paused && paused.branches[0].record.headTick === h.status().headTick && paused.branches[0].inputs.robot1.length === h.status().headTick * 4, 'paused unfinished match: recipe source up to the head');
     h.dispose();
   }, FULL_MATCH_TIMEOUT_MS);
 
-  it('K. 분기 트리 (10-5): BRANCH = 새 가지(원래 가지 보존), 전환 / 이름 / 삭제, 8개 상한, 종료 가지 전환 = 복기, NEW = 트리 폐기', () => {
+  it('K. 분기 트리 (10-5): BRANCH = 새 가지(원래 가지 보존), 전환 / 이름 / 삭제, 가지 상한, 종료 가지 전환 = 복기, NEW = 트리 폐기', () => {
     const { h, frames, win } = setup();
     h.start();
     frames.advance(VIEW_ANIMATION_MS + 50);
@@ -728,22 +741,22 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     h.renameBranch(2, '');
     assert(h.status().branchName === null, 'empty name -> auto name');
 
-    // 8개까지: 원본 / 가지 2에서 계속 분기
-    for (let i = 3; i <= 8; i++) {
+    // MAX_BRANCHES(16)개까지: 원본 / 가지 2에서 계속 분기
+    for (let i = 3; i <= MAX_BRANCHES; i++) {
       h.setViewTick(10 + i);
       assert(h.branch(), `branch ${i}`);
       frames.advance(100, 20);
       h.pause();
     }
     s = h.status();
-    assert(s.branches.length === 8 && !s.canFork && s.branches.map(b => b.number).join() === '1,2,3,4,5,6,7,8', '8 branches, full');
+    assert(s.branches.length === MAX_BRANCHES && !s.canFork && s.branches.map(b => b.number).join() === Array.from({ length: MAX_BRANCHES }, (_, i) => i + 1).join(), 'all branches, full');
     h.setViewTick(5);
-    assert(!h.branch() && h.status().branches.length === 8 && h.status().loopState === 'PAUSED', 'full: BRANCH refused, still paused');
+    assert(!h.branch() && h.status().branches.length === MAX_BRANCHES && h.status().loopState === 'PAUSED', 'full: BRANCH refused, still paused');
 
-    // 삭제: 원본 불가, 가지 2(하위 3 ~ 8 포함, 지금 가지 8도 하위) → 부모(원본)로 전환
+    // 삭제: 원본 불가, 가지 2(하위 3 ~ 16 포함, 지금 가지 16도 하위) → 부모(원본)로 전환
     assert(!h.deleteBranch(1), 'root cannot be deleted');
-    const depth = h.status().branches.find(b => b.id === 8)!.depth;
-    assert(depth === 7, `nested branches (depth ${depth})`);
+    const depth = h.status().branches.find(b => b.id === MAX_BRANCHES)!.depth;
+    assert(depth === MAX_BRANCHES - 1, `nested branches (depth ${depth})`);
     assert(h.deleteBranch(2), 'delete branch 2 with its sub-branches');
     s = h.status();
     assert(s.branches.length === 1 && s.currentBranchId === 1 && s.canFork, 'only the root left, current = root');
@@ -751,7 +764,7 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     h.setViewTick(rootHead);
     assert(JSON.stringify(h.currentFrame()) === rootHeadFrame, 'root head frame after deleting the current branch');
     h.setViewTick(rootHead - 20);
-    assert(h.branch() && h.status().branches[1].number === 9, 'numbers are not reused');
+    assert(h.branch() && h.status().branches[1].number === MAX_BRANCHES + 1, 'numbers are not reused');
     const b9 = h.status().branches[1].id;
     frames.advance(200, 20);
 
@@ -786,10 +799,10 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     const ref = new SimulationEngine(base.r1Config, base.r2Config, base.shotJudge, 'RED', base.scenario);
     ref.inputProvider = createInputRecordProvider(rootSrc.inputs);
     ref.runFullMatch();
-    assert(JSON.stringify(ref.getFrame(MATCH_TICKS)) === JSON.stringify(rootSrc.timeline[MATCH_TICKS]), 'root inputs reproduce the root result');
+    assert(timelineCheckpoints(ref.timeline).join() === rootSrc.record.checksums.join() && ref.getFrame(MATCH_TICKS)!.totalScore === rootSrc.record.result!.totalScore, 'root inputs reproduce the root result');
     // 다른 가지도 그 가지의 입력 사본 = 머리까지 (부모 번호 = 부모 가지의 번호)
     for (const b of src.branches) {
-      assert(b.inputs.robot1.length === (b.timeline.length - 1) * 4 && (b.parent === null || src.branches.some(p => p.number === b.parent)), `branch #${b.number}: inputs up to its head, parent by number`);
+      assert(b.inputs.robot1.length === b.record.headTick * 4 && (b.parent === null || src.branches.some(p => p.number === b.parent)), `branch #${b.number}: inputs up to its head, parent by number`);
     }
 
     // NEW: 트리 폐기
@@ -799,6 +812,112 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     assert(s.branches.length === 1 && s.currentBranchId === 1 && s.branchName === null, 'NEW discards the tree');
     h.dispose();
   }, FULL_MATCH_TIMEOUT_MS);
+  it('K2. (16-2) 지금 가지만 프레임 보관: 떠난 가지는 입력 사본 + 기록 요약, 전환 = 같은 프레임의 마지막 틱부터 재계산 (처음 기록과 같음), 불러오기도 해제', () => {
+    const { h, frames, win } = setup();
+    frames.advance(16);
+    h.start();
+    frames.advance(VIEW_ANIMATION_MS + 50);
+    const drive = (code: string, ms: number) => {
+      h.resume();
+      win.dispatchEvent(key('keydown', code));
+      frames.advance(ms, 20);
+      win.dispatchEvent(key('keyup', code));
+      h.pause();
+    };
+    const branchData = () => (h as unknown as { tree: { currentId: number; nodes: { id: number; data: Record<string, unknown> }[] } }).tree;
+    // 가지마다 떠나기 전의 체크포인트 / 머리 프레임 (처음 기록)
+    const original = new Map<number, { sums: string; head: string }>();
+    const remember = () => {
+      const s = h.status();
+      h.setViewTick(s.headTick);
+      original.set(s.currentBranchId, { sums: viewCheckpoints(h).join(), head: JSON.stringify(h.currentFrame()) });
+    };
+    const matches = (id: number) => {
+      const s = h.status();
+      h.setViewTick(s.headTick);
+      return s.currentBranchId === id && viewCheckpoints(h).join() === original.get(id)!.sums && JSON.stringify(h.currentFrame()) === original.get(id)!.head;
+    };
+
+    // 1 ─(500) 2 ─(800) 3
+    //  │        └(200) 4   (부모 분기 틱보다 앞)
+    //  └(1500) 5
+    h.pause();
+    drive(KEYBOARD_BINDINGS.forward, 40_000);
+    remember();
+    h.setViewTick(500);
+    h.branch();
+    h.pause();
+    drive(KEYBOARD_BINDINGS.right, 20_000);
+    remember();
+    h.setViewTick(800);
+    h.branch();
+    h.pause();
+    drive(KEYBOARD_BINDINGS.left, 5_000);
+    remember();
+    h.switchBranch(2);
+    h.setViewTick(200);
+    h.branch();
+    h.pause();
+    drive(KEYBOARD_BINDINGS.forward, 3_000);
+    remember();
+    h.switchBranch(1);
+    h.setViewTick(1500);
+    h.branch();
+    h.pause();
+    drive(KEYBOARD_BINDINGS.left, 2_000);
+    remember();
+    const ids = h.status().branches.map(b => b.id);
+    assert(ids.join() === '1,2,3,4,5', `tree 1 ~ 5 (${ids})`);
+
+    // 떠난 가지는 프레임 없이 입력 사본 + 기록 요약, 지금 가지는 둘 다 없음
+    const tree = branchData();
+    assert(tree.nodes.every(n => !('timeline' in n.data) && (n.id === tree.currentId ? n.data.inputs === null && n.data.record === null : !!n.data.inputs && !!n.data.record)), 'only the current branch keeps frames');
+    const info = h.status().branches;
+    assert(info[0].headTick === 2000 && info[0].ended === false && info[1].headTick > 500, `heads from the records (${info.map(b => b.headTick)})`);
+
+    // 재계산할 틱 수 = 머리 − 같은 프레임의 마지막 틱 (지금 가지 5 기준)
+    const head = (id: number) => h.status().branches.find(b => b.id === id)!.headTick;
+    assert(h.switchCost(5) === 0 && h.switchCost(1) === head(1) - 1500 && h.switchCost(3) === head(3) - 500 && h.switchCost(4) === head(4) - 200 && h.switchCost(99) === 0, 'switch cost');
+
+    // 여러 순서로 오가도 매번 처음 기록과 같다
+    for (const id of [3, 4, 1, 2, 5, 4, 3, 1, 5, 2]) {
+      assert(h.switchBranch(id) && matches(id), `switch to ${id}: recomputed = original`);
+    }
+
+    // 재계산한 가지에서 이어 기록 → 떠났다 돌아와도 이어 쓴 기록 그대로
+    h.switchBranch(4);
+    h.setViewTick(head(4));
+    drive(KEYBOARD_BINDINGS.right, 1_000);
+    remember();
+    h.switchBranch(1);
+    assert(h.switchBranch(4) && matches(4), 'continued branch 4 after a recompute, kept after leaving');
+
+    // 내보내기 재료 = 가지마다 기록 요약 (지금 가지는 지금 프레임에서)
+    const src = h.recipeSource()!;
+    for (const b of src.branches) assert(b.record.checksums.join() === original.get(b.number)!.sums, `recipe source #${b.number}: checkpoints = original`);
+
+    // 지금 가지 삭제 → 부모로 전환(재계산)
+    h.switchBranch(3);
+    assert(h.deleteBranch(3) && matches(2), 'deleting the current branch recomputes its parent');
+
+    // 불러오기: 지금 가지 외 프레임 해제, 체크포인트로 비교
+    const recipe = buildMatchRecipe({ setup: DEFAULT_DRAFT_VALUES, ...h.recipeSource()!, createdAt: new Date() });
+    h.dispose();
+    const second = setup();
+    second.frames.advance(16);
+    const loaded = second.h.loadMatch(makeSetup('RED'), recipeLoadTree(recipe))!;
+    assert(loaded.every(b => compareCheckpoints(recipe.branches.find(r => r.number === b.number)!.checksums, b.checksums).match), 'loaded checkpoints = file');
+    const loadedTree = (second.h as unknown as { tree: { currentId: number; nodes: { id: number; data: Record<string, unknown> }[] } }).tree;
+    assert(loadedTree.currentId === 2 && loadedTree.nodes.every(n => (n.id === loadedTree.currentId) === (n.data.record === null)), 'loaded tree: only the current branch keeps frames');
+    second.frames.advance(VIEW_ANIMATION_MS + 50);
+    for (const id of [4, 1, 5]) {
+      second.h.switchBranch(id);
+      second.h.setViewTick(second.h.status().headTick);
+      assert(viewCheckpoints(second.h).join() === original.get(id)!.sums, `loaded branch ${id}: recomputed = original`);
+    }
+    second.h.dispose();
+  }, FULL_MATCH_TIMEOUT_MS);
+
   it('L. (15-2) 트리 내보내기 재료 → 불러오기: 가지 단위 재계산 작업(진행 / 취소 = 버림), 번호 · 부모 · 분기 틱 · 이름 · 다음 번호 보존, 미종료 지금 가지는 머리에서 일시정지', () => {
     const { h, frames, win } = setup();
     frames.advance(16);
@@ -832,6 +951,7 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     h.pause();
     drive(KEYBOARD_BINDINGS.forward, 600);
     const before = h.status();
+    const exportedHead = JSON.stringify(h.currentFrame());
     const numberOf = (id: number | null) => (id === null ? null : before.branches.find(b => b.id === id)!.number);
     const shape = (branches: AppStatus['branches'], num: (id: number | null) => number | null) =>
       branches.map(b => [b.number, num(b.parentId), b.forkTick, b.name, b.headTick, b.ended]);
@@ -856,7 +976,7 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     const loaded = job.commit()!;
     assert(loaded.map(b => b.number).join() === '1,3,4', 'loaded branches in file order');
     for (const b of loaded) {
-      const comparison = verifyRecipe(recipe.branches.find(r => r.number === b.number)!, b.timeline);
+      const comparison = compareCheckpoints(recipe.branches.find(r => r.number === b.number)!.checksums, b.checksums);
       assert(comparison.match, `branch #${b.number}: recomputed checkpoints match`);
     }
     assert(job.commit() === null, 'second commit refused (no longer SETUP)');
@@ -867,9 +987,9 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     assert(JSON.stringify(shape(s.branches, id => id)) === JSON.stringify(shape(before.branches, numberOf)), 'numbers / parents / fork ticks / names / heads preserved');
     assert(s.branches.find(b => b.id === s.currentBranchId)!.number === 4 && s.branchName === null, 'opened the exported current branch (#4)');
     assert(s.input.sources.robot1 === 'REPLAY' && s.input.sources.robot2 === 'REPLAY', 'both robots REPLAY');
-    assert(JSON.stringify(second.h.currentFrame()) === JSON.stringify(src.branches[2].timeline[s.headTick]), 'same head frame as the exported branch');
+    assert(before.tick === before.headTick && JSON.stringify(second.h.currentFrame()) === exportedHead, 'same head frame as the exported branch');
     // 다른 가지로 전환해도 그 가지 그대로 / 새 가지 번호 = 파일의 다음 번호 (지운 번호 재사용 없음)
-    assert(second.h.switchBranch(3) && second.h.status().branchName === 'Plan B' && JSON.stringify(second.h.currentFrame()) === JSON.stringify(src.branches[1].timeline[second.h.status().tick]), 'switch to "Plan B"');
+    assert(second.h.switchBranch(3) && second.h.status().branchName === 'Plan B' && viewCheckpoints(second.h).join() === src.branches[1].record.checksums.join(), 'switch to "Plan B" (recomputed = exported checkpoints)');
     second.h.setViewTick(10);
     assert(second.h.branch(), 'branch from a loaded branch');
     second.h.pause();

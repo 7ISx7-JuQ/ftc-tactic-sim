@@ -5,6 +5,7 @@ import {
   branchComparison,
   branchConfirmText,
   branchFullText,
+  switchNeedsBusy,
   branchLabel,
   branchMenuEnabled,
   branchRows,
@@ -73,7 +74,7 @@ describe('분기 트리 화면 규칙 (10-6)', () => {
   it('E. 확인창 문구: 분기(보는 틱 시각 + 지금 가지) / 가득 참 / 삭제(하위 수) / NEW(가지 수)', () => {
     expect(branchConfirmText('en', { ...tree(2), tick: 1500 })).toBe('Start a new branch at 1:30 and drive again? The current branch (Plan B) keeps its record.');
     expect(branchConfirmText('ko', { ...tree(1), tick: 0 })).toBe('2:00에서 새 가지를 만들어 다시 조종할까요? 지금 가지(원본)의 기록은 그대로 남습니다.');
-    expect(branchFullText('en')).toBe('All 8 branches are in use. Delete a branch from the branch list before branching.');
+    expect(branchFullText('en')).toBe('All 16 branches are in use. Delete a branch from the branch list before branching.');
     expect(descendantCount(tree(1), 1)).toBe(3);
     expect(descendantCount(tree(1), 2)).toBe(1);
     expect(deleteConfirmText('en', tree(1), 2)).toBe('Delete the branch "Plan B" with its sub-branches (1)?');
@@ -95,6 +96,13 @@ describe('분기 트리 화면 규칙 (10-6)', () => {
     const tie = [branches[0], { ...branches[1], totalScore: 87 }, branches[2]];
     expect(branchComparison('en', tree(1, tie))!.map(c => c.best)).toEqual([true, true]);
     expect(branchComparison('en', tree(1, [branches[0], branches[2]]))).toBeNull();
+  });
+
+  it('H. (16-2) 가지 전환 계산 중 표시: 다시 계산할 틱이 1500 이상일 때만', () => {
+    expect(switchNeedsBusy(0)).toBe(false);
+    expect(switchNeedsBusy(1499)).toBe(false);
+    expect(switchNeedsBusy(1500)).toBe(true);
+    expect(switchNeedsBusy(6000)).toBe(true);
   });
 
   it('G. 파일 이름: 원본이 아닌 가지는 _b{번호}', () => {

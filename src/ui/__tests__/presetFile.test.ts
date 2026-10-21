@@ -71,7 +71,7 @@ describe('프리셋 파일 (10-2)', () => {
     expect(parse(buildPresetFile('scenario', custom), 'robot1')).toEqual({ ok: false, error: { code: 'WRONG_KIND', kind: 'SCENARIO' } });
     expect(parse(buildPresetFile('robot2', custom), 'all')).toEqual({ ok: false, error: { code: 'WRONG_KIND', kind: 'ROBOT' } });
     expect(parse(buildPresetFile('all', custom), 'scenario')).toEqual({ ok: false, error: { code: 'WRONG_KIND', kind: 'SETUP' } });
-    expect(MAX_IMPORT_BYTES).toBe(1024 * 1024);
+    expect(MAX_IMPORT_BYTES).toBe(2 * 1024 * 1024);
   });
 
   it('C. 로봇: 없거나 형식이 틀린 항목만 기본값, 범위 밖 숫자는 그대로(폼이 빨간 오류), 구역은 틀린 것만 빼고 최대 8개', () => {

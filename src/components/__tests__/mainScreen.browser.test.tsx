@@ -11,7 +11,7 @@ import type { MainScreenServices } from '../MainScreen';
 import type { LUTCacheEntry } from '../../workers/lutCache';
 import type { LUTWorkerLike } from '../../workers/lutManager';
 import { DEFAULT_DRAFT_VALUES, setupFromDrafts } from '../../app/defaultSetup';
-import { buildMatchRecipe, serializeMatchRecipe } from '../../app/matchRecipe';
+import { buildMatchRecipe, serializeMatchRecipe, timelineRecord } from '../../app/matchRecipe';
 import { MATCH_TICKS, SimulationEngine } from '../../core/simulationEngine';
 import '../../index.css';
 
@@ -406,6 +406,48 @@ describe('도움말', () => {
   });
 });
 
+// 경기 파일 글자: 중립 입력(틱마다 정지)으로 진행한 가지들 — 같은 입력이라 모든 가지가 원본 타임라인의 앞부분과 같다
+function neutralRecipeText(branches: { number: number; parent: number | null; forkTick: number; name: string | null; headTick: number }[], current: number): string {
+  const setup = setupFromDrafts(DEFAULT_DRAFT_VALUES);
+  const engine = new SimulationEngine(setup.r1Config, setup.r2Config, setup.shotJudge, 'RED', setup.scenario, setup.shooters);
+  engine.runFullMatch();
+  const neutral = { robot1: new Int8Array(MATCH_TICKS * 4), robot2: new Int8Array(MATCH_TICKS * 4) };
+  return serializeMatchRecipe(
+    buildMatchRecipe({
+      setup: DEFAULT_DRAFT_VALUES,
+      branches: branches.map(({ headTick, ...b }) => ({ ...b, inputs: neutral, record: timelineRecord(engine.timeline.slice(0, headTick + 1)) })),
+      current,
+      nextNumber: Math.max(...branches.map(b => b.number)) + 1,
+      createdAt: new Date(),
+    }),
+  );
+}
+
+// 파일 선택창 가로채기: 주어진 글자를 고른 것으로. 반환 = 되돌리기
+function interceptFilePick(text: string): () => void {
+  const inputClick = HTMLInputElement.prototype.click;
+  HTMLInputElement.prototype.click = function (this: HTMLInputElement) {
+    if (this.type !== 'file') return inputClick.call(this);
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([text], 'match.json', { type: 'application/json' }));
+    this.files = transfer.files;
+    this.dispatchEvent(new Event('change'));
+  };
+  return () => {
+    HTMLInputElement.prototype.click = inputClick;
+  };
+}
+
+// 경기 전 화면 → SETTINGS 탭 경기 줄 IMPORT → 확인창(가지 수) Enter
+async function importMatchFile(branchCount: number): Promise<void> {
+  await expect.element(button('START')).toBeEnabled();
+  await userEvent.click(button('Open settings'));
+  await userEvent.click(page.getByRole('tab', { name: 'SETTINGS' }));
+  await userEvent.click(page.getByRole('button', { name: 'IMPORT', exact: true }).last());
+  await expect.poll(() => document.querySelector('[role="alertdialog"]')?.textContent ?? '').toContain(`Loads ${branchCount} branches.`);
+  await userEvent.keyboard('{Enter}');
+}
+
 describe('경기 흐름', () => {
   it('START → 진행 → Space 일시정지 → 되감기 → BRANCH 확인창(Esc 취소) → NEW 확인(Enter) → 경기 전', async () => {
     await userEvent.click(button('START'));
@@ -505,40 +547,19 @@ describe('경기 흐름', () => {
   });
 
   it('결과 팝업 가지 비교 (16-1): 종료한 가지 2개 경기 파일 IMPORT → RESULT → 비교 칩을 누르면 팝업이 열린 채 그 가지로 전환 → REVIEW = 그 가지 복기', async () => {
-    // 중립 입력으로 끝까지 진행한 원본 + 3000틱에서 갈라 끝까지 간 가지 2 "Plan B" (지금 가지)
-    const setup = setupFromDrafts(DEFAULT_DRAFT_VALUES);
-    const engine = new SimulationEngine(setup.r1Config, setup.r2Config, setup.shotJudge, 'RED', setup.scenario, setup.shooters);
-    engine.runFullMatch();
-    const neutral = { robot1: new Int8Array(MATCH_TICKS * 4), robot2: new Int8Array(MATCH_TICKS * 4) };
-    const text = serializeMatchRecipe(
-      buildMatchRecipe({
-        setup: DEFAULT_DRAFT_VALUES,
-        branches: [
-          { number: 1, parent: null, forkTick: 0, name: null, inputs: neutral, timeline: engine.timeline },
-          { number: 2, parent: 1, forkTick: 3000, name: 'Plan B', inputs: neutral, timeline: engine.timeline },
+    // 끝까지 간 원본 + 3000틱에서 갈라 끝까지 간 가지 2 "Plan B" (지금 가지)
+    const restore = interceptFilePick(
+      neutralRecipeText(
+        [
+          { number: 1, parent: null, forkTick: 0, name: null, headTick: 6000 },
+          { number: 2, parent: 1, forkTick: 3000, name: 'Plan B', headTick: 6000 },
         ],
-        current: 2,
-        nextNumber: 3,
-        createdAt: new Date(),
-      }),
+        2,
+      ),
     );
-    // 파일 선택창 가로채기: 만든 경기 파일을 고른 것으로
-    const inputClick = HTMLInputElement.prototype.click;
-    HTMLInputElement.prototype.click = function (this: HTMLInputElement) {
-      if (this.type !== 'file') return inputClick.call(this);
-      const transfer = new DataTransfer();
-      transfer.items.add(new File([text], 'two-branches.json', { type: 'application/json' }));
-      this.files = transfer.files;
-      this.dispatchEvent(new Event('change'));
-    };
     try {
-      await expect.element(button('START')).toBeEnabled();
-      await userEvent.click(button('Open settings'));
-      await userEvent.click(page.getByRole('tab', { name: 'SETTINGS' }));
-      await userEvent.click(page.getByRole('button', { name: 'IMPORT', exact: true }).last());
-      await expect.poll(() => document.querySelector('[role="alertdialog"]')?.textContent ?? '').toContain('Loads 2 branches.');
-      await userEvent.keyboard('{Enter}');
-      await expect.element(button('RESULT'), { timeout: 10000 }).toBeVisible(); // 종료한 지금 가지 = 복기
+      await importMatchFile(2);
+      await expect.element(button('RESULT'), { timeout: 10000 }).toBeEnabled(); // 종료한 지금 가지 = 복기
       expect(document.body.textContent).not.toContain('Results differ from the file');
 
       await userEvent.click(button('RESULT'));
@@ -563,7 +584,59 @@ describe('경기 흐름', () => {
       await expect.element(popup).not.toBeInTheDocument();
       await expect.element(page.getByRole('button', { name: /Main/ })).toBeVisible();
     } finally {
-      HTMLInputElement.prototype.click = inputClick;
+      restore();
+    }
+  });
+
+  it('가지 전환 재계산 (16-2): 다른 가지는 프레임 없이 보관 → 전환 / 지금 가지 삭제 때 "가지 계산 중"을 먼저 보이고 다시 계산해 전환', async () => {
+    // 1 (끝) ─(100) 2 (끝, 지금 가지) / ─(50) 3 (3000틱까지)
+    const restore = interceptFilePick(
+      neutralRecipeText(
+        [
+          { number: 1, parent: null, forkTick: 0, name: null, headTick: 6000 },
+          { number: 2, parent: 1, forkTick: 100, name: null, headTick: 6000 },
+          { number: 3, parent: 1, forkTick: 50, name: null, headTick: 3000 },
+        ],
+        2,
+      ),
+    );
+    // 계산 중 표시는 계산 직전 한 프레임만 보이므로 DOM 변화로 기록
+    let busySeen = false;
+    const observer = new MutationObserver(() => {
+      if (document.querySelector('.branch-busy')) busySeen = true;
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    const branchButton = (name: RegExp) => page.getByRole('button', { name, expanded: false });
+    const pick = async (from: RegExp, to: RegExp) => {
+      busySeen = false;
+      await userEvent.click(branchButton(from));
+      await userEvent.click(page.getByRole('menuitemradio', { name: to }));
+      await expect.element(branchButton(to), { timeout: 5000 }).toBeVisible();
+      expect(busySeen).toBe(true);
+      expect(document.querySelector('.branch-busy')).toBeNull();
+    };
+    try {
+      await importMatchFile(3);
+      await expect.element(button('RESULT'), { timeout: 15000 }).toBeEnabled(); // 종료한 지금 가지 = 복기
+      await pick(/Branch 2/, /Main/);       // 원본: 100틱부터 다시 계산
+      await pick(/Main/, /Branch 3/);       // 미종료 가지: 50틱부터 3000틱까지
+      await expect.element(button('RESULT')).toBeDisabled(); // 미종료 가지
+
+      // 지금 가지(3) 삭제 → 부모(원본)로 전환하며 다시 계산
+      busySeen = false;
+      await userEvent.click(branchButton(/Branch 3/));
+      await userEvent.click(page.getByRole('button', { name: 'Delete' }).last()); // 만든 순서 마지막 줄 = 가지 3
+      await expect.element(page.getByRole('alertdialog')).toBeVisible();
+      await userEvent.keyboard('{Enter}');
+      await expect.element(page.getByRole('menuitemradio', { name: /Main/, checked: true }), { timeout: 5000 }).toBeVisible(); // 삭제 뒤 목록은 열린 채
+      expect(page.getByRole('menuitemradio').elements()).toHaveLength(2);
+      expect(busySeen).toBe(true);
+      await userEvent.keyboard('{Escape}');
+      await expect.element(branchButton(/Main/)).toBeVisible();
+      await expect.element(button('RESULT')).toBeEnabled(); // 종료한 원본 = 복기
+    } finally {
+      observer.disconnect();
+      restore();
     }
   });
 });

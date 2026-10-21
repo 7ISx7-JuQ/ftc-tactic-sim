@@ -2,9 +2,11 @@
 // - 원본 가지(번호 1) + 분기할 때마다 새 가지(번호 2, 3, … 경기 안에서 재사용 없음). 최대 MAX_BRANCHES개 (원본 포함).
 // - 이름: null = 자동 이름(원본 Main / 가지 Branch n, 화면 문구는 10-6), 바꾸기 = 앞뒤 공백 제거 1 ~ 24자, 비우면 자동 이름.
 // - 삭제 = 그 가지 + 모든 하위 가지, 원본은 삭제 불가. 지금 가지가 지워지면 지운 가지의 부모로.
+// - 프레임 공유 (16-2): 가지는 분기 틱까지 부모와 같은 프레임을 갖는다. 두 가지가 같은 프레임을 갖는 마지막 틱 = sharedFrameTick.
 // 트리는 불변 값으로 다룬다 (바꾸는 함수는 새 트리를 돌려준다).
 
-export const MAX_BRANCHES = 8;
+// 16-2: 지금 가지 외 프레임을 해제하므로 메모리 대신 경기 파일 크기(가지당 최대 약 96 KB) / 불러오기 재계산 시간(가지당 최대 약 1.5초)이 상한을 정한다
+export const MAX_BRANCHES = 16;
 export const BRANCH_NAME_MAX_LENGTH = 24;
 
 export interface BranchNode<T> {
@@ -73,6 +75,28 @@ export function descendantIds<T>(tree: BranchTree<T>, id: number): number[] {
     if (n.parentId !== null && (n.parentId === id || out.includes(n.parentId))) out.push(n.id);
   }
   return out;
+}
+
+/**
+ * 두 가지가 같은 프레임을 갖는 마지막 틱 (16-2 가지 전환 재계산의 시작 틱): 공통 조상까지 거슬러 오르는 두 길의 분기 틱 중 최솟값.
+ * 가지는 분기 틱까지 부모와 같은 프레임을 갖고, 한 가지의 프레임은 뒤에 이어 붙기만 하므로 이 틱까지는 두 가지의 프레임이 같다.
+ * 같은 가지면 Infinity (머리 틱으로 자르는 것은 부르는 쪽)
+ */
+export function sharedFrameTick<T>(tree: BranchTree<T>, a: number, b: number): number {
+  const parentOf = (n: BranchNode<T>) => (n.parentId === null ? undefined : findBranch(tree, n.parentId));
+  const pathA: BranchNode<T>[] = [];
+  for (let n = findBranch(tree, a); n; n = parentOf(n)) pathA.push(n);
+  let limit = Infinity;
+  let common = findBranch(tree, b);
+  while (common && !pathA.includes(common)) {
+    limit = Math.min(limit, common.forkTick);
+    common = parentOf(common);
+  }
+  for (const n of pathA) {
+    if (n === common) break;
+    limit = Math.min(limit, n.forkTick);
+  }
+  return limit;
 }
 
 /** 원본 → 가지까지의 깊이 (원본 = 0) */

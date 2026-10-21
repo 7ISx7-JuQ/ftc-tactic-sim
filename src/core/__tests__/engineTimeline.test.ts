@@ -91,4 +91,17 @@ describe('가지 타임라인 (10-5)', () => {
     e.adoptTimeline({ frames: [], rngStates: [] });
     expect(e.timeline).toBe(nested.frames);
   });
+
+  it('D. (16-2 가지 전환 재계산의 근거) 어느 틱으로 되감아 같은 입력으로 끝까지 이어도 모든 프레임이 처음 기록과 같다', () => {
+    const e = eng();
+    run(e, 6000);
+    const original = e.timeline.map(f => JSON.stringify(f));
+    const inHive = (t: number) => e.getFrame(t)!.pieces.filter(p => p.state === 'IN_HIVE').length;
+    expect(inHive(6000)).not.toBe(inHive(0)); // 발사(난수 판정) / HIVE TIP이 섞인 경기
+    for (const tick of [0, 1, 1777, 4999]) {
+      e.forkTimeline(tick);
+      run(e, 6000);
+      expect(e.timeline.findIndex((f, t) => JSON.stringify(f) !== original[t])).toBe(-1);
+    }
+  }, 60_000);
 });

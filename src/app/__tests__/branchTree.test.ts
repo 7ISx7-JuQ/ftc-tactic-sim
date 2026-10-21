@@ -14,6 +14,7 @@ import {
   removeBranch,
   renameBranch,
   setBranchData,
+  sharedFrameTick,
   switchBranch,
 } from '../branchTree';
 import type { BranchTree } from '../branchTree';
@@ -21,7 +22,7 @@ import type { BranchTree } from '../branchTree';
 const fork = (tree: BranchTree<string>, tick: number, data: string) => forkBranch(tree, tick, data)!;
 
 describe('분기 트리 규칙 (10-5)', () => {
-  it('A. 원본 1개로 시작, 분기할 때마다 번호 2, 3, … 새 가지가 지금 가지, 원본 포함 8개까지', () => {
+  it('A. 원본 1개로 시작, 분기할 때마다 번호 2, 3, … 새 가지가 지금 가지, 원본 포함 16개까지 (16-2)', () => {
     let tree = createBranchTree('root');
     expect(tree.nodes).toEqual([{ id: 1, number: 1, name: null, parentId: null, forkTick: 0, data: 'root' }]);
     expect(currentBranch(tree).id).toBe(1);
@@ -31,8 +32,8 @@ describe('분기 트리 규칙 (10-5)', () => {
     tree = fork(tree, 50, 'b');
     expect(currentBranch(tree)).toMatchObject({ number: 3, parentId: 1, forkTick: 50 });
     for (let i = tree.nodes.length; i < MAX_BRANCHES; i++) tree = fork(tree, i, `x${i}`);
-    expect(tree.nodes).toHaveLength(8);
-    expect(MAX_BRANCHES).toBe(8);
+    expect(tree.nodes).toHaveLength(16);
+    expect(MAX_BRANCHES).toBe(16);
     expect(canFork(tree)).toBe(false);
     expect(forkBranch(tree, 1, 'full')).toBeNull();
     expect(createBranchTree('r', '  Loaded run ').nodes[0].name).toBe('Loaded run');
@@ -97,5 +98,23 @@ describe('분기 트리 규칙 (10-5)', () => {
     expect(fileBranchName({ name: null, number: 1, parentId: null })).toBe('Main');
     expect(fileBranchName({ name: null, number: 3, parentId: 1 })).toBe('Branch 3');
     expect(fileBranchName({ name: 'Plan B', number: 3, parentId: 1 })).toBe('Plan B');
+  });
+
+  it('F. (16-2) 같은 프레임을 갖는 마지막 틱: 공통 조상까지 두 길의 분기 틱 중 최솟값, 같은 가지면 Infinity', () => {
+    // 1 ─(300) 2 ─(500) 3
+    //  │        └(100) 5   (부모 분기 틱보다 앞에서 갈라짐)
+    //  └(200) 4
+    let tree = fork(createBranchTree('r'), 300, 'b2');
+    tree = fork(tree, 500, 'b3');
+    tree = fork(switchBranch(tree, 1), 200, 'b4');
+    tree = fork(switchBranch(tree, 2), 100, 'b5');
+    expect(sharedFrameTick(tree, 1, 1)).toBe(Infinity);
+    expect(sharedFrameTick(tree, 1, 2)).toBe(300);           // 부모 ↔ 자식 = 자식의 분기 틱
+    expect(sharedFrameTick(tree, 3, 1)).toBe(300);           // 손자 → 원본: 길의 최솟값
+    expect(sharedFrameTick(tree, 2, 3)).toBe(500);
+    expect(sharedFrameTick(tree, 3, 4)).toBe(200);           // 사촌: 공통 조상(원본)까지 두 길
+    expect(sharedFrameTick(tree, 4, 3)).toBe(200);           // 대칭
+    expect(sharedFrameTick(tree, 3, 5)).toBe(100);           // 형제 (5는 2의 분기 틱 300보다 앞)
+    expect(sharedFrameTick(tree, 5, 1)).toBe(100);
   });
 });

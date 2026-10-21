@@ -20,8 +20,8 @@ export const PRESET_FORMAT = 'ftc-tactic-sim/preset';
 export const PRESET_VERSION = 2;
 // 경기 레시피 (3.9항, 10-3 ~ 10-4). 프리셋 줄에 경기 파일을 넣으면 따로 알려 준다
 export const MATCH_FORMAT = 'ftc-tactic-sim/match';
-// 읽을 파일 크기 상한 (프리셋은 수 KB, 경기 레시피도 약 100 KB 이하)
-export const MAX_IMPORT_BYTES = 1024 * 1024;
+// 읽을 파일 크기 상한 (프리셋은 수 KB, 경기 레시피는 보통 수십 KB · 가지 16개 최악 약 1.6 MB — 16-2)
+export const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
 
 export type PresetKind = 'ROBOT' | 'SCENARIO' | 'SETUP';
 /** SETTINGS 탭 PRESETS 구역의 줄 (MATCH 줄은 10-4) */

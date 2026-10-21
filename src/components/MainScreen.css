@@ -429,6 +429,8 @@
 }
 .result-popup {
   width: calc(var(--u) * 460);
+  max-height: calc(100vh - var(--u) * 24); /* 16-2: 낮은 창에서도 동작 줄까지 닿게 (넘치면 스크롤) */
+  overflow-y: auto;
   padding: calc(var(--u) * 24);
   display: flex;
   flex-direction: column;
@@ -699,6 +701,31 @@
     opacity: 0;
     transform: translateY(calc(var(--u) * -6));
   }
+}
+
+/* 가지 계산 중 (16-2): 전환할 가지를 다시 계산하는 동안 화면 가운데 (결과 팝업 / 확인창 위) */
+.branch-busy {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  z-index: 40;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 8);
+  padding: calc(var(--u) * 10) calc(var(--u) * 18);
+  border: 1px solid var(--panel-border);
+  border-radius: calc(var(--u) * 999);
+  background: var(--panel-bg);
+  font-size: calc(var(--u) * 14);
+  font-weight: 800;
+  white-space: nowrap;
+  box-shadow: 0 calc(var(--u) * 6) calc(var(--u) * 20) rgba(0, 0, 0, 0.35);
+}
+.branch-busy svg {
+  width: calc(var(--u) * 16);
+  height: calc(var(--u) * 16);
+  color: var(--accent);
 }
 
 /* ---------------- 확인창 (09-7b): 화면 전체 흐림 + 필드 중앙 상자 ---------------- */
@@ -2287,12 +2314,14 @@
   color: var(--text-muted);
 }
 .branch-list {
-  margin: 0;
-  padding: 0;
+  margin: calc(var(--u) * -4);
+  padding: calc(var(--u) * 4); /* 스크롤 상자 안에서도 초점 테두리가 잘리지 않게 */
   list-style: none;
   display: flex;
   flex-direction: column;
   gap: calc(var(--u) * 2);
+  max-height: calc(var(--u) * 360); /* 16-2: 가지 16개 — 10줄 남짓 보이고 나머지는 스크롤 */
+  overflow-y: auto;
 }
 /* 목록 아래 EXPORT MATCH (15-3): 트리 전체 내보내기 */
 .branch-popover-footer {
@@ -2418,6 +2447,11 @@
   flex-wrap: wrap;
   align-items: center;
   gap: calc(var(--u) * 6);
+  flex: none; /* 팝업이 낮아도 줄어들지 않음 (넘치면 팝업이 스크롤) */
+  max-height: calc(var(--u) * 70); /* 16-2: 종료 가지가 많으면 2줄 남짓 보이고 스크롤 */
+  overflow-y: auto;
+  margin: calc(var(--u) * -4);
+  padding: calc(var(--u) * 4); /* 스크롤 상자 안에서도 초점 테두리가 잘리지 않게 */
 }
 .result-compare-head {
   font-size: calc(var(--u) * 12);

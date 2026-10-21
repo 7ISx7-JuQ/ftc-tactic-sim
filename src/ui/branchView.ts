@@ -2,6 +2,7 @@
 // - 가지 이름: 사용자 이름, 없으면 원본 Main / "원본", 가지 Branch n / "가지 n" (파일에는 언어와 무관한 영어 자동 이름, branchTree.fileBranchName).
 // - 가지 목록 줄: 깊이 들여쓰기 / 분기 시각(원본 —) / 상태(종료 = 점수, 미종료 = 머리 시각) / 지금 가지 / 삭제 가능(원본 제외).
 // - 타임라인 분기 표식: 지금 가지와 그 조상이 갈라진 틱. 확인창 문구(분기 / 가득 참 / 삭제 / NEW), 결과 팝업 가지 이름 · 비교 줄.
+// - 가지 전환 계산 중 표시 (16-2): 다시 계산할 틱이 BUSY_SWITCH_TICKS 이상이면 "가지 계산 중"을 먼저 그린 뒤 전환.
 
 import type { AppStatus, BranchInfo } from '../app/appController';
 import { MAX_BRANCHES } from '../app/branchTree';
@@ -11,6 +12,13 @@ import type { Language } from './i18n';
 import { formatMatchTime } from './units';
 
 type Tree = Pick<AppStatus, 'branches' | 'currentBranchId'>;
+
+/**
+ * 가지 전환 / 삭제에서 이만큼 이상 다시 계산하면 "가지 계산 중"을 먼저 그린다 (16-2, 계산 동안 화면이 멈춤).
+ * 1500틱 ≈ 0.15 ~ 0.4초 (끝까지 6000틱이 약 0.6 ~ 1.5초)
+ */
+export const BUSY_SWITCH_TICKS = 1500;
+export const switchNeedsBusy = (cost: number): boolean => cost >= BUSY_SWITCH_TICKS;
 
 /** 틱 → 경기 타이머 표시 (남은 시간) */
 const clock = (tick: number) => formatMatchTime((MATCH_TICKS - tick) * DT);
