@@ -10,6 +10,8 @@ import { VIEW_ANIMATION_MS, viewAngle } from '../../renderer/viewTransform';
 import { MATCH_TICKS, SimulationEngine } from '../../core/simulationEngine';
 import { createInputRecordProvider } from '../../input/inputLog';
 import { AppController, END_HIGHLIGHT_MS, LIFT_TOAST_COOLDOWN_MS } from '../appController';
+import { buildMatchRecipe, recipeLoadTree, verifyRecipe } from '../matchRecipe';
+import { DEFAULT_DRAFT_VALUES } from '../defaultSetup';
 import type { AppStatus, LiftToast, MatchSetup } from '../appController';
 import type { EditScene } from '../../renderer/editSceneRenderer';
 
@@ -567,10 +569,12 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
       robot2: rec(t => (t < 600 ? [0, 90, -30, 0] : [-60, 0, 0, t % 300 < 20 ? 2 : 0])),
     };
     const loadSetup = makeSetup('BLUE', { rngSeed: 99 });
+    const single = { branches: [{ number: 1, parent: null, forkTick: 0, name: 'Branch 3', headTick: MATCH_TICKS, records }], current: 1, nextNumber: 2 };
     const { h, frames, statuses } = setup();
     frames.advance(16);
-    const timeline = h.loadMatch(loadSetup, records, 'Branch 3');
-    assert(!!timeline && timeline.length === MATCH_TICKS + 1, 'loadMatch recomputed the whole match');
+    const loaded = h.loadMatch(loadSetup, single);
+    const timeline = loaded?.[0].timeline;
+    assert(!!timeline && loaded!.length === 1 && timeline.length === MATCH_TICKS + 1, 'loadMatch recomputed the whole match');
     const ref = new SimulationEngine(loadSetup.r1Config, loadSetup.r2Config, loadSetup.shotJudge, 'BLUE', loadSetup.scenario);
     ref.inputProvider = createInputRecordProvider(records);
     ref.runFullMatch();
@@ -590,10 +594,11 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     assert(h.status().endStage === 'RESULT', 'RESULT opens the popup');
     h.closeResult();
 
-    // 내보내기 재료 = 불러온 기록 그대로
+    // 내보내기 재료 = 불러온 기록 그대로 (트리 = 원본 하나)
     const src = h.recipeSource();
-    assert(!!src && src.branchName === 'Branch 3' && src.timeline.length === MATCH_TICKS + 1, 'recipe source available after the end');
-    assert(Array.from(src!.inputs.robot1).join() === Array.from(records.robot1).join() && Array.from(src!.inputs.robot2).join() === Array.from(records.robot2).join(), 'recipe inputs = loaded records');
+    const root = src?.branches[0];
+    assert(!!src && src.branches.length === 1 && src.current === 1 && src.nextNumber === 2 && root!.name === 'Branch 3' && root!.parent === null && root!.timeline.length === MATCH_TICKS + 1, 'recipe source available after the end');
+    assert(Array.from(root!.inputs.robot1).join() === Array.from(records.robot1).join() && Array.from(root!.inputs.robot2).join() === Array.from(records.robot2).join(), 'recipe inputs = loaded records');
 
     // 분기: 두 로봇 REPLAY로 끝까지 → 같은 결과 (녹화 덧입히기 재료 확인), 이번에는 실제 종료 → 종료 연출
     h.setViewTick(3000);
@@ -603,18 +608,21 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     s = h.status();
     assert(s.loopState === 'ENDED' && (s.endStage === 'HIGHLIGHT' || s.endStage === 'RESULT') && s.endSeq === 1, `branched run reached the end -> end sequence (${s.endStage})`);
     assert(JSON.stringify(h.currentFrame()) === JSON.stringify(ref.getFrame(MATCH_TICKS)), 'REPLAY of both robots reproduces the loaded result');
-    assert(Array.from(h.recipeSource()!.inputs.robot1).join() === Array.from(records.robot1).join(), 'applied record after the branch = same inputs');
+    const afterBranch = h.recipeSource()!;
+    assert(afterBranch.current === 2 && Array.from(afterBranch.branches[1].inputs.robot1).join() === Array.from(records.robot1).join(), 'applied record after the branch = same inputs');
 
-    // 경기 중에는 불러오기 거부, NEW → 가지 이름 초기화, 진행 중 경기는 내보내기 재료 없음
-    assert(h.loadMatch(loadSetup, records, 'x') === null, 'loadMatch refused during a match');
+    // 경기 중에는 불러오기 거부, NEW → 가지 이름 초기화, 진행 중이면 내보내기 재료 없음 / 일시정지면 미종료 경기도 있음 (15-2)
+    assert(h.loadMatch(loadSetup, single) === null && h.beginLoadMatch(loadSetup, single) === null, 'loadMatch refused during a match');
     h.reset();
     frames.advance(VIEW_ANIMATION_MS + 50);
     assert(h.status().phase === 'SETUP' && h.status().branchName === null && h.recipeSource() === null, 'NEW: branch name cleared, no recipe source');
     h.start();
     frames.advance(VIEW_ANIMATION_MS + 50);
     frames.advance(1000, 20);
+    assert(h.status().loopState === 'RUNNING' && h.recipeSource() === null, 'running: no recipe source');
     h.pause();
-    assert(h.recipeSource() === null, 'unfinished match: no recipe source');
+    const paused = h.recipeSource();
+    assert(!!paused && paused.branches[0].timeline.length - 1 === h.status().headTick && paused.branches[0].inputs.robot1.length === h.status().headTick * 4, 'paused unfinished match: recipe source up to the head');
     h.dispose();
   }, FULL_MATCH_TIMEOUT_MS);
 
@@ -720,13 +728,18 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     s = h.status();
     assert(s.endStage === 'REVIEW' && s.matchEnded && !s.canResume && s.endSeq === 1 && !!s.result, 'ended branch -> review, no new end signal');
     const src = h.recipeSource()!;
-    assert(src.branchName === 'Main', 'recipe name of the root');
+    const rootSrc = src.branches.find(b => b.number === 1)!;
+    assert(src.current === 1 && rootSrc.name === null && rootSrc.parent === null, 'recipe source: current = root (auto name)');
     // 원본 가지의 적용 입력 기록만으로 독립 재계산 = 원본 결과 (가지를 오가도 입력 기록이 섞이지 않음)
     const base = makeSetup('RED');
     const ref = new SimulationEngine(base.r1Config, base.r2Config, base.shotJudge, 'RED', base.scenario);
-    ref.inputProvider = createInputRecordProvider(src.inputs);
+    ref.inputProvider = createInputRecordProvider(rootSrc.inputs);
     ref.runFullMatch();
-    assert(JSON.stringify(ref.getFrame(MATCH_TICKS)) === JSON.stringify(src.timeline[MATCH_TICKS]), 'root inputs reproduce the root result')
+    assert(JSON.stringify(ref.getFrame(MATCH_TICKS)) === JSON.stringify(rootSrc.timeline[MATCH_TICKS]), 'root inputs reproduce the root result');
+    // 다른 가지도 그 가지의 입력 사본 = 머리까지 (부모 번호 = 부모 가지의 번호)
+    for (const b of src.branches) {
+      assert(b.inputs.robot1.length === (b.timeline.length - 1) * 4 && (b.parent === null || src.branches.some(p => p.number === b.parent)), `branch #${b.number}: inputs up to its head, parent by number`);
+    }
 
     // NEW: 트리 폐기
     h.reset();
@@ -735,5 +748,87 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     assert(s.branches.length === 1 && s.currentBranchId === 1 && s.branchName === null, 'NEW discards the tree');
     h.dispose();
   }, FULL_MATCH_TIMEOUT_MS);
-});
+  it('L. (15-2) 트리 내보내기 재료 → 불러오기: 가지 단위 재계산 작업(진행 / 취소 = 버림), 번호 · 부모 · 분기 틱 · 이름 · 다음 번호 보존, 미종료 지금 가지는 머리에서 일시정지', () => {
+    const { h, frames, win } = setup();
+    frames.advance(16);
+    h.start();
+    frames.advance(VIEW_ANIMATION_MS + 50);
+    const drive = (code: string, ms: number) => {
+      h.resume();
+      win.dispatchEvent(key('keydown', code));
+      frames.advance(ms, 20);
+      win.dispatchEvent(key('keyup', code));
+      h.pause();
+    };
+    // 원본: 키보드(R2) 전진 / 가지 2(지움) / 가지 3 "Plan B" / 가지 4 = 가지 3의 20틱(원본 분기 틱 100보다 앞)에서
+    h.pause();
+    drive(KEYBOARD_BINDINGS.forward, 3000);
+    h.setViewTick(50);
+    h.branch();
+    h.pause();
+    drive(KEYBOARD_BINDINGS.right, 400);
+    const b2 = h.status().currentBranchId;
+    h.switchBranch(1);
+    h.setViewTick(100);
+    h.branch();
+    h.pause();
+    drive(KEYBOARD_BINDINGS.left, 1000);
+    const b3 = h.status().currentBranchId;
+    h.renameBranch(b3, 'Plan B');
+    assert(h.deleteBranch(b2), 'deleted branch #2 (numbers keep a gap)');
+    h.setViewTick(20);
+    h.branch();
+    h.pause();
+    drive(KEYBOARD_BINDINGS.forward, 600);
+    const before = h.status();
+    const numberOf = (id: number | null) => (id === null ? null : before.branches.find(b => b.id === id)!.number);
+    const shape = (branches: AppStatus['branches'], num: (id: number | null) => number | null) =>
+      branches.map(b => [b.number, num(b.parentId), b.forkTick, b.name, b.headTick, b.ended]);
+    assert(before.branches.map(b => b.number).join() === '1,3,4' && before.branches.every(b => !b.ended), `tree 1, 3, 4 (${before.branches.map(b => b.number)})`);
+    const src = h.recipeSource()!;
+    assert(src.current === 4 && src.nextNumber === 5 && src.branches.map(b => b.parent).join() === ',1,3', 'recipe source: current #4, next number 5, parents by number');
+    const recipe = buildMatchRecipe({ setup: DEFAULT_DRAFT_VALUES, ...src, createdAt: new Date() });
+    h.dispose();
 
+    // 새 컨트롤러에서 가지 단위로 불러오기
+    const second = setup();
+    second.frames.advance(16);
+    const job = second.h.beginLoadMatch(makeSetup('RED'), recipeLoadTree(recipe))!;
+    assert(job.total === 3 && job.done === 0 && job.commit() === null, 'job: 3 branches, nothing computed, commit refused');
+    assert(!job.step() && job.done === 1 && second.h.status().phase === 'SETUP', 'one branch per step, controller untouched until commit');
+    // 취소 = 버림: 다른 작업을 끝까지 계산해도 commit하지 않으면 경기 전 그대로
+    const dropped = second.h.beginLoadMatch(makeSetup('RED'), recipeLoadTree(recipe))!;
+    while (!dropped.step());
+    assert(second.h.status().phase === 'SETUP' && second.h.status().branches.length === 1, 'a job that is not committed changes nothing');
+    while (!job.step());
+    assert(job.done === 3 && job.step(), 'all branches computed');
+    const loaded = job.commit()!;
+    assert(loaded.map(b => b.number).join() === '1,3,4', 'loaded branches in file order');
+    for (const b of loaded) {
+      const comparison = verifyRecipe(recipe.branches.find(r => r.number === b.number)!, b.timeline);
+      assert(comparison.match, `branch #${b.number}: recomputed checkpoints match`);
+    }
+    assert(job.commit() === null, 'second commit refused (no longer SETUP)');
+    second.frames.advance(VIEW_ANIMATION_MS + 50);
+    const s = second.h.status();
+    assert(s.phase === 'MATCH' && s.loopState === 'PAUSED' && s.pauseReason === 'USER' && s.endStage === 'NONE', `unfinished current branch: paused after the rotation (${s.loopState})`);
+    assert(s.tick === s.headTick && s.headTick === before.headTick && s.canResume && s.endSeq === 0, 'paused at its head, RESUME available');
+    assert(JSON.stringify(shape(s.branches, id => id)) === JSON.stringify(shape(before.branches, numberOf)), 'numbers / parents / fork ticks / names / heads preserved');
+    assert(s.branches.find(b => b.id === s.currentBranchId)!.number === 4 && s.branchName === null, 'opened the exported current branch (#4)');
+    assert(s.input.sources.robot1 === 'REPLAY' && s.input.sources.robot2 === 'REPLAY', 'both robots REPLAY');
+    assert(JSON.stringify(second.h.currentFrame()) === JSON.stringify(src.branches[2].timeline[s.headTick]), 'same head frame as the exported branch');
+    // 다른 가지로 전환해도 그 가지 그대로 / 새 가지 번호 = 파일의 다음 번호 (지운 번호 재사용 없음)
+    assert(second.h.switchBranch(3) && second.h.status().branchName === 'Plan B' && JSON.stringify(second.h.currentFrame()) === JSON.stringify(src.branches[1].timeline[second.h.status().tick]), 'switch to "Plan B"');
+    second.h.setViewTick(10);
+    assert(second.h.branch(), 'branch from a loaded branch');
+    second.h.pause();
+    assert(second.h.status().branches.at(-1)!.number === 5, 'new branch number = file next number (5)');
+    // 재개: 머리에서 이어 진행
+    assert(second.h.switchBranch(4), 'back to #4');
+    second.h.setViewTick(second.h.status().headTick);
+    second.h.resume();
+    second.frames.advance(300, 20);
+    assert(second.h.status().loopState === 'RUNNING' && second.h.status().headTick > before.headTick, 'resumed the loaded unfinished branch');
+    second.h.dispose();
+  }, FULL_MATCH_TIMEOUT_MS);
+});

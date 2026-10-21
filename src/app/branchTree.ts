@@ -26,6 +26,14 @@ export function createBranchTree<T>(rootData: T, rootName: string | null = null)
   return { nodes: [{ id: 1, number: 1, name: normalizeName(rootName), parentId: null, forkTick: 0, data: rootData }], currentId: 1, nextNumber: 2 };
 }
 
+/**
+ * 저장한 트리 복원 (15-2 경기 불러오기): 노드 = 만든 순서(부모가 자식보다 앞), 가지 id = 파일의 번호.
+ * 구조 검사는 경기 파일 해석이 이미 했다고 본다. 이름은 이름 규칙으로 정리
+ */
+export function restoreBranchTree<T>(nodes: readonly BranchNode<T>[], currentId: number, nextNumber: number): BranchTree<T> {
+  return { nodes: nodes.map(n => ({ ...n, name: normalizeName(n.name) })), currentId, nextNumber };
+}
+
 export const findBranch = <T>(tree: BranchTree<T>, id: number): BranchNode<T> | undefined => tree.nodes.find(n => n.id === id);
 export const currentBranch = <T>(tree: BranchTree<T>): BranchNode<T> => findBranch(tree, tree.currentId)!;
 export const canFork = <T>(tree: BranchTree<T>): boolean => tree.nodes.length < MAX_BRANCHES;

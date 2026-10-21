@@ -10,7 +10,8 @@
 // 기록을 바꾸는 동작은 재개(보는 틱 = 머리, 경기 미종료)와 분기(보는 틱 < 머리 → 새 가지에서 재개, 원래 가지는 보존 — 10-5)뿐이다.
 // 분기 트리 (10-5): BRANCH는 기록을 지우지 않고 새 가지를 만든다 (0 ~ 분기 틱 프레임은 부모와 참조 공유). 가지 전환 / 삭제 / 이름 바꾸기,
 //   최대 8개(원본 포함). 입력 허브는 지금 가지의 작업본이고, 떠나는 가지는 입력 기록 사본을 보관한다.
-// 불러온 경기 (10-4): loadMatch = 입력 기록으로 전체 재계산 → 기본 보기로 회전 → 종료 연출 없이 복기(보는 틱 0, 두 로봇 REPLAY).
+// 불러온 경기 (10-4, 15-2): beginLoadMatch = 가지를 만든 순서대로 하나씩 재계산(작업 객체, commit할 때만 상태 교체) → 기본 보기로 회전
+//   → 파일의 지금 가지로 열기: 끝난 가지면 종료 연출 없이 복기(보는 틱 0), 아니면 그 가지 머리에서 일시정지. 두 로봇 REPLAY.
 // 다시 그리기: 루프 RUNNING 중에는 onFrame마다, 그 외(일시정지 / 옵션 / 보기 애니메이션 / 재생 / 종료 강조 대기)에는 rAF로.
 // 시계 / 프레임 스케줄러 / 브라우저 환경을 주입받아 Node에서 가짜 시간으로 테스트한다.
 
@@ -36,8 +37,8 @@ import type { BranchInputs, InputSource } from '../input/inputLog';
 import { DEFAULT_DRIVE_MODE, KEYBOARD_ENABLED } from '../input/inputConfig';
 import type { DriveMode, RobotId } from '../input/inputConfig';
 import { autoSource, resolveSource, sourceChoiceAllowed } from './inputPlan';
-import { branchDepth, canFork, createBranchTree, currentBranch, fileBranchName, findBranch, forkBranch, removeBranch, renameBranch, setBranchData, switchBranch } from './branchTree';
-import type { BranchTree } from './branchTree';
+import { branchDepth, canFork, createBranchTree, currentBranch, findBranch, forkBranch, removeBranch, renameBranch, restoreBranchTree, setBranchData, switchBranch } from './branchTree';
+import type { BranchNode, BranchTree } from './branchTree';
 import type { SourceChoice } from './inputPlan';
 import type { FrameScheduler, LoopState, PauseReason, RealtimeLoop } from '../input/realtimeLoop';
 import { DEFAULT_RENDER_OPTIONS, hitProbabilities } from '../renderer/renderOptions';
@@ -141,6 +142,51 @@ interface BranchData {
   inputs: BranchInputs | null;
 }
 
+/** 불러올 분기 트리 (15-2, 경기 파일 recipeLoadTree): 만든 순서, 가지마다 0 ~ 머리 전체 적용 입력 기록 (틱당 4 B) */
+export interface MatchLoadTree {
+  branches: readonly {
+    number: number;
+    parent: number | null;
+    forkTick: number;
+    name: string | null;
+    headTick: number;
+    records: Readonly<Record<RobotId, ArrayLike<number>>>;
+  }[];
+  current: number;
+  nextNumber: number;
+}
+
+/** 다시 계산한 가지 (체크포인트 비교용) */
+export interface LoadedBranch {
+  number: number;
+  timeline: readonly DeepReadonly<TimelineFrame>[];
+}
+
+/**
+ * 경기 불러오기 작업 (15-2): 가지를 만든 순서대로 하나씩 다시 계산한다. step()은 가지 하나(끝까지 6000틱이면 약 1.5초)를 계산하고
+ * 모두 끝났으면 true. commit()은 모두 계산했고 아직 경기 전일 때만 컨트롤러 상태를 바꾸고 회전을 시작한다 (취소 = 작업을 버림)
+ */
+export interface MatchLoadJob {
+  readonly total: number;
+  readonly done: number;
+  step(): boolean;
+  commit(): LoadedBranch[] | null;
+}
+
+/** 내보내기 재료 (15-2, buildMatchRecipe의 branches / current / nextNumber) */
+export interface MatchRecipeTree {
+  branches: {
+    number: number;
+    parent: number | null;
+    forkTick: number;
+    name: string | null;
+    inputs: Record<RobotId, Int8Array>;               // 0 ~ 머리 전체 적용 입력 기록
+    timeline: readonly DeepReadonly<TimelineFrame>[]; // 0 ~ 머리 프레임
+  }[];
+  current: number;
+  nextNumber: number;
+}
+
 /** 상태 알림의 가지 목록 한 줄 (만든 순서, 10-5) */
 export interface BranchInfo {
   id: number;
@@ -219,6 +265,7 @@ export class AppController {
   private endSeq = 0;
   private tree!: BranchTree<BranchData>;
   private loadedEnd = false;            // 불러온 경기: 회전 뒤 루프가 곧바로 ENDED → 종료 연출 없이 복기 (10-4)
+  private loadedPause = false;          // 불러온 미종료 가지: 회전 뒤 시작하자마자 일시정지 → 머리에서 RESUME 가능 (15-2)
   private shortcutsEnabled = true;
   private autoPauseReason: Exclude<PauseReason, 'USER'> | null = null;
   private lastToastAt: Record<'robot1' | 'robot2', number> = { robot1: -Infinity, robot2: -Infinity };
@@ -320,40 +367,107 @@ export class AppController {
   }
 
   /**
-   * 경기 불러오기 (명세서 3.9 경기 불러오기 ④ ⑤, 10-4): 경기 전(SETUP)에만. 주어진 설정으로 새 엔진을 만들어 입력 기록(로봇별 0 ~ 5999틱)으로
-   * 전체를 재계산하고, 기본 보기 방향으로 회전한 뒤 종료 연출 / 결과 팝업 없이 복기 상태(보는 틱 0)로 연다.
-   * 입력 기록은 녹화 로그에도 넣고 두 로봇 출처를 REPLAY로 두어, 되감아 분기하면 녹화 덧입히기로 이어 조종할 수 있다.
-   * 반환 = 재계산한 타임라인 (체크포인트 비교용), 경기 전이 아니면 null
+   * 경기 불러오기 (명세서 3.9 경기 불러오기 ④ ⑤, 10-4 · 15-2): 경기 전(SETUP)에만. 주어진 설정의 새 엔진으로 가지를 만든 순서대로
+   * 다시 계산한다 — 원본은 0틱부터, 다른 가지는 부모 타임라인에서 분기 틱으로 갈라 그 가지 전체 입력을 머리 틱까지 재생.
+   * 가지마다 타임라인과 입력 사본(녹화 로그 = 적용 입력 기록 = 그 가지 전체 입력)을 보관해 두었다가 commit()에서
+   * 분기 트리(가지 id = 번호)와 파일의 지금 가지로 연다. 경기 전이 아니면 null
    */
-  loadMatch(setup: MatchSetup, records: Readonly<Record<RobotId, ArrayLike<number>>>, branchName: string | null): readonly DeepReadonly<TimelineFrame>[] | null {
-    if (this.phase !== 'SETUP') return null;
-    this.setup = setup;
-    this.newMatch();
-    this.inputs.loadRecords(records);
-    this.engine.inputProvider = createInputRecordProvider(records);
-    this.engine.runFullMatch();
-    this.engine.inputProvider = null;
-    this.matchChoices = { robot1: 'REPLAY', robot2: 'REPLAY' };
-    this.applyInputChoices();
-    this.tree = createBranchTree({ timeline: this.engine.currentTimeline, inputs: null }, branchName); // 불러온 경기 = 원본 가지
-    this.loadedEnd = true;
-    this.phase = 'ROTATING_IN';
-    this.editScene = null;
-    this.animator.start(viewAngle(this.matchView, this.alliance), this.now());
-    this.changed();
-    return this.engine.timeline;
+  beginLoadMatch(setup: MatchSetup, tree: MatchLoadTree): MatchLoadJob | null {
+    if (this.phase !== 'SETUP' || tree.branches.length === 0) return null;
+    const engine = new SimulationEngine(setup.r1Config, setup.r2Config, setup.shotJudge, setup.scenario.allianceColor, setup.scenario, setup.shooters);
+    const computed = new Map<number, { timeline: EngineTimeline; inputs: BranchInputs }>();
+    const total = tree.branches.length;
+    let done = 0;
+    const step = (): boolean => {
+      if (done >= total) return true;
+      const b = tree.branches[done];
+      const parent = b.parent === null ? undefined : computed.get(b.parent);
+      if (parent) {
+        engine.adoptTimeline(parent.timeline);
+        engine.forkTimeline(b.forkTick);
+      } else {
+        engine.reset();
+      }
+      const provider = createInputRecordProvider(b.records);
+      while (engine.currentTick < b.headTick) {
+        const inputs = provider(engine.currentTick, engine);
+        engine.step(inputs?.r1, inputs?.r2);
+      }
+      const hub = new MatchInputs();
+      hub.loadRecords(b.records, b.headTick);
+      computed.set(b.number, { timeline: engine.currentTimeline, inputs: hub.snapshot() });
+      done++;
+      return done >= total;
+    };
+    const commit = (): LoadedBranch[] | null => {
+      if (done < total || this.phase !== 'SETUP') return null;
+      const current = computed.get(tree.current);
+      if (!current) return null;
+      this.setup = setup;
+      this.newMatch();
+      this.engine.adoptTimeline(current.timeline);
+      this.inputs.restore(current.inputs);
+      this.matchChoices = { robot1: 'REPLAY', robot2: 'REPLAY' };
+      this.applyInputChoices();
+      const nodes: BranchNode<BranchData>[] = tree.branches.map(b => ({
+        id: b.number,
+        number: b.number,
+        name: b.name,
+        parentId: b.parent,
+        forkTick: b.forkTick,
+        data: { timeline: computed.get(b.number)!.timeline, inputs: b.number === tree.current ? null : computed.get(b.number)!.inputs },
+      }));
+      this.tree = restoreBranchTree(nodes, tree.current, tree.nextNumber);
+      const head = current.timeline.frames.length - 1;
+      this.loadedEnd = head >= MATCH_TICKS;
+      this.loadedPause = !this.loadedEnd;
+      this.viewTick = this.loadedEnd ? 0 : head;
+      this.phase = 'ROTATING_IN';
+      this.editScene = null;
+      this.animator.start(viewAngle(this.matchView, this.alliance), this.now());
+      this.changed();
+      return tree.branches.map(b => ({ number: b.number, timeline: computed.get(b.number)!.timeline.frames }));
+    };
+    return {
+      total,
+      get done() {
+        return done;
+      },
+      step,
+      commit,
+    };
+  }
+
+  /** 경기 불러오기 한 번에 (가지를 모두 계산한 뒤 commit, 테스트 / 진행률이 필요 없을 때) */
+  loadMatch(setup: MatchSetup, tree: MatchLoadTree): LoadedBranch[] | null {
+    const job = this.beginLoadMatch(setup, tree);
+    if (!job) return null;
+    while (!job.step());
+    return job.commit();
   }
 
   /**
-   * 경기 내보내기 재료 (명세서 3.9 경기 내보내기, 10-4): 경기 종료(6000틱)에 도달했으면 로봇별 적용 입력 기록 0 ~ 5999틱 + 타임라인 + 가지 이름,
-   * 아니면 null. 적용 입력 기록 길이 = 엔진 머리이므로 6000틱이 모두 있으면 종료에 도달한 것 (진행 중 / 분기 직후는 모자람)
+   * 경기 내보내기 재료 (명세서 3.9 경기 내보내기, 10-4 · 15-2): 경기 중이고 진행 중이 아니면(일시정지 / 복기 / 종료 강조 / 결과 팝업)
+   * 분기 트리 전체 — 가지마다 번호 / 부모 번호 / 분기 틱 / 이름 / 0 ~ 머리 적용 입력 기록 / 타임라인 + 지금 가지 번호 + 다음 번호.
+   * 지금 가지의 입력은 입력 허브 작업본, 다른 가지는 보관한 사본. 진행 중이면 null
    */
-  recipeSource(): { inputs: Record<RobotId, Int8Array>; timeline: readonly DeepReadonly<TimelineFrame>[]; branchName: string } | null {
-    if (this.phase !== 'MATCH') return null;
-    const cut = (robot: RobotId) => this.inputs.applied[robot].data.slice(0, this.inputs.applied[robot].length * LOG_RECORD_BYTES);
-    const inputs = { robot1: cut('robot1'), robot2: cut('robot2') };
-    if (inputs.robot1.length < MATCH_TICKS * LOG_RECORD_BYTES || inputs.robot2.length < MATCH_TICKS * LOG_RECORD_BYTES) return null;
-    return { inputs, timeline: this.engine.timeline, branchName: fileBranchName(currentBranch(this.tree)) };
+  recipeSource(): MatchRecipeTree | null {
+    if (this.phase !== 'MATCH' || this.loop.state === 'RUNNING') return null;
+    const cut = (channel: BranchInputs['applied'][RobotId]) => channel.data.slice(0, channel.length * LOG_RECORD_BYTES);
+    const numberOf = (id: number | null) => (id === null ? null : findBranch(this.tree, id)!.number);
+    const branches = this.tree.nodes.map(n => {
+      const isCurrent = n.id === this.tree.currentId;
+      const applied = isCurrent ? this.inputs.applied : n.data.inputs!.applied;
+      return {
+        number: n.number,
+        parent: numberOf(n.parentId),
+        forkTick: n.forkTick,
+        name: n.name,
+        inputs: { robot1: cut(applied.robot1), robot2: cut(applied.robot2) },
+        timeline: isCurrent ? this.engine.timeline : n.data.timeline.frames,
+      };
+    });
+    return { branches, current: currentBranch(this.tree).number, nextNumber: this.tree.nextNumber };
   }
 
   pause(): void {
@@ -709,6 +823,7 @@ export class AppController {
     this.endSeq = 0;
     this.tree = createBranchTree({ timeline: this.engine.currentTimeline, inputs: null }); // 새 경기 = 원본 가지 하나 (NEW = 트리 폐기)
     this.loadedEnd = false;
+    this.loadedPause = false;
     this.autoPauseReason = null;
     this.lastToastAt = { robot1: -Infinity, robot2: -Infinity };
     const created = createBrowserRealtimeLoop(
@@ -874,6 +989,11 @@ export class AppController {
     } else if (this.phase === 'ROTATING_IN') {
       this.phase = 'MATCH';
       this.loop.start(); // 회전이 끝난 뒤에만 조종 시작
+      // 불러온 미종료 가지: 첫 프레임 전에 바로 일시정지 → 머리에서 멈춘 채 RESUME / 분기 가능 (15-2)
+      if (this.loadedPause) {
+        this.loadedPause = false;
+        this.loop.pause('USER');
+      }
       this.emitStatus(true);
     } else if (this.phase === 'ROTATING_OUT') {
       this.phase = 'SETUP';

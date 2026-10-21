@@ -260,6 +260,15 @@ export function branchInputRecords(recipe: Pick<MatchRecipe, 'branches'>, number
   return { robot1: join('robot1'), robot2: join('robot2') };
 }
 
+/** 불러오기용 트리 (15-2, AppController.beginLoadMatch 입력): 가지마다 0 ~ 머리 전체 입력 */
+export function recipeLoadTree(recipe: Pick<MatchRecipe, 'branches' | 'current' | 'nextNumber'>) {
+  return {
+    branches: recipe.branches.map(b => ({ number: b.number, parent: b.parent, forkTick: b.forkTick, name: b.name, headTick: b.headTick, records: branchInputRecords(recipe, b.number)! })),
+    current: recipe.current,
+    nextNumber: recipe.nextNumber,
+  };
+}
+
 /** 레시피 → 파일 문자열 (형식 버전 2, 2칸 들여쓰기) */
 export function serializeMatchRecipe(recipe: MatchRecipe): string {
   const file = {
