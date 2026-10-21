@@ -16,10 +16,23 @@ import { compareCheckpoints, frameChecksum, timelineCheckpoints } from '../../co
 import { DEFAULT_DRAFT_VALUES } from '../defaultSetup';
 import type { AppStatus, LiftToast, MatchSetup } from '../appController';
 import type { EditScene } from '../../renderer/editSceneRenderer';
+import type { ScenePaths } from '../../renderer/robotPath';
 
 // 편집 모드 장면 그리기 기록 (09-10b): 실제 그리기 대신 받은 장면만 모음
 const editRenders = vi.hoisted(() => [] as unknown[]);
 vi.mock('../../renderer/editSceneRenderer', () => ({ renderEditScene: (_ctx: unknown, scene: unknown) => editRenders.push(scene) }));
+// 경기 장면 기록 (16-3 로봇 동선): 실제로 그리면서 받은 장면도 모음
+const sceneRenders = vi.hoisted(() => [] as { paths?: ScenePaths | null; frame: { tick: number } }[]);
+vi.mock('../../renderer/sceneRenderer', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../renderer/sceneRenderer')>();
+  return {
+    ...actual,
+    renderScene: (...args: Parameters<typeof actual.renderScene>) => {
+      sceneRenders.push(args[1]);
+      actual.renderScene(...args);
+    },
+  };
+});
 
 // 각 검증은 메시지와 함께 expect로 확인 (실패 시 어떤 조건이 깨졌는지 메시지로 표시)
 const assert = (c: boolean, m: string) => {
@@ -572,6 +585,34 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     frames.advance(VIEW_ANIMATION_MS + 50);
     input = h.status().input;
     assert(h.status().phase === 'SETUP' && h.status().matchView === 'AUDIENCE' && input.choices.robot2 === 'AUTO', 'NEW: view back to the default, choices back to the pre-match choices');
+    h.dispose();
+  });
+
+  it('H2. (16-3) 로봇 동선: 표시 옵션이 켜져 있고 진행 중이 아닐 때만 장면에 지금 가지의 동선 (보는 틱에서 나뉨)', () => {
+    const { h, frames, win } = setup();
+    h.setOptions({ ...DEFAULT_RENDER_OPTIONS, robotPath: true });
+    const lastPaths = () => {
+      frames.advance(16);
+      return sceneRenders.at(-1)!.paths ?? null;
+    };
+    assert(lastPaths() === null, 'before the match: no paths');
+    h.start();
+    frames.advance(VIEW_ANIMATION_MS + 50);
+    win.dispatchEvent(key('keydown', KEYBOARD_BINDINGS.forward));
+    frames.advance(1000, 20);
+    assert(h.status().loopState === 'RUNNING' && lastPaths() === null, 'running: no paths');
+    win.dispatchEvent(key('keyup', KEYBOARD_BINDINGS.forward));
+    h.pause();
+    const head = h.status().headTick;
+    let paths = lastPaths()!;
+    const at = () => ({ x: h.currentFrame().r2.x, y: h.currentFrame().r2.y });
+    assert(!!paths && JSON.stringify(paths.robot2.past.at(-1)) === JSON.stringify(at()) && paths.robot2.future.length === 1, `paused at the head (${head}): path up to the robot, nothing ahead`);
+    assert(paths.robot2.past.length > 2, 'R2 (keyboard) drove: a real path');
+    h.setViewTick(10);
+    paths = lastPaths()!;
+    assert(JSON.stringify(paths.robot2.past.at(-1)) === JSON.stringify(at()) && paths.robot2.future.length > 2 && sceneRenders.at(-1)!.frame.tick === 10, 'rewound: split at the viewed tick');
+    h.setOptions({ ...DEFAULT_RENDER_OPTIONS, robotPath: false });
+    assert(lastPaths() === null, 'option off: no paths');
     h.dispose();
   });
 

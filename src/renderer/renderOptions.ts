@@ -23,6 +23,7 @@ export interface RenderOptions {
   hitProbability: boolean; // 실시간 명중 확률 (좌측 HTML 득점 패널 글자, 09-6d — 캔버스에는 그리지 않음)
   flightTrail: boolean;    // 비행 잔상
   flightResult: boolean;   // 비행 중 결과 색 (기본은 도착 전까지 숨김)
+  robotPath: boolean;      // 로봇 동선 (진행 중이 아닐 때 — 복기 / 일시정지 / 재생, 16-3)
 }
 
 export const DEFAULT_RENDER_OPTIONS: Readonly<RenderOptions> = {
@@ -31,6 +32,7 @@ export const DEFAULT_RENDER_OPTIONS: Readonly<RenderOptions> = {
   hitProbability: false,
   flightTrail: false,
   flightResult: false,
+  robotPath: false,
 };
 
 type Robot = DeepReadonly<RobotState>;

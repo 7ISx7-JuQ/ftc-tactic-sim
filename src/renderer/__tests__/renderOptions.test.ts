@@ -8,6 +8,7 @@ import { renderScene } from '../sceneRenderer';
 import { DEFAULT_RENDER_OPTIONS, aimGuide, aimGuidePiece, hitProbabilities, intakeProgress } from '../renderOptions';
 import type { RenderOptions } from '../renderOptions';
 import { restingView } from '../viewTransform';
+import { robotPaths } from '../robotPath';
 
 // 각 검증은 메시지와 함께 expect로 확인 (실패 시 어떤 조건이 깨졌는지 메시지로 표시)
 const assert = (c: boolean, m: string) => {
@@ -29,7 +30,7 @@ const engine = (judge: ShotJudge = fixedRateShotJudge(0.5)) =>
 // 모든 메서드를 받아 아무것도 하지 않는 캔버스 (Node에서 renderScene 실행용, measureText만 폭 반환)
 const noopCtx = () =>
   new Proxy({}, { get: (_t, prop) => (prop === 'measureText' ? () => ({ width: 10 }) : () => undefined), set: () => true }) as unknown as CanvasRenderingContext2D;
-const ALL_ON: RenderOptions = { aimGuide: true, intakeProgress: true, hitProbability: true, flightTrail: true, flightResult: true };
+const ALL_ON: RenderOptions = { aimGuide: true, intakeProgress: true, hitProbability: true, flightTrail: true, flightResult: true, robotPath: true };
 
 describe('표시 옵션 (명세서 3.7, 08-6)', () => {
   it('A. 조준선 (터렛 범위 부채꼴 / 고정형은 부채꼴 없음, 발사 방향)', () => {
@@ -100,7 +101,7 @@ describe('표시 옵션 (명세서 3.7, 08-6)', () => {
     assert(e.timeline.some(f => f.field.pendingShots.length > 0), 'match has flights to draw');
     const ctx = noopCtx();
     const draw = (frame: Frame, options?: RenderOptions) =>
-      renderScene(ctx, { frame, r1Config: C1, r2Config: C2, view: restingView('DRIVER', 'RED'), options }, 2);
+      renderScene(ctx, { frame, r1Config: C1, r2Config: C2, view: restingView('DRIVER', 'RED'), options, paths: options?.robotPath ? robotPaths(e.timeline, frame.tick) : null }, 2);
     calls = 0;
     for (const frame of e.timeline) draw(frame);
     draw(e.timeline[100], DEFAULT_RENDER_OPTIONS);

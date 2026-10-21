@@ -73,6 +73,7 @@ import {
   screenUpInField,
 } from './viewTransform';
 import type { Point2, ViewTransform } from './viewTransform';
+import type { ScenePaths } from './robotPath';
 
 export interface SceneInput {
   frame: DeepReadonly<TimelineFrame>;
@@ -81,6 +82,7 @@ export interface SceneInput {
   view: ViewTransform;
   options?: RenderOptions;                 // 미지정 = 모두 꺼짐
   shooters?: MatchShooterBallistics;       // 경기의 기물별 슈터 탄도 (엔진 생성 인자와 같음, 조준선 사출구 — 13-2). 미지정 = 엔진 기본 슈터
+  paths?: ScenePaths | null;               // 로봇 동선 (표시 옵션 robotPath, 16-3 — 여러 프레임에서 뽑으므로 부르는 쪽이 robotPaths로 계산). 없으면 그리지 않음
 }
 
 const SCENE_COLORS = {
@@ -116,6 +118,7 @@ const SCENE_COLORS = {
   aimSector: 'rgba(250, 204, 21, 0.25)',
   aimSectorStroke: 'rgba(161, 98, 7, 0.6)',
   intakeArc: '#15803d',
+  pathStart: '#ffffff',
 };
 
 const MARGIN_PX = FIELD_MARGIN_INCH * PX_PER_INCH;
@@ -476,6 +479,39 @@ function pathPolyline(ctx: CanvasRenderingContext2D, pts: Point2[]): void {
   pts.forEach((p, i) => (i === 0 ? ctx.moveTo(inchToPx(p.x), inchToPx(p.y)) : ctx.lineTo(inchToPx(p.x), inchToPx(p.y))));
 }
 
+// 표시 옵션 robotPath (16-3): 진영 색 선 — R1 실선 / R2 점선, 지나온 동선은 진하게 · 앞으로 갈 동선은 흐리게, 0틱 위치에 흰 원.
+// 바닥 표시라 바닥 기물 / 로봇 / 터널 지붕 아래에 그린다 (터널 안 구간은 로봇처럼 지붕 아래)
+const PATH_DASH: Readonly<Record<'robot1' | 'robot2', number[]>> = { robot1: [], robot2: [7, 4] };
+const PATH_START_RADIUS = 1.2; // inch
+
+function drawRobotPaths(ctx: CanvasRenderingContext2D, paths: ScenePaths, ally: Alliance): void {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = SCENE_COLORS.robot[ally];
+  for (const robot of ['robot1', 'robot2'] as const) {
+    const { past, future } = paths[robot];
+    ctx.setLineDash(PATH_DASH[robot]);
+    if (future.length >= 2) {
+      pathPolyline(ctx, future);
+      ctx.globalAlpha = 0.3;
+      ctx.lineWidth = 1.75;
+      ctx.stroke();
+    }
+    if (past.length >= 2) {
+      pathPolyline(ctx, past);
+      ctx.globalAlpha = 0.85;
+      ctx.lineWidth = 2.75;
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+    const start = past[0] ?? future[0];
+    if (start) drawCircle(ctx, start.x, start.y, PATH_START_RADIUS, SCENE_COLORS.pathStart, SCENE_COLORS.robot[ally], 2);
+  }
+  ctx.restore();
+}
+
 // 표시 옵션 aimGuide: 다음에 발사할 기물의 슈터 기준 (13-2) — 터렛형은 사출구를 꼭짓점으로 회전 범위 부채꼴 (고정형은 없음, 13-5)
 // + 사출구에서 발사 방향으로 조준점 거리만큼 점선 (로봇 아래) + 사출구 점 (비행 공이 출발하는 점, 몸체 안이라 로봇 위 — drawMuzzleMarks)
 const AIM_SECTOR_RADIUS = 24; // inch
@@ -715,7 +751,7 @@ function drawBadge(ctx: CanvasRenderingContext2D, robot: DeepReadonly<RobotState
 
 /**
  * 장면 전체를 그림. ctx는 SCENE_WIDTH_PX × SCENE_HEIGHT_PX(= 필드 뷰포트 800 × 800) 논리 크기 × dpr 버퍼의 캔버스
- * 순서: 둘레 배경 → 정적 레이어(HIVE 기둥 부분, 게이지 틀 포함) → HIVE 셀 상태(기둥 부분) / 게이지 내용 → 바닥 기물(득점 GARDEN 포함)
+ * 순서: 둘레 배경 → 정적 레이어(HIVE 기둥 부분, 게이지 틀 포함) → HIVE 셀 상태(기둥 부분) / 게이지 내용 → [로봇 동선] → 바닥 기물(득점 GARDEN 포함)
  *       → 종료 강조(FLOWER) → [조준선] → 로봇 → [사출구 점] → 종료 강조(주차) → [흡입 진행] → 터널 지붕(지붕 불투명도, 13-1) → 팁 낙하
  *       → 비행 공([잔상] / [결과 색])
  *       → HIVE 셀 알약 / 번호 / 배지   ([ ] = 표시 옵션)
@@ -741,6 +777,7 @@ export function renderScene(ctx: CanvasRenderingContext2D, scene: SceneInput, dp
 
   drawHiveState(ctx, frame.field.hive, ally, 'PILLARS');
   drawGaugeContents(ctx, frame.field, ally);
+  if (scene.paths) drawRobotPaths(ctx, scene.paths, ally);
   drawFloorPieces(ctx, frame);
   drawScoredFieldMarks(ctx, frame, ally);
   const guides = options.aimGuide ? sceneAimGuides(frame, scene) : [];

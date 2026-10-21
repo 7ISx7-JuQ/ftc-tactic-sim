@@ -48,6 +48,7 @@ import type { FrameScheduler, LoopState, PauseReason, RealtimeLoop } from '../in
 import { DEFAULT_RENDER_OPTIONS, hitProbabilities } from '../renderer/renderOptions';
 import type { RenderOptions, RobotHitProbability } from '../renderer/renderOptions';
 import { renderScene } from '../renderer/sceneRenderer';
+import { robotPaths } from '../renderer/robotPath';
 import { renderEditScene } from '../renderer/editSceneRenderer';
 import type { EditScene } from '../renderer/editSceneRenderer';
 import { ViewAnimator, viewAngle } from '../renderer/viewTransform';
@@ -1036,7 +1037,10 @@ export class AppController {
       renderEditScene(this.ctx, this.editScene, view, this.dpr);
     } else {
       const frame = this.currentFrame();
-      renderScene(this.ctx, { frame, r1Config: this.setup.r1Config, r2Config: this.setup.r2Config, view, options: this.options, shooters: this.setup.shooters }, this.dpr);
+      // 로봇 동선 (16-3): 표시 옵션이 켜져 있고 진행 중이 아닐 때만 (복기 / 일시정지 / 재생), 지금 가지의 0 ~ 머리 프레임에서
+      const showPaths = this.options.robotPath && this.phase === 'MATCH' && this.loop.state !== 'RUNNING';
+      const paths = showPaths ? robotPaths(this.engine.timeline, this.shownTick()) : null;
+      renderScene(this.ctx, { frame, r1Config: this.setup.r1Config, r2Config: this.setup.r2Config, view, options: this.options, shooters: this.setup.shooters, paths }, this.dpr);
     }
 
     if (!view.done || this.playing || this.endStage === 'HIGHLIGHT') {

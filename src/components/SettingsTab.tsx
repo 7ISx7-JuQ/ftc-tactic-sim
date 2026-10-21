@@ -24,7 +24,7 @@ import { Section, Segmented, Toggle } from './FormControls';
 import type { UiSettings } from '../ui/settings';
 
 const ROBOTS: readonly RobotId[] = ['robot1', 'robot2'];
-const OPTION_KEYS: readonly (keyof RenderOptions)[] = ['aimGuide', 'intakeProgress', 'hitProbability', 'flightTrail', 'flightResult'];
+const OPTION_KEYS: readonly (keyof RenderOptions)[] = ['aimGuide', 'intakeProgress', 'hitProbability', 'flightTrail', 'flightResult', 'robotPath'];
 const DRIVE_MODES: readonly DriveMode[] = ['FIELD', 'ROBOT'];
 const VIEWS: readonly ViewMode[] = ['DRIVER', 'AUDIENCE'];
 // 로봇 프리셋 줄 설명: 적용된 팀 번호 + 팀명 (없으면 빈칸)

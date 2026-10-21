@@ -395,6 +395,32 @@ describe('config 창', () => {
     mount();
     await expect.element(button('시작')).toBeVisible();
   });
+
+  it('표시 옵션 로봇 동선 (16-3): SETTINGS에서 켜면 경기 중 일시정지에도 그대로, 다시 열어도 유지 (설정 자동 보관)', async () => {
+    const toggle = () => page.getByRole('checkbox', { name: /Robot paths/ });
+    await userEvent.click(button('Open settings'));
+    await userEvent.click(page.getByRole('tab', { name: 'SETTINGS' }));
+    await expect.element(toggle()).not.toBeChecked(); // 기본 꺼짐
+    await userEvent.click(page.getByText('Robot paths', { exact: true })); // 스위치 라벨 (입력칸은 숨김)
+    await expect.element(toggle()).toBeChecked();
+    await userEvent.keyboard('{Escape}');
+
+    await expect.element(button('START')).toBeEnabled();
+    await userEvent.click(button('START'));
+    await expect.element(button('PAUSE'), { timeout: 5000 }).toBeVisible();
+    await new Promise(r => setTimeout(r, 400));
+    await userEvent.keyboard(' ');
+    await expect.element(button('RESUME')).toBeVisible();
+    await userEvent.click(button('Open settings'));
+    await userEvent.click(page.getByRole('tab', { name: 'SETTINGS' }));
+    await expect.element(toggle()).toBeChecked();
+
+    unmount();
+    mount();
+    await userEvent.click(button('Open settings'));
+    await userEvent.click(page.getByRole('tab', { name: 'SETTINGS' }));
+    await expect.element(toggle()).toBeChecked();
+  });
 });
 
 describe('도움말', () => {

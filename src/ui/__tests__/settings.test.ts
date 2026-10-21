@@ -28,7 +28,7 @@ const custom: UiSettings = {
   language: 'ko',
   lengthUnit: 'cm',
   defaultView: 'AUDIENCE',
-  renderOptions: { aimGuide: true, intakeProgress: false, hitProbability: true, flightTrail: false, flightResult: true },
+  renderOptions: { aimGuide: true, intakeProgress: false, hitProbability: true, flightTrail: false, flightResult: true, robotPath: true },
   keyboardEnabled: false,
   driveModes: { robot1: 'ROBOT', robot2: 'FIELD' },
 };
@@ -40,7 +40,7 @@ describe('SETTINGS / 자동 보관 (09-8b)', () => {
       language: 'en',
       lengthUnit: 'in',
       defaultView: 'DRIVER',
-      renderOptions: { aimGuide: false, intakeProgress: false, hitProbability: false, flightTrail: false, flightResult: false },
+      renderOptions: { aimGuide: false, intakeProgress: false, hitProbability: false, flightTrail: false, flightResult: false, robotPath: false },
       keyboardEnabled: true,
       driveModes: { robot1: 'FIELD', robot2: 'FIELD' },
     });
@@ -75,6 +75,7 @@ describe('SETTINGS / 자동 보관 (09-8b)', () => {
     expect(partial.settings.defaultView).toBe('DRIVER');
     expect(partial.settings.lengthUnit).toBe('cm');
     expect(partial.settings.renderOptions).toEqual({ ...DEFAULT_SETTINGS.renderOptions, flightTrail: true });
+    expect(partial.settings.renderOptions.robotPath).toBe(false); // 16-3 이전에 저장한 설정 = 새 옵션은 기본값 (SETTINGS_VERSION 그대로)
     expect(partial.settings.driveModes).toEqual({ robot1: 'FIELD', robot2: 'FIELD' });
     expect(partial.settings.keyboardEnabled).toBe(false);
   });
