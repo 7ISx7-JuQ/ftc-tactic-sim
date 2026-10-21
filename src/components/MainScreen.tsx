@@ -1219,6 +1219,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
           onRestart={newMatch}
           onExportMatch={exportMatch}
           onExportSummary={exportSummary}
+          onSwitchBranch={id => c()?.switchBranch(id)}
           branchName={shownBranchName(lang, status)}
           comparison={branchComparison(lang, status)}
         />

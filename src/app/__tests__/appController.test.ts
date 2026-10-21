@@ -369,6 +369,57 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     h.dispose();
   });
 
+  it('F2. (16-1) 결과 팝업 가지 비교 → 종료한 가지로 전환: 팝업 유지 · 그 가지의 결과, 미종료 / 지금 가지 / 종료 강조 중은 거부, 종료 신호 불변', () => {
+    const { h, frames, win } = setup();
+    h.start();
+    frames.advance(VIEW_ANIMATION_MS + 50);
+    for (let i = 0; i < 1300 && h.status().loopState !== 'ENDED'; i++) frames.advance(100, 100);
+    h.skipHighlight();
+    h.closeResult();
+    h.setViewTick(MATCH_TICKS);
+    const rootEnd = JSON.stringify(h.currentFrame());
+    const rootTotal = h.status().result!.total;
+
+    // 가지 2: 종료 100틱 전에서 갈라 R2(키보드) 전진 → 다시 종료 (종료 강조 중에는 전환 불가)
+    h.setViewTick(MATCH_TICKS - 100);
+    h.branch();
+    win.dispatchEvent(key('keydown', KEYBOARD_BINDINGS.forward));
+    frames.advance(2500, 20);
+    win.dispatchEvent(key('keyup', KEYBOARD_BINDINGS.forward));
+    let s = h.status();
+    assert(s.endStage === 'HIGHLIGHT' && s.endSeq === 2 && !h.switchBranch(1), 'highlight: switch refused');
+    h.skipHighlight();
+    const sideEnd = JSON.stringify(h.currentFrame());
+    assert(sideEnd !== rootEnd, 'branch 2 ends in a different state');
+
+    // 가지 3: 미종료 (원본 100틱에서 갈라 잠깐 진행)
+    h.closeResult();
+    h.switchBranch(1);
+    h.setViewTick(100);
+    h.branch();
+    frames.advance(200, 20);
+    h.pause();
+    const b3 = h.status().currentBranchId;
+
+    // 가지 2로 돌아가 결과 팝업 → 원본으로 전환 = 팝업 유지, 원본 결과 / 종료 프레임
+    h.switchBranch(2);
+    h.setViewTick(MATCH_TICKS);
+    h.openResult();
+    assert(!h.switchBranch(b3) && h.status().currentBranchId === 2, 'result popup: unfinished branch refused');
+    assert(!h.switchBranch(2), 'result popup: current branch refused');
+    assert(h.switchBranch(1), 'result popup: switch to the ended root');
+    s = h.status();
+    assert(s.endStage === 'RESULT' && s.currentBranchId === 1 && s.tick === MATCH_TICKS && s.endSeq === 2, 'popup stays open on the root, no new end signal');
+    assert(JSON.stringify(h.currentFrame()) === rootEnd && s.result!.total === rootTotal, 'root end frame / result');
+    assert(h.switchBranch(2) && JSON.stringify(h.currentFrame()) === sideEnd && h.status().endStage === 'RESULT', 'and back to branch 2');
+
+    // 팝업 닫기 = 그 가지 복기
+    h.closeResult();
+    s = h.status();
+    assert(s.endStage === 'REVIEW' && s.currentBranchId === 2 && s.canScrub, 'close -> review of branch 2');
+    h.dispose();
+  }, FULL_MATCH_TIMEOUT_MS);
+
   it('G. 경고 토스트 (리프트 중 주행 입력, 로봇당 2초에 한 번) / 자동 일시정지 배너 사유 (09-7b)', () => {
     const { h, frames, win, toasts } = setup();
     h.start();

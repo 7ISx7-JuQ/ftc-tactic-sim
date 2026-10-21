@@ -508,10 +508,13 @@ export class AppController {
   /**
    * 가지 전환 (10-5): 일시정지 / 복기 중에만 (진행 · 종료 강조 · 결과 팝업 중 불가, 재생은 멈춤). 기록을 바꾸지 않으므로 확인창 없음.
    * 보는 틱은 유지하되 그 가지 머리를 넘으면 머리로. 종료한 가지면 복기, 아니면 일시정지 (보는 틱 = 머리면 RESUME). endSeq 불변
+   * 16-1: 결과 팝업(가지 비교 줄)에서는 종료한 가지로만 전환하고 팝업을 유지한다 (그 가지의 결과를 보여 줌)
    */
   switchBranch(id: number): boolean {
     const target = findBranch(this.tree, id);
-    if (!this.canScrub() || !target || id === this.tree.currentId) return false;
+    const fromResult = this.endStage === 'RESULT';
+    if (!(this.canScrub() || fromResult) || !target || id === this.tree.currentId) return false;
+    if (fromResult && target.data.timeline.frames.length - 1 < MATCH_TICKS) return false;
     this.stopPlayback();
     this.tree = setBranchData(this.tree, this.tree.currentId, { timeline: this.engine.currentTimeline, inputs: this.inputs.snapshot() });
     this.engine.adoptTimeline(target.data.timeline);
@@ -519,7 +522,7 @@ export class AppController {
     this.tree = setBranchData(switchBranch(this.tree, id), id, { timeline: target.data.timeline, inputs: null });
     const head = this.headTick();
     this.viewTick = Math.min(this.viewTick, head);
-    this.endStage = head >= MATCH_TICKS ? 'REVIEW' : 'NONE';
+    this.endStage = fromResult ? 'RESULT' : head >= MATCH_TICKS ? 'REVIEW' : 'NONE';
     this.autoPauseReason = null;
     this.changed();
     return true;

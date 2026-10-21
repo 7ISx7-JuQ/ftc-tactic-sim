@@ -10,6 +10,9 @@ import MainScreen from '../MainScreen';
 import type { MainScreenServices } from '../MainScreen';
 import type { LUTCacheEntry } from '../../workers/lutCache';
 import type { LUTWorkerLike } from '../../workers/lutManager';
+import { DEFAULT_DRAFT_VALUES, setupFromDrafts } from '../../app/defaultSetup';
+import { buildMatchRecipe, serializeMatchRecipe } from '../../app/matchRecipe';
+import { MATCH_TICKS, SimulationEngine } from '../../core/simulationEngine';
 import '../../index.css';
 
 // 바로 준비되는 명중 확률표: 어떤 요청이든 캐시 적중 (기준 LUT = 전 격자 0.5)
@@ -497,6 +500,69 @@ describe('경기 흐름', () => {
     } finally {
       URL.createObjectURL = createObjectURL;
       HTMLAnchorElement.prototype.click = anchorClick;
+      HTMLInputElement.prototype.click = inputClick;
+    }
+  });
+
+  it('결과 팝업 가지 비교 (16-1): 종료한 가지 2개 경기 파일 IMPORT → RESULT → 비교 칩을 누르면 팝업이 열린 채 그 가지로 전환 → REVIEW = 그 가지 복기', async () => {
+    // 중립 입력으로 끝까지 진행한 원본 + 3000틱에서 갈라 끝까지 간 가지 2 "Plan B" (지금 가지)
+    const setup = setupFromDrafts(DEFAULT_DRAFT_VALUES);
+    const engine = new SimulationEngine(setup.r1Config, setup.r2Config, setup.shotJudge, 'RED', setup.scenario, setup.shooters);
+    engine.runFullMatch();
+    const neutral = { robot1: new Int8Array(MATCH_TICKS * 4), robot2: new Int8Array(MATCH_TICKS * 4) };
+    const text = serializeMatchRecipe(
+      buildMatchRecipe({
+        setup: DEFAULT_DRAFT_VALUES,
+        branches: [
+          { number: 1, parent: null, forkTick: 0, name: null, inputs: neutral, timeline: engine.timeline },
+          { number: 2, parent: 1, forkTick: 3000, name: 'Plan B', inputs: neutral, timeline: engine.timeline },
+        ],
+        current: 2,
+        nextNumber: 3,
+        createdAt: new Date(),
+      }),
+    );
+    // 파일 선택창 가로채기: 만든 경기 파일을 고른 것으로
+    const inputClick = HTMLInputElement.prototype.click;
+    HTMLInputElement.prototype.click = function (this: HTMLInputElement) {
+      if (this.type !== 'file') return inputClick.call(this);
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([text], 'two-branches.json', { type: 'application/json' }));
+      this.files = transfer.files;
+      this.dispatchEvent(new Event('change'));
+    };
+    try {
+      await expect.element(button('START')).toBeEnabled();
+      await userEvent.click(button('Open settings'));
+      await userEvent.click(page.getByRole('tab', { name: 'SETTINGS' }));
+      await userEvent.click(page.getByRole('button', { name: 'IMPORT', exact: true }).last());
+      await expect.poll(() => document.querySelector('[role="alertdialog"]')?.textContent ?? '').toContain('Loads 2 branches.');
+      await userEvent.keyboard('{Enter}');
+      await expect.element(button('RESULT'), { timeout: 10000 }).toBeVisible(); // 종료한 지금 가지 = 복기
+      expect(document.body.textContent).not.toContain('Results differ from the file');
+
+      await userEvent.click(button('RESULT'));
+      const popup = page.getByRole('dialog');
+      await expect.element(popup).toBeVisible();
+      const header = () => document.querySelector('.result-branch')?.textContent;
+      const currentChip = () => document.querySelector('.result-compare-chip[aria-current="true"] .result-compare-name')?.textContent;
+      expect(header()).toBe('Plan B');
+      expect(currentChip()).toBe('Plan B');
+
+      // 원본 칩 → 팝업은 그대로, 헤더 / 강조 칩이 원본으로
+      await userEvent.click(popup.getByRole('button', { name: /Main/ }));
+      await expect.poll(header).toBe('Main');
+      expect(currentChip()).toBe('Main');
+      await expect.element(popup).toBeVisible();
+      // 지금 가지 칩을 다시 눌러도 그대로
+      await userEvent.click(popup.getByRole('button', { name: /Main/ }));
+      expect(header()).toBe('Main');
+
+      // REVIEW → 원본 복기 (가지 목록 버튼 = 원본)
+      await userEvent.click(button('REVIEW'));
+      await expect.element(popup).not.toBeInTheDocument();
+      await expect.element(page.getByRole('button', { name: /Main/ })).toBeVisible();
+    } finally {
       HTMLInputElement.prototype.click = inputClick;
     }
   });

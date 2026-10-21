@@ -3,6 +3,7 @@
 // 09-12 확정: 헤더 아래 두 로봇 칩(좌측 패널과 같은 팀 표시), 항목별 점수 + 한 줄 근거, RP 카드 = 조건 + 지금 값.
 // 10-4: 동작 줄 위에 EXPORT MATCH(경기 레시피 .json) / EXPORT SUMMARY(요약 .txt) 줄.
 // 10-6: 가지가 2개 이상이면 진영 옆에 지금 가지 이름, 종료한 가지가 2개 이상이면 가지 비교 줄(점수, 지금 가지 강조, 최고 점수 표시).
+// 16-1: 가지 비교 칩을 누르면 그 가지로 전환 (팝업은 열린 채 그 가지의 결과로 바뀜, 지금 가지 칩은 그대로).
 import { Check, Download, FileText, GitFork, Trophy } from 'lucide-react';
 import type { MatchResult } from '../app/appController';
 import { ALLIANCE_COLORS } from '../renderer/canvasRenderer';
@@ -29,6 +30,7 @@ export default function ResultPopup({
   onRestart,
   onExportMatch,
   onExportSummary,
+  onSwitchBranch,
   branchName,
   comparison,
 }: {
@@ -40,6 +42,7 @@ export default function ResultPopup({
   onRestart: () => void;
   onExportMatch: () => void;   // 경기 파일 (.json, 10-4)
   onExportSummary: () => void; // 요약 (.txt, 10-4)
+  onSwitchBranch: (id: number) => void; // 가지 비교 칩 → 그 가지로 전환 (16-1)
   branchName: string | null;    // 지금 가지 이름 (가지 2개 이상일 때만, 10-6)
   comparison: { id: number; label: string; score: number; current: boolean; best: boolean }[] | null; // 종료한 가지 비교 (2개 이상일 때만)
 }) {
@@ -117,11 +120,19 @@ export default function ResultPopup({
           <div className="result-compare">
             <span className="result-compare-head">{t(lang, 'result.branches')}</span>
             {comparison.map(c => (
-              <span key={c.id} className={`result-compare-chip${c.current ? ' is-current' : ''}`}>
+              <button
+                type="button"
+                key={c.id}
+                className={`result-compare-chip${c.current ? ' is-current' : ''}`}
+                aria-current={c.current || undefined}
+                onClick={() => {
+                  if (!c.current) onSwitchBranch(c.id);
+                }}
+              >
                 {c.best && <Trophy aria-label={t(lang, 'branch.best')} />}
                 <span className="result-compare-name">{c.label}</span>
                 <b>{c.score}</b>
-              </span>
+              </button>
             ))}
           </div>
         )}

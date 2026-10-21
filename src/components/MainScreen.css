@@ -2425,7 +2425,7 @@
   color: var(--text-muted);
   margin-right: calc(var(--u) * 4);
 }
-.result-compare-chip {
+.main-screen .result-compare-chip {
   display: inline-flex;
   align-items: center;
   gap: calc(var(--u) * 6);
@@ -2435,8 +2435,12 @@
   border-radius: 999px;
   font-size: calc(var(--u) * 12);
 }
-.result-compare-chip.is-current {
+.main-screen .result-compare-chip.is-current {
   border-color: var(--accent);
+  cursor: default;
+}
+.main-screen .result-compare-chip:not(.is-current):hover {
+  background: rgba(255, 255, 255, 0.08);
 }
 .result-compare-name {
   min-width: 0;
