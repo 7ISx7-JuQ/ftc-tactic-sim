@@ -2294,6 +2294,18 @@
   flex-direction: column;
   gap: calc(var(--u) * 2);
 }
+/* 목록 아래 EXPORT MATCH (15-3): 트리 전체 내보내기 */
+.branch-popover-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: calc(var(--u) * 6);
+  padding: calc(var(--u) * 6) calc(var(--u) * 4) 0;
+  border-top: 1px solid var(--panel-border);
+}
+.branch-export svg {
+  width: calc(var(--u) * 14);
+  height: calc(var(--u) * 14);
+}
 .branch-row {
   display: flex;
   align-items: center;

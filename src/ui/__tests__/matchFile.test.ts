@@ -7,6 +7,7 @@ import { ENGINE_VERSION } from '../../core/simulationEngine';
 import { PENDING_LUT_VIEW } from '../lutView';
 import type { RobotLutView } from '../lutView';
 import {
+  matchComputingText,
   matchFileName,
   matchImportConfirmMessage,
   matchImportErrorMessage,
@@ -87,6 +88,12 @@ describe('경기 파일 화면 규칙 (10-4)', () => {
     expect(lines[2]).toContain(`ballistics model v${BALLISTICS_MODEL_VERSION + 1}`);
     expect(lines[3]).toContain('Hit map settings differ');
     expect(matchImportConfirmMessage('ko', [warnings[0]]).split('\n')[1]).toContain(`엔진 v${ENGINE_VERSION + 1}`);
+    // 가지가 2개 이상인 트리 (15-3): 안내 바로 아래 가지 수 줄, 경고는 그 뒤
+    expect(matchImportConfirmMessage('en', [], 1)).toBe(matchImportConfirmMessage('en', []));
+    const tree = matchImportConfirmMessage('ko', [{ code: 'LUT_SETTINGS' }], 4).split('\n');
+    expect(tree).toHaveLength(3);
+    expect(tree[1]).toBe('가지 4개를 불러옵니다.');
+    expect(tree[2]).toContain('⚠');
   });
 
   it('C. 준비 진행: 두 로봇 평균(준비 완료 = 100%), 오류가 있으면 오류', () => {
@@ -98,6 +105,15 @@ describe('경기 파일 화면 규칙 (10-4)', () => {
     expect(matchImportProgress({ robot1: view({ phase: 'ERROR', progress: 0.2 }), robot2: view({ phase: 'READY', progress: 1 }) }).error).toBe(true);
   });
 
+  it('C2. 재계산 진행 (15-3): 가지가 2개 이상이면 지금 계산 중인 가지 번째 / 전체, 하나면 "재계산 중"', () => {
+    expect(matchComputingText('en', 0, 1)).toBe(matchComputingText('en', 0, 0));
+    expect(matchComputingText('en', 0, 1)).not.toMatch(/\//);
+    expect(matchComputingText('ko', 0, 3)).toBe('경기 불러오는 중 · 재계산 1 / 3');
+    expect(matchComputingText('en', 2, 3)).toBe('Loading match · recalculating 3 / 3');
+    // 모두 끝나 적용하는 순간에도 전체를 넘지 않음
+    expect(matchComputingText('en', 3, 3)).toBe('Loading match · recalculating 3 / 3');
+  });
+
   it('D. 체크섬 불일치 배너: 일치 = 없음, 처음부터 / 구간(경기 타이머), 버전이 달랐으면 사유 추가', () => {
     expect(mismatchBanner('en', { match: true }, [])).toBeNull();
     expect(mismatchBanner('en', { match: false, index: 0, lastMatchTick: null, firstMismatchTick: 0 }, [])).toEqual({ title: 'Results differ from the file', hint: 'From the start' });
@@ -106,10 +122,23 @@ describe('경기 파일 화면 규칙 (10-4)', () => {
     const versioned = mismatchBanner('en', { match: false, index: 1, lastMatchTick: 0, firstMismatchTick: 50 }, [{ code: 'ENGINE_VERSION', file: 9, current: 1 }]);
     expect(versioned!.hint).toBe('From between 2:00 and 1:59 · the file was made with a different engine or ballistics version');
     expect(mismatchBanner('en', { match: false, index: 1, lastMatchTick: 0, firstMismatchTick: 50 }, [{ code: 'LUT_SETTINGS' }])!.hint).toBe('From between 2:00 and 1:59');
+    // 트리 (15-3): 처음 어긋난 가지 이름 + 그 밖에 어긋난 가지 수, 버전 사유는 맨 뒤
+    const part = { match: false, index: 5, lastMatchTick: 200, firstMismatchTick: 250 } as const;
+    expect(mismatchBanner('en', part, [], { label: 'Branch 3', others: 2 })!.hint).toBe('Branch 3 · From between 1:56 and 1:55 (+2 more branches)');
+    expect(mismatchBanner('ko', part, [], { label: '원본', others: 0 })!.hint).toBe('원본 · 1:56 ~ 1:55 사이부터');
+    expect(mismatchBanner('ko', part, [], { label: '가지 2', others: 1 })!.hint).toBe('가지 2 · 1:56 ~ 1:55 사이부터 (외 1개 가지)');
+    expect(mismatchBanner('en', part, [{ code: 'ENGINE_VERSION', file: 9, current: 1 }], { label: 'Main', others: 1 })!.hint).toBe(
+      'Main · From between 1:56 and 1:55 (+1 more branches) · the file was made with a different engine or ballistics version',
+    );
+    expect(mismatchBanner('en', { match: true }, [], { label: 'Main', others: 3 })).toBeNull();
   });
 
-  it('E. 파일 이름: 로컬 시각 / 진영 / 총점, 요약은 같은 이름의 .txt', () => {
-    expect(matchFileName(date, 'RED', 87)).toBe('tacticsim-match_20260930-1432_RED_87pts.json');
+  it('E. 파일 이름: 로컬 시각 / 진영 / 지금 가지 상태(총점 · 미종료면 남은 시간) / _b{번호} / _{가지 수}br, 요약은 같은 이름의 .txt', () => {
+    expect(matchFileName(date, 'RED', { total: 87 })).toBe('tacticsim-match_20260930-1432_RED_87pts.json');
+    expect(matchFileName(date, 'BLUE', { headTick: 3000 })).toBe('tacticsim-match_20260930-1432_BLUE_1-00.json');
+    expect(matchFileName(date, 'RED', { headTick: 250 })).toBe('tacticsim-match_20260930-1432_RED_1-55.json');
+    expect(matchFileName(date, 'RED', { total: 95 }, 3, 4)).toBe('tacticsim-match_20260930-1432_RED_95pts_b3_4br.json');
+    expect(matchFileName(date, 'RED', { headTick: 3000 }, null, 2)).toBe('tacticsim-match_20260930-1432_RED_1-00_2br.json');
     expect(summaryFileName(date, 'BLUE', 0)).toBe('tacticsim-summary_20260930-1432_BLUE_0pts.txt');
   });
 

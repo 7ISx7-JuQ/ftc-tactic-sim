@@ -427,4 +427,77 @@ describe('경기 흐름', () => {
     await expect.element(button('START'), { timeout: 5000 }).toBeEnabled(); // 관중석으로 회전 뒤 경기 전
     await expect.poll(timerText).toBe('2:00');
   });
+
+  it('경기 파일 (15-3): 가지 목록 EXPORT MATCH = 트리 전체(미종료 포함) → NEW → 경기 줄 IMPORT(가지 수 확인) → 재계산 → 보던 가지 머리에서 일시정지', async () => {
+    // 다운로드 / 파일 선택창 가로채기: 내려받은 글자를 그대로 불러오기 파일로 돌려준다
+    let saved: { name: string; text: Promise<string> } | null = null;
+    const createObjectURL = URL.createObjectURL;
+    const anchorClick = HTMLAnchorElement.prototype.click;
+    const inputClick = HTMLInputElement.prototype.click;
+    let lastBlob: Blob | null = null;
+    URL.createObjectURL = (blob: Blob | MediaSource) => {
+      lastBlob = blob as Blob;
+      return 'blob:test';
+    };
+    HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+      if (lastBlob) saved = { name: this.download, text: lastBlob.text() };
+    };
+    HTMLInputElement.prototype.click = function (this: HTMLInputElement) {
+      if (this.type !== 'file' || !saved) return inputClick.call(this);
+      void saved.text.then(text => {
+        const transfer = new DataTransfer();
+        transfer.items.add(new File([text], saved!.name, { type: 'application/json' }));
+        this.files = transfer.files;
+        this.dispatchEvent(new Event('change'));
+      });
+    };
+    try {
+      // 원본을 조금 진행 → 1틱 되감아 가지 2 → 가지 2를 조금 진행하고 일시정지 (미종료)
+      await userEvent.click(button('START'));
+      await expect.element(button('PAUSE'), { timeout: 5000 }).toBeVisible();
+      await new Promise(r => setTimeout(r, 600));
+      await userEvent.keyboard(' ');
+      await userEvent.click(button('Back 1 tick'));
+      await userEvent.click(button('BRANCH'));
+      await userEvent.keyboard('{Enter}');
+      await expect.element(button('PAUSE'), { timeout: 5000 }).toBeVisible();
+      await new Promise(r => setTimeout(r, 300));
+      await userEvent.keyboard(' ');
+      await expect.element(button('RESUME')).toBeVisible();
+      const head = timerText();
+
+      // 가지 목록 아래 EXPORT MATCH → 메뉴가 닫히고 파일 이름 = 머리 남은 시간 + _b2 + _2br
+      await userEvent.click(page.getByRole('button', { name: /Branch 2/ }));
+      await userEvent.click(button('EXPORT MATCH'));
+      await expect.element(page.getByRole('menu')).not.toBeInTheDocument();
+      expect(saved).not.toBeNull();
+      expect(saved!.name).toMatch(new RegExp(`^tacticsim-match_\\d{8}-\\d{4}_(RED|BLUE)_${head!.replace(':', '-')}_b2_2br\\.json$`));
+      const file = JSON.parse(await saved!.text);
+      expect(file.branches).toHaveLength(2);
+      expect(file.current).toBe(2);
+
+      // NEW → 경기 전 → 경기 줄 IMPORT → 확인창에 가지 수 → Enter
+      await userEvent.click(button('NEW'));
+      await userEvent.keyboard('{Enter}');
+      await expect.element(button('START'), { timeout: 5000 }).toBeEnabled();
+      await userEvent.click(button('Open settings'));
+      await userEvent.click(page.getByRole('tab', { name: 'SETTINGS' }));
+      await userEvent.click(page.getByRole('button', { name: 'IMPORT', exact: true }).last()); // 맨 아래 경기(MATCH) 줄
+      await expect.poll(() => document.querySelector('[role="alertdialog"]')?.textContent ?? '').toContain('Loads 2 branches.');
+      await userEvent.keyboard('{Enter}');
+
+      // 재계산 → 보던 가지(가지 2)의 머리에서 일시정지, 체크섬 일치(배너 없음), 목록에 가지 2개
+      await expect.element(button('RESUME'), { timeout: 10000 }).toBeVisible();
+      await expect.poll(timerText).toBe(head);
+      await expect.element(page.getByRole('button', { name: /Branch 2/ })).toBeVisible();
+      expect(document.body.textContent).not.toContain('Results differ from the file');
+      await userEvent.click(page.getByRole('button', { name: /Branch 2/ }));
+      await expect.element(page.getByRole('menu')).toBeVisible();
+      expect(page.getByRole('menuitemradio').elements()).toHaveLength(2);
+    } finally {
+      URL.createObjectURL = createObjectURL;
+      HTMLAnchorElement.prototype.click = anchorClick;
+      HTMLInputElement.prototype.click = inputClick;
+    }
+  });
 });

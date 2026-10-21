@@ -18,7 +18,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { AppController } from '../app/appController';
-import type { AppStatus, LiftToast } from '../app/appController';
+import type { AppStatus, LiftToast, MatchLoadJob } from '../app/appController';
 import { DEFAULT_DRAFT_VALUES, setupFromDrafts } from '../app/defaultSetup';
 import { LUTTracker } from '../app/lutTracker';
 import type { MatchLUTResults } from '../app/lutTracker';
@@ -33,7 +33,7 @@ import { DEFAULT_RNG_SEED } from '../core/simulationEngine';
 import type { CheckpointComparison } from '../core/checksum';
 import { buildMatchRecipe, parseMatchRecipe, recipeLoadTree, serializeMatchRecipe, verifyRecipe } from '../app/matchRecipe';
 import type { MatchRecipe, RecipeWarning } from '../app/matchRecipe';
-import { matchFileName, matchImportConfirmMessage, matchImportErrorMessage, matchImportProgress, matchSummaryText, mismatchBanner, summaryFileName } from '../ui/matchFile';
+import { matchComputingText, matchFileName, matchImportConfirmMessage, matchImportErrorMessage, matchImportProgress, matchSummaryText, mismatchBanner, summaryFileName } from '../ui/matchFile';
 import type { MatchImportError } from '../ui/matchFile';
 import { t } from '../ui/i18n';
 import { DEFAULT_SETTINGS, browserSettingsStorage, loadStoredConfig, saveStoredConfig } from '../ui/settings';
@@ -42,7 +42,7 @@ import type { PresetError, PresetRow } from '../ui/presetFile';
 import { downloadTextFile, pickTextFile } from '../ui/fileTransfer';
 import type { UiSettings } from '../ui/settings';
 import { fieldCanvasSize, layoutCssVars, robotLabel } from '../ui/mainScreenModel';
-import { branchComparison, branchConfirmText, branchFullText, branchMenuEnabled, deleteConfirmText, fileBranchNumber, newMatchConfirmText, shownBranchName } from '../ui/branchView';
+import { branchComparison, branchConfirmText, branchFullText, branchLabel, branchMenuEnabled, currentBranchInfo, deleteConfirmText, fileBranchNumber, newMatchConfirmText, shownBranchName } from '../ui/branchView';
 import {
   DRAFT_TABS,
   TAB_LABEL_KEYS,
@@ -165,10 +165,16 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
   const [presetError, setPresetError] = useState<{ row: PresetRow; error: PresetError } | null>(null);
   // 도움말 창 (v1.0.0): 열면 진행 중인 경기 / 재생을 멈추고 단축키를 끔
   const [helpOpen, setHelpOpen] = useState(false);
-  // 경기 불러오기 (10-4): 명중 확률표 준비 대기 / 재계산 중, 거부 사유, 체크섬 불일치 배너
-  const [matchImport, setMatchImport] = useState<'LUT' | 'COMPUTING' | null>(null);
+  // 경기 불러오기 (10-4): 명중 확률표 준비 대기(LUT) → 가지 단위 재계산(done / total, 15-3), 거부 사유, 체크섬 불일치 배너
+  const [matchImport, setMatchImport] = useState<'LUT' | { done: number; total: number } | null>(null);
   const [matchImportError, setMatchImportError] = useState<MatchImportError | null>(null);
-  const [matchNotice, setMatchNotice] = useState<{ comparison: CheckpointComparison; warnings: RecipeWarning[] } | null>(null);
+  // 체크섬 불일치 배너: 처음 어긋난 가지(가지가 2개 이상인 트리일 때) + 그 밖에 어긋난 가지 수 (15-3)
+  const [matchNotice, setMatchNotice] = useState<{
+    comparison: CheckpointComparison;
+    warnings: RecipeWarning[];
+    branch: { name: string | null; number: number; parentId: number | null; others: number } | null;
+  } | null>(null);
+  const importJobRef = useRef<MatchLoadJob | null>(null); // 진행 중인 재계산 작업 (CANCEL = 버림)
   const pendingMatchRef = useRef<{ recipe: MatchRecipe; warnings: RecipeWarning[] } | null>(null);
   const completeImportRef = useRef<(results: MatchLUTResults) => void>(() => {});
   const initialApplied = useRef(drafts.applied);
@@ -487,6 +493,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
   //   → 준비되면 재계산해 복기 상태로 열고, 체크포인트가 다르면 배너. 준비 중 CANCEL / APPLY / REROLL / RESET ALL / 프리셋 불러오기는 취소
   const cancelMatchImport = () => {
     pendingMatchRef.current = null;
+    importJobRef.current = null; // 재계산 작업은 commit하지 않고 버림 (경기 전 화면 그대로, 15-3)
     setMatchImport(null);
   };
   const importMatch = () => {
@@ -499,7 +506,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
         setMatchImportError(parsed.error);
         return;
       }
-      void ask(matchImportConfirmMessage(lang, parsed.warnings), t(lang, 'preset.import')).then(ok => {
+      void ask(matchImportConfirmMessage(lang, parsed.warnings, parsed.recipe.branches.length), t(lang, 'preset.import')).then(ok => {
         if (ok) beginMatchImport(parsed.recipe, parsed.warnings);
       });
     });
@@ -521,41 +528,69 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
     c()?.setSetup(setupOf(values, results));
     if (results) completeImportRef.current(results); // 같은 명중 확률표가 이미 준비됨
   };
-  // 재계산은 1 ~ 2초 걸리므로 "재계산 중"을 한 번 그린 뒤 실행
+  // 재계산 (15-2 / 15-3): 트리를 가지 하나씩 계산하고(가지 하나 최대 약 1.5초) 그 사이에 "재계산 n / m"을 그린다.
+  // 모두 계산하면 commit해 파일의 지금 가지로 열고, CANCEL(작업을 버림)이면 경기 전 화면 그대로
   useEffect(() => {
     completeImportRef.current = results => {
       const pending = pendingMatchRef.current;
       if (!pending) return;
       pendingMatchRef.current = null;
-      setMatchImport('COMPUTING');
-      window.setTimeout(() => {
-        const { recipe } = pending;
-        // 15-2: 트리 전체를 가지 단위로 재계산해 파일의 지금 가지로 연다 (가지별 진행률 표시 / 취소는 15-3)
-        const loaded = controllerRef.current?.loadMatch(setupOf(appliedRef.current, results), recipeLoadTree(recipe)) ?? null;
+      const { recipe } = pending;
+      const job = controllerRef.current?.beginLoadMatch(setupOf(appliedRef.current, results), recipeLoadTree(recipe)) ?? null;
+      if (!job) {
         setMatchImport(null);
-        if (!loaded) return;
-        // 체크포인트: 처음 어긋난 가지(만든 순서)의 구간 (배너의 가지 표시는 15-3)
-        const mismatch = loaded
-          .map(b => verifyRecipe(recipe.branches.find(r => r.number === b.number)!, b.timeline))
-          .find(comparison => !comparison.match);
-        setMatchNotice(mismatch ? { comparison: mismatch, warnings: pending.warnings } : null);
-      }, 30);
+        return;
+      }
+      importJobRef.current = job;
+      setMatchImport({ done: 0, total: job.total });
+      const next = () =>
+        window.setTimeout(() => {
+          if (importJobRef.current !== job) return; // 취소됨
+          if (!job.step()) {
+            setMatchImport({ done: job.done, total: job.total });
+            next();
+            return;
+          }
+          importJobRef.current = null;
+          setMatchImport(null);
+          const loaded = job.commit();
+          if (!loaded) return;
+          // 체크포인트: 가지마다 비교, 배너 = 처음 어긋난 가지(만든 순서) + 그 밖에 어긋난 가지 수
+          const mismatches = loaded
+            .map(b => {
+              const branch = recipe.branches.find(r => r.number === b.number)!;
+              return { branch, comparison: verifyRecipe(branch, b.timeline) };
+            })
+            .filter(m => !m.comparison.match);
+          const first = mismatches[0];
+          setMatchNotice(
+            first
+              ? {
+                  comparison: first.comparison,
+                  warnings: pending.warnings,
+                  branch: recipe.branches.length >= 2 ? { name: first.branch.name, number: first.branch.number, parentId: first.branch.parent, others: mismatches.length - 1 } : null,
+                }
+              : null,
+          );
+        }, 30);
+      next();
     };
   });
   const matchImportText = (() => {
     if (!matchImport) return null;
-    if (matchImport === 'COMPUTING') return { text: t(lang, 'matchImport.computing'), error: false };
+    if (matchImport !== 'LUT') return { text: matchComputingText(lang, matchImport.done, matchImport.total), error: false };
     const progress = matchImportProgress(luts);
     return progress.error ? { text: t(lang, 'matchImport.lutError'), error: true } : { text: t(lang, 'matchImport.loading', { percent: progress.percent }), error: false };
   })();
-  // 내보내기 (결과 팝업): 경기 레시피(.json) / 요약(.txt). 적용 값 = 이 경기의 설정 (경기 중에는 잠금)
+  // 내보내기 (결과 팝업 / 가지 목록, 15-3): 경기 레시피(.json, 분기 트리 전체) / 요약(.txt, 지금 가지). 적용 값 = 이 경기의 설정 (경기 중에는 잠금)
   const exportMatch = () => {
     const src = c()?.recipeSource();
-    const result = status?.result;
-    if (!src || !result || !status) return;
+    const current = status && currentBranchInfo(status);
+    if (!src || !status || !current) return;
     const now = new Date();
-    const recipe = buildMatchRecipe({ setup: drafts.applied, ...src, createdAt: now }); // 트리 전체 (15-2)
-    downloadTextFile(matchFileName(now, status.alliance, result.total, fileBranchNumber(status)), serializeMatchRecipe(recipe));
+    const recipe = buildMatchRecipe({ setup: drafts.applied, ...src, createdAt: now });
+    const state = current.totalScore !== null ? { total: current.totalScore } : { headTick: current.headTick };
+    downloadTextFile(matchFileName(now, status.alliance, state, fileBranchNumber(status), status.branches.length), serializeMatchRecipe(recipe));
   };
   const exportSummary = () => {
     const result = status?.result;
@@ -951,6 +986,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
         if (ok) controller.deleteBranch(id);
       });
     },
+    exportMatch,
   };
 
   // NEW: 진행 중이면 먼저 일시정지하고 확인, 취소하면 일시정지 상태로 남음 (09-7 확정)
@@ -1006,7 +1042,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
           autoPauseReason={status?.autoPauseReason ?? null}
           toasts={toasts}
           lang={lang}
-          matchNotice={matchNotice && mismatchBanner(lang, matchNotice.comparison, matchNotice.warnings)}
+          matchNotice={matchNotice && mismatchBanner(lang, matchNotice.comparison, matchNotice.warnings, matchNotice.branch && { label: branchLabel(lang, matchNotice.branch), others: matchNotice.branch.others })}
           onDismissMatchNotice={() => setMatchNotice(null)}
         />
         {scenarioEdit && (

@@ -101,7 +101,7 @@ describe('분기 트리 화면 규칙 (10-6)', () => {
     expect(fileBranchNumber(tree(1))).toBeNull();
     expect(fileBranchNumber(tree(4))).toBe(4);
     const date = new Date(2026, 8, 30, 14, 32);
-    expect(matchFileName(date, 'RED', 87, fileBranchNumber(tree(4)))).toBe('tacticsim-match_20260930-1432_RED_87pts_b4.json');
+    expect(matchFileName(date, 'RED', { total: 87 }, fileBranchNumber(tree(4)))).toBe('tacticsim-match_20260930-1432_RED_87pts_b4.json');
     expect(summaryFileName(date, 'RED', 87, fileBranchNumber(tree(1)))).toBe('tacticsim-summary_20260930-1432_RED_87pts.txt');
   });
 });

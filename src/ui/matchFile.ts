@@ -1,6 +1,7 @@
 // 경기 파일 화면 규칙 (명세서 3.9 경기 불러오기 / 경기 내보내기, 10-4): React / DOM 비의존 순수 함수
-// - 불러오기: 거부 사유 문구, 확인창(설정 교체 안내 + 버전 / LUT 설정 경고 줄), 준비 진행(두 로봇 명중 확률표), 체크섬 불일치 배너.
-// - 내보내기: 경기 / 요약 파일 이름(원본이 아닌 가지는 _b{번호}, 10-6), 요약 텍스트(결과 팝업과 같은 규칙 resultRows / rpCards / resultBasisText, 현재 화면 언어).
+// - 불러오기: 거부 사유 문구, 확인창(설정 교체 안내 + 가지 수 + 버전 / LUT 설정 경고 줄), 준비 진행(두 로봇 명중 확률표 → 가지 단위 재계산, 15-3),
+//   체크섬 불일치 배너(처음 어긋난 가지 이름 + 구간, 15-3).
+// - 내보내기: 경기 파일 이름(지금 가지 상태 / _b{번호} / _{가지 수}br, 15-3), 요약 파일 이름, 요약 텍스트(결과 팝업과 같은 규칙, 현재 화면 언어).
 
 import type { MatchResult } from '../app/appController';
 import { MAX_BRANCHES } from '../app/branchTree';
@@ -48,9 +49,10 @@ export function matchImportErrorMessage(lang: Language, error: MatchImportError)
   }
 }
 
-/** 확인창 문구: 설정 교체 안내 + 해당될 때만 경고 줄 (줄바꿈으로 구분) */
-export function matchImportConfirmMessage(lang: Language, warnings: readonly RecipeWarning[]): string {
+/** 확인창 문구: 설정 교체 안내 + 가지가 2개 이상이면 가지 수 줄(15-3) + 해당될 때만 경고 줄 (줄바꿈으로 구분) */
+export function matchImportConfirmMessage(lang: Language, warnings: readonly RecipeWarning[], branchCount = 1): string {
   const lines = [t(lang, 'confirm.importMatch')];
+  if (branchCount >= 2) lines.push(t(lang, 'matchImport.branches', { count: branchCount }));
   for (const w of warnings) {
     lines.push(w.code === 'LUT_SETTINGS' ? `⚠ ${t(lang, 'matchImport.warn.LUT_SETTINGS')}` : `⚠ ${t(lang, `matchImport.warn.${w.code}`, { file: w.file, current: w.current })}`);
   }
@@ -64,14 +66,34 @@ export function matchImportProgress(views: Readonly<Record<RobotId, RobotLutView
   return { percent, error: ROBOTS.some(r => views[r].phase === 'ERROR') };
 }
 
-/** 체크섬 불일치 배너: 제목 + 처음 달라진 구간(경기 타이머 표시) + 버전이 달랐으면 그 사유. 일치하면 null */
-export function mismatchBanner(lang: Language, comparison: CheckpointComparison, warnings: readonly RecipeWarning[]): { title: string; hint: string } | null {
+/** 재계산 진행 문구 (15-3): 가지 단위 "재계산 n / m" — 가지가 하나면 지금처럼 "재계산 중" */
+export function matchComputingText(lang: Language, done: number, total: number): string {
+  return total >= 2 ? t(lang, 'matchImport.computingBranches', { done: Math.min(done + 1, total), total }) : t(lang, 'matchImport.computing');
+}
+
+/** 배너가 가리키는 가지 (15-3): 처음 어긋난 가지의 화면 이름 + 그 밖에 어긋난 가지 수 */
+export interface MismatchBranch {
+  label: string;
+  others: number;
+}
+
+/**
+ * 체크섬 불일치 배너: 제목 + (가지가 2개 이상인 트리면 처음 어긋난 가지 이름) 처음 달라진 구간(경기 타이머 표시)
+ * + 그 밖에 어긋난 가지 수 + 버전이 달랐으면 그 사유. 일치하면 null
+ */
+export function mismatchBanner(
+  lang: Language,
+  comparison: CheckpointComparison,
+  warnings: readonly RecipeWarning[],
+  branch: MismatchBranch | null = null,
+): { title: string; hint: string } | null {
   if (comparison.match) return null;
   const clock = (tick: number) => formatMatchTime((MATCH_TICKS - tick) * DT);
   let hint =
     comparison.lastMatchTick === null
       ? t(lang, 'matchImport.mismatchStart')
       : t(lang, 'matchImport.mismatchFrom', { from: clock(comparison.lastMatchTick), to: clock(comparison.firstMismatchTick) });
+  if (branch) hint = `${branch.label} · ${hint}${branch.others > 0 ? t(lang, 'matchImport.mismatchOthers', { count: branch.others }) : ''}`;
   if (warnings.some(w => w.code !== 'LUT_SETTINGS')) hint += t(lang, 'matchImport.mismatchVersion');
   return { title: t(lang, 'matchImport.mismatch'), hint };
 }
@@ -84,9 +106,17 @@ export function mismatchBanner(lang: Language, comparison: CheckpointComparison,
 const fileStem = (date: Date, alliance: 'RED' | 'BLUE', total: number, branchNumber: number | null) =>
   `${fileTimestamp(date)}_${alliance}_${total}pts${branchNumber !== null ? `_b${branchNumber}` : ''}`;
 
-/** 경기 파일 이름: tacticsim-match_{YYYYMMDD-HHmm}_{진영}_{총점}pts[_b{번호}].json */
-export function matchFileName(date: Date, alliance: 'RED' | 'BLUE', total: number, branchNumber: number | null = null): string {
-  return safeFileName(`tacticsim-match_${fileStem(date, alliance, total, branchNumber)}.json`);
+/** 경기 파일 이름의 지금 가지 상태 (15-3): 끝난 가지 = 총점, 미종료 = 머리 틱 (남은 시간 M-SS로 씀) */
+export type MatchFileState = { total: number } | { headTick: number };
+
+/**
+ * 경기 파일 이름 (15-3, 트리 전체): tacticsim-match_{YYYYMMDD-HHmm}_{진영}_{지금 가지 상태}[_b{번호}][_{가지 수}br].json
+ * 지금 가지 상태 = 끝났으면 {총점}pts, 아니면 머리의 남은 시간 {M-SS}. _b{번호} = 지금 가지가 원본이 아닐 때, _{가지 수}br = 가지가 2개 이상일 때
+ */
+export function matchFileName(date: Date, alliance: 'RED' | 'BLUE', state: MatchFileState, branchNumber: number | null = null, branchCount = 1): string {
+  const head = 'total' in state ? `${state.total}pts` : formatMatchTime((MATCH_TICKS - state.headTick) * DT).replace(':', '-');
+  const tail = `${branchNumber !== null ? `_b${branchNumber}` : ''}${branchCount >= 2 ? `_${branchCount}br` : ''}`;
+  return safeFileName(`tacticsim-match_${fileTimestamp(date)}_${alliance}_${head}${tail}.json`);
 }
 
 /** 요약 파일 이름: 경기 파일과 같은 이름의 tacticsim-summary_….txt */
