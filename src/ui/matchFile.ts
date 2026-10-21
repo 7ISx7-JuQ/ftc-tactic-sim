@@ -3,6 +3,7 @@
 // - 내보내기: 경기 / 요약 파일 이름(원본이 아닌 가지는 _b{번호}, 10-6), 요약 텍스트(결과 팝업과 같은 규칙 resultRows / rpCards / resultBasisText, 현재 화면 언어).
 
 import type { MatchResult } from '../app/appController';
+import { MAX_BRANCHES } from '../app/branchTree';
 import type { RecipeError, RecipeWarning } from '../app/matchRecipe';
 import { BALLISTICS_MODEL_VERSION } from '../core/ballistics';
 import type { CheckpointComparison } from '../core/checksum';
@@ -40,6 +41,8 @@ export function matchImportErrorMessage(lang: Language, error: MatchImportError)
       return t(lang, `matchImport.error.${error.code}`, { field: error.field ?? '?' });
     case 'INVALID_SETUP':
       return t(lang, 'matchImport.error.INVALID_SETUP', { issues: (error.issues ?? []).join(', ') });
+    case 'TOO_MANY_BRANCHES':
+      return t(lang, 'matchImport.error.TOO_MANY_BRANCHES', { count: error.count ?? '?', max: MAX_BRANCHES });
     default:
       return t(lang, `matchImport.error.${error.code}` as MessageKey);
   }

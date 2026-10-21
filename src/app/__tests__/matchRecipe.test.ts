@@ -1,4 +1,4 @@
-// 저장 레시피 (명세서 3.9 저장 레시피 / 상태 체크섬, 10-3)
+// 저장 레시피 (명세서 3.9 저장 레시피 / 상태 체크섬, 10-3). 15-1: 분기 트리 형식 (버전 2), 버전 1 파일 계속 읽기
 import { describe, expect, it } from 'vitest';
 import { BALLISTICS_MODEL_VERSION } from '../../core/ballistics';
 import { CHECKPOINT_COUNT, compareCheckpoints, fnv1a32, frameChecksum, timelineCheckpoints } from '../../core/checksum';
@@ -12,6 +12,7 @@ import {
   CURRENT_LUT_SETTINGS,
   RECIPE_VERSION,
   appliedInputRecords,
+  branchInputRecords,
   buildMatchRecipe,
   decodeInputRecord,
   encodeInputRecord,
@@ -21,7 +22,9 @@ import {
   serializeMatchRecipe,
   verifyRecipe,
 } from '../matchRecipe';
-import type { MatchRecipe } from '../matchRecipe';
+import type { MatchRecipe, RecipeBranchSource } from '../matchRecipe';
+import { MAX_BRANCHES } from '../branchTree';
+import { MAX_IMPORT_BYTES } from '../../ui/presetFile';
 
 const TEST_TIMEOUT_MS = 120_000;
 const defaults = DEFAULT_DRAFT_VALUES;
@@ -65,7 +68,8 @@ let cached: { recipe: MatchRecipe; text: string; engine: SimulationEngine } | nu
 function sample() {
   if (!cached) {
     const { engine, inputs } = playOverdubMatch();
-    const recipe = buildMatchRecipe({ setup: values, inputs: appliedInputRecords(inputs), timeline: engine.timeline, branchName: 'Branch 3', createdAt: new Date(2026, 8, 30, 14, 32, 5) });
+    const root: RecipeBranchSource = { number: 1, parent: null, forkTick: 0, name: 'Branch 3', inputs: appliedInputRecords(inputs), timeline: engine.timeline };
+    const recipe = buildMatchRecipe({ setup: values, branches: [root], current: 1, nextNumber: 2, createdAt: new Date(2026, 8, 30, 14, 32, 5) });
     cached = { recipe, text: serializeMatchRecipe(recipe), engine };
   }
   return cached;
@@ -73,8 +77,7 @@ function sample() {
 // 파일 JSON 고치기: [경로, 새 값 | DEL | (옛 값) => 새 값]. 경로는 점으로 (배열 번호 포함)
 const DEL = Symbol('delete');
 type Change = [path: string, value: unknown];
-const edit = (...changes: Change[]): string => {
-  const file = JSON.parse(sample().text) as Record<string, unknown>;
+const applyChanges = (file: Record<string, unknown>, changes: Change[]): string => {
   for (const [path, value] of changes) {
     const keys = path.split('.');
     const last = keys.pop()!;
@@ -83,6 +86,17 @@ const edit = (...changes: Change[]): string => {
     else parent[last] = typeof value === 'function' ? (value as (old: unknown) => unknown)(parent[last]) : value;
   }
   return JSON.stringify(file);
+};
+const edit = (...changes: Change[]): string => applyChanges(JSON.parse(sample().text) as Record<string, unknown>, changes);
+// 같은 경기를 형식 버전 1 파일(v1.0.0, 끝난 가지 하나)로 바꾼 뒤 고치기 (sample()은 원본 가지 하나짜리 버전 2 트리)
+const editV1 = (...changes: Change[]): string => {
+  const file = JSON.parse(sample().text) as Record<string, unknown> & { branches: { name: string; inputs: Record<string, string>; checksums: string[]; result: unknown }[] };
+  const [root] = file.branches;
+  const v1: Record<string, unknown> = {
+    format: file.format, recipeVersion: 1, engineVersion: file.engineVersion, ballisticsModelVersion: file.ballisticsModelVersion, createdAt: file.createdAt, setup: file.setup, lut: file.lut,
+    inputs: { ticks: MATCH_TICKS, ...root.inputs }, checksums: { interval: 50, values: root.checksums }, branch: { name: root.name }, result: root.result,
+  };
+  return applyChanges(v1, changes);
 };
 const parse = (text: string) => parseMatchRecipe(text, defaults);
 
@@ -136,11 +150,12 @@ describe('저장 레시피 (10-3)', () => {
     expect(recipe.engineVersion).toBe(ENGINE_VERSION);
     expect(recipe.ballisticsModelVersion).toBe(BALLISTICS_MODEL_VERSION);
     expect(recipe.lut).toEqual(CURRENT_LUT_SETTINGS);
-    expect(recipe.checksums).toHaveLength(CHECKPOINT_COUNT);
-    expect(recipe.result).toEqual({ totalScore: engine.getFrame(6000)!.totalScore, rp: engine.getFrame(6000)!.rpAchieved });
+    expect(recipe.branches[0].checksums).toHaveLength(CHECKPOINT_COUNT);
+    expect(recipe.branches[0].result).toEqual({ totalScore: engine.getFrame(6000)!.totalScore, rp: engine.getFrame(6000)!.rpAchieved });
 
     const file = JSON.parse(text);
-    expect(file).toMatchObject({ format: 'ftc-tactic-sim/match', recipeVersion: RECIPE_VERSION, inputs: { ticks: 6000 }, checksums: { interval: 50 }, branch: { name: 'Branch 3' } });
+    expect(RECIPE_VERSION).toBe(2);
+    expect(file).toMatchObject({ format: 'ftc-tactic-sim/match', recipeVersion: 2, checkpointInterval: 50, current: 1, nextNumber: 2, branches: [{ number: 1, parent: null, forkTick: 0, headTick: 6000, name: 'Branch 3' }] });
     expect(file.setup.robot1.config.id).toBeUndefined();
     expect(text.length).toBeLessThan(120_000);
 
@@ -149,31 +164,39 @@ describe('저장 레시피 (10-3)', () => {
     if (!parsed.ok) return;
     expect(parsed.warnings).toEqual([]);
     expect(parsed.recipe.setup).toEqual(values);
-    expect(parsed.recipe.branchName).toBe('Branch 3');
+    expect(parsed.recipe.branches[0].name).toBe('Branch 3');
     expect(parsed.recipe.createdAt).toBe(recipe.createdAt);
-    expect(Array.from(parsed.recipe.inputs.robot1)).toEqual(Array.from(recipe.inputs.robot1));
+    expect(Array.from(parsed.recipe.branches[0].inputs.robot1)).toEqual(Array.from(recipe.branches[0].inputs.robot1));
+    const records = branchInputRecords(parsed.recipe, 1)!;
 
     // 파일만으로 재계산 → 체크포인트 전부 일치 + 종료 프레임 동일
     const replay = engineFor(parsed.recipe.setup);
-    replay.inputProvider = createInputRecordProvider(parsed.recipe.inputs);
+    replay.inputProvider = createInputRecordProvider(records);
     replay.runFullMatch();
-    expect(verifyRecipe(parsed.recipe, replay.timeline)).toEqual({ match: true });
+    expect(verifyRecipe(parsed.recipe.branches[0], replay.timeline)).toEqual({ match: true });
     expect(JSON.stringify(replay.getFrame(6000))).toBe(JSON.stringify(engine.getFrame(6000)));
     // 시드가 다르면 결과가 달라지고 체크섬이 그 구간을 잡는다
     const other = engineFor({ ...parsed.recipe.setup, scenario: { ...parsed.recipe.setup.scenario, rngSeed: 1 } });
-    other.inputProvider = createInputRecordProvider(parsed.recipe.inputs);
+    other.inputProvider = createInputRecordProvider(records);
     other.runFullMatch();
-    expect(verifyRecipe(parsed.recipe, other.timeline)).toMatchObject({ match: false });
+    expect(verifyRecipe(parsed.recipe.branches[0], other.timeline)).toMatchObject({ match: false });
   }, TEST_TIMEOUT_MS);
 
-  it('D. 만들기: 종료 전 / 입력 부족은 오류, 시드가 비어 있으면 엔진 기본 시드, 로컬 시각 + 시간대', () => {
+  it('D. 만들기: 입력 부족 / 트리 구조가 틀리면 오류, 끝나지 않은 가지도 저장, 시드가 비어 있으면 엔진 기본 시드, 로컬 시각 + 시간대', () => {
     const e = engineFor(defaults);
     const inputs: Record<RobotId, Int8Array> = { robot1: new Int8Array(MATCH_TICKS * 4), robot2: new Int8Array(MATCH_TICKS * 4) };
-    const base = { setup: defaults, inputs, branchName: 'Main', createdAt: new Date(2026, 0, 2, 3, 4, 5) };
-    expect(() => buildMatchRecipe({ ...base, timeline: e.timeline })).toThrow(RangeError);
+    const root = (timeline: RecipeBranchSource['timeline'], over: Partial<RecipeBranchSource> = {}): RecipeBranchSource => ({ number: 1, parent: null, forkTick: 0, name: null, inputs, timeline, ...over });
+    const build = (b: RecipeBranchSource[], current = 1, nextNumber = 2) => buildMatchRecipe({ setup: defaults, branches: b, current, nextNumber, createdAt: new Date(2026, 0, 2, 3, 4, 5) });
+    for (let i = 0; i < 120; i++) e.step();
+    const early = build([root(e.timeline)]); // 끝나지 않은 가지: 머리 120, 체크포인트 0 / 50 / 100, 결과 없음
+    expect([early.branches[0].headTick, early.branches[0].checksums.length, early.branches[0].result, early.branches[0].inputs.robot1.length]).toEqual([120, 3, null, 480]);
     e.runFullMatch();
-    expect(() => buildMatchRecipe({ ...base, timeline: e.timeline, inputs: { ...inputs, robot2: new Int8Array(40) } })).toThrow(RangeError);
-    const r = buildMatchRecipe({ ...base, timeline: e.timeline });
+    expect(() => build([root(e.timeline, { inputs: { ...inputs, robot2: new Int8Array(40) } })])).toThrow(RangeError);
+    expect(() => build([root(e.timeline, { number: 2 })], 2, 3)).toThrow(RangeError);                 // 원본 번호 ≠ 1
+    expect(() => build([root(e.timeline)], 5)).toThrow(RangeError);                                    // 없는 지금 가지
+    expect(() => build([root(e.timeline)], 1, 1)).toThrow(RangeError);                                 // 다음 번호 ≤ 가장 큰 번호
+    expect(() => build([root(e.timeline), root(e.timeline, { number: 2, parent: 9, forkTick: 10 })], 1, 3)).toThrow(RangeError); // 없는 부모
+    const r = build([root(e.timeline)]);
     expect(r.setup.scenario.rngSeed).toBe(DEFAULT_RNG_SEED);
     expect(defaults.scenario.rngSeed).toBeUndefined(); // 원본 불변
     expect(r.createdAt).toMatch(/^2026-01-02T03:04:05[+-]\d{2}:\d{2}$/);
@@ -183,9 +206,9 @@ describe('저장 레시피 (10-3)', () => {
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     const replay = engineFor(parsed.recipe.setup);
-    replay.inputProvider = createInputRecordProvider(parsed.recipe.inputs);
+    replay.inputProvider = createInputRecordProvider(branchInputRecords(parsed.recipe, 1)!);
     replay.runFullMatch();
-    expect(verifyRecipe(parsed.recipe, replay.timeline)).toEqual({ match: true });
+    expect(verifyRecipe(parsed.recipe.branches[0], replay.timeline)).toEqual({ match: true });
   }, TEST_TIMEOUT_MS);
 
   it('E. 거부: 파일 형식 / 형식 버전 / 항목 누락 · 형식 틀림(기본값으로 채우지 않음) / 입력 / 체크포인트 / 설정 검증', () => {
@@ -196,7 +219,7 @@ describe('저장 레시피 (10-3)', () => {
     expect(code('{oops')).toEqual({ code: 'NOT_JSON' });
     expect(code(JSON.stringify({ format: 'ftc-tactic-sim/preset', presetVersion: 1, kind: 'ROBOT', data: {} }))).toEqual({ code: 'PRESET_FILE' });
     expect(code('[]')).toEqual({ code: 'NOT_RECIPE' });
-    expect(code(edit(['recipeVersion', 2]))).toEqual({ code: 'RECIPE_VERSION', version: 2 });
+    expect(code(edit(['recipeVersion', 3]))).toEqual({ code: 'RECIPE_VERSION', version: 3 });
     expect(code(edit(['recipeVersion', DEL]))).toEqual({ code: 'RECIPE_VERSION', version: undefined });
     expect(code(edit(['engineVersion', 0]))).toEqual({ code: 'INVALID_FIELD', field: 'engineVersion' });
     expect(code(edit(['ballisticsModelVersion', '1']))).toEqual({ code: 'INVALID_FIELD', field: 'ballisticsModelVersion' });
@@ -211,11 +234,16 @@ describe('저장 레시피 (10-3)', () => {
     expect(code(edit(['setup.scenario.autoTipCount', 'two']))).toEqual({ code: 'INVALID_FIELD', field: 'setup.scenario' });
     expect(code(edit(['setup', DEL]))).toEqual({ code: 'INVALID_FIELD', field: 'setup.robot1' });
     expect(code(edit(['lut.samples', 0]))).toEqual({ code: 'INVALID_FIELD', field: 'lut' });
-    expect(code(edit(['inputs.ticks', 5999]))).toEqual({ code: 'INVALID_INPUTS', field: 'ticks' });
-    expect(code(edit(['inputs.robot2', (old: unknown) => String(old).slice(0, -8)]))).toEqual({ code: 'INVALID_INPUTS', field: 'robot2' });
-    expect(code(edit(['checksums.values', (old: unknown) => (old as string[]).slice(0, -1)]))).toEqual({ code: 'INVALID_CHECKSUMS' });
-    expect(code(edit(['checksums.values.3', 'ABCDEF12']))).toEqual({ code: 'INVALID_CHECKSUMS' });
-    expect(code(edit(['checksums.interval', 25]))).toEqual({ code: 'INVALID_CHECKSUMS' });
+    expect(code(edit(['branches.0.headTick', 5999]))).toEqual({ code: 'INVALID_INPUTS', field: 'branches[0].robot1' }); // 입력 길이 ≠ 머리 − 분기
+    expect(code(edit(['branches.0.inputs.robot2', (old: unknown) => String(old).slice(0, -8)]))).toEqual({ code: 'INVALID_INPUTS', field: 'branches[0].robot2' });
+    expect(code(edit(['branches.0.checksums', (old: unknown) => (old as string[]).slice(0, -1)]))).toEqual({ code: 'INVALID_CHECKSUMS', field: 'branches[0]' });
+    expect(code(edit(['branches.0.checksums.3', 'ABCDEF12']))).toEqual({ code: 'INVALID_CHECKSUMS', field: 'branches[0]' });
+    expect(code(edit(['checkpointInterval', 25]))).toEqual({ code: 'INVALID_CHECKSUMS', field: 'checkpointInterval' });
+    // 버전 1 파일의 입력 / 체크포인트 규칙은 그대로
+    expect(code(editV1(['inputs.ticks', 5999]))).toEqual({ code: 'INVALID_INPUTS', field: 'ticks' });
+    expect(code(editV1(['inputs.robot2', (old: unknown) => String(old).slice(0, -8)]))).toEqual({ code: 'INVALID_INPUTS', field: 'robot2' });
+    expect(code(editV1(['checksums.values', (old: unknown) => (old as string[]).slice(0, -1)]))).toEqual({ code: 'INVALID_CHECKSUMS' });
+    expect(code(editV1(['checksums.interval', 25]))).toEqual({ code: 'INVALID_CHECKSUMS' });
     // 형식은 맞지만 검증 실패: 최고 속도 범위 밖 / 시작 자세 겹침
     const bad = parse(edit(['setup.robot1.config.maxSpeed', 999]));
     expect(!bad.ok && bad.error.code === 'INVALID_SETUP' && bad.error.issues).toContain('FIELD_maxSpeed');
@@ -224,8 +252,10 @@ describe('저장 레시피 (10-3)', () => {
   }, TEST_TIMEOUT_MS);
 
   it('F. 알아보기 정보(가지 이름 / 결과 / 시각)는 틀려도 거부하지 않음, 모르는 항목은 무시, 버전 · LUT 설정 차이는 경고', () => {
-    const loose = parse(edit(['branch', 7], ['result', { totalScore: 'many' }], ['createdAt', DEL], ['extra', true], ['setup.robot1.config.color', 'yellow']));
-    expect(loose.ok && [loose.recipe.branchName, loose.recipe.result, loose.recipe.createdAt]).toEqual(['', null, '']);
+    const loose = parse(edit(['branches.0.name', 7], ['branches.0.result', { totalScore: 'many' }], ['createdAt', DEL], ['extra', true], ['setup.robot1.config.color', 'yellow']));
+    expect(loose.ok && [loose.recipe.branches[0].name, loose.recipe.branches[0].result, loose.recipe.createdAt]).toEqual([null, null, '']);
+    const looseV1 = parse(editV1(['branch', 7], ['result', { totalScore: 'many' }]));
+    expect(looseV1.ok && [looseV1.recipe.branches[0].name, looseV1.recipe.branches[0].result]).toEqual([null, null]);
     const warned = parse(edit(['engineVersion', ENGINE_VERSION + 1], ['ballisticsModelVersion', BALLISTICS_MODEL_VERSION + 1], ['lut.samples', 100]));
     expect(warned.ok && warned.warnings).toEqual([
       { code: 'ENGINE_VERSION', file: ENGINE_VERSION + 1, current: ENGINE_VERSION },
@@ -235,15 +265,16 @@ describe('저장 레시피 (10-3)', () => {
     expect(recipeWarnings({ engineVersion: ENGINE_VERSION, ballisticsModelVersion: BALLISTICS_MODEL_VERSION, lut: { ...CURRENT_LUT_SETTINGS, seed: 1 } })).toEqual([{ code: 'LUT_SETTINGS' }]);
   }, TEST_TIMEOUT_MS);
 
-  it('G. (11-2) v1 경기 파일: v2.0.0 로봇 항목이 없으면 변환으로 채움(NECTAR 슈터 = 주 슈터 복사), 있으면 엄격 검사, 시나리오 새 항목도 엄격', () => {
+  it('G. (11-2) 버전 1 경기 파일: v2.0.0 로봇 항목이 없으면 변환으로 채움(NECTAR 슈터 = 주 슈터 복사), 있으면 엄격 검사, 버전 2 파일은 모두 있어야 함 (15-1)', () => {
     const v1 = (id: RobotId): Change[] => [
       [`setup.${id}.config.shooterSetup`, DEL], [`setup.${id}.config.nectarShooter`, DEL], [`setup.${id}.config.flowerDropZones`, DEL], [`setup.${id}.config.liftMaxSpeed`, DEL],
       [`setup.${id}.ballistics.shooterLateralOffset`, DEL], [`setup.${id}.ballistics.nectarShooter`, DEL],
     ];
     // R2 주 슈터를 바꾼 v1 파일 → NECTAR 슈터는 그 값의 복사
-    const old = parse(edit(...v1('robot1'), ...v1('robot2'), ['setup.robot2.config.shooterDelay', 250], ['setup.robot2.ballistics.dz', 41]));
+    const old = parse(editV1(...v1('robot1'), ...v1('robot2'), ['setup.robot2.config.shooterDelay', 250], ['setup.robot2.ballistics.dz', 41]));
     expect(old.ok).toBe(true);
     if (!old.ok) return;
+    expect([old.recipe.branches.length, old.recipe.branches[0].headTick, old.recipe.branches[0].name, old.recipe.current, old.recipe.nextNumber]).toEqual([1, 6000, 'Branch 3', 1, 2]);
     expect(old.recipe.setup.robot1).toEqual(sample().recipe.setup.robot1); // 기본 프로필은 주 슈터 = NECTAR 슈터라 변환 결과가 원래와 같음
     const r2 = old.recipe.setup.robot2;
     expect([r2.config.shooterSetup, r2.config.nectarShooter.shooterDelay, r2.config.flowerDropZones, r2.config.liftMaxSpeed]).toEqual(['SHARED', 250, [], 0]);
@@ -253,8 +284,10 @@ describe('저장 레시피 (10-3)', () => {
       const r = parse(text);
       return r.ok ? 'OK' : r.error;
     };
-    // 일부만 없어도 그 항목만 채움
-    expect(code(edit(['setup.robot1.config.liftMaxSpeed', DEL]))).toBe('OK');
+    // 버전 1: 일부만 없어도 그 항목만 채움 / 버전 2: 하나라도 없으면 거부
+    expect(code(editV1(['setup.robot1.config.liftMaxSpeed', DEL]))).toBe('OK');
+    expect(code(edit(['setup.robot1.config.liftMaxSpeed', DEL]))).toEqual({ code: 'INVALID_FIELD', field: 'setup.robot1' });
+    expect(code(edit(['setup.robot2.ballistics.shooterLateralOffset', DEL]))).toEqual({ code: 'INVALID_FIELD', field: 'setup.robot2' });
     // 있는 새 항목은 형식이 맞아야 함 (기본값으로 채우지 않음)
     expect(code(edit(['setup.robot1.config.shooterSetup', 'TRIPLE']))).toEqual({ code: 'INVALID_FIELD', field: 'setup.robot1' });
     expect(code(edit(['setup.robot1.config.nectarShooter.turretType', 'LASER']))).toEqual({ code: 'INVALID_FIELD', field: 'setup.robot1' });
@@ -280,13 +313,15 @@ describe('저장 레시피 (10-3)', () => {
   }, TEST_TIMEOUT_MS);
 
   it('G-2. (11-3) 없어진 허용 조준 오차 aimTolerance: 파일에 있어도(v1 / v2 개발 중 파일) 버리고 통과, 내보낸 파일에는 없음', () => {
-    const v1 = parse(edit(
+    const v1 = parse(editV1(
       ['setup.robot1.config.aimTolerance', 0.0524], ['setup.robot1.config.nectarShooter', DEL],
       ['setup.robot2.config.aimTolerance', 0.1], ['setup.robot2.config.nectarShooter.aimTolerance', 0.1],
     ));
     expect(v1.ok).toBe(true);
     if (!v1.ok) return;
     expect(v1.recipe.setup).toEqual(sample().recipe.setup);
+    const v2 = parse(edit(['setup.robot1.config.aimTolerance', 0.0524], ['setup.robot2.config.nectarShooter.aimTolerance', 0.1]));
+    expect(v2.ok && v2.recipe.setup).toEqual(sample().recipe.setup);
     const robot1 = (JSON.parse(sample().text) as { setup: { robot1: { config: Record<string, unknown> & { nectarShooter: Record<string, unknown> } } } }).setup.robot1;
     expect('aimTolerance' in robot1.config || 'aimTolerance' in robot1.config.nectarShooter).toBe(false);
   }, TEST_TIMEOUT_MS);
@@ -298,5 +333,94 @@ describe('저장 레시피 (10-3)', () => {
     const current = parse(sample().text);
     expect(current.ok && current.recipe.setup.scenario).not.toHaveProperty('r2Spawn');
     expect(LEGACY_BLUE_SPAWN_POSES.robot2).not.toEqual(DEFAULT_SPAWN_POSES.BLUE.robot2);
+  }, TEST_TIMEOUT_MS);
+
+  it('I. (15-1) 분기 트리: 끝나지 않은 가지 / 부모의 분기 틱보다 앞에서 갈라진 손자 / 빈 가지 왕복, 가지마다 재계산 체크포인트 일치, 거부 규칙, 크기', () => {
+    // 로봇별 입력 기록(틱당 4 B)을 틱의 순수 함수로 만든다 (q ∈ [−127, 127], 행동 코드 0 ~ 4)
+    const rec = (seed: number) => (t: number) => [((t * 7 + seed * 13) % 255) - 127, ((t * 3 + seed * 5) % 255) - 127, ((t + seed) % 61) - 30, Math.floor(t / 40 + seed) % 5];
+    const compose = (head: number, parts: [from: number, gen: (t: number) => number[]][]): Record<RobotId, Int8Array> => {
+      const make = (offset: number) => {
+        const out = new Int8Array(head * 4);
+        for (let t = 0; t < head; t++) {
+          const gen = [...parts].reverse().find(([from]) => t >= from)![1];
+          out.set(gen(t + offset), t * 4);
+        }
+        return out;
+      };
+      return { robot1: make(0), robot2: make(1000) };
+    };
+    const run = (records: Record<RobotId, Int8Array>, head: number) => {
+      const e = engineFor(values);
+      e.inputProvider = createInputRecordProvider(records);
+      while (e.currentTick < head) e.step();
+      return e.timeline;
+    };
+    // 원본 1: 끝까지 / 가지 2: 원본 2000틱에서, 3500틱까지(미종료) / 가지 5: 가지 2의 1000틱에서(2의 분기 틱보다 앞), 끝까지 / 가지 6: 원본 4000틱에서 바로 멈춤(빈 가지)
+    const full = {
+      1: compose(6000, [[0, rec(1)]]),
+      2: compose(3500, [[0, rec(1)], [2000, rec(2)]]),
+      5: compose(6000, [[0, rec(1)], [1000, rec(5)]]),
+      6: compose(4000, [[0, rec(1)]]),
+    };
+    const src: RecipeBranchSource[] = [
+      { number: 1, parent: null, forkTick: 0, name: null, inputs: full[1], timeline: run(full[1], 6000) },
+      { number: 2, parent: 1, forkTick: 2000, name: '  Plan B  ', inputs: full[2], timeline: run(full[2], 3500) },
+      { number: 5, parent: 2, forkTick: 1000, name: null, inputs: full[5], timeline: run(full[5], 6000) },
+      { number: 6, parent: 1, forkTick: 4000, name: null, inputs: full[6], timeline: run(full[6], 4000) },
+    ];
+    const recipe = buildMatchRecipe({ setup: values, branches: src, current: 2, nextNumber: 7, createdAt: new Date(2026, 9, 21, 10, 0, 0) });
+    expect(recipe.branches.map(b => [b.number, b.parent, b.forkTick, b.headTick, b.name, b.inputs.robot1.length / 4, b.checksums.length, b.result !== null]))
+      .toEqual([[1, null, 0, 6000, null, 6000, 121, true], [2, 1, 2000, 3500, 'Plan B', 1500, 71, false], [5, 2, 1000, 6000, null, 5000, 121, true], [6, 1, 4000, 4000, null, 0, 81, false]]);
+    const text = serializeMatchRecipe(recipe);
+    expect(JSON.parse(text).branches[3].inputs).toEqual({ robot1: '', robot2: '' }); // 빈 가지 = 빈 글자
+    const parsed = parse(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect([parsed.recipe.current, parsed.recipe.nextNumber]).toEqual([2, 7]);
+    expect(parsed.recipe.branches.map(b => [b.number, b.parent, b.forkTick, b.headTick, b.name])).toEqual(recipe.branches.map(b => [b.number, b.parent, b.forkTick, b.headTick, b.name]));
+    // 가지마다: 조상 구간을 이어 붙인 입력 = 원래 전체 입력, 재계산 체크포인트 일치
+    for (const [number, records] of Object.entries(full)) {
+      const joined = branchInputRecords(parsed.recipe, Number(number))!;
+      expect(Array.from(joined.robot1)).toEqual(Array.from(records.robot1));
+      expect(Array.from(joined.robot2)).toEqual(Array.from(records.robot2));
+      const branch = parsed.recipe.branches.find(b => b.number === Number(number))!;
+      expect(verifyRecipe(branch, run(joined, branch.headTick))).toEqual({ match: true });
+    }
+    expect(branchInputRecords(parsed.recipe, 3)).toBeNull();
+
+    // 거부: 가지 수 상한 / 구조 / 지금 가지 / 다음 번호
+    const code = (changes: Change[]) => {
+      const r = parse(applyChanges(JSON.parse(text) as Record<string, unknown>, changes));
+      return r.ok ? 'OK' : r.error;
+    };
+    const many = Array.from({ length: MAX_BRANCHES + 1 }, (_, i) => ({ ...JSON.parse(text).branches[0], number: i + 1, parent: i === 0 ? null : 1, forkTick: i === 0 ? 0 : 10, headTick: i === 0 ? 6000 : 10, inputs: i === 0 ? JSON.parse(text).branches[0].inputs : { robot1: '', robot2: '' }, checksums: i === 0 ? JSON.parse(text).branches[0].checksums : ['00000000'] }));
+    expect(code([['branches', many], ['nextNumber', 20]])).toEqual({ code: 'TOO_MANY_BRANCHES', count: MAX_BRANCHES + 1 });
+    expect(code([['branches', many.slice(0, MAX_BRANCHES)], ['current', 1], ['nextNumber', 20]])).toBe('OK');
+    expect(code([['branches.1.parent', 9]])).toEqual({ code: 'INVALID_FIELD', field: 'branches[1]' });       // 없는 부모
+    expect(code([['branches.2.parent', 6]])).toEqual({ code: 'INVALID_FIELD', field: 'branches[2]' });       // 뒤에 있는 부모
+    expect(code([['branches.2.forkTick', 3500], ['branches.2.inputs', JSON.parse(serializeMatchRecipe({ ...recipe, branches: [recipe.branches[0], recipe.branches[1], { ...recipe.branches[2], forkTick: 3500, inputs: { robot1: recipe.branches[2].inputs.robot1.slice(0, 2500 * 4), robot2: recipe.branches[2].inputs.robot2.slice(0, 2500 * 4) } }, recipe.branches[3]] })).branches[2].inputs]]))
+      .toEqual({ code: 'INVALID_FIELD', field: 'branches[2]' });                                             // 부모(가지 2) 머리 3500에서 분기 = 불가
+    expect(code([['branches.1.number', 1]])).toEqual({ code: 'INVALID_FIELD', field: 'branches[1]' });       // 번호 중복
+    expect(code([['branches.0.parent', 2]])).toEqual({ code: 'INVALID_FIELD', field: 'branches[0]' });       // 원본에 부모
+    expect(code([['current', 3]])).toEqual({ code: 'INVALID_FIELD', field: 'current' });
+    expect(code([['nextNumber', 6]])).toEqual({ code: 'INVALID_FIELD', field: 'nextNumber' });
+    expect(code([['branches', []]])).toEqual({ code: 'INVALID_FIELD', field: 'branches' });
+    expect(code([['branches.3.inputs.robot1', 'AAAA']])).toEqual({ code: 'INVALID_INPUTS', field: 'branches[3].robot1' }); // 빈 가지에 입력
+    expect(code([['branches.1.checksums', (old: unknown) => (old as string[]).concat('00000000')]])).toEqual({ code: 'INVALID_CHECKSUMS', field: 'branches[1]' });
+
+    // 크기: 가지 8개가 모두 0틱에서 갈라져 끝까지, 매 틱 다른 입력(최악)이어도 불러오기 한도(1 MB) 안
+    const worst: MatchRecipe = {
+      ...recipe,
+      branches: Array.from({ length: MAX_BRANCHES }, (_, i) => ({
+        number: i + 1, parent: i === 0 ? null : 1, forkTick: 0, name: null, headTick: 6000, result: null,
+        inputs: compose(6000, [[0, (t: number) => [(t * 37 + i) % 255 - 127, (t * 11 + i) % 255 - 127, t % 255 - 127, (t + i) % 5]]]),
+        checksums: Array.from({ length: CHECKPOINT_COUNT }, () => 'ffffffff'),
+      })),
+      current: 1,
+      nextNumber: MAX_BRANCHES + 1,
+    };
+    const worstText = serializeMatchRecipe(worst);
+    expect(worstText.length).toBeLessThan(MAX_IMPORT_BYTES);
+    expect(parse(worstText).ok).toBe(true);
   }, TEST_TIMEOUT_MS);
 });

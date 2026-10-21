@@ -50,10 +50,11 @@ describe('경기 파일 화면 규칙 (10-4)', () => {
       { code: 'NOT_JSON' },
       { code: 'PRESET_FILE' },
       { code: 'NOT_RECIPE' },
-      { code: 'RECIPE_VERSION', version: 2 },
+      { code: 'RECIPE_VERSION', version: 3 },
       { code: 'INVALID_FIELD', field: 'setup.robot1' },
       { code: 'INVALID_INPUTS', field: 'robot2' },
       { code: 'INVALID_CHECKSUMS' },
+      { code: 'TOO_MANY_BRANCHES', count: 9 },
       { code: 'INVALID_SETUP', issues: ['FIELD_maxSpeed', 'PLACEMENT_ROBOT_OVERLAP'] },
       { code: 'TOO_LARGE' },
       { code: 'READ_FAILED' },
@@ -65,7 +66,8 @@ describe('경기 파일 화면 규칙 (10-4)', () => {
       }
       expect(matchImportErrorMessage('ko', e)).not.toBe(matchImportErrorMessage('en', e));
     }
-    expect(matchImportErrorMessage('en', { code: 'RECIPE_VERSION', version: 2 })).toBe('Unsupported match file format (v2)');
+    expect(matchImportErrorMessage('en', { code: 'RECIPE_VERSION', version: 3 })).toBe('Unsupported match file format (v3)');
+    expect(matchImportErrorMessage('ko', { code: 'TOO_MANY_BRANCHES', count: 9 })).toBe('파일의 가지가 9개 — 이 앱은 8개까지 담을 수 있습니다');
     expect(matchImportErrorMessage('en', { code: 'INVALID_FIELD', field: 'setup.robot1' })).toBe('Damaged match file (setup.robot1)');
     expect(matchImportErrorMessage('ko', { code: 'INVALID_INPUTS', field: 'robot2' })).toBe('손상된 경기 파일 (입력: robot2)');
     expect(matchImportErrorMessage('en', { code: 'INVALID_SETUP', issues: ['FIELD_maxSpeed', 'PLACEMENT_ROBOT_OVERLAP'] })).toBe('The settings in the file are invalid (FIELD_maxSpeed, PLACEMENT_ROBOT_OVERLAP)');

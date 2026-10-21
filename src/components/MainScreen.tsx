@@ -29,9 +29,9 @@ import type { LUTCache } from '../workers/lutCache';
 import type { LUTWorkerLike } from '../workers/lutManager';
 import { PENDING_LUT_VIEW, lutInputsChanged, startBlocker } from '../ui/lutView';
 import type { RobotLutView } from '../ui/lutView';
-import { DEFAULT_RNG_SEED } from '../core/simulationEngine';
+import { DEFAULT_RNG_SEED, MATCH_TICKS } from '../core/simulationEngine';
 import type { CheckpointComparison } from '../core/checksum';
-import { buildMatchRecipe, parseMatchRecipe, serializeMatchRecipe, verifyRecipe } from '../app/matchRecipe';
+import { branchInputRecords, buildMatchRecipe, parseMatchRecipe, serializeMatchRecipe, verifyRecipe } from '../app/matchRecipe';
 import type { MatchRecipe, RecipeWarning } from '../app/matchRecipe';
 import { matchFileName, matchImportConfirmMessage, matchImportErrorMessage, matchImportProgress, matchSummaryText, mismatchBanner, summaryFileName } from '../ui/matchFile';
 import type { MatchImportError } from '../ui/matchFile';
@@ -499,6 +499,11 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
         setMatchImportError(parsed.error);
         return;
       }
+      // 15-1 임시: 컨트롤러가 트리를 불러오기 전까지(15-2) 지금 가지가 끝난 가지일 때만 그 가지 하나를 연다
+      if (parsed.recipe.branches.find(b => b.number === parsed.recipe.current)?.headTick !== MATCH_TICKS) {
+        setMatchImportError({ code: 'INVALID_INPUTS', field: 'branches' });
+        return;
+      }
       void ask(matchImportConfirmMessage(lang, parsed.warnings), t(lang, 'preset.import')).then(ok => {
         if (ok) beginMatchImport(parsed.recipe, parsed.warnings);
       });
@@ -529,10 +534,13 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
       pendingMatchRef.current = null;
       setMatchImport('COMPUTING');
       window.setTimeout(() => {
-        const timeline = controllerRef.current?.loadMatch(setupOf(appliedRef.current, results), pending.recipe.inputs, pending.recipe.branchName || null) ?? null;
+        const { recipe } = pending;
+        const branch = recipe.branches.find(b => b.number === recipe.current)!;
+        const records = branchInputRecords(recipe, recipe.current)!;
+        const timeline = controllerRef.current?.loadMatch(setupOf(appliedRef.current, results), records, branch.name) ?? null;
         setMatchImport(null);
         if (!timeline) return;
-        const comparison = verifyRecipe(pending.recipe, timeline);
+        const comparison = verifyRecipe(branch, timeline);
         setMatchNotice(comparison.match ? null : { comparison, warnings: pending.warnings });
       }, 30);
     };
@@ -549,7 +557,9 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
     const result = status?.result;
     if (!src || !result || !status) return;
     const now = new Date();
-    const recipe = buildMatchRecipe({ setup: drafts.applied, inputs: src.inputs, timeline: src.timeline, branchName: src.branchName, createdAt: now });
+    // 15-1 임시: 지금 가지 하나를 원본으로 (트리 전체 내보내기는 15-2)
+    const root = { number: 1, parent: null, forkTick: 0, name: src.branchName, inputs: src.inputs, timeline: src.timeline };
+    const recipe = buildMatchRecipe({ setup: drafts.applied, branches: [root], current: 1, nextNumber: 2, createdAt: now });
     downloadTextFile(matchFileName(now, status.alliance, result.total, fileBranchNumber(status)), serializeMatchRecipe(recipe));
   };
   const exportSummary = () => {
