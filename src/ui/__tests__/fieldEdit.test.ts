@@ -526,6 +526,9 @@ describe('시나리오 필드 편집 로봇 팝오버 (14-1d)', () => {
     expect([scene.robots.robot1.loadout, scene.robots.robot1.next]).toEqual([['NECTAR', 'POLLEN'], 1]); // POLLEN 전용: 첫 POLLEN 강조
     expect(scene.parkZone).toBe(true);
     expect([scene.robots.robot1.bad, scene.robots.robot2.bad]).toEqual([false, true]); // R1 기본 자세는 LOADING ZONE에 걸침
+    // 12-12: LEAVE_PARK도 PARK처럼 LOADING ZONE 강조 + 밖이면 빨간 표시
+    const leavePark = scenarioEditScene(values({ r2AutoMovement: 'LEAVE_PARK' }), null);
+    expect([leavePark.parkZone, leavePark.robots.robot1.bad, leavePark.robots.robot2.bad]).toEqual([true, false, true]);
   });
 });
 

@@ -68,8 +68,8 @@ export interface RobotPose {
   heading: number;          // 라디안
 }
 
-// 오토 이동 (SWARM 판정에만 사용): LEAVE 3점 / PARK 5점 / NONE 0점
-export type AutoMovement = 'NONE' | 'LEAVE' | 'PARK';
+// 오토 이동 (SWARM 판정에만 사용): LEAVE 3점 / PARK 5점 / LEAVE_PARK 8점(둘 다, 12-12) / NONE 0점
+export type AutoMovement = 'NONE' | 'LEAVE' | 'PARK' | 'LEAVE_PARK';
 
 // 바닥 기물 직접 배치 1개 (필드 좌표, 정지 상태 ON_FIELD로 놓임). NECTAR = 우리 진영 NECTAR
 export interface FloorPiecePlacement {

@@ -22,6 +22,7 @@ import {
   rpFieldKey,
   scenarioFormWarnings,
   setAlliance,
+  AUTO_MOVEMENTS,
   setAutoMovement,
   setFlowerCount,
   setRpThreshold,
@@ -126,9 +127,12 @@ describe('시나리오 탭 폼 (09-11a)', () => {
     expect(sc).toEqual({ allianceColor: 'RED', r2AutoMovement: 'PARK' });
     expect(readScenario(setAutoMovement(sc, 'robot1', 'NONE'), R1, R2).autoMovement).toEqual({ robot1: 'NONE', robot2: 'PARK' });
     expect(readScenario({ allianceColor: 'RED', r1AutoMovement: 'FLY' as never }, R1, R2).autoMovement.robot1).toBe('LEAVE');
+    // 12-12: LEAVE_PARK (LEAVE + PARK 함께 8점) 선택지
+    expect(AUTO_MOVEMENTS).toEqual(['NONE', 'LEAVE', 'PARK', 'LEAVE_PARK']);
+    expect(readScenario(setAutoMovement(sc, 'robot1', 'LEAVE_PARK'), R1, R2).autoMovement.robot1).toBe('LEAVE_PARK');
   });
 
-  it('D-3. RP 기준값 (14-2): 한 칸을 고치면 세 값을 묶어 지정, DEFAULT = 지정 해제, 틀린 값은 그대로 보임 + rp 묶음 빨강, SWARM > 20은 경고만', () => {
+  it('D-3. RP 기준값 (14-2): 한 칸을 고치면 세 값을 묶어 지정, DEFAULT = 지정 해제, 틀린 값은 그대로 보임 + rp 묶음 빨강, SWARM > 26은 경고만 (12-12)', () => {
     const sc: ScenarioConfig = { allianceColor: 'RED' };
     const view = readScenario(sc, R1, R2);
     const swarm = setRpThreshold(sc, view, 'swarmPoints', 13);
@@ -144,13 +148,15 @@ describe('시나리오 탭 폼 (09-11a)', () => {
     expect(issues.map(i => i.code)).toEqual(['RP_THRESHOLDS']);
     expect([...issueFieldSet(issues)]).toEqual(['rp']);
     // 도달할 수 없는 SWARM: 경고만 (적용 가능)
-    const far = withScenario(setRpThreshold(sc, view, 'swarmPoints', 21));
+    const far = withScenario(setRpThreshold(sc, view, 'swarmPoints', 27));
     expect(scenarioFormIssues(far)).toEqual([]);
     expect(scenarioFormWarnings(far)).toEqual(['SWARM_UNREACHABLE']);
+    expect(scenarioFormWarnings(withScenario(setRpThreshold(sc, view, 'swarmPoints', 26)))).toEqual([]); // 오토 LEAVE_PARK 8 × 2 + TELEOP 10
     expect(scenarioFormWarnings(withScenario(swarm))).toEqual([]);
     // 오토 이동 PARK 밖 = autoMove + spawn 묶음
     const park = scenarioFormIssues(withScenario(setAutoMovement(sc, 'robot2', 'PARK')));
     expect(park).toEqual([{ code: 'AUTO_PARK_NOT_IN_ZONE', robot: 'robot2', fields: ['autoMove.robot2', 'spawn.robot2'] }]);
+    expect(scenarioFormIssues(withScenario(setAutoMovement(sc, 'robot2', 'LEAVE_PARK')))).toEqual(park); // LEAVE_PARK도 PARK 검사 (12-12)
   });
 
   it('D. 시작 자세 / 개수: 한 축만 고치면 기본 스폰에서 시작, 기본값 = 지정 해제, 개수는 나머지 칸 유지', () => {

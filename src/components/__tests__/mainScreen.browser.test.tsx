@@ -298,7 +298,7 @@ describe('config 창', () => {
     await expect.element(banner).toBeVisible();
   });
 
-  it('시나리오 필드 편집 로봇 팝오버 (14-1d): 로봇 클릭 → 적재물 칸 / 오토 이동, PARK가 LOADING ZONE 밖이면 빨간 사유, 다시 클릭하면 닫기', async () => {
+  it('시나리오 필드 편집 로봇 팝오버 (14-1d): 로봇 클릭 → 적재물 칸 / 오토 이동(4칸이 팝오버 안), PARK가 LOADING ZONE 밖이면 빨간 사유, 다시 클릭하면 닫기', async () => {
     await userEvent.click(button('Open settings'));
     await userEvent.click(page.getByRole('tab', { name: 'SCENARIO' }));
     await userEvent.click(button('EDIT ON FIELD').first());
@@ -313,11 +313,15 @@ describe('config 창', () => {
     const popover = page.getByRole('dialog', { name: 'R2' });
     await expect.element(popover).toBeVisible();
     const movement = popover.getByRole('radiogroup', { name: 'Auto movement' });
-    await expect.element(movement.getByRole('radio', { name: 'LEAVE' })).toBeChecked();
+    await expect.element(movement.getByRole('radio', { name: 'LEAVE', exact: true })).toBeChecked();
+    // 오토 이동 4칸 (12-12, LEAVE+PARK)이 팝오버 안에 들어감
+    const box = (el: Element) => el.getBoundingClientRect();
+    const pop = box(popover.element()), row = box(movement.element());
+    expect(row.left >= pop.left && row.right <= pop.right, `auto movement row inside the popover (${row.left}–${row.right} / ${pop.left}–${pop.right})`).toBe(true);
     // PARK: R2 기본 자세는 LOADING ZONE 밖 → 빨간 사유 + 탭 무효
-    await userEvent.click(movement.getByRole('radio', { name: 'PARK' }));
+    await userEvent.click(movement.getByRole('radio', { name: 'PARK', exact: true }));
     await expect.element(popover.getByText('R2 auto PARK needs a start pose in the LOADING ZONE')).toBeVisible();
-    await userEvent.click(movement.getByRole('radio', { name: 'LEAVE' }));
+    await userEvent.click(movement.getByRole('radio', { name: 'LEAVE', exact: true }));
     await expect.element(popover.getByText('R2 auto PARK needs a start pose in the LOADING ZONE')).not.toBeInTheDocument();
     // 적재물 1번 칸: POLLEN → NECTAR (탭에도 반영)
     await userEvent.click(popover.getByRole('button', { name: 'Slot 1: POLLEN' }));
@@ -328,7 +332,7 @@ describe('config 창', () => {
     await expect.element(popover).not.toBeInTheDocument();
   });
 
-  it('시나리오 탭 RP 기준값 / 오토 이동 (14-2): POLLINATOR 1 > 2 = 오류 + APPLY 막힘, SWARM 21 = 경고만, DEFAULT, PARK가 LOADING ZONE 밖이면 오류', async () => {
+  it('시나리오 탭 RP 기준값 / 오토 이동 (14-2): POLLINATOR 1 > 2 = 오류 + APPLY 막힘, SWARM 27 = 경고만, DEFAULT, PARK / LEAVE+PARK가 LOADING ZONE 밖이면 오류 (12-12)', async () => {
     await userEvent.click(button('Open settings'));
     await userEvent.click(page.getByRole('tab', { name: 'SCENARIO' }));
     const p1 = page.getByLabelText('POLLINATOR 1 TIPs');
@@ -343,9 +347,12 @@ describe('config 창', () => {
     // 범위 밖 글자 → 칸 오류 (글자 보관)
     await userEvent.fill(swarm, '0');
     await expect.element(button('APPLY')).toBeDisabled();
-    // SWARM 21 → 경고만, 적용 가능
-    await userEvent.fill(swarm, '21');
-    await expect.element(page.getByText(/^SWARM 21 points cannot be reached with 2 robots/)).toBeVisible();
+    // SWARM 26 = 도달 가능 (오토 LEAVE+PARK 8 × 2 + TELEOP 10), 27 → 경고만, 적용 가능
+    await userEvent.fill(swarm, '26');
+    await expect.element(button('APPLY')).toBeEnabled();
+    await expect.element(page.getByText(/cannot be reached with 2 robots/)).not.toBeInTheDocument();
+    await userEvent.fill(swarm, '27');
+    await expect.element(page.getByText(/^SWARM 27 points cannot be reached with 2 robots \(max 26\)/)).toBeVisible();
     await expect.element(button('APPLY')).toBeEnabled();
     // DEFAULT = 기본 기준으로 (지정 해제)
     await userEvent.click(page.getByRole('button', { name: 'DEFAULT' }).last());
@@ -353,11 +360,15 @@ describe('config 창', () => {
     await expect.element(p1).toHaveValue('4');
     await expect.element(page.getByText('Default thresholds')).toBeVisible();
     // 오토 이동: R2 PARK (기본 자세는 LOADING ZONE 밖) → 오류, R1 PARK는 통과
-    await userEvent.click(page.getByRole('radiogroup', { name: 'R2 Auto movement' }).getByRole('radio', { name: 'PARK' }));
+    await userEvent.click(page.getByRole('radiogroup', { name: 'R2 Auto movement' }).getByRole('radio', { name: 'PARK', exact: true }));
     await expect.element(page.getByText('R2 auto PARK needs a start pose in the LOADING ZONE').first()).toBeVisible();
     await expect.element(button('APPLY')).toBeDisabled();
-    await userEvent.click(page.getByRole('radiogroup', { name: 'R2 Auto movement' }).getByRole('radio', { name: 'LEAVE' }));
-    await userEvent.click(page.getByRole('radiogroup', { name: 'R1 Auto movement' }).getByRole('radio', { name: 'PARK' }));
+    // R2 LEAVE+PARK도 PARK와 같은 검사 (12-12)
+    await userEvent.click(page.getByRole('radiogroup', { name: 'R2 Auto movement' }).getByRole('radio', { name: 'LEAVE+PARK' }));
+    await expect.element(page.getByText('R2 auto PARK needs a start pose in the LOADING ZONE').first()).toBeVisible();
+    await expect.element(button('APPLY')).toBeDisabled();
+    await userEvent.click(page.getByRole('radiogroup', { name: 'R2 Auto movement' }).getByRole('radio', { name: 'LEAVE', exact: true }));
+    await userEvent.click(page.getByRole('radiogroup', { name: 'R1 Auto movement' }).getByRole('radio', { name: 'LEAVE+PARK' }));
     await expect.element(button('APPLY')).toBeEnabled();
     await userEvent.click(button('APPLY'));
     await expect.element(button('APPLY')).toBeDisabled();

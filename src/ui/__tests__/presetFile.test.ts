@@ -338,6 +338,7 @@ describe('프리셋 파일 (10-2)', () => {
       { allianceColor: 'BLUE' },
     );
     expect(scenario).toEqual({ allianceColor: 'RED', r2AutoMovement: 'PARK' });
+    expect(sanitizeScenarioPreset({ r1AutoMovement: 'LEAVE_PARK' }, { allianceColor: 'RED' }).r1AutoMovement).toBe('LEAVE_PARK'); // 12-12
     // 형식이 맞는 지정 바닥 기물은 모르는 항목을 버리고 복사
     expect(sanitizeScenarioPreset({ floorPieces: [{ type: 'NECTAR', x: 5, y: 6, vx: 1 }] }, { allianceColor: 'RED' }).floorPieces).toEqual([{ type: 'NECTAR', x: 5, y: 6 }]);
   });

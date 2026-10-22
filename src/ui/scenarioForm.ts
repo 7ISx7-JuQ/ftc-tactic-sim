@@ -153,8 +153,8 @@ export function setAutoMovement(scenario: ScenarioConfig, robot: RobotId, moveme
   return robot === 'robot1' ? { ...scenario, r1AutoMovement: movement } : { ...scenario, r2AutoMovement: movement };
 }
 
-/** 오토 이동 선택지 (점수: NONE 0 / LEAVE 3 / PARK 5, RP에만) */
-export const AUTO_MOVEMENTS: readonly AutoMovement[] = ['NONE', 'LEAVE', 'PARK'];
+/** 오토 이동 선택지 (점수: NONE 0 / LEAVE 3 / PARK 5 / LEAVE_PARK 8, RP에만) */
+export const AUTO_MOVEMENTS: readonly AutoMovement[] = ['NONE', 'LEAVE', 'PARK', 'LEAVE_PARK'];
 
 // ------------------------------------------------------------
 // RP 기준값 (14-2): 세 값을 묶어 저장 (부분 지정 없음) — 한 칸을 고치면 나머지는 보이는 값(기본값)으로 함께 지정
@@ -177,7 +177,7 @@ export function resetRpThresholds(scenario: ScenarioConfig): ScenarioConfig {
   return next;
 }
 
-/** 시나리오 경고 (적용은 허용, 14-2): SWARM_UNREACHABLE = 로봇 2대로 도달할 수 없는 SWARM 기준 (> 20점) */
+/** 시나리오 경고 (적용은 허용, 14-2): SWARM_UNREACHABLE = 로봇 2대로 도달할 수 없는 SWARM 기준 (> 26점) */
 export function scenarioFormWarnings(values: DraftValues): ScenarioWarning[] {
   return scenarioWarnings(values.scenario);
 }

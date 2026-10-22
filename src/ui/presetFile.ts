@@ -241,7 +241,7 @@ export function pinLegacyBlueSpawns(scenario: ScenarioConfig): ScenarioConfig {
 }
 
 const PIECE_TYPES = ['POLLEN', 'NECTAR'] as const;
-const AUTO_MOVEMENTS: readonly AutoMovement[] = ['NONE', 'LEAVE', 'PARK'];
+const AUTO_MOVEMENTS: readonly AutoMovement[] = ['NONE', 'LEAVE', 'PARK', 'LEAVE_PARK'];
 const isPose = (v: unknown): v is RobotPose => isRecord(v) && isNumber(v.x) && isNumber(v.y) && isNumber(v.heading);
 
 /** 시나리오 정리: 선택 항목은 없으면 없는 대로(엔진 기본값), 형식이 틀리면 기본 시나리오의 그 항목 */

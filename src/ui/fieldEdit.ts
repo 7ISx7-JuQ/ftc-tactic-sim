@@ -21,7 +21,7 @@ import { FIELD_SIZE, FLOWER_CIRCLES, GARDEN_AABB, PIECE_PHYSICS, getRobotOBB, te
 import { FIELD_LAYOUT } from '../renderer/canvasRenderer';
 import { flowerGaugeLayout } from '../renderer/gaugeLayout';
 import { carriedHighlightIndex } from '../renderer/robotLayout';
-import { FLOWER_MAX_START_PIECES, INITIAL_HUMAN_NECTAR_STOCK, getCarryCapacity, NECTAR_IN_PLAY, PLACEMENT_TOLERANCE, TOTAL_POLLEN, gardenPiecePositions, humanNectarSlots, isFloorPiecePositionValid, validateRobotPlacement } from '../core/simulationEngine';
+import { FLOWER_MAX_START_PIECES, INITIAL_HUMAN_NECTAR_STOCK, autoMovementParks, getCarryCapacity, NECTAR_IN_PLAY, PLACEMENT_TOLERANCE, TOTAL_POLLEN, gardenPiecePositions, humanNectarSlots, isFloorPiecePositionValid, validateRobotPlacement } from '../core/simulationEngine';
 import type { FloorPiecePlacement, RobotPose, ScenarioConfig } from '../core/types';
 import type { HeatmapEditScene, ScenarioEditScene, SweetSpotEditScene } from '../renderer/editSceneRenderer';
 import type { SpawnPart, SpawnRobotId } from '../renderer/spawnEditLayout';
@@ -624,7 +624,7 @@ export function scenarioEditScene(values: DraftValues, active: { robot: SpawnRob
     hive: { upwardCell: view.hiveUpwardCell, nectar: clampInt(view.hiveNectar, NECTAR_IN_PLAY), pollen: clampInt(view.hivePollen, TOTAL_POLLEN) },
     stock: INITIAL_HUMAN_NECTAR_STOCK - clampInt(view.autoTipCount, INITIAL_HUMAN_NECTAR_STOCK),
     target: ui.target ?? null,
-    parkZone: view.autoMovement.robot1 === 'PARK' || view.autoMovement.robot2 === 'PARK',
+    parkZone: autoMovementParks(view.autoMovement.robot1) || autoMovementParks(view.autoMovement.robot2),
   };
 }
 

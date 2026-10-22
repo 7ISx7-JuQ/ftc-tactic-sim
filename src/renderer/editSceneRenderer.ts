@@ -81,7 +81,7 @@ export interface ScenarioEditScene {
   hive?: { upwardCell: HiveCell; nectar: number; pollen: number };
   stock?: number;
   target?: { kind: 'HIVE' } | { kind: 'FLOWER'; index: number } | { kind: 'GARDEN'; side: 'ally' | 'opponent' } | { kind: 'ROBOT'; robot: SpawnRobotId } | null;
-  parkZone?: boolean;                             // 오토 이동 PARK 로봇이 있음 (14-1d): 우리 LOADING ZONE 강조
+  parkZone?: boolean;                             // 오토 이동 PARK / LEAVE_PARK 로봇이 있음 (14-1d, 12-12): 우리 LOADING ZONE 강조
 }
 
 /** 편집 모드 장면 */

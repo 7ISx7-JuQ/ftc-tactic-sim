@@ -103,17 +103,17 @@ const PARK_POINTS = 5;
 
 // ------------------------------------------------------------
 // RP 기준값 / 오토 이동 (12-5, 명세서 2.6.5): 대회마다 바뀔 수 있는 기준 숫자는 시나리오 값(ScenarioConfig.rpThresholds),
-// SWARM = 오토 이동 점수(LEAVE / PARK) + TELEOP PARK 점수 ≥ swarmPoints. 오토 이동 점수는 RP에만 쓰고 totalScore에는 넣지 않는다
+// SWARM = 오토 이동 점수(LEAVE / PARK / 둘 다) + TELEOP PARK 점수 ≥ swarmPoints. 오토 이동 점수는 RP에만 쓰고 totalScore에는 넣지 않는다
 // ------------------------------------------------------------
 
 /** RP 기준 기본값 (v1 판정과 같은 결과: 기본 오토 이동 LEAVE · LEAVE 6점 + TELEOP 두 로봇 PARK 10점 = 16) */
 export const DEFAULT_RP_THRESHOLDS: Readonly<RPThresholds> = { swarmPoints: 16, pollinator1Tips: 4, pollinator2Tips: 7 };
 /** RP 기준값 입력 범위 (정수) */
 export const RP_THRESHOLD_MAX = 99;
-/** 로봇 2대가 얻을 수 있는 SWARM 최대 점수 (오토 PARK 5 × 2 + TELEOP PARK 5 × 2): 넘는 기준은 경고 */
-export const SWARM_MAX_POINTS = 20;
-/** 오토 이동 점수 (룰북: LEAVE 3 / PARK 5) */
-export const AUTO_MOVEMENT_POINTS: Readonly<Record<AutoMovement, number>> = { NONE: 0, LEAVE: 3, PARK: 5 };
+/** 로봇 2대가 얻을 수 있는 SWARM 최대 점수 (오토 LEAVE + PARK 8 × 2 + TELEOP PARK 5 × 2): 넘는 기준은 경고 */
+export const SWARM_MAX_POINTS = 26;
+/** 오토 이동 점수 (룰북: LEAVE 3 / PARK 5, 한 로봇이 둘 다 받을 수 있음 — 12-12) */
+export const AUTO_MOVEMENT_POINTS: Readonly<Record<AutoMovement, number>> = { NONE: 0, LEAVE: 3, PARK: 5, LEAVE_PARK: 8 };
 /** 오토 이동 기본값 (v1 판정과 같은 결과) */
 export const DEFAULT_AUTO_MOVEMENT: AutoMovement = 'LEAVE';
 
@@ -132,10 +132,15 @@ export function resolveRPThresholds(scenario: Pick<ScenarioConfig, 'rpThresholds
 
 /** 로봇별 오토 이동 (없거나 모르는 값이면 LEAVE) */
 export function resolveAutoMovement(value: unknown): AutoMovement {
-  return value === 'NONE' || value === 'LEAVE' || value === 'PARK' ? value : DEFAULT_AUTO_MOVEMENT;
+  return value === 'NONE' || value === 'LEAVE' || value === 'PARK' || value === 'LEAVE_PARK' ? value : DEFAULT_AUTO_MOVEMENT;
 }
 
-/** 오토 이동 점수 = 두 로봇의 LEAVE 3 / PARK 5 / NONE 0 합 (RP 판정에만 사용) */
+/** 오토 PARK를 포함하는 이동인지 (PARK / LEAVE_PARK: 시작 자세가 우리 LOADING ZONE과 겹쳐야 함) */
+export function autoMovementParks(movement: AutoMovement): boolean {
+  return movement === 'PARK' || movement === 'LEAVE_PARK';
+}
+
+/** 오토 이동 점수 = 두 로봇의 LEAVE 3 / PARK 5 / LEAVE_PARK 8 / NONE 0 합 (RP 판정에만 사용) */
 export function autoMovementPoints(scenario: Pick<ScenarioConfig, 'r1AutoMovement' | 'r2AutoMovement'> | undefined): number {
   return AUTO_MOVEMENT_POINTS[resolveAutoMovement(scenario?.r1AutoMovement)] + AUTO_MOVEMENT_POINTS[resolveAutoMovement(scenario?.r2AutoMovement)];
 }
@@ -289,7 +294,7 @@ export function acceptedFloorPieces(placements: readonly FloorPiecePlacement[] |
   return out;
 }
 
-/** 시나리오 경고 (적용은 허용): SWARM_UNREACHABLE = 로봇 2대로 도달할 수 없는 SWARM 기준 (> 20점) */
+/** 시나리오 경고 (적용은 허용): SWARM_UNREACHABLE = 로봇 2대로 도달할 수 없는 SWARM 기준 (> 26점) */
 export type ScenarioWarning = 'SWARM_UNREACHABLE';
 export function scenarioWarnings(scenario: Pick<ScenarioConfig, 'rpThresholds'>): ScenarioWarning[] {
   const t = scenario.rpThresholds;
@@ -390,11 +395,11 @@ export function validateScenario(
     add('RP_THRESHOLDS', `RP 기준값은 정수 1 ~ ${RP_THRESHOLD_MAX}, POLLINATOR 1 ≤ POLLINATOR 2여야 함`);
   }
 
-  // 오토 PARK (12-5, 룰북: LOADING ZONE에 일부라도 들어가 있으면 PARK): 오토 종료 위치 = TELEOP 시작 자세가 우리 LOADING ZONE과 겹쳐야 함
+  // 오토 PARK (12-5, 룰북: LOADING ZONE에 일부라도 들어가 있으면 PARK): 오토 종료 위치 = TELEOP 시작 자세가 우리 LOADING ZONE과 겹쳐야 함 (LEAVE_PARK 포함, 12-12)
   const alliance = scenario.allianceColor === 'BLUE' ? 'BLUE' : 'RED';
   const zone = LOADING_ZONE_AABB[alliance];
   const parkers = ([['robot1', scenario.r1AutoMovement, scenario.r1Spawn, r1Config], ['robot2', scenario.r2AutoMovement, scenario.r2Spawn, r2Config]] as const)
-    .filter(([id, movement, spawn, config]) => resolveAutoMovement(movement) === 'PARK'
+    .filter(([id, movement, spawn, config]) => autoMovementParks(resolveAutoMovement(movement))
       && !testOBBvsAABB(getRobotOBB(resolveSpawnPose(spawn, DEFAULT_SPAWN_POSES[alliance][id]), config), zone).colliding)
     .map(([id]) => id);
   if (parkers.length > 0) {

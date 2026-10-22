@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SimulationEngine, DEFAULT_RNG_SEED, DEFAULT_SPAWN_POSES, validateScenario, validateRobotPlacement, PLACEMENT_TOLERANCE, HIVE_SHOOT_TOLERANCE, isRobotUnderHive, getCarryCapacity, DT, DEFAULT_RP_THRESHOLDS, AUTO_MOVEMENT_POINTS, autoMovementPoints, resolveAutoMovement, resolveRPThresholds, scenarioWarnings, acceptedFloorPieces, isFloorPiecePositionValid, findLandingSpot, LANDING_SEARCH_STEP, LANDING_SEARCH_MAX_RADIUS } from '../simulationEngine';
+import { SimulationEngine, DEFAULT_RNG_SEED, DEFAULT_SPAWN_POSES, validateScenario, validateRobotPlacement, PLACEMENT_TOLERANCE, HIVE_SHOOT_TOLERANCE, isRobotUnderHive, getCarryCapacity, DT, DEFAULT_RP_THRESHOLDS, AUTO_MOVEMENT_POINTS, SWARM_MAX_POINTS, autoMovementParks, autoMovementPoints, resolveAutoMovement, resolveRPThresholds, scenarioWarnings, acceptedFloorPieces, isFloorPiecePositionValid, findLandingSpot, LANDING_SEARCH_STEP, LANDING_SEARCH_MAX_RADIUS } from '../simulationEngine';
 import type { RobotDriveInput } from '../simulationEngine';
 import type { BumperZone, RobotConfig, RobotPose, RobotState, ScenarioConfig, ShotJudge, ShotJudgement } from '../types';
 import { liftDriveRatio, stepRobotKinematics } from '../kinematics';
@@ -1387,7 +1387,7 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
   it('Z. RP 기준값 + 오토 이동 (12-5): SWARM = 오토 이동 점수 + TELEOP PARK ≥ 기준, POLLINATOR = TIP 합 ≥ 기준, 검증 / 안전장치', () => {
     // 상수 / 해석
     expect(DEFAULT_RP_THRESHOLDS).toEqual({ swarmPoints: 16, pollinator1Tips: 4, pollinator2Tips: 7 });
-    expect(AUTO_MOVEMENT_POINTS).toEqual({ NONE: 0, LEAVE: 3, PARK: 5 });
+    expect(AUTO_MOVEMENT_POINTS).toEqual({ NONE: 0, LEAVE: 3, PARK: 5, LEAVE_PARK: 8 });
     expect([resolveAutoMovement(undefined), resolveAutoMovement('FLY'), resolveAutoMovement('PARK')]).toEqual(['LEAVE', 'LEAVE', 'PARK']);
     expect([autoMovementPoints(undefined), autoMovementPoints({ r1AutoMovement: 'PARK' }), autoMovementPoints({ r1AutoMovement: 'NONE', r2AutoMovement: 'PARK' })]).toEqual([6, 8, 5]);
     expect(resolveRPThresholds({ rpThresholds: { swarmPoints: 0, pollinator1Tips: 4, pollinator2Tips: 7 } })).toEqual(DEFAULT_RP_THRESHOLDS); // 틀린 값 → 기본값
@@ -1431,8 +1431,8 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
     assert(codes({ allianceColor: 'BLUE', r1AutoMovement: 'PARK', r2AutoMovement: 'PARK' }) === 'AUTO_PARK_NOT_IN_ZONE:robot2', 'BLUE: zone is the BLUE LOADING ZONE (R1 default touches it, 14-1a)');
     assert(codes({ r2AutoMovement: 'PARK', r2Spawn: pose(9, 46) }) === '', 'start pose partly in the zone is enough');
     assert(codes({ r2AutoMovement: 'LEAVE' }) === '' && codes({ r2AutoMovement: 'NONE' }) === '', 'LEAVE / NONE need no zone');
-    // 경고: 로봇 2대로 도달할 수 없는 SWARM 기준
-    expect(scenarioWarnings({ rpThresholds: { swarmPoints: 21, pollinator1Tips: 4, pollinator2Tips: 7 } })).toEqual(['SWARM_UNREACHABLE']);
+    // 경고: 로봇 2대로 도달할 수 없는 SWARM 기준 (최대 26점 — 경계는 AE, 12-12)
+    expect(scenarioWarnings({ rpThresholds: { swarmPoints: 27, pollinator1Tips: 4, pollinator2Tips: 7 } })).toEqual(['SWARM_UNREACHABLE']);
     expect(scenarioWarnings({ rpThresholds: { swarmPoints: 20, pollinator1Tips: 4, pollinator2Tips: 7 } })).toEqual([]);
     expect(scenarioWarnings({})).toEqual([]);
   }, TEST_TIMEOUT_MS);
@@ -1669,5 +1669,39 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       assert(b.x === spot.x && b.y === spot.y, 'first drop lands on its spot');
       assert(Math.hypot(c.x - b.x, c.y - b.y) >= gap && Math.hypot(c.x - b.x, c.y - b.y) < gap + LANDING_SEARCH_STEP, 'second drop on the same tick avoids the first');
     }
+  }, TEST_TIMEOUT_MS);
+
+  it('AE. 오토 LEAVE_PARK (12-12): 한 로봇이 LEAVE 3 + PARK 5 = 8점을 함께 받음, PARK처럼 LOADING ZONE 검사, SWARM 최대 26점', () => {
+    // 상수 / 해석
+    expect(resolveAutoMovement('LEAVE_PARK')).toBe('LEAVE_PARK');
+    expect((['NONE', 'LEAVE', 'PARK', 'LEAVE_PARK'] as const).map(autoMovementParks)).toEqual([false, false, true, true]);
+    expect(autoMovementPoints({ r1AutoMovement: 'LEAVE_PARK', r2AutoMovement: 'LEAVE_PARK' })).toBe(16); // 오토만으로 기본 기준 16
+    expect(autoMovementPoints({ r1AutoMovement: 'LEAVE_PARK', r2AutoMovement: 'NONE' })).toBe(8);
+    expect(SWARM_MAX_POINTS).toBe(2 * AUTO_MOVEMENT_POINTS.LEAVE_PARK + 2 * 5);
+
+    // 경기 끝까지 (입력 없음): R1만 LOADING ZONE에 주차 = TELEOP 5점
+    const end = (sc: Partial<ScenarioConfig>) => {
+      const e = eng(sc);
+      e.runFullMatch();
+      const f = e.getFrame(6000)!;
+      return { rp: f.rpAchieved, total: f.totalScore, park: f.scoreBreakdown!.park };
+    };
+    const park = end({ r1AutoMovement: 'PARK' });          // 5 + 3 + 5 = 13
+    const leavePark = end({ r1AutoMovement: 'LEAVE_PARK' }); // 8 + 3 + 5 = 16
+    assert(leavePark.park === 5 && !park.rp.swarm && leavePark.rp.swarm, 'R1 LEAVE_PARK reaches the default 16 where PARK alone (13) does not');
+    assert(leavePark.total === park.total, 'auto movement counts for RP only, total score unchanged');
+    const th = (swarmPoints: number) => ({ swarmPoints, pollinator1Tips: 4, pollinator2Tips: 7 });
+    const BOTH: Partial<ScenarioConfig> = { r1Spawn: pose(9, 27), r2Spawn: pose(9, 46), r1AutoMovement: 'LEAVE_PARK', r2AutoMovement: 'LEAVE_PARK' };
+    assert(end({ ...BOTH, rpThresholds: th(26) }).rp.swarm && !end({ ...BOTH, rpThresholds: th(26), r2AutoMovement: 'PARK' }).rp.swarm, 'max 16 + 10 = 26 reaches 26, 13 + 10 does not');
+
+    // 검증: PARK와 같은 LOADING ZONE 겹침 검사
+    const codes = (sc: Partial<ScenarioConfig>) => validateScenario({ allianceColor: 'RED', ...sc }, C1, C2).map(i => `${i.code}${i.robots ? ':' + i.robots.join('+') : ''}`).join(',');
+    assert(codes({ r1AutoMovement: 'LEAVE_PARK' }) === '', 'RED R1 default start pose touches the LOADING ZONE -> LEAVE_PARK allowed');
+    assert(codes({ r1AutoMovement: 'LEAVE_PARK', r2AutoMovement: 'LEAVE_PARK' }) === 'AUTO_PARK_NOT_IN_ZONE:robot2', 'RED R2 default start pose is outside the LOADING ZONE');
+    assert(codes({ r2AutoMovement: 'LEAVE_PARK', r2Spawn: pose(9, 46) }) === '', 'start pose partly in the zone is enough');
+
+    // 경고 경계: 26점까지는 도달 가능
+    expect(scenarioWarnings({ rpThresholds: th(26) })).toEqual([]);
+    expect(scenarioWarnings({ rpThresholds: th(27) })).toEqual(['SWARM_UNREACHABLE']);
   }, TEST_TIMEOUT_MS);
 });

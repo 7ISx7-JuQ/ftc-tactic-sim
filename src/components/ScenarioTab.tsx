@@ -2,7 +2,7 @@
 // 시작 자세 숫자 칸 / 난수 시드. 값은 초안에만 들어가고 APPLY로 확정한다 (시드 REROLL만 바로 적용 — 09-11 확정). 경기가 있는 동안 읽기 전용.
 // 09-11b: EDIT ON FIELD(필드에서 끌어 시작 자세 정하기 — 모드는 필드 안내 띠의 DONE · APPLY / CANCEL로 끝냄).
 // 14-1a: EDIT ON FIELD = 시나리오 필드 편집 모드 — 탭 맨 위 버튼, 시작 자세 구역의 버튼도 같은 모드를 연다.
-// 14-2: 오토 이동(로봇별 NONE / LEAVE / PARK) + RP 기준값(SWARM 점수 / POLLINATOR 1 · 2 TIP 수, 정수 1 ~ 99, DEFAULT = 지정 해제),
+// 14-2: 오토 이동(로봇별 NONE / LEAVE / PARK / LEAVE_PARK, 12-12) + RP 기준값(SWARM 점수 / POLLINATOR 1 · 2 TIP 수, 정수 1 ~ 99, DEFAULT = 지정 해제),
 //   로봇 2대로 도달할 수 없는 SWARM 기준은 경고(주황, 적용 허용).
 import { CircleAlert, CircleCheck, Dices, Move, RotateCcw } from 'lucide-react';
 import { hiveTipPollenThreshold } from '../core/types';

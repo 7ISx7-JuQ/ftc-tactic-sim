@@ -305,6 +305,8 @@ describe('저장 레시피 (10-3)', () => {
     expect(!tooMany.ok && tooMany.error.code === 'INVALID_SETUP' && tooMany.error.issues).toContain('FLOOR_PIECE_COUNT');
     const parkOutside = parse(edit(['setup.scenario.r1AutoMovement', 'PARK']));
     expect(!parkOutside.ok && parkOutside.error.code === 'INVALID_SETUP' && parkOutside.error.issues).toContain('AUTO_PARK_NOT_IN_ZONE');
+    const leaveParkOutside = parse(edit(['setup.scenario.r1AutoMovement', 'LEAVE_PARK'])); // 12-12: 형식은 맞고 PARK와 같은 검사
+    expect(!leaveParkOutside.ok && leaveParkOutside.error.code === 'INVALID_SETUP' && leaveParkOutside.error.issues).toContain('AUTO_PARK_NOT_IN_ZONE');
     expect(code(edit(['setup.scenario.floorPieces', [{ type: 'ROCK', x: 1, y: 2 }]]))).toEqual({ code: 'INVALID_FIELD', field: 'setup.scenario' });
     expect(code(edit(['setup.scenario.rpThresholds', { swarmPoints: 16 }]))).toEqual({ code: 'INVALID_FIELD', field: 'setup.scenario' });
     expect(code(edit(['setup.scenario.r2AutoMovement', 'FLY']))).toEqual({ code: 'INVALID_FIELD', field: 'setup.scenario' });

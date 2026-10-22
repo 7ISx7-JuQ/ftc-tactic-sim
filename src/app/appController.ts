@@ -224,7 +224,7 @@ export interface MatchResult {
   autoTips: number;             // 오토 TIP 횟수 (결과 팝업 근거: RP에만 합산, 09-12)
   teleopTips: number;           // 텔레옵 TIP 횟수 (HIVE 점수 = × 20)
   thresholds: RPThresholds;     // 이 경기 RP 기준값 (엔진 판정과 같은 값, 14-3: RP 카드)
-  autoMovementPoints: number;   // 오토 이동 점수 (LEAVE 3 / PARK 5 합, RP에만 — SWARM = 이 점수 + TELEOP PARK, 14-3)
+  autoMovementPoints: number;   // 오토 이동 점수 (LEAVE 3 / PARK 5 / LEAVE_PARK 8 합, RP에만 — SWARM = 이 점수 + TELEOP PARK, 14-3)
 }
 
 export interface AppControllerDeps {

@@ -2129,7 +2129,7 @@
   z-index: 2;
   pointer-events: auto;
   box-sizing: border-box;
-  width: calc(var(--u) * 240);
+  width: calc(var(--u) * 260);
   display: flex;
   flex-direction: column;
   gap: calc(var(--u) * 6);
@@ -2174,6 +2174,10 @@
   display: flex;
   flex-direction: column;
   gap: calc(var(--u) * 6);
+}
+/* 오토 이동 4칸 (12-12, LEAVE+PARK)이 팝오버 폭 안에 들어가도록 좁은 여백 */
+.main-screen .field-popover .segmented-button {
+  padding: 0 calc(var(--u) * 6);
 }
 .field-area.is-scenario-edit.is-over-target .field-canvas {
   cursor: pointer;
