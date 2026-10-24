@@ -1135,21 +1135,24 @@
 .gamepad-row.is-connected {
   border-color: rgba(34, 197, 94, 0.5);
 }
+/* 첫 줄 = 장치 이름 | 배정 선택 | 매핑 버튼, 둘째 줄 = 연결 상태 / 패드 이름 (줄바꿈, 잘리지 않음) → 경고 → 매핑 편집 */
 .gamepad-slot {
   font-weight: 800;
+  flex: 1;
+  min-width: 0;
 }
 .gamepad-name {
+  order: 1;
+  flex-basis: 100%;
   color: var(--text-muted);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
+  font-size: calc(var(--u) * 11);
+  overflow-wrap: anywhere;
 }
 .gamepad-row.is-connected .gamepad-name {
   color: inherit;
 }
 .gamepad-warn {
+  order: 2;
   flex-basis: 100%;
   display: flex;
   align-items: center;
@@ -1163,6 +1166,7 @@
 }
 /* 게임패드 버튼 매핑 (18-3): 슬롯 줄 안에서 펼침 — 동작 | 지금 버튼 | 지정 */
 .gamepad-mapping {
+  order: 3;
   flex-basis: 100%;
   display: flex;
   flex-direction: column;

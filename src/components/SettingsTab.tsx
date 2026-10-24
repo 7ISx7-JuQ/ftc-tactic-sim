@@ -149,7 +149,6 @@ export default function SettingsTab({
           })}
           <li className="gamepad-row is-connected">
             <span className="gamepad-slot">{t(lang, 'settings.device.keyboard')}</span>
-            <span className="gamepad-name" />
             <Segmented<DeviceTarget>
               ariaLabel={t(lang, 'settings.device.keyboard')}
               value={toTarget(devices.keyboard)}
