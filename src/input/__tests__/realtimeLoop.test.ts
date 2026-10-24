@@ -19,6 +19,7 @@ const TEST_TIMEOUT_MS = 120_000;
 const assert = (c: boolean, m: string) => {
   expect(c, m).toBe(true);
 };
+const near = (a: number, b: number, tol = 1e-9) => Math.abs(a - b) < tol;
 
 const cfg = (id: 'robot1' | 'robot2', over: Partial<RobotConfig> = {}): RobotConfig => ({
   id, name: id, width: 18, length: 18, maxSpeed: 60, maxTurnRate: 4, maxLinearAccel: 120, maxAngularAccel: 10,
@@ -69,14 +70,18 @@ class CountingControls implements LiveControlSource {
 const harness = (e = eng(), controls: LiveControlSource = new CountingControls(), inputs = new MatchInputs()) => {
   const sched = new FakeScheduler();
   const stepped: number[] = [];
+  const alphas: number[] = [];
   const events: [LoopState, PauseReason | null][] = [];
   const loop = new RealtimeLoop(e, inputs, controls, sched, {
-    onFrame: n => stepped.push(n),
+    onFrame: (n, a) => {
+      stepped.push(n);
+      alphas.push(a);
+    },
     onStateChange: (s, r) => events.push([s, r]),
   });
   let now = 1000;                                          // 임의 시작 시각 (rAF 타임스탬프)
   const frame = (dt: number) => { now += dt; sched.frame(now); return stepped[stepped.length - 1] ?? 0; };
-  return { e, loop, sched, stepped, events, frame, inputs, controls };
+  return { e, loop, sched, stepped, alphas, events, frame, inputs, controls };
 };
 
 // 표준 배열 게임패드 스냅샷
@@ -140,6 +145,25 @@ describe('실시간 루프 (명세서 3.6)', () => {
     const before = h.e.currentTick;
     assert(h.frame(250) === MAX_CATCHUP_TICKS, '250 ms hitch -> capped at 5 ticks');
     assert(h.frame(20) === 1 && h.e.currentTick === before + 6, 'backlog (150 ms) discarded: next 20 ms frame steps only 1 tick');
+  });
+
+  it('C2. (17-1a) 프레임 보간 비율: alpha = 틱 소비 뒤 남은 누산 시간 / 20 ms ∈ [0, 1)', () => {
+    const h = harness();
+    h.loop.start();
+    h.frame(0);
+    const last = () => h.alphas[h.alphas.length - 1];
+    assert(last() === 0, 'first frame after start: nothing accumulated -> alpha 0');
+    h.frame(15);
+    assert(h.stepped.at(-1) === 0 && near(last(), 0.75), '15 ms: no tick, alpha 0.75');
+    h.frame(15);
+    assert(h.stepped.at(-1) === 1 && near(last(), 0.5), '30 ms total: 1 tick, 10 ms left -> alpha 0.5');
+    h.frame(100);
+    assert(h.stepped.at(-1) === 5 && near(last(), 0.5), '10 + 100 ms (cap 5 ticks): 10 ms remainder kept -> alpha 0.5');
+    h.frame(250);
+    assert(h.stepped.at(-1) === MAX_CATCHUP_TICKS && last() === 0, 'hitch: backlog discarded -> alpha 0');
+    for (let i = 0; i < 120; i++) h.frame(1000 / 60);
+    assert(h.alphas.every(a => a >= 0 && a < 1), 'alpha always in [0, 1)');
+    assert(new Set(h.alphas.slice(-60).map(a => a.toFixed(3))).size > 3, '60 Hz: alpha varies between frames');
   });
 
   it('D. 일시정지 / 재개', () => {

@@ -54,4 +54,20 @@ describe('로봇 동선 (16-3)', () => {
     expect(robotPaths(frames, Number.NaN)!.robot1.past).toHaveLength(1);
     expect(robotPaths([], 0)).toBeNull();
   });
+
+  it('D. (17-1a) 나눔 점 지정: 지나온 동선 = 0 ~ 보는 틱 + 그 점, 앞으로 갈 동선 = 그 점 + 다음 틱 ~ 머리, 보는 틱 = 머리면 무시', () => {
+    const frames = run(300);
+    const a = at(frames, 101), b = at(frames, 102);
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const still = { x: frames[101].r2.x, y: frames[101].r2.y };
+    const paths = robotPaths(frames, 101, { robot1: mid, robot2: still })!;
+    const plain = robotPaths(frames, 101)!;
+    expect(paths.robot1.past).toEqual([...plain.robot1.past, mid]);
+    expect(paths.robot1.future[0]).toEqual(mid);
+    expect(paths.robot1.future[1]).toEqual(b);
+    expect(paths.robot1.future.at(-1)).toEqual(at(frames, 300));
+    expect(paths.robot2).toEqual(plain.robot2); // 제자리 로봇: 같은 점은 건너뜀
+    const head = robotPaths(frames, 300, { robot1: mid, robot2: still })!;
+    expect(head).toEqual(robotPaths(frames, 300));
+  });
 });

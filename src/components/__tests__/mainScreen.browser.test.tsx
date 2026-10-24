@@ -432,6 +432,36 @@ describe('config 창', () => {
     await userEvent.click(page.getByRole('tab', { name: 'SETTINGS' }));
     await expect.element(toggle()).toBeChecked();
   });
+
+  it('부드러운 움직임 (17-1a): SETTINGS 화면 구역 토글(기본 꺼짐), 켜고 경기를 진행 / 일시정지 / 재생해도 그대로, 다시 열어도 유지', async () => {
+    const toggle = () => page.getByRole('checkbox', { name: /Smooth motion/ });
+    await userEvent.click(button('Open settings'));
+    await userEvent.click(page.getByRole('tab', { name: 'SETTINGS' }));
+    await expect.element(toggle()).not.toBeChecked();
+    await userEvent.click(page.getByText('Smooth motion', { exact: true }));
+    await expect.element(toggle()).toBeChecked();
+    await userEvent.keyboard('{Escape}');
+
+    await expect.element(button('START')).toBeEnabled();
+    await userEvent.click(button('START'));
+    await expect.element(button('PAUSE'), { timeout: 5000 }).toBeVisible();
+    await new Promise(r => setTimeout(r, 400));
+    await userEvent.keyboard(' ');
+    await expect.element(button('RESUME')).toBeVisible();
+    await userEvent.keyboard('{Shift>}{ArrowLeft}{/Shift}'); // 되감아 재생 (재생은 항상 보간)
+    await userEvent.keyboard(' ');
+    await new Promise(r => setTimeout(r, 300));
+    await userEvent.keyboard(' ');
+    await userEvent.click(button('Open settings'));
+    await userEvent.click(page.getByRole('tab', { name: 'SETTINGS' }));
+    await expect.element(toggle()).toBeChecked();
+
+    unmount();
+    mount();
+    await userEvent.click(button('Open settings'));
+    await userEvent.click(page.getByRole('tab', { name: 'SETTINGS' }));
+    await expect.element(toggle()).toBeChecked();
+  });
 });
 
 describe('도움말', () => {

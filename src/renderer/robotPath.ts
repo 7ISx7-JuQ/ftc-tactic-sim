@@ -1,6 +1,7 @@
 // 로봇 동선 (명세서 3.7 표시 옵션 robotPath, 16-3): 저장된 프레임에서 로봇 중심 위치를 뽑아 선으로 그릴 점 목록. DOM 비의존 순수 함수.
 // - 0틱 ~ 보는 틱 = 지나온 동선(진하게), 보는 틱 ~ 머리 = 앞으로 갈 동선(흐리게). 복기 회의에서 전체 동선과 지금 위치를 함께 본다.
 // - ROBOT_PATH_STEP틱마다 표본 + 보는 틱 / 머리 틱은 항상 포함 (선 끝 = 로봇 중심). 제자리(이전 점과 거의 같은 점)는 건너뛴다.
+// - 17-1a: 재생 중 보간한 프레임을 그릴 때는 나눔 점을 그린 로봇 중심(보간 위치)으로 둔다 (선 끝 = 그린 로봇 중심 유지).
 
 import type { DeepReadonly, TimelineFrame } from '../core/types';
 import type { Point2 } from './viewTransform';
@@ -11,8 +12,8 @@ export const ROBOT_PATH_STEP = 2;
 const SAME_POINT_INCH = 0.01;
 
 export interface RobotPath {
-  past: Point2[];   // 0틱 ~ 보는 틱 (끝 = 보는 틱의 로봇 중심)
-  future: Point2[]; // 보는 틱 ~ 머리 틱 (시작 = 보는 틱의 로봇 중심), 보는 틱 = 머리면 점 1개
+  past: Point2[];   // 0틱 ~ 보는 틱 (끝 = 보는 틱의 로봇 중심, split이면 그 점)
+  future: Point2[]; // 보는 틱 ~ 머리 틱 (시작 = 보는 틱의 로봇 중심, split이면 그 점), 보는 틱 = 머리면 점 1개
 }
 
 export interface ScenePaths {
@@ -28,27 +29,36 @@ function sampleTicks(from: number, to: number): number[] {
   return ticks;
 }
 
-function pathOf(frames: readonly DeepReadonly<TimelineFrame>[], ticks: readonly number[], robot: 'r1' | 'r2'): Point2[] {
+function pathOf(frames: readonly DeepReadonly<TimelineFrame>[], ticks: readonly number[], robot: 'r1' | 'r2', before: Point2 | null = null, after: Point2 | null = null): Point2[] {
+  const points: Point2[] = [];
+  if (before) points.push(before);
+  for (const t of ticks) points.push({ x: frames[t][robot].x, y: frames[t][robot].y });
+  if (after) points.push(after);
   const out: Point2[] = [];
-  for (const t of ticks) {
-    const { x, y } = frames[t][robot];
+  for (const p of points) {
     const last = out[out.length - 1];
-    if (last && Math.abs(last.x - x) < SAME_POINT_INCH && Math.abs(last.y - y) < SAME_POINT_INCH) continue;
-    out.push({ x, y });
+    if (last && Math.abs(last.x - p.x) < SAME_POINT_INCH && Math.abs(last.y - p.y) < SAME_POINT_INCH) continue;
+    out.push(p);
   }
   return out;
 }
 
 /**
  * 두 로봇의 동선 (프레임 0 ~ 머리, 보는 틱으로 나눔). 보는 틱은 [0, 머리]로 자른다. 프레임이 없으면 null.
- * 지나온 / 앞으로 갈 동선은 보는 틱의 점을 함께 가져 선이 끊기지 않는다
+ * 지나온 / 앞으로 갈 동선은 보는 틱의 점을 함께 가져 선이 끊기지 않는다.
+ * split(17-1a): 보는 틱 ~ 다음 틱 사이에 그린 로봇 중심. 주면 지나온 동선 = 0 ~ 보는 틱 + split, 앞으로 갈 동선 = split + 다음 틱 ~ 머리
+ * (보는 틱 = 머리면 무시)
  */
-export function robotPaths(frames: readonly DeepReadonly<TimelineFrame>[], viewTick: number): ScenePaths | null {
+export function robotPaths(frames: readonly DeepReadonly<TimelineFrame>[], viewTick: number, split?: Readonly<Record<'robot1' | 'robot2', Point2>>): ScenePaths | null {
   if (frames.length === 0) return null;
   const head = frames.length - 1;
   const view = Math.min(Math.max(Math.floor(Number.isFinite(viewTick) ? viewTick : 0), 0), head);
+  const cut = split && view < head ? split : null;
   const pastTicks = sampleTicks(0, view);
-  const futureTicks = sampleTicks(view, head);
-  const of = (robot: 'r1' | 'r2'): RobotPath => ({ past: pathOf(frames, pastTicks, robot), future: pathOf(frames, futureTicks, robot) });
-  return { robot1: of('r1'), robot2: of('r2') };
+  const futureTicks = sampleTicks(cut ? view + 1 : view, head);
+  const of = (robot: 'r1' | 'r2', id: 'robot1' | 'robot2'): RobotPath => {
+    const at = cut ? cut[id] : null;
+    return { past: pathOf(frames, pastTicks, robot, null, at), future: pathOf(frames, futureTicks, robot, at) };
+  };
+  return { robot1: of('r1', 'robot1'), robot2: of('r2', 'robot2') };
 }

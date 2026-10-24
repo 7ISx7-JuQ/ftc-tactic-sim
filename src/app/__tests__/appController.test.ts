@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fixedRateShotJudge } from '../../core/ballistics';
 import { createIntakeZonePreset } from '../../core/collision';
-import type { RobotConfig, ScenarioConfig, ShotProbabilityResolver } from '../../core/types';
+import type { DeepReadonly, RobotConfig, ScenarioConfig, ShotProbabilityResolver, TimelineFrame } from '../../core/types';
 import type { BrowserInputEnv, GamepadLike } from '../../input/browserInput';
 import { KEYBOARD_BINDINGS } from '../../input/inputConfig';
 import type { FrameScheduler } from '../../input/realtimeLoop';
@@ -613,6 +613,72 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     assert(JSON.stringify(paths.robot2.past.at(-1)) === JSON.stringify(at()) && paths.robot2.future.length > 2 && sceneRenders.at(-1)!.frame.tick === 10, 'rewound: split at the viewed tick');
     h.setOptions({ ...DEFAULT_RENDER_OPTIONS, robotPath: false });
     assert(lastPaths() === null, 'option off: no paths');
+    h.dispose();
+  });
+
+  it('H3. (17-1a) 프레임 보간: 진행 중 = 부드러운 움직임 켜짐일 때만 머리 − 1 ~ 머리, 재생 = 항상 보는 틱 ~ 다음 틱, 멈추면 정수 틱', () => {
+    const { h, frames, win } = setup();
+    const engine = (h as unknown as { engine: SimulationEngine }).engine;
+    const drawn = () => sceneRenders.at(-1)!.frame as unknown as DeepReadonly<TimelineFrame>;
+    // 그린 R2 위치가 두 틱 프레임 사이(양 끝 포함)인지
+    const between = (f: DeepReadonly<TimelineFrame>, t0: number, t1: number) => {
+      const [a, b] = [engine.getFrame(t0)!.r2, engine.getFrame(t1)!.r2];
+      return f.r2.x >= Math.min(a.x, b.x) - 1e-9 && f.r2.x <= Math.max(a.x, b.x) + 1e-9 && f.r2.y >= Math.min(a.y, b.y) - 1e-9 && f.r2.y <= Math.max(a.y, b.y) + 1e-9;
+    };
+    h.start();
+    frames.advance(VIEW_ANIMATION_MS + 50);
+    win.dispatchEvent(key('keydown', KEYBOARD_BINDINGS.forward));
+    win.dispatchEvent(key('keydown', KEYBOARD_BINDINGS.right));
+    frames.advance(500, 16);
+    for (let i = 0; i < 20; i++) {
+      frames.advance(16, 16);
+      assert(drawn() === h.currentFrame(), 'smooth motion off (default): running draws the head frame');
+    }
+    h.pause();
+    h.setSmoothMotion(true);
+    frames.advance(16);
+    assert(drawn() === h.currentFrame(), 'paused: the head frame');
+    h.resume();
+    const resumedAt = h.status().headTick;
+    frames.advance(16, 16);
+    assert(h.status().headTick === resumedAt && drawn() === h.currentFrame(), 'first frame after resume (no tick yet): the head frame, not one tick back');
+    let interpolated = 0;
+    for (let i = 0; i < 30; i++) {
+      frames.advance(16, 16);
+      const head = h.status().headTick;
+      const f = drawn();
+      assert(f.tick === head && between(f, head - 1, head), `running: robot between head − 1 and head (${head})`);
+      assert(f.pieces === h.currentFrame().pieces, 'only robot poses change: the rest is the head frame');
+      if (Math.abs(f.r2.x - h.currentFrame().r2.x) + Math.abs(f.r2.y - h.currentFrame().r2.y) > 1e-6) interpolated++;
+    }
+    assert(interpolated > 10, `60 Hz frames: mostly in between ticks (${interpolated} / 30)`);
+    win.dispatchEvent(key('keyup', KEYBOARD_BINDINGS.forward));
+    win.dispatchEvent(key('keyup', KEYBOARD_BINDINGS.right));
+    h.pause();
+    frames.advance(16);
+    assert(drawn() === h.currentFrame(), 'paused again: snapped to the head frame');
+
+    // 재생: 부드러운 움직임을 꺼도 보는 틱 ~ 다음 틱 사이 (재생 위치 소수부)
+    h.setSmoothMotion(false);
+    h.setOptions({ ...DEFAULT_RENDER_OPTIONS, robotPath: true });
+    h.setViewTick(20);
+    h.setPlaybackSpeed(0.25);
+    h.play();
+    interpolated = 0;
+    for (let i = 0; i < 20; i++) {
+      frames.advance(16, 16);
+      const view = h.status().tick;
+      const f = drawn();
+      assert(between(f, view, view + 1), `playback: robot between the viewed tick (${view}) and the next`);
+      const split = sceneRenders.at(-1)!.paths!.robot2;
+      assert(JSON.stringify(split.past.at(-1)) === JSON.stringify({ x: f.r2.x, y: f.r2.y }) && JSON.stringify(split.future[0]) === JSON.stringify({ x: f.r2.x, y: f.r2.y }), 'playback: path split = drawn robot center');
+      const [a, b] = [engine.getFrame(view)!.r2, engine.getFrame(view + 1)!.r2];
+      if (Math.min(Math.hypot(f.r2.x - a.x, f.r2.y - a.y), Math.hypot(f.r2.x - b.x, f.r2.y - b.y)) > 1e-6) interpolated++;
+    }
+    assert(interpolated > 10, `0.25× playback: mostly in between ticks (${interpolated} / 20)`);
+    h.stopPlayback();
+    frames.advance(16);
+    assert(drawn() === h.currentFrame() && drawn().tick === h.status().tick, 'playback stopped: snapped to the viewed tick');
     h.dispose();
   });
 

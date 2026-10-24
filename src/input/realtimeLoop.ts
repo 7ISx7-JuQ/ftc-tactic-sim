@@ -22,7 +22,8 @@ export type LoopState = 'READY' | 'RUNNING' | 'PAUSED' | 'ENDED';
 export type PauseReason = 'USER' | 'HIDDEN' | 'BLUR' | 'GAMEPAD_DISCONNECTED';
 
 export interface RealtimeLoopHooks {
-  onFrame?: (ticksStepped: number) => void;                       // 프레임 처리 후 (렌더링 연결용, Step 8)
+  // 프레임 처리 후 (렌더링 연결용, Step 8). alpha = 틱 소비 뒤 남은 누산 시간 / 20 ms ∈ [0, 1) (프레임 보간용, 17-1a)
+  onFrame?: (ticksStepped: number, alpha: number) => void;
   onStateChange?: (state: LoopState, reason: PauseReason | null) => void;
 }
 
@@ -123,7 +124,7 @@ export class RealtimeLoop {
     } else {
       this.handle = this.scheduler.request(this.onFrame);
     }
-    this.hooks.onFrame?.(stepped);
+    this.hooks.onFrame?.(stepped, this.accumulated / TICK_MS);
   };
 
   private setState(state: LoopState, reason: PauseReason | null): void {

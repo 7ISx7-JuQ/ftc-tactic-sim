@@ -15,6 +15,8 @@
 // 불러온 경기 (10-4, 15-2): beginLoadMatch = 가지를 만든 순서대로 하나씩 재계산(작업 객체, commit할 때만 상태 교체) → 기본 보기로 회전
 //   → 파일의 지금 가지로 열기: 끝난 가지면 종료 연출 없이 복기(보는 틱 0), 아니면 그 가지 머리에서 일시정지. 두 로봇 REPLAY.
 // 다시 그리기: 루프 RUNNING 중에는 onFrame마다, 그 외(일시정지 / 옵션 / 보기 애니메이션 / 재생 / 종료 강조 대기)에는 rAF로.
+// 프레임 보간 (17-1a): 진행 중에는 부드러운 움직임(smoothMotion)이 켜져 있을 때만 머리 − 1 ~ 머리 사이, 재생은 항상 보는 틱 ~ 다음 틱 사이를 그린다
+//   (로봇 자세만, interpolateFrame). 상태 알림 / 좌측 패널 / 틱 표시는 정수 틱 그대로.
 // 시계 / 프레임 스케줄러 / 브라우저 환경을 주입받아 Node에서 가짜 시간으로 테스트한다.
 
 import { liftDriveRatio } from '../core/kinematics';
@@ -49,6 +51,7 @@ import { DEFAULT_RENDER_OPTIONS, hitProbabilities } from '../renderer/renderOpti
 import type { RenderOptions, RobotHitProbability } from '../renderer/renderOptions';
 import { renderScene } from '../renderer/sceneRenderer';
 import { robotPaths } from '../renderer/robotPath';
+import { interpolateFrame } from '../renderer/frameInterpolation';
 import { renderEditScene } from '../renderer/editSceneRenderer';
 import type { EditScene } from '../renderer/editSceneRenderer';
 import { ViewAnimator, viewAngle } from '../renderer/viewTransform';
@@ -239,6 +242,7 @@ export interface AppControllerDeps {
   input?: Partial<InputSettings>;
   defaultView?: ViewMode;          // 새 경기의 경기 중 보기 (SETTINGS 기본 보기 방향, 09-8b)
   options?: RenderOptions;
+  smoothMotion?: boolean;          // 진행 중 프레임 보간 (SETTINGS 화면 구역 부드러운 움직임, 17-1a, 기본 꺼짐)
   statusIntervalMs?: number;      // 진행 중 상태 알림 최소 간격 (기본 100 ms ≈ 10 Hz)
 }
 
@@ -261,6 +265,7 @@ export class AppController {
   private driveModes: Record<RobotId, DriveMode> = { robot1: DEFAULT_DRIVE_MODE, robot2: DEFAULT_DRIVE_MODE };
   private keyboardEnabled = KEYBOARD_ENABLED;
   private options: RenderOptions = { ...DEFAULT_RENDER_OPTIONS };
+  private smoothMotion = false;
   private phase: AppPhase = 'SETUP';
   private readonly animator = new ViewAnimator(0);
 
@@ -287,6 +292,8 @@ export class AppController {
   private detachKeys: (() => void) | null = null;
 
   private renderHandle: number | null = null;
+  private runStartTick = 0;             // 이번 진행(START / RESUME / BRANCH)을 시작한 틱 (17-1a: 첫 틱 소비 전에는 보간하지 않음)
+  private loopAlpha = 1;                // 마지막 루프 프레임의 누산 잔여 비율 (17-1a)
   private lastStatusAt = -Infinity;
   private editScene: EditScene | null = null; // 필드 편집 모드 장면 (경기 전 SETUP에서만 그림, 09-10b)
 
@@ -304,6 +311,7 @@ export class AppController {
     if (deps.input?.driveModes) this.driveModes = { ...deps.input.driveModes };
     this.defaultView = deps.defaultView ?? 'DRIVER';
     if (deps.options) this.options = { ...deps.options };
+    this.smoothMotion = deps.smoothMotion ?? false;
     this.newMatch();
     this.attachShortcuts();
     this.requestRender();
@@ -364,6 +372,13 @@ export class AppController {
   setOptions(options: RenderOptions): void {
     this.options = { ...options };
     this.changed();
+  }
+
+  /** 부드러운 움직임 (17-1a): 진행 중 프레임 보간 켜기 / 끄기. 재생은 이 값과 무관하게 항상 보간 */
+  setSmoothMotion(enabled: boolean): void {
+    if (enabled === this.smoothMotion) return;
+    this.smoothMotion = enabled;
+    this.requestRender();
   }
 
   /** 시작: 보기 회전 애니메이션이 끝난 뒤 실시간 루프 시작 (회전 중 조종 방지) */
@@ -886,7 +901,8 @@ export class AppController {
       this.engine,
       this.inputs,
       {
-        onFrame: stepped => {
+        onFrame: (stepped, alpha) => {
+          this.loopAlpha = alpha;
           this.checkLiftToasts(stepped);
           this.renderNow();
         },
@@ -899,6 +915,7 @@ export class AppController {
             this.requestRender();
             return;
           }
+          if (state === 'RUNNING') this.runStartTick = this.engine.currentTick;
           // 진행이 멈추면 보는 틱 = 멈춘 틱. 6000틱 도달 → 종료 강조 시작
           if (state !== 'RUNNING') this.viewTick = this.engine.currentTick;
           this.autoPauseReason = state === 'PAUSED' && reason !== null && reason !== 'USER' ? reason : null;
@@ -1031,15 +1048,35 @@ export class AppController {
     if (this.endStage === 'HIGHLIGHT' && this.now() - this.endStageAt >= END_HIGHLIGHT_MS) this.setEndStage('RESULT');
   }
 
+  /**
+   * 그릴 프레임 (17-1a 프레임 보간): 진행 중 = 부드러운 움직임이 켜져 있고 이번 진행에서 틱을 하나 이상 소비했으면 머리 − 1 ~ 머리
+   * 사이(루프 누산 잔여 비율, 화면이 최대 1틱 늦음), 재생 중 = 보는 틱 ~ 다음 틱 사이(재생 위치 소수부, 지연 없음, 항상).
+   * 그 밖에는 보는 틱 프레임 (일시정지 / 재생 멈춤 / 종료 = 정수 틱으로 맞춤)
+   */
+  private drawnFrame(): DeepReadonly<TimelineFrame> {
+    const frame = this.currentFrame();
+    if (this.loop.state === 'RUNNING') {
+      const head = this.engine.currentTick;
+      if (!this.smoothMotion || head <= this.runStartTick) return frame;
+      return interpolateFrame(this.engine.getFrame(head - 1)!, frame, this.loopAlpha);
+    }
+    if (this.playing && this.viewTick < this.headTick()) {
+      return interpolateFrame(frame, this.engine.getFrame(this.viewTick + 1)!, this.playbackPos - this.viewTick);
+    }
+    return frame;
+  }
+
   private renderNow(): void {
     const view = this.animator.sample(this.now());
     if (this.editScene && this.phase === 'SETUP') {
       renderEditScene(this.ctx, this.editScene, view, this.dpr);
     } else {
-      const frame = this.currentFrame();
-      // 로봇 동선 (16-3): 표시 옵션이 켜져 있고 진행 중이 아닐 때만 (복기 / 일시정지 / 재생), 지금 가지의 0 ~ 머리 프레임에서
+      const frame = this.drawnFrame();
+      // 로봇 동선 (16-3): 표시 옵션이 켜져 있고 진행 중이 아닐 때만 (복기 / 일시정지 / 재생), 지금 가지의 0 ~ 머리 프레임에서.
+      // 재생 중 보간한 프레임이면 나눔 점 = 그린 로봇 중심 (17-1a)
       const showPaths = this.options.robotPath && this.phase === 'MATCH' && this.loop.state !== 'RUNNING';
-      const paths = showPaths ? robotPaths(this.engine.timeline, this.shownTick()) : null;
+      const split = this.playing ? { robot1: { x: frame.r1.x, y: frame.r1.y }, robot2: { x: frame.r2.x, y: frame.r2.y } } : undefined;
+      const paths = showPaths ? robotPaths(this.engine.timeline, this.shownTick(), split) : null;
       renderScene(this.ctx, { frame, r1Config: this.setup.r1Config, r2Config: this.setup.r2Config, view, options: this.options, shooters: this.setup.shooters, paths }, this.dpr);
     }
 

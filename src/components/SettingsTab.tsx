@@ -1,5 +1,5 @@
 // SETTINGS 탭 (명세서 3.8 SETTINGS 탭, 09-8b): 게임패드(읽기 전용) / 입력(출처 · 조작 모드 · 키보드 + 키보드 조작표) /
-// 표시 옵션 / 화면(언어 · 단위 · 기본 보기) / 초기화(RESET ALL, 경기 전만). 바꾸는 즉시 적용 (APPLY 없음).
+// 표시 옵션 / 화면(언어 · 단위 · 기본 보기 · 부드러운 움직임 17-1a) / 초기화(RESET ALL, 경기 전만). 바꾸는 즉시 적용 (APPLY 없음).
 // 입력 출처 / 조작 모드 / 키보드는 다음 START / RESUME / BRANCH부터 경기에 적용된다 (컨트롤러가 보관).
 // 10-2: 프리셋(PRESETS) — 줄별 EXPORT(적용 값 → 파일, 언제나) / IMPORT(파일 → 초안, 경기 전만), 거부 사유는 그 줄 아래 빨간 글자.
 // 10-4: MATCH 줄 — IMPORT(경기 파일, 경기 전만), 준비 중에는 진행 글자 + CANCEL. 내보내기는 결과 팝업에서.
@@ -190,6 +190,12 @@ export default function SettingsTab({
           />
         </div>
         <p className="settings-note">{t(lang, 'settings.defaultViewHint')}</p>
+        <Toggle
+          checked={settings.smoothMotion}
+          onChange={v => onSettings({ smoothMotion: v })}
+          label={t(lang, 'settings.smoothMotion')}
+          hint={t(lang, 'settings.smoothMotion.desc')}
+        />
       </Section>
 
       <Section title={t(lang, 'settings.section.presets')}>

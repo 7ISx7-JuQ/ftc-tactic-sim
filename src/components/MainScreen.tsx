@@ -262,6 +262,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
       input: { keyboardEnabled: s0.keyboardEnabled, driveModes: s0.driveModes },
       defaultView: s0.defaultView,
       options: s0.renderOptions,
+      smoothMotion: s0.smoothMotion,
     });
     controllerRef.current = controller;
     setStatus(controller.status());
@@ -437,6 +438,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
     if (!controller) return;
     if (!prev || next.renderOptions !== prev.renderOptions) controller.setOptions(next.renderOptions);
     if (!prev || next.defaultView !== prev.defaultView) controller.setDefaultView(next.defaultView);
+    if (!prev || next.smoothMotion !== prev.smoothMotion) controller.setSmoothMotion(next.smoothMotion);
     if (!prev || next.keyboardEnabled !== prev.keyboardEnabled) controller.setKeyboardEnabled(next.keyboardEnabled);
     if (!prev || next.driveModes !== prev.driveModes) {
       controller.setDriveMode('robot1', next.driveModes.robot1);
