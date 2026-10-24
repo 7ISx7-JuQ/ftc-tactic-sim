@@ -12,6 +12,7 @@ import type { LUTCacheEntry } from '../../workers/lutCache';
 import type { LUTWorkerLike } from '../../workers/lutManager';
 import { DEFAULT_DRAFT_VALUES, setupFromDrafts } from '../../app/defaultSetup';
 import { buildMatchRecipe, serializeMatchRecipe, timelineRecord } from '../../app/matchRecipe';
+import { createMemoryAutosave } from '../../app/matchAutosave';
 import { MATCH_TICKS, SimulationEngine } from '../../core/simulationEngine';
 import '../../index.css';
 
@@ -25,17 +26,18 @@ const idleWorker = (): LUTWorkerLike => ({ onmessage: null, onerror: null, postM
 const SERVICES: MainScreenServices = {
   createLUTWorker: idleWorker,
   createLUTCache: () => ({ get: async () => READY_ENTRY, put: async () => {} }),
+  createAutosave: () => null, // 다른 테스트끼리 자동 저장이 이어지지 않게 (19-1 테스트만 메모리 저장소)
 };
 
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
 
-function mount(): void {
+function mount(services: MainScreenServices = SERVICES): void {
   container = document.createElement('div');
   container.id = 'root';
   document.body.appendChild(container);
   root = createRoot(container);
-  flushSync(() => root!.render(<MainScreen services={SERVICES} />));
+  flushSync(() => root!.render(<MainScreen services={services} />));
 }
 
 function unmount(): void {
@@ -644,6 +646,49 @@ describe('경기 흐름', () => {
     await userEvent.keyboard('{Enter}');
     await expect.element(button('START'), { timeout: 5000 }).toBeEnabled(); // 관중석으로 회전 뒤 경기 전
     await expect.poll(timerText).toBe('2:00');
+  });
+
+  it('경기 자동 저장 / 복구 (19-1): 진행 중 / 일시정지에 저장 → 다시 열면 확인창 → RESTORE = 저장한 머리에서 일시정지, NEW = 저장 지움, DISCARD = 지우고 경기 전', async () => {
+    const store = createMemoryAutosave();
+    const services: MainScreenServices = { ...SERVICES, createAutosave: () => store };
+    unmount();
+    mount(services);
+    await expect.element(button('START')).toBeEnabled();
+    expect(store.text).toBeNull(); // 경기 전 = 저장하지 않음
+    await userEvent.click(button('START'));
+    await expect.element(button('PAUSE'), { timeout: 5000 }).toBeVisible();
+    await expect.poll(() => store.text !== null, { timeout: 3000 }).toBe(true); // 진행 중에도 저장 (처음은 바로)
+    await new Promise(r => setTimeout(r, 500));
+    await userEvent.keyboard(' ');
+    await expect.element(button('RESUME')).toBeVisible();
+    const pausedTimer = timerText();
+    const head = () => (store.text ? (JSON.parse(store.text) as { branches: { headTick: number }[] }).branches[0].headTick : -1);
+    await expect.poll(head, { timeout: 2000 }).toBeGreaterThan(20); // 일시정지 = 잠시 뒤 저장 (머리까지)
+    const savedText = store.text!;
+
+    // 새로고침처럼 다시 마운트 → 복구 확인창 → RESTORE
+    unmount();
+    mount(services);
+    await expect.element(page.getByText(/Restore the last match\?/)).toBeVisible();
+    await expect.element(page.getByText(/Saved \d{4}-\d{2}-\d{2} \d{2}:\d{2} · Main \d:\d{2}/)).toBeVisible();
+    await userEvent.click(button(/^RESTORE/)); // 이름 = 문구 + 키 힌트(Enter)
+    await expect.element(button('RESUME'), { timeout: 10_000 }).toBeVisible();
+    await expect.poll(timerText).toBe(pausedTimer);
+
+    // NEW(확인) = 버린 경기 → 자동 저장도 지움
+    await userEvent.click(button('NEW'));
+    await userEvent.keyboard('{Enter}');
+    await expect.element(button('START'), { timeout: 5000 }).toBeEnabled();
+    await expect.poll(() => store.text).toBeNull();
+
+    // DISCARD = 지우고 경기 전 그대로
+    store.text = savedText;
+    unmount();
+    mount(services);
+    await userEvent.click(button(/^DISCARD/));
+    await expect.poll(() => store.text).toBeNull();
+    await expect.element(button('START')).toBeEnabled();
+    expect(timerText()).toBe('2:00');
   });
 
   it('경기 파일 (15-3): 가지 목록 EXPORT MATCH = 트리 전체(미종료 포함) → NEW → 경기 줄 IMPORT(가지 수 확인) → 재계산 → 보던 가지 머리에서 일시정지', async () => {

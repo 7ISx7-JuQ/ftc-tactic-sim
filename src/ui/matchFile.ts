@@ -1,11 +1,12 @@
 // 경기 파일 화면 규칙 (명세서 3.9 경기 불러오기 / 경기 내보내기, 10-4): React / DOM 비의존 순수 함수
+// - 자동 저장 복구 확인창 (19-1, 지금 가지 / 저장 시각 / 가지 수 / 불러오기와 같은 경고 줄).
 // - 불러오기: 거부 사유 문구, 확인창(설정 교체 안내 + 가지 수 + 버전 / LUT 설정 경고 줄), 준비 진행(두 로봇 명중 확률표 → 가지 단위 재계산, 15-3),
 //   체크섬 불일치 배너(처음 어긋난 가지 이름 + 구간, 15-3).
 // - 내보내기: 경기 파일 이름(지금 가지 상태 / _b{번호} / _{가지 수}br, 15-3), 요약 파일 이름, 요약 텍스트(결과 팝업과 같은 규칙, 현재 화면 언어).
 
 import type { MatchResult } from '../app/appController';
 import { MAX_BRANCHES } from '../app/branchTree';
-import type { RecipeError, RecipeWarning } from '../app/matchRecipe';
+import type { MatchRecipe, RecipeError, RecipeWarning } from '../app/matchRecipe';
 import { BALLISTICS_MODEL_VERSION } from '../core/ballistics';
 import type { CheckpointComparison } from '../core/checksum';
 import { DT, ENGINE_VERSION, MATCH_TICKS } from '../core/simulationEngine';
@@ -13,6 +14,7 @@ import type { RobotId } from '../input/inputConfig';
 import { t } from './i18n';
 import type { Language, MessageKey } from './i18n';
 import type { RobotLutView } from './lutView';
+import { branchLabel } from './branchView';
 import { robotLabel } from './mainScreenModel';
 import { fileTimestamp, safeFileName } from './presetFile';
 import { resultBasisText, resultRows, rpCardProgressText, rpCards } from './resultModel';
@@ -53,10 +55,35 @@ export function matchImportErrorMessage(lang: Language, error: MatchImportError)
 export function matchImportConfirmMessage(lang: Language, warnings: readonly RecipeWarning[], branchCount = 1): string {
   const lines = [t(lang, 'confirm.importMatch')];
   if (branchCount >= 2) lines.push(t(lang, 'matchImport.branches', { count: branchCount }));
-  for (const w of warnings) {
-    lines.push(w.code === 'LUT_SETTINGS' ? `⚠ ${t(lang, 'matchImport.warn.LUT_SETTINGS')}` : `⚠ ${t(lang, `matchImport.warn.${w.code}`, { file: w.file, current: w.current })}`);
-  }
-  return lines.join('\n');
+  return [...lines, ...warningLines(lang, warnings)].join('\n');
+}
+
+/** 버전 / LUT 설정 경고 줄 (불러오기 확인창 · 자동 저장 복구 확인창 공용) */
+function warningLines(lang: Language, warnings: readonly RecipeWarning[]): string[] {
+  return warnings.map(w =>
+    w.code === 'LUT_SETTINGS' ? `⚠ ${t(lang, 'matchImport.warn.LUT_SETTINGS')}` : `⚠ ${t(lang, `matchImport.warn.${w.code}`, { file: w.file, current: w.current })}`,
+  );
+}
+
+/**
+ * 자동 저장 복구 확인창 (19-1): "지난 경기를 복구할까요?" + "저장 {YYYY-MM-DD HH:mm} · {지금 가지 이름} {끝났으면 점수, 아니면 머리의 남은 시간}"
+ * (+ 가지가 2개 이상이면 가지 수) + 불러오기와 같은 버전 경고 줄
+ */
+export function autosaveRestoreMessage(lang: Language, recipe: Pick<MatchRecipe, 'createdAt' | 'branches' | 'current'>, warnings: readonly RecipeWarning[]): string {
+  const current = recipe.branches.find(b => b.number === recipe.current) ?? recipe.branches[0];
+  const label = branchLabel(lang, { name: current.name, number: current.number, parentId: current.parent });
+  const state =
+    current.headTick >= MATCH_TICKS && current.result
+      ? t(lang, 'autosave.ended', { score: current.result.totalScore })
+      : formatMatchTime((MATCH_TICKS - current.headTick) * DT);
+  const saved = new Date(recipe.createdAt);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const time = Number.isNaN(saved.getTime())
+    ? '—'
+    : `${saved.getFullYear()}-${pad(saved.getMonth() + 1)}-${pad(saved.getDate())} ${pad(saved.getHours())}:${pad(saved.getMinutes())}`;
+  const lines = [t(lang, 'autosave.confirm'), t(lang, 'autosave.detail', { time, branch: label, state })];
+  if (recipe.branches.length >= 2) lines.push(t(lang, 'matchImport.branches', { count: recipe.branches.length }));
+  return [...lines, ...warningLines(lang, warnings)].join('\n');
 }
 
 /** 준비 진행: 두 로봇 명중 확률표 진행률 평균 (READY = 100%), 오류가 있으면 error */

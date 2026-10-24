@@ -7,6 +7,7 @@ import { ENGINE_VERSION } from '../../core/simulationEngine';
 import { PENDING_LUT_VIEW } from '../lutView';
 import type { RobotLutView } from '../lutView';
 import {
+  autosaveRestoreMessage,
   matchComputingText,
   matchFileName,
   matchImportConfirmMessage,
@@ -17,6 +18,7 @@ import {
   summaryFileName,
 } from '../matchFile';
 import type { MatchImportError } from '../matchFile';
+import { t } from '../i18n';
 
 const result: MatchResult = {
   total: 38,
@@ -94,6 +96,22 @@ describe('경기 파일 화면 규칙 (10-4)', () => {
     expect(tree).toHaveLength(3);
     expect(tree[1]).toBe('가지 4개를 불러옵니다.');
     expect(tree[2]).toContain('⚠');
+  });
+
+  it('B2. (19-1) 자동 저장 복구 확인창: 저장 시각 · 지금 가지 이름 + 남은 시간(끝났으면 점수), 가지 수, 불러오기와 같은 경고 줄', () => {
+    const b = (number: number, parent: number | null, headTick: number, name: string | null = null, score: number | null = null) => ({
+      number, parent, forkTick: 0, name, headTick, inputs: { robot1: new Int8Array(), robot2: new Int8Array() }, checksums: [],
+      result: score === null ? null : { totalScore: score, rp: { swarm: false, pollinator1: false, pollinator2: false } },
+    });
+    const createdAt = '2026-10-24T09:05:00';
+    const one = autosaveRestoreMessage('en', { createdAt, branches: [b(1, null, 1500)], current: 1 }, []);
+    expect(one.split('\n')).toEqual(['Restore the last match? It was saved automatically before the page closed.', 'Saved 2026-10-24 09:05 · Main 1:30']);
+    const tree = { createdAt, branches: [b(1, null, 6000, null, 38), b(2, 1, 6000, 'Plan B', 52)], current: 2 };
+    const ko = autosaveRestoreMessage('ko', tree, [{ code: 'ENGINE_VERSION', file: 1, current: 2 }]).split('\n');
+    expect(ko[1]).toBe('저장 2026-10-24 09:05 · Plan B 종료, 52점');
+    expect(ko[2]).toBe(t('ko', 'matchImport.branches', { count: 2 }));
+    expect(ko[3].startsWith('⚠ ')).toBe(true);
+    expect(autosaveRestoreMessage('en', { createdAt: 'bad', branches: [b(1, null, 100)], current: 9 }, []).split('\n')[1]).toBe('Saved — · Main 1:58'); // 100틱 = 2초
   });
 
   it('C. 준비 진행: 두 로봇 평균(준비 완료 = 100%), 오류가 있으면 오류', () => {

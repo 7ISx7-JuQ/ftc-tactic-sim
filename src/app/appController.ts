@@ -513,10 +513,11 @@ export class AppController {
   /**
    * 경기 내보내기 재료 (명세서 3.9 경기 내보내기, 10-4 · 15-2): 경기 중이고 진행 중이 아니면(일시정지 / 복기 / 종료 강조 / 결과 팝업)
    * 분기 트리 전체 — 가지마다 번호 / 부모 번호 / 분기 틱 / 이름 / 0 ~ 머리 적용 입력 기록 / 기록 요약 + 지금 가지 번호 + 다음 번호.
-   * 지금 가지의 입력은 입력 허브 작업본(요약은 지금 프레임에서), 다른 가지는 보관한 사본과 요약. 진행 중이면 null
+   * 지금 가지의 입력은 입력 허브 작업본(요약은 지금 프레임에서), 다른 가지는 보관한 사본과 요약. 진행 중이면 null.
+   * whileRunning(19-1 자동 저장): 진행 중에도 — 프레임 사이(틱 소비 밖)에 부르므로 머리까지의 입력 / 프레임이 맞는다
    */
-  recipeSource(): MatchRecipeTree | null {
-    if (this.phase !== 'MATCH' || this.loop.state === 'RUNNING') return null;
+  recipeSource(options: { whileRunning?: boolean } = {}): MatchRecipeTree | null {
+    if (this.phase !== 'MATCH' || (this.loop.state === 'RUNNING' && !options.whileRunning)) return null;
     const numberOf = (id: number | null) => (id === null ? null : findBranch(this.tree, id)!.number);
     const branches = this.tree.nodes.map(n => {
       const isCurrent = n.id === this.tree.currentId;

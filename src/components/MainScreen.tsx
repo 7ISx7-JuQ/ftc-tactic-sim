@@ -35,7 +35,9 @@ import { compareCheckpoints } from '../core/checksum';
 import type { CheckpointComparison } from '../core/checksum';
 import { buildMatchRecipe, parseMatchRecipe, recipeLoadTree, serializeMatchRecipe } from '../app/matchRecipe';
 import type { MatchRecipe, RecipeWarning } from '../app/matchRecipe';
-import { matchComputingText, matchFileName, matchImportConfirmMessage, matchImportErrorMessage, matchImportProgress, matchSummaryText, mismatchBanner, summaryFileName } from '../ui/matchFile';
+import { AutosaveScheduler, autosaveSignature, createBrowserAutosave } from '../app/matchAutosave';
+import type { AutosaveStore } from '../app/matchAutosave';
+import { autosaveRestoreMessage, matchComputingText, matchFileName, matchImportConfirmMessage, matchImportErrorMessage, matchImportProgress, matchSummaryText, mismatchBanner, summaryFileName } from '../ui/matchFile';
 import type { MatchImportError } from '../ui/matchFile';
 import { t } from '../ui/i18n';
 import { DEFAULT_SETTINGS, browserSettingsStorage, loadStoredConfig, saveStoredConfig } from '../ui/settings';
@@ -143,8 +145,9 @@ const sameResults = (a: MatchLUTResults | null, b: MatchLUTResults | null) => a?
 export interface MainScreenServices {
   createLUTWorker: () => LUTWorkerLike;
   createLUTCache: () => LUTCache | null;
+  createAutosave: () => AutosaveStore | null; // 경기 자동 저장 (19-1, null = 자동 저장 없음)
 }
-const BROWSER_SERVICES: MainScreenServices = { createLUTWorker: createBrowserLUTWorker, createLUTCache: createBrowserLUTCache };
+const BROWSER_SERVICES: MainScreenServices = { createLUTWorker: createBrowserLUTWorker, createLUTCache: createBrowserLUTCache, createAutosave: createBrowserAutosave };
 
 export default function MainScreen({ services = BROWSER_SERVICES }: { services?: MainScreenServices }) {
   const areaRef = useRef<HTMLDivElement>(null);
@@ -182,6 +185,11 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
   const importJobRef = useRef<MatchLoadJob | null>(null); // 진행 중인 재계산 작업 (CANCEL = 버림)
   const pendingMatchRef = useRef<{ recipe: MatchRecipe; warnings: RecipeWarning[] } | null>(null);
   const completeImportRef = useRef<(results: MatchLUTResults) => void>(() => {});
+  // 경기 자동 저장 / 복구 (19-1): 저장소 · 언제 저장할지 · 저장 / 복구 제안 (렌더마다 최신 상태로 다시 묶음)
+  const autosaveRef = useRef<AutosaveStore | null>(null);
+  const autosaveSchedulerRef = useRef<AutosaveScheduler | null>(null);
+  const saveAutosaveRef = useRef<() => void>(() => {});
+  const offerRestoreRef = useRef<(text: string) => void>(() => {});
   const initialApplied = useRef(drafts.applied);
   const initialSettings = useRef(settings);
   // 명중 확률표 (09-10a): 추적기 / 경기 설정에 쓴 적용 값 · LUT 결과 / 화면 요약
@@ -245,9 +253,20 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
       later(TOAST_VISIBLE_MS + TOAST_FADE_MS, () => setToasts(list => list.filter(x => x.id !== id)));
     };
 
+    // 경기 자동 저장 (19-1): 상태 알림의 저장 표식이 바뀌면 저장 예약, 탭을 떠나면 예약을 바로 저장
+    const autosave = servicesRef.current.createAutosave();
+    autosaveRef.current = autosave;
+    const scheduler = autosave
+      ? new AutosaveScheduler({ save: () => saveAutosaveRef.current(), now: () => performance.now(), setTimer: (fn, ms) => window.setTimeout(fn, ms), clearTimer: id => window.clearTimeout(id) })
+      : null;
+    autosaveSchedulerRef.current = scheduler;
+    const flushAutosave = () => scheduler?.flush();
+    const onVisibility = () => document.visibilityState === 'hidden' && flushAutosave();
+
     // 상태 알림: 펼칠 수 없는 상태(진행 / 재생 / 회전 / 종료 강조 · 결과)가 되면 config 창을 자동으로 접음
     const onStatus = (s: AppStatus) => {
       setStatus(s);
+      scheduler?.update(autosaveSignature(s), s.loopState === 'RUNNING');
       if (!configCanOpen(s)) setConfigOpen(false);
       if (s.phase !== 'SETUP') setFieldEdit(null);
       else setMatchNotice(null); // 불러온 경기의 불일치 배너는 NEW(경기 전 화면)에서 사라짐
@@ -295,9 +314,18 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
     // 웹폰트(Pretendard)가 늦게 도착하면 캔버스 글자(로봇 번호 / HIVE 알약)를 다시 그림
     let alive = true;
     void document.fonts?.ready.then(() => alive && controller.redraw());
+    // 자동 저장된 지난 경기가 있으면 복구 제안 (19-1, 확인창). 탭 숨김(자동 일시정지 뒤) / 페이지 닫힘에 예약 저장을 바로
+    void autosave?.load().then(text => alive && text && offerRestoreRef.current(text));
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', flushAutosave);
 
     return () => {
       alive = false;
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', flushAutosave);
+      scheduler?.dispose();
+      autosaveSchedulerRef.current = null;
+      autosaveRef.current = null;
       observer.disconnect();
       window.removeEventListener('resize', fit);
       timers.forEach(id => window.clearTimeout(id));
@@ -950,13 +978,13 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
   };
 
   // 확인창 (09-7b): 필드 영역 중앙의 모달. 떠 있는 동안 컨트롤러 단축키를 끔
-  // cancel = false: 확인 버튼 하나인 안내창 (10-6 가지 가득 참)
-  const ask = (message: string, okLabel: string, cancel = true): Promise<boolean> =>
+  // cancel = false: 확인 버튼 하나인 안내창 (10-6 가지 가득 참), 문자열 = 취소 버튼 문구 (19-1 복구 제안의 버리기)
+  const ask = (message: string, okLabel: string, cancel: boolean | string = true): Promise<boolean> =>
     new Promise(resolve => {
       const rect = areaRef.current?.getBoundingClientRect();
       c()?.setShortcutsEnabled(false);
       setConfirm({
-        request: { message, okLabel, cancelLabel: cancel ? t(lang, 'confirm.cancel') : null },
+        request: { message, okLabel, cancelLabel: typeof cancel === 'string' ? cancel : cancel ? t(lang, 'confirm.cancel') : null },
         anchor: rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : null,
         resolve,
       });
@@ -967,6 +995,39 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
     c()?.setShortcutsEnabled(true);
     current?.resolve(ok);
   };
+
+  // 자동 저장 / 복구 제안 (19-1): 렌더마다 최신 상태로 다시 묶음 (마운트 효과의 저장 예약 / 복구 제안이 부름)
+  useEffect(() => {
+    // 자동 저장 (19-1): 저장하는 순간의 분기 트리 전체를 경기 파일과 같은 레시피 글자로 (진행 중에도, 설정 = 적용 값)
+    saveAutosaveRef.current = () => {
+      const store = autosaveRef.current;
+      const src = c()?.recipeSource({ whileRunning: true });
+      if (!store || !src) return;
+      try {
+        void store.save(serializeMatchRecipe(buildMatchRecipe({ setup: appliedRef.current, ...src, createdAt: new Date() })));
+      } catch {
+        // 재료가 틀리면(있을 수 없음) 이번 저장만 건너뜀
+      }
+    };
+    // 복구 제안 (19-1): 저장 글자를 경기 파일처럼 해석 → 확인창(복구 / 버리기) → 복구 = 경기 불러오기 흐름, 버리기 = 저장 지움.
+    // 해석 실패(형식이 바뀐 이전 앱 등)면 조용히 지움. 경기 전이 아니거나 불러오는 중이면 묻지 않음
+    offerRestoreRef.current = text => {
+      const parsed = parseMatchRecipe(text, DEFAULT_DRAFT_VALUES);
+      const discard = () => {
+        autosaveSchedulerRef.current?.reset();
+        void autosaveRef.current?.clear();
+      };
+      if (!parsed.ok) {
+        discard();
+        return;
+      }
+      if (c()?.status().phase !== 'SETUP' || matchImport) return;
+      void ask(autosaveRestoreMessage(lang, parsed.recipe, parsed.warnings), t(lang, 'autosave.restore'), t(lang, 'autosave.discard')).then(ok => {
+        if (!ok) discard();
+        else if (c()?.status().phase === 'SETUP') beginMatchImport(parsed.recipe, parsed.warnings);
+      });
+    };
+  });
 
   // 분기: 재생 중이면 멈춘 뒤 그 틱 기준으로 확인 (명세서 3.8 분기 확인창)
   const branch = () => {
@@ -1026,7 +1087,11 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
     controller.pause();
     controller.stopPlayback();
     void ask(newMatchConfirmText(lang, controller.status()), t(lang, 'control.newMatch')).then(ok => {
-      if (ok) controller.reset();
+      if (!ok) return;
+      controller.reset();
+      // 확인창을 거쳐 버린 경기 = 자동 저장도 지움 (19-1 확정)
+      autosaveSchedulerRef.current?.reset();
+      void autosaveRef.current?.clear();
     });
   };
 

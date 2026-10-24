@@ -624,6 +624,21 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     h.dispose();
   });
 
+  it('H5. (19-1) 자동 저장 재료: 진행 중에는 내보내기 재료가 없지만 whileRunning이면 머리까지 입력 / 체크포인트가 맞는 트리 (레시피로 만들 수 있음)', () => {
+    const { h, frames } = setup();
+    h.start();
+    frames.advance(VIEW_ANIMATION_MS + 50);
+    frames.advance(700, 20);
+    assert(h.status().loopState === 'RUNNING' && h.recipeSource() === null, 'export material refused while running');
+    const src = h.recipeSource({ whileRunning: true })!;
+    const head = h.status().headTick;
+    const [b] = src.branches;
+    assert(src.branches.length === 1 && b.record.headTick === head && b.inputs.robot1.length === head * 4 && b.record.checksums.length === Math.floor(head / 50) + 1, `running: head ${head}, inputs / checkpoints up to the head`);
+    const recipe = buildMatchRecipe({ setup: DEFAULT_DRAFT_VALUES, ...src, createdAt: new Date(0) });
+    assert(recipe.branches[0].headTick === head && recipe.current === 1, 'builds a recipe mid-run');
+    h.dispose();
+  });
+
   it('H2. (16-3) 로봇 동선: 표시 옵션이 켜져 있고 진행 중이 아닐 때만 장면에 지금 가지의 동선 (보는 틱에서 나뉨)', () => {
     const { h, frames, win } = setup();
     h.setOptions({ ...DEFAULT_RENDER_OPTIONS, robotPath: true });
