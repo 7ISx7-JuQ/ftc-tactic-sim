@@ -433,13 +433,13 @@ describe('config 창', () => {
     await expect.element(toggle()).toBeChecked();
   });
 
-  it('부드러운 움직임 (17-1a): SETTINGS 화면 구역 토글(기본 꺼짐), 켜고 경기를 진행 / 일시정지 / 재생해도 그대로, 다시 열어도 유지', async () => {
+  it('부드러운 움직임 (17-1a / 17-1b): SETTINGS 화면 구역 토글(기본 켜짐), 끄고 경기를 진행 / 일시정지 / 재생해도 그대로, 다시 열어도 유지', async () => {
     const toggle = () => page.getByRole('checkbox', { name: /Smooth motion/ });
     await userEvent.click(button('Open settings'));
     await userEvent.click(page.getByRole('tab', { name: 'SETTINGS' }));
-    await expect.element(toggle()).not.toBeChecked();
+    await expect.element(toggle()).toBeChecked(); // 기본 켜짐 (17-1b)
     await userEvent.click(page.getByText('Smooth motion', { exact: true }));
-    await expect.element(toggle()).toBeChecked();
+    await expect.element(toggle()).not.toBeChecked();
     await userEvent.keyboard('{Escape}');
 
     await expect.element(button('START')).toBeEnabled();
@@ -454,13 +454,13 @@ describe('config 창', () => {
     await userEvent.keyboard(' ');
     await userEvent.click(button('Open settings'));
     await userEvent.click(page.getByRole('tab', { name: 'SETTINGS' }));
-    await expect.element(toggle()).toBeChecked();
+    await expect.element(toggle()).not.toBeChecked();
 
     unmount();
     mount();
     await userEvent.click(button('Open settings'));
     await userEvent.click(page.getByRole('tab', { name: 'SETTINGS' }));
-    await expect.element(toggle()).toBeChecked();
+    await expect.element(toggle()).not.toBeChecked();
   });
 });
 

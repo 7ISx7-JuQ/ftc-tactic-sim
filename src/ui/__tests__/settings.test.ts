@@ -31,12 +31,12 @@ const custom: UiSettings = {
   renderOptions: { aimGuide: true, intakeProgress: false, hitProbability: true, flightTrail: false, flightResult: true, robotPath: true },
   keyboardEnabled: false,
   driveModes: { robot1: 'ROBOT', robot2: 'FIELD' },
-  smoothMotion: true,
+  smoothMotion: false,
 };
 const defaults = DEFAULT_DRAFT_VALUES;
 
 describe('SETTINGS / 자동 보관 (09-8b)', () => {
-  it('A. 기본값: 영어, in, 드라이버 시점, 표시 옵션 모두 꺼짐, 키보드 켬, 필드 기준, 부드러운 움직임 꺼짐', () => {
+  it('A. 기본값: 영어, in, 드라이버 시점, 표시 옵션 모두 꺼짐, 키보드 켬, 필드 기준, 부드러운 움직임 켜짐(17-1b)', () => {
     expect(DEFAULT_SETTINGS).toEqual({
       language: 'en',
       lengthUnit: 'in',
@@ -44,7 +44,7 @@ describe('SETTINGS / 자동 보관 (09-8b)', () => {
       renderOptions: { aimGuide: false, intakeProgress: false, hitProbability: false, flightTrail: false, flightResult: false, robotPath: false },
       keyboardEnabled: true,
       driveModes: { robot1: 'FIELD', robot2: 'FIELD' },
-      smoothMotion: false,
+      smoothMotion: true,
     });
     expect(sanitizeSettings(undefined)).toEqual(DEFAULT_SETTINGS);
   });
@@ -80,13 +80,13 @@ describe('SETTINGS / 자동 보관 (09-8b)', () => {
     expect(partial.settings.renderOptions.robotPath).toBe(false); // 16-3 이전에 저장한 설정 = 새 옵션은 기본값 (SETTINGS_VERSION 그대로)
     expect(partial.settings.driveModes).toEqual({ robot1: 'FIELD', robot2: 'FIELD' });
     expect(partial.settings.keyboardEnabled).toBe(false);
-    expect(partial.settings.smoothMotion).toBe(true);
-    // 17-1a: 이전에 저장한 설정(항목 없음) / 형식 오류 → 부드러운 움직임만 기본값(꺼짐), 다른 항목은 보존 (SETTINGS_VERSION 그대로)
+    expect(partial.settings.smoothMotion).toBe(false); // 저장한 값(끔) 유지
+    // 17-1a: 이전에 저장한 설정(항목 없음) / 형식 오류 → 부드러운 움직임만 기본값(켜짐, 17-1b), 다른 항목은 보존 (SETTINGS_VERSION 그대로)
     const older: Partial<UiSettings> = { ...custom };
     delete older.smoothMotion;
     const restored = parseStoredConfig(JSON.stringify({ version: SETTINGS_VERSION, settings: older }), defaults).settings;
-    expect(restored).toEqual({ ...custom, smoothMotion: false });
-    expect(parseStoredConfig(JSON.stringify({ version: SETTINGS_VERSION, settings: { ...custom, smoothMotion: 'on' } }), defaults).settings).toEqual({ ...custom, smoothMotion: false });
+    expect(restored).toEqual({ ...custom, smoothMotion: true });
+    expect(parseStoredConfig(JSON.stringify({ version: SETTINGS_VERSION, settings: { ...custom, smoothMotion: 'on' } }), defaults).settings).toEqual({ ...custom, smoothMotion: true });
   });
 
   it('D. 적용 값 검사: 없는 항목은 기본값으로 채우고, 종류가 다르거나 범위 / 시나리오 검증 실패면 버림 (기본값 사용)', () => {

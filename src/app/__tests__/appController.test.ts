@@ -22,7 +22,7 @@ import type { ScenePaths } from '../../renderer/robotPath';
 const editRenders = vi.hoisted(() => [] as unknown[]);
 vi.mock('../../renderer/editSceneRenderer', () => ({ renderEditScene: (_ctx: unknown, scene: unknown) => editRenders.push(scene) }));
 // 경기 장면 기록 (16-3 로봇 동선): 실제로 그리면서 받은 장면도 모음
-const sceneRenders = vi.hoisted(() => [] as { paths?: ScenePaths | null; frame: { tick: number } }[]);
+const sceneRenders = vi.hoisted(() => [] as { paths?: ScenePaths | null; frame: { tick: number }; tickOffset?: number }[]);
 vi.mock('../../renderer/sceneRenderer', async importOriginal => {
   const actual = await importOriginal<typeof import('../../renderer/sceneRenderer')>();
   return {
@@ -616,10 +616,11 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     h.dispose();
   });
 
-  it('H3. (17-1a) 프레임 보간: 진행 중 = 부드러운 움직임 켜짐일 때만 머리 − 1 ~ 머리, 재생 = 항상 보는 틱 ~ 다음 틱, 멈추면 정수 틱', () => {
+  it('H3. (17-1a / 17-1b) 프레임 보간: 진행 중 = 부드러운 움직임 켜짐일 때만 머리 − 1 ~ 머리, 재생 = 항상 보는 틱 ~ 다음 틱, 멈추면 정수 틱 (틱 안 시간 함께)', () => {
     const { h, frames, win } = setup();
     const engine = (h as unknown as { engine: SimulationEngine }).engine;
     const drawn = () => sceneRenders.at(-1)!.frame as unknown as DeepReadonly<TimelineFrame>;
+    const offset = () => sceneRenders.at(-1)!.tickOffset ?? 0;
     // 그린 R2 위치가 두 틱 프레임 사이(양 끝 포함)인지
     const between = (f: DeepReadonly<TimelineFrame>, t0: number, t1: number) => {
       const [a, b] = [engine.getFrame(t0)!.r2, engine.getFrame(t1)!.r2];
@@ -632,7 +633,7 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     frames.advance(500, 16);
     for (let i = 0; i < 20; i++) {
       frames.advance(16, 16);
-      assert(drawn() === h.currentFrame(), 'smooth motion off (default): running draws the head frame');
+      assert(drawn() === h.currentFrame() && offset() === 0, 'smooth motion off (controller default): running draws the head frame');
     }
     h.pause();
     h.setSmoothMotion(true);
@@ -648,7 +649,11 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
       const head = h.status().headTick;
       const f = drawn();
       assert(f.tick === head && between(f, head - 1, head), `running: robot between head − 1 and head (${head})`);
-      assert(f.pieces === h.currentFrame().pieces, 'only robot poses change: the rest is the head frame');
+      if (head === resumedAt) {
+        assert(f === h.currentFrame() && offset() === 0, 'still no tick consumed since resume: the head frame');
+        continue;
+      }
+      assert(f.field.flowers === h.currentFrame().field.flowers && offset() >= -1 && offset() < 0, 'FLOWER / HIVE cells are the head frame; flights drawn at a sub-tick time in [−1, 0) (alpha − 1)');
       if (Math.abs(f.r2.x - h.currentFrame().r2.x) + Math.abs(f.r2.y - h.currentFrame().r2.y) > 1e-6) interpolated++;
     }
     assert(interpolated > 10, `60 Hz frames: mostly in between ticks (${interpolated} / 30)`);
@@ -656,7 +661,7 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     win.dispatchEvent(key('keyup', KEYBOARD_BINDINGS.right));
     h.pause();
     frames.advance(16);
-    assert(drawn() === h.currentFrame(), 'paused again: snapped to the head frame');
+    assert(drawn() === h.currentFrame() && offset() === 0, 'paused again: snapped to the head frame');
 
     // 재생: 부드러운 움직임을 꺼도 보는 틱 ~ 다음 틱 사이 (재생 위치 소수부)
     h.setSmoothMotion(false);
@@ -678,7 +683,7 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     assert(interpolated > 10, `0.25× playback: mostly in between ticks (${interpolated} / 20)`);
     h.stopPlayback();
     frames.advance(16);
-    assert(drawn() === h.currentFrame() && drawn().tick === h.status().tick, 'playback stopped: snapped to the viewed tick');
+    assert(drawn() === h.currentFrame() && drawn().tick === h.status().tick && offset() === 0, 'playback stopped: snapped to the viewed tick');
     h.dispose();
   });
 

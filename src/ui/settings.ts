@@ -28,7 +28,7 @@ export interface UiSettings {
   renderOptions: RenderOptions;
   keyboardEnabled: boolean;
   driveModes: Record<RobotId, DriveMode>;  // 09-8 확정: 조작 모드도 보관 (드라이버 개인 설정)
-  smoothMotion: boolean;                   // 부드러운 움직임: 진행 중 프레임 보간 (17-1a, 기본 꺼짐 — 화면이 최대 20 ms 늦음)
+  smoothMotion: boolean;                   // 부드러운 움직임: 진행 중 프레임 보간 (17-1a, 화면이 최대 20 ms 늦음 — 17-1b에서 기본 켜짐)
 }
 
 export const DEFAULT_SETTINGS: Readonly<UiSettings> = {
@@ -38,7 +38,7 @@ export const DEFAULT_SETTINGS: Readonly<UiSettings> = {
   renderOptions: { ...DEFAULT_RENDER_OPTIONS },
   keyboardEnabled: KEYBOARD_ENABLED,
   driveModes: { robot1: DEFAULT_DRIVE_MODE, robot2: DEFAULT_DRIVE_MODE },
-  smoothMotion: false,
+  smoothMotion: true,
 };
 
 export interface StoredConfig {

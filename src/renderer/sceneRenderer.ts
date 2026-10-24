@@ -83,6 +83,8 @@ export interface SceneInput {
   options?: RenderOptions;                 // 미지정 = 모두 꺼짐
   shooters?: MatchShooterBallistics;       // 경기의 기물별 슈터 탄도 (엔진 생성 인자와 같음, 조준선 사출구 — 13-2). 미지정 = 엔진 기본 슈터
   paths?: ScenePaths | null;               // 로봇 동선 (표시 옵션 robotPath, 16-3 — 여러 프레임에서 뽑으므로 부르는 쪽이 robotPaths로 계산). 없으면 그리지 않음
+  // 틱 안 시간 (틱, [−1, 0], 프레임 보간 17-1b): 비행 공을 frame.tick + 이 값 시각으로 그림. 미지정 = 0 (프레임 틱 그대로)
+  tickOffset?: number;
 }
 
 const SCENE_COLORS = {
@@ -442,7 +444,7 @@ function drawParkedMarks(ctx: CanvasRenderingContext2D, frame: DeepReadonly<Time
 
 // 비행 공 (명세서 3.7): 바닥 위치에 그림자, 공은 화면 위쪽으로 0.3·z in 띄우고 반지름 × (1 + z / 100)
 // 표시 옵션: flightTrail = 발사구부터 현재까지 점선, flightResult = 결과별 색 테두리 (기본은 도착 전까지 구분 없음)
-function drawFlights(ctx: CanvasRenderingContext2D, frame: DeepReadonly<TimelineFrame>, view: ViewTransform, options: RenderOptions): void {
+function drawFlights(ctx: CanvasRenderingContext2D, frame: DeepReadonly<TimelineFrame>, view: ViewTransform, options: RenderOptions, tickOffset: number): void {
   const shots = frame.field.pendingShots;
   if (shots.length === 0) return;
   const up = screenUpInField(view);
@@ -454,7 +456,7 @@ function drawFlights(ctx: CanvasRenderingContext2D, frame: DeepReadonly<Timeline
   for (const shot of shots) {
     const piece = frame.pieces.find((p) => p.id === shot.pieceId);
     if (!piece) continue;
-    const t = shotElapsed(shot, frame.tick);
+    const t = shotElapsed(shot, frame.tick + tickOffset); // 이 틱에 발사한 공은 t < 0 → 발사구 (shotPositionAt이 자름)
     const pos = shotPositionAt(shot, t);
     const r = PIECE_PHYSICS[piece.type].radius;
     if (options.flightTrail) {
@@ -790,7 +792,7 @@ export function renderScene(ctx: CanvasRenderingContext2D, scene: SceneInput, dp
   const roofRobots = [{ pose: frame.r1, size: scene.r1Config }, { pose: frame.r2, size: scene.r2Config }];
   drawTunnelRoof(ctx, ally, frame.field.hive, tunnelRoofOpacity(roofRobots, frame.pieces), dpr);
   drawTipDrops(ctx, frame, ally, view);
-  drawFlights(ctx, frame, view, options);
+  drawFlights(ctx, frame, view, options, Number.isFinite(scene.tickOffset) ? Math.min(0, Math.max(-1, scene.tickOffset!)) : 0);
 
   // 화면 공간: HIVE 셀 알약 / 로봇 번호 / 배지는 똑바로 (지붕과 함께 흐리게 하지 않음 — 선명한 셀 내용과 흐린 바닥 기물로 위아래 구분)
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);

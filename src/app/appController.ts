@@ -15,8 +15,8 @@
 // 불러온 경기 (10-4, 15-2): beginLoadMatch = 가지를 만든 순서대로 하나씩 재계산(작업 객체, commit할 때만 상태 교체) → 기본 보기로 회전
 //   → 파일의 지금 가지로 열기: 끝난 가지면 종료 연출 없이 복기(보는 틱 0), 아니면 그 가지 머리에서 일시정지. 두 로봇 REPLAY.
 // 다시 그리기: 루프 RUNNING 중에는 onFrame마다, 그 외(일시정지 / 옵션 / 보기 애니메이션 / 재생 / 종료 강조 대기)에는 rAF로.
-// 프레임 보간 (17-1a): 진행 중에는 부드러운 움직임(smoothMotion)이 켜져 있을 때만 머리 − 1 ~ 머리 사이, 재생은 항상 보는 틱 ~ 다음 틱 사이를 그린다
-//   (로봇 자세만, interpolateFrame). 상태 알림 / 좌측 패널 / 틱 표시는 정수 틱 그대로.
+// 프레임 보간 (17-1a / 17-1b): 진행 중에는 부드러운 움직임(smoothMotion)이 켜져 있을 때만 머리 − 1 ~ 머리 사이, 재생은 항상 보는 틱 ~ 다음 틱 사이를
+//   그린다 (로봇 자세 / 바닥 기물 / TIP 낙하는 interpolateFrame, 비행 공은 틱 안 시간 tickOffset). 상태 알림 / 좌측 패널 / 틱 표시는 정수 틱 그대로.
 // 시계 / 프레임 스케줄러 / 브라우저 환경을 주입받아 Node에서 가짜 시간으로 테스트한다.
 
 import { liftDriveRatio } from '../core/kinematics';
@@ -51,7 +51,7 @@ import { DEFAULT_RENDER_OPTIONS, hitProbabilities } from '../renderer/renderOpti
 import type { RenderOptions, RobotHitProbability } from '../renderer/renderOptions';
 import { renderScene } from '../renderer/sceneRenderer';
 import { robotPaths } from '../renderer/robotPath';
-import { interpolateFrame } from '../renderer/frameInterpolation';
+import { frameTickOffset, interpolateFrame } from '../renderer/frameInterpolation';
 import { renderEditScene } from '../renderer/editSceneRenderer';
 import type { EditScene } from '../renderer/editSceneRenderer';
 import { ViewAnimator, viewAngle } from '../renderer/viewTransform';
@@ -242,7 +242,7 @@ export interface AppControllerDeps {
   input?: Partial<InputSettings>;
   defaultView?: ViewMode;          // 새 경기의 경기 중 보기 (SETTINGS 기본 보기 방향, 09-8b)
   options?: RenderOptions;
-  smoothMotion?: boolean;          // 진행 중 프레임 보간 (SETTINGS 화면 구역 부드러운 움직임, 17-1a, 기본 꺼짐)
+  smoothMotion?: boolean;          // 진행 중 프레임 보간 (SETTINGS 화면 구역 부드러운 움직임, 17-1a). 미지정 = 꺼짐 (화면은 저장된 설정 — 기본 켜짐 — 을 넘김)
   statusIntervalMs?: number;      // 진행 중 상태 알림 최소 간격 (기본 100 ms ≈ 10 Hz)
 }
 
@@ -1049,21 +1049,22 @@ export class AppController {
   }
 
   /**
-   * 그릴 프레임 (17-1a 프레임 보간): 진행 중 = 부드러운 움직임이 켜져 있고 이번 진행에서 틱을 하나 이상 소비했으면 머리 − 1 ~ 머리
-   * 사이(루프 누산 잔여 비율, 화면이 최대 1틱 늦음), 재생 중 = 보는 틱 ~ 다음 틱 사이(재생 위치 소수부, 지연 없음, 항상).
+   * 그릴 프레임 + 틱 안 시간 (17-1a / 17-1b 프레임 보간): 진행 중 = 부드러운 움직임이 켜져 있고 이번 진행에서 틱을 하나 이상 소비했으면
+   * 머리 − 1 ~ 머리 사이(루프 누산 잔여 비율, 화면이 최대 1틱 늦음), 재생 중 = 보는 틱 ~ 다음 틱 사이(재생 위치 소수부, 지연 없음, 항상).
    * 그 밖에는 보는 틱 프레임 (일시정지 / 재생 멈춤 / 종료 = 정수 틱으로 맞춤)
    */
-  private drawnFrame(): DeepReadonly<TimelineFrame> {
+  private drawnFrame(): { frame: DeepReadonly<TimelineFrame>; tickOffset: number } {
     const frame = this.currentFrame();
+    const between = (a: DeepReadonly<TimelineFrame>, b: DeepReadonly<TimelineFrame>, alpha: number) => ({ frame: interpolateFrame(a, b, alpha), tickOffset: frameTickOffset(alpha) });
     if (this.loop.state === 'RUNNING') {
       const head = this.engine.currentTick;
-      if (!this.smoothMotion || head <= this.runStartTick) return frame;
-      return interpolateFrame(this.engine.getFrame(head - 1)!, frame, this.loopAlpha);
+      if (!this.smoothMotion || head <= this.runStartTick) return { frame, tickOffset: 0 };
+      return between(this.engine.getFrame(head - 1)!, frame, this.loopAlpha);
     }
     if (this.playing && this.viewTick < this.headTick()) {
-      return interpolateFrame(frame, this.engine.getFrame(this.viewTick + 1)!, this.playbackPos - this.viewTick);
+      return between(frame, this.engine.getFrame(this.viewTick + 1)!, this.playbackPos - this.viewTick);
     }
-    return frame;
+    return { frame, tickOffset: 0 };
   }
 
   private renderNow(): void {
@@ -1071,13 +1072,13 @@ export class AppController {
     if (this.editScene && this.phase === 'SETUP') {
       renderEditScene(this.ctx, this.editScene, view, this.dpr);
     } else {
-      const frame = this.drawnFrame();
+      const { frame, tickOffset } = this.drawnFrame();
       // 로봇 동선 (16-3): 표시 옵션이 켜져 있고 진행 중이 아닐 때만 (복기 / 일시정지 / 재생), 지금 가지의 0 ~ 머리 프레임에서.
       // 재생 중 보간한 프레임이면 나눔 점 = 그린 로봇 중심 (17-1a)
       const showPaths = this.options.robotPath && this.phase === 'MATCH' && this.loop.state !== 'RUNNING';
       const split = this.playing ? { robot1: { x: frame.r1.x, y: frame.r1.y }, robot2: { x: frame.r2.x, y: frame.r2.y } } : undefined;
       const paths = showPaths ? robotPaths(this.engine.timeline, this.shownTick(), split) : null;
-      renderScene(this.ctx, { frame, r1Config: this.setup.r1Config, r2Config: this.setup.r2Config, view, options: this.options, shooters: this.setup.shooters, paths }, this.dpr);
+      renderScene(this.ctx, { frame, r1Config: this.setup.r1Config, r2Config: this.setup.r2Config, view, options: this.options, shooters: this.setup.shooters, paths, tickOffset }, this.dpr);
     }
 
     if (!view.done || this.playing || this.endStage === 'HIGHLIGHT') {
