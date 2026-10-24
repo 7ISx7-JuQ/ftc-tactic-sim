@@ -26,8 +26,9 @@ import type { ControlSample, DriverSettings, GamepadSnapshot, TickControls } fro
 import {
   DEADZONE_LEFT,
   DEVICE_ASSIGNMENT,
+  DEFAULT_GAMEPAD_MAPPING,
   GAMEPAD_AXES,
-  GAMEPAD_BUTTONS,
+  assignGamepadButton,
   KEYBOARD_BINDINGS,
   QUANT_MAX,
   TRIGGER_THRESHOLD,
@@ -75,9 +76,9 @@ describe('입력 계층 순수 변환 (명세서 3.6)', () => {
   it('A. 설정 기본값 (키 매핑 / 장치 배정)', () => {
     assert(GAMEPAD_AXES.forward.index === 1 && GAMEPAD_AXES.forward.invert && GAMEPAD_AXES.right.index === 0 && GAMEPAD_AXES.turn.index === 2,
       'axes: left Y (inverted) forward, left X right, right X turn');
-    assert(GAMEPAD_BUTTONS.intake.index === 6 && GAMEPAD_BUTTONS.shoot.index === 7 && GAMEPAD_BUTTONS.lift.index === 0 && GAMEPAD_BUTTONS.drop.index === 1,
-      'buttons: LT 6 intake, RT 7 shoot, A 0 lift, B 1 drop (standard mapping, 0-based)');
-    assert(GAMEPAD_BUTTONS.intake.analog && GAMEPAD_BUTTONS.shoot.analog && !GAMEPAD_BUTTONS.lift.analog && !GAMEPAD_BUTTONS.drop.analog, 'triggers analog, A / B digital');
+    const db = DEFAULT_GAMEPAD_MAPPING.buttons;
+    assert(db.intake === 6 && db.shoot === 7 && db.lift === 0 && db.drop === 1 && !DEFAULT_GAMEPAD_MAPPING.swapSticks,
+      'buttons: LT 6 intake, RT 7 shoot, A 0 lift, B 1 drop (standard mapping, 0-based), sticks not swapped');
     assert(KEYBOARD_BINDINGS.intake === 'KeyM' && KEYBOARD_BINDINGS.shoot === 'Comma' && KEYBOARD_BINDINGS.lift === 'Period' && KEYBOARD_BINDINGS.drop === 'Slash',
       'keyboard actions m , . /');
     const r1 = assignedDevices('robot1'), r2 = assignedDevices('robot2');
@@ -100,9 +101,11 @@ describe('입력 계층 순수 변환 (명세서 3.6)', () => {
     const corner = applyRadialDeadzone(1, 1);
     assert(near(Math.hypot(corner.x, corner.y), 1), 'square-gate corner clamped to magnitude 1');
     assert(applyAxialDeadzone(0.07) === 0 && near(applyAxialDeadzone(-1), -1) && applyAxialDeadzone(NaN) === 0, 'axial deadzone / full scale / non-finite');
-    // 트리거는 value 임계값, A / B는 pressed
+    // 트리거는 value 임계값 (pressed여도 반 미만이면 아님), 디지털 버튼은 value 1 / value 없이 pressed (18-3: 어느 버튼이든 같은 판정)
     const trig = (v: number) => readGamepad(pad(undefined, { 6: { pressed: v > 0, value: v }, 7: { pressed: v > 0, value: v } }));
     assert(!trig(TRIGGER_THRESHOLD - 0.01).intake && trig(TRIGGER_THRESHOLD).intake && trig(TRIGGER_THRESHOLD).shoot, 'LT / RT pressed at value >= 0.5');
+    assert(readGamepad(pad(undefined, { 0: { pressed: true, value: 0 } })).lift, 'pressed without a value (some pads) -> down');
+    assert(!readGamepad(pad(undefined, { 0: { pressed: false, value: 0 } })).lift, 'released -> up');
     const ab = readGamepad(pad(undefined, { 0: press, 1: press }));
     assert(ab.lift && ab.drop && !ab.intake && !ab.shoot, 'A -> lift, B -> drop');
     const x = readGamepad(pad(undefined, { 2: press, 3: press }));
@@ -110,6 +113,25 @@ describe('입력 계층 순수 변환 (명세서 3.6)', () => {
     const short = readGamepad({ axes: [], buttons: [] });
     assert(JSON.stringify(short) === JSON.stringify(NEUTRAL_SAMPLE), 'missing axes / buttons -> neutral');
     assert(readGamepad(pad([NaN, Infinity, 0, 0])).forward === 0, 'non-finite axes -> 0');
+  });
+
+  it('B2. (18-3) 게임패드 매핑: 버튼 인덱스 지정(겹치면 서로 자리 바꾸기), 스틱 좌우 바꾸기', () => {
+    // 발사를 A(0)로 → 리프트(원래 A)는 발사의 원래 버튼 RT(7)
+    const m = assignGamepadButton(DEFAULT_GAMEPAD_MAPPING, 'shoot', 0);
+    assert(m.buttons.shoot === 0 && m.buttons.lift === 7 && m.buttons.intake === 6 && m.buttons.drop === 1, 'shoot -> A, lift takes RT (swap)');
+    assert(assignGamepadButton(m, 'shoot', 0) === m, 'same button -> unchanged');
+    const free = assignGamepadButton(DEFAULT_GAMEPAD_MAPPING, 'drop', 5);
+    assert(free.buttons.drop === 5 && free.buttons.lift === 0, 'unused button (RB) -> just assigned');
+    const a = readGamepad(pad(undefined, { 0: press }), m);
+    assert(a.shoot && !a.lift, 'A -> shoot with the edited mapping');
+    const rt = readGamepad(pad(undefined, { 7: { pressed: true, value: 1 } }), m);
+    assert(rt.lift && !rt.shoot, 'RT -> lift (digital read works for a trigger too)');
+    // 스틱 바꾸기: 이동 = 우스틱(2, 3), 회전 = 좌스틱 X(0)
+    const sw = { ...DEFAULT_GAMEPAD_MAPPING, swapSticks: true };
+    const s1 = readGamepad(pad([0.6, -1, 0, 0]), sw);
+    assert(near(s1.turn, (0.6 - DEADZONE_LEFT) / (1 - DEADZONE_LEFT)) && s1.forward === 0 && s1.right === 0, 'swapped: left X -> turn, left Y unused');
+    const s2 = readGamepad(pad([0, 0, 1, -1]), sw);
+    assert(near(Math.hypot(s2.forward, s2.right), 1) && s2.forward > 0 && s2.right > 0 && s2.turn === 0, 'swapped: right stick -> move (radial deadzone)');
   });
 
   it('C. 키보드 읽기 (WASD / 방향키 / 대각선 정규화)', () => {

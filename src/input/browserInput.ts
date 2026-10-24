@@ -6,9 +6,10 @@
 // ============================================================
 
 import type { SimulationEngine } from '../core/simulationEngine';
+import { isGamepadButtonDown } from './controls';
 import type { GamepadSnapshot, TickControls } from './controls';
 import { DEVICE_ASSIGNMENT, GAMEPAD_SLOTS, KEYBOARD_BINDINGS, slotRobot } from './inputConfig';
-import type { DeviceAssignment, RobotId } from './inputConfig';
+import type { DeviceAssignment, GamepadMappings, RobotId } from './inputConfig';
 import type { MatchInputs } from './inputLog';
 import { LiveControlCollector } from './liveControls';
 import type { LiveControlSource } from './liveControls';
@@ -40,6 +41,7 @@ export interface GamepadLike extends GamepadSnapshot {
 
 export interface BrowserInputOptions {
   assignment?: DeviceAssignment;
+  mappings?: GamepadMappings; // 게임패드 슬롯별 매핑 (18-3)
 }
 
 const BOUND_KEYS: ReadonlySet<string> = new Set(Object.values(KEYBOARD_BINDINGS));
@@ -70,7 +72,7 @@ export class BrowserInputAdapter implements LiveControlSource {
 
   constructor(env: BrowserInputEnv, options: BrowserInputOptions = {}) {
     this.env = env;
-    this.collector = new LiveControlCollector(options.assignment ?? DEVICE_ASSIGNMENT);
+    this.collector = new LiveControlCollector(options.assignment ?? DEVICE_ASSIGNMENT, options.mappings);
   }
 
   // 이벤트 연결. onPause: 탭 숨김 / 포커스 소실 / 배정된 게임패드 분리 시 호출 (보통 loop.pause)
@@ -162,6 +164,16 @@ export class BrowserInputAdapter implements LiveControlSource {
     this.collector.setAssignment(assignment);
   }
 
+  /** 지금 적용된 게임패드 슬롯별 매핑 (18-3) */
+  get mappings(): GamepadMappings {
+    return this.collector.currentMappings;
+  }
+
+  /** 게임패드 슬롯별 매핑 바꾸기 (18-3, 시작 / 재개 / 분기 때) */
+  setMappings(mappings: GamepadMappings): void {
+    this.collector.setMappings(mappings);
+  }
+
   // 배정할 수 있는 슬롯(0 / 1)별 연결 상태 + 적용된 배정 (슬롯 오름차순, 18-2)
   gamepadStatus(): GamepadSlotStatus[] {
     const pads = this.readGamepads();
@@ -176,6 +188,12 @@ export class BrowserInputAdapter implements LiveControlSource {
         standard: connected ? pad!.mapping === 'standard' : false,
       };
     });
+  }
+
+  /** 그 슬롯 패드의 버튼별 눌림 (18-3 버튼 지정 화면용, 매핑과 무관한 원시 인덱스). 연결되지 않았으면 null */
+  gamepadButtons(slot: number): boolean[] | null {
+    const pad = this.readGamepads()[slot];
+    return pad && pad.connected ? pad.buttons.map(b => isGamepadButtonDown(b)) : null;
   }
 
   private readGamepads(): readonly (GamepadLike | null)[] {

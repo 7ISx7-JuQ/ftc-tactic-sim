@@ -12,13 +12,14 @@ import {
   DEADZONE_RIGHT_X,
   DEVICE_ASSIGNMENT,
   GAMEPAD_SLOTS,
+  DEFAULT_GAMEPAD_MAPPING,
   GAMEPAD_AXES,
-  GAMEPAD_BUTTONS,
+  GAMEPAD_AXES_SWAPPED,
   KEYBOARD_BINDINGS,
   QUANT_MAX,
   TRIGGER_THRESHOLD,
 } from './inputConfig';
-import type { ControlButton, DeviceAssignment, DriveMode, GamepadAxisBinding, GamepadButtonBinding, RobotId } from './inputConfig';
+import type { ControlButton, DeviceAssignment, DriveMode, GamepadAxisBinding, GamepadMapping, RobotId } from './inputConfig';
 
 // ============================================================
 // 1. 타입
@@ -116,22 +117,29 @@ function readAxis(pad: GamepadSnapshot, binding: GamepadAxisBinding): number {
   return binding.invert ? -v : v;
 }
 
-function readButton(pad: GamepadSnapshot, binding: GamepadButtonBinding): boolean {
-  const button = pad.buttons[binding.index];
+/**
+ * 버튼 눌림 (18-3: 어느 버튼이든 어느 동작에): value ≥ TRIGGER_THRESHOLD, 또는 value가 없거나 0인데 pressed.
+ * 아날로그 트리거는 반쯤 눌러야 눌림이고(덜 누르면 pressed여도 아님), 디지털 버튼은 value 1 = 눌림이라 v1 판정과 같다
+ */
+export function isGamepadButtonDown(button: { readonly pressed: boolean; readonly value: number } | undefined): boolean {
   if (!button) return false;
-  return binding.analog ? finiteOr0(button.value) >= TRIGGER_THRESHOLD : button.pressed === true;
+  const value = finiteOr0(button.value);
+  return value >= TRIGGER_THRESHOLD || (button.pressed === true && !(value > 0));
 }
 
-export function readGamepad(pad: GamepadSnapshot): ControlSample {
-  const left = applyRadialDeadzone(readAxis(pad, GAMEPAD_AXES.right), readAxis(pad, GAMEPAD_AXES.forward));
+/** 게임패드 → 조작 표본 (18-3: 슬롯의 매핑 — 버튼 인덱스 / 스틱 좌우 바꾸기). 이동 스틱은 원형 데드존, 회전은 축 데드존 */
+export function readGamepad(pad: GamepadSnapshot, mapping: GamepadMapping = DEFAULT_GAMEPAD_MAPPING): ControlSample {
+  const axes = mapping.swapSticks ? GAMEPAD_AXES_SWAPPED : GAMEPAD_AXES;
+  const move = applyRadialDeadzone(readAxis(pad, axes.right), readAxis(pad, axes.forward));
+  const button = (b: ControlButton) => isGamepadButtonDown(pad.buttons[mapping.buttons[b]]);
   return {
-    forward: left.y,
-    right: left.x,
-    turn: applyAxialDeadzone(readAxis(pad, GAMEPAD_AXES.turn)),
-    intake: readButton(pad, GAMEPAD_BUTTONS.intake),
-    shoot: readButton(pad, GAMEPAD_BUTTONS.shoot),
-    lift: readButton(pad, GAMEPAD_BUTTONS.lift),
-    drop: readButton(pad, GAMEPAD_BUTTONS.drop),
+    forward: move.y,
+    right: move.x,
+    turn: applyAxialDeadzone(readAxis(pad, axes.turn)),
+    intake: button('intake'),
+    shoot: button('shoot'),
+    lift: button('lift'),
+    drop: button('drop'),
   };
 }
 

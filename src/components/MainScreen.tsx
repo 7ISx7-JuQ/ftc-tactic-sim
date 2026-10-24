@@ -259,7 +259,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
       setup: setupOf(initialApplied.current),
       onStatus,
       onToast,
-      input: { assignment: s0.devices, driveModes: s0.driveModes },
+      input: { assignment: s0.devices, mappings: s0.gamepadMappings, driveModes: s0.driveModes },
       defaultView: s0.defaultView,
       options: s0.renderOptions,
       smoothMotion: s0.smoothMotion,
@@ -441,6 +441,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
     if (!prev || next.defaultView !== prev.defaultView) controller.setDefaultView(next.defaultView);
     if (!prev || next.smoothMotion !== prev.smoothMotion) controller.setSmoothMotion(next.smoothMotion);
     if (!prev || next.devices !== prev.devices) controller.setAssignment(next.devices);
+    if (!prev || next.gamepadMappings !== prev.gamepadMappings) controller.setGamepadMappings(next.gamepadMappings);
     if (!prev || next.driveModes !== prev.driveModes) {
       controller.setDriveMode('robot1', next.driveModes.robot1);
       controller.setDriveMode('robot2', next.driveModes.robot2);
@@ -1190,6 +1191,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
                   matchImport={{ loading: matchImportText, error: matchImportError && matchImportErrorMessage(lang, matchImportError) }}
                   onMatchImport={importMatch}
                   onMatchCancel={cancelMatchImport}
+                  readGamepadButtons={slot => c()?.gamepadButtons(slot) ?? null}
                 />
               ) : configTab === 'robot1' || configTab === 'robot2' ? (
                 <RobotTab
@@ -1253,7 +1255,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
         />
       )}
       {confirm && <ConfirmDialog request={confirm.request} anchor={confirm.anchor} onClose={closeConfirm} />}
-      {helpOpen && <HelpDialog lang={lang} devices={settings.devices} onClose={closeHelp} />}
+      {helpOpen && <HelpDialog lang={lang} devices={settings.devices} mappings={settings.gamepadMappings} onClose={closeHelp} />}
       {branchBusy && (
         <div className="branch-busy" role="status">
           <LoaderCircle />

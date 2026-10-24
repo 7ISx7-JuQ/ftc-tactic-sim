@@ -38,8 +38,8 @@ import { createAnimationFrameScheduler, createBrowserRealtimeLoop, isEditableTar
 import type { BrowserInputAdapter, BrowserInputEnv, GamepadSlotStatus } from '../input/browserInput';
 import { LOG_RECORD_BYTES, MatchInputs, createInputRecordProvider } from '../input/inputLog';
 import type { BranchInputs, InputSource } from '../input/inputLog';
-import { DEFAULT_DRIVE_MODE, DEVICE_ASSIGNMENT, sameAssignment } from '../input/inputConfig';
-import type { DeviceAssignment, DriveMode, RobotId } from '../input/inputConfig';
+import { DEFAULT_DRIVE_MODE, DEFAULT_GAMEPAD_MAPPINGS, DEVICE_ASSIGNMENT, sameAssignment, sameMappings } from '../input/inputConfig';
+import type { DeviceAssignment, DriveMode, GamepadMappings, RobotId } from '../input/inputConfig';
 import { autoSource, resolveSource, sourceChoiceAllowed } from './inputPlan';
 import { branchDepth, canFork, createBranchTree, currentBranch, findBranch, forkBranch, removeBranch, renameBranch, restoreBranchTree, setBranchData, sharedFrameTick, switchBranch } from './branchTree';
 import type { BranchNode, BranchTree } from './branchTree';
@@ -124,9 +124,9 @@ export interface AppStatus {
 }
 
 /**
- * 입력 출처 / 조작 모드 / 장치 배정 (명세서 3.8 SETTINGS 탭 입력 · 장치, 09-8b / 18-2). 선택(choices / modes / assignment)은
- * 다음 START / RESUME / BRANCH부터 적용되고, sources / activeModes / activeAssignment는 지금 경기에 적용 중인 값.
- * 경기 전(SETUP)에는 배정을 바로 적용한다 (진행 중인 것이 없음 — AUTO 미리보기 / 장치 표시가 고른 배정을 따름)
+ * 입력 출처 / 조작 모드 / 장치 배정 / 게임패드 매핑 (명세서 3.8 SETTINGS 탭 입력 · 장치, 09-8b / 18-2 / 18-3). 선택(choices / modes /
+ * assignment / mappings)은 다음 START / RESUME / BRANCH부터 적용되고, sources / activeModes / activeAssignment / activeMappings는 지금 경기에 적용 중인 값.
+ * 경기 전(SETUP)에는 배정 / 매핑을 바로 적용한다 (진행 중인 것이 없음 — AUTO 미리보기 / 장치 표시가 고른 배정을 따름)
  */
 export interface InputStatus {
   choices: Record<RobotId, SourceChoice>;   // 경기 전 = AUTO / LIVE / NONE, 경기 중 = LIVE / REPLAY / NONE
@@ -137,11 +137,14 @@ export interface InputStatus {
   activeModes: Record<RobotId, DriveMode>;
   assignment: DeviceAssignment;
   activeAssignment: DeviceAssignment;
+  mappings: GamepadMappings;
+  activeMappings: GamepadMappings;
 }
 
 /** 입력 설정 초기값 (저장된 SETTINGS에서) */
 export interface InputSettings {
   assignment: DeviceAssignment;
+  mappings: GamepadMappings;
   driveModes: Record<RobotId, DriveMode>;
 }
 
@@ -260,11 +263,12 @@ export class AppController {
   private setup: MatchSetup;
   private matchView: ViewMode = 'DRIVER';
   private defaultView: ViewMode = 'DRIVER';
-  // 입력 선택 (09-8b): 경기 전 선택 / 경기 중 선택 / 조작 모드 / 장치 배정(18-2) — 다음 START / RESUME / BRANCH부터 적용
+  // 입력 선택 (09-8b): 경기 전 선택 / 경기 중 선택 / 조작 모드 / 장치 배정(18-2) / 게임패드 매핑(18-3) — 다음 START / RESUME / BRANCH부터 적용
   private setupChoices: Record<RobotId, SourceChoice> = { robot1: 'AUTO', robot2: 'AUTO' };
   private matchChoices: Record<RobotId, InputSource> = { robot1: 'LIVE', robot2: 'LIVE' };
   private driveModes: Record<RobotId, DriveMode> = { robot1: DEFAULT_DRIVE_MODE, robot2: DEFAULT_DRIVE_MODE };
   private assignment: DeviceAssignment = DEVICE_ASSIGNMENT;
+  private mappings: GamepadMappings = DEFAULT_GAMEPAD_MAPPINGS;
   private options: RenderOptions = { ...DEFAULT_RENDER_OPTIONS };
   private smoothMotion = false;
   private phase: AppPhase = 'SETUP';
@@ -309,6 +313,7 @@ export class AppController {
     this.onToast = deps.onToast ?? (() => {});
     this.statusIntervalMs = deps.statusIntervalMs ?? 100;
     this.assignment = deps.input?.assignment ?? DEVICE_ASSIGNMENT;
+    this.mappings = deps.input?.mappings ?? DEFAULT_GAMEPAD_MAPPINGS;
     if (deps.input?.driveModes) this.driveModes = { ...deps.input.driveModes };
     this.defaultView = deps.defaultView ?? 'DRIVER';
     if (deps.options) this.options = { ...deps.options };
@@ -373,6 +378,19 @@ export class AppController {
     this.assignment = assignment;
     if (this.phase === 'SETUP') this.adapter.setAssignment(assignment);
     this.emitStatus(true);
+  }
+
+  /** 게임패드 슬롯별 매핑 (18-3, 버튼 / 스틱 좌우 바꾸기). 적용 시점은 장치 배정과 같음 */
+  setGamepadMappings(mappings: GamepadMappings): void {
+    if (sameMappings(mappings, this.mappings)) return;
+    this.mappings = mappings;
+    if (this.phase === 'SETUP') this.adapter.setMappings(mappings);
+    this.emitStatus(true);
+  }
+
+  /** 그 슬롯 패드의 원시 버튼 눌림 (18-3 버튼 지정 화면이 폴링). 연결되지 않았으면 null */
+  gamepadButtons(slot: number): boolean[] | null {
+    return this.adapter.gamepadButtons(slot);
   }
 
   setOptions(options: RenderOptions): void {
@@ -789,6 +807,7 @@ export class AppController {
       this.inputs.modes[robot] = this.driveModes[robot];
     }
     this.adapter.setAssignment(this.assignment);
+    this.adapter.setMappings(this.mappings);
   }
 
   private inputStatus(): InputStatus {
@@ -804,6 +823,8 @@ export class AppController {
       activeModes: { ...this.inputs.modes },
       assignment: this.assignment,
       activeAssignment: this.adapter.assignment,
+      mappings: this.mappings,
+      activeMappings: this.adapter.mappings,
     };
   }
 
@@ -935,7 +956,7 @@ export class AppController {
       },
       this.env,
       this.scheduler,
-      { assignment: this.assignment },
+      { assignment: this.assignment, mappings: this.mappings },
     );
     this.loop = created.loop;
     this.adapter = created.adapter;

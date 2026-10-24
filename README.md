@@ -30,6 +30,8 @@ The **?** button on the right edge opens the in-app help (controls, branches, fi
 | Lift up · down / drop into FLOWER | A / B | . / / |
 | Pause · resume | — | Space |
 
+Gamepad buttons (and left / right sticks) can be changed per slot under **SETTINGS → Devices**.
+
 Designed for desktop browsers at 1366 × 768 or larger. The hosted app above uses HTTPS; if you host it yourself, serve it over HTTPS so hit maps can be cached.
 
 ## Run locally
@@ -85,6 +87,8 @@ Free for **non-commercial** use under the [PolyForm Noncommercial License 1.0.0]
 | 흡입 / 발사 | LT / RT | M / , |
 | 리프트 올림 · 내림 / FLOWER 투입 | A / B | . / / |
 | 일시정지 · 재개 | — | Space |
+
+게임패드 버튼(과 왼쪽 / 오른쪽 스틱)은 **SETTINGS → 장치**에서 슬롯별로 바꿀 수 있습니다.
 
 1366 × 768 이상의 데스크톱 브라우저용입니다. 위 주소는 HTTPS입니다. 직접 호스팅할 때도 명중 확률표 저장을 위해 HTTPS로 제공하세요.
 

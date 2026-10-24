@@ -1161,6 +1161,36 @@
   width: calc(var(--u) * 14);
   height: calc(var(--u) * 14);
 }
+/* 게임패드 버튼 매핑 (18-3): 슬롯 줄 안에서 펼침 — 동작 | 지금 버튼 | 지정 */
+.gamepad-mapping {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 6);
+  padding-top: calc(var(--u) * 8);
+  border-top: 1px solid var(--panel-border);
+}
+.gamepad-mapping-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: calc(var(--u) * 6) calc(var(--u) * 10);
+}
+.gamepad-mapping-row {
+  display: contents;
+}
+.gamepad-mapping-button {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.gamepad-mapping-toggle {
+  padding-left: calc(var(--u) * 8);
+  padding-right: calc(var(--u) * 8);
+}
 
 .input-grid {
   display: grid;

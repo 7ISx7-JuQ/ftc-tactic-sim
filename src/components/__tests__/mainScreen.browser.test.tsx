@@ -496,6 +496,49 @@ describe('config 창', () => {
     await expect.element(selected('Keyboard')).toHaveTextContent('None');
   });
 
+  it('게임패드 버튼 매핑 (18-3): 슬롯 버튼 펼치기 → 지정 → 패드 버튼을 누르면 지정(겹치면 자리 바꾸기), Esc = 지정만 취소, 스틱 바꾸기 / DEFAULT, 다시 열어도 유지', async () => {
+    // 가짜 게임패드 (슬롯 0, 표준 배열) — 이 테스트 동안만 navigator.getGamepads를 덮어씀
+    const buttons = Array.from({ length: 17 }, () => ({ pressed: false, value: 0 }));
+    const pad = { index: 0, id: 'Test Pad', mapping: 'standard', connected: true, axes: [0, 0, 0, 0], buttons };
+    Object.defineProperty(navigator, 'getGamepads', { configurable: true, value: () => [pad, null] });
+    try {
+      unmount();
+      mount();
+      const openMapping = async () => {
+        await userEvent.click(button('Open settings'));
+        await userEvent.click(page.getByRole('tab', { name: 'SETTINGS' }));
+        await userEvent.click(button('Gamepad slot 0 buttons'));
+      };
+      const shown = (action: string) => page.getByRole('group', { name: 'Gamepad slot 0 buttons' }).getByText(action, { exact: true }).element().nextElementSibling?.textContent;
+      await openMapping();
+      await expect.poll(() => shown('Shoot')).toBe('RT');
+      await userEvent.click(button('Shoot SET'));
+      await expect.poll(() => shown('Shoot')).toBe('Press a button…');
+      buttons[0] = { pressed: true, value: 1 }; // A
+      await expect.poll(() => shown('Shoot')).toBe('A');
+      await expect.poll(() => shown('Lift up / down')).toBe('RT'); // 원래 A였던 리프트는 발사의 원래 버튼
+      buttons[0] = { pressed: false, value: 0 };
+      // Esc = 지정만 취소 (config 창은 그대로)
+      await userEvent.click(button('Intake SET'));
+      await userEvent.keyboard('{Escape}');
+      await expect.poll(() => shown('Intake')).toBe('LT');
+      await expect.element(page.getByRole('tab', { name: 'SETTINGS' })).toBeVisible();
+      await userEvent.click(page.getByText('Swap sticks', { exact: true }));
+      await expect.element(page.getByRole('checkbox', { name: /Swap sticks/ })).toBeChecked();
+
+      unmount();
+      mount();
+      await openMapping();
+      await expect.poll(() => shown('Shoot')).toBe('A');
+      await expect.element(page.getByRole('checkbox', { name: /Swap sticks/ })).toBeChecked();
+      await userEvent.click(button('DEFAULT'));
+      await expect.poll(() => shown('Shoot')).toBe('RT');
+      await expect.element(page.getByRole('checkbox', { name: /Swap sticks/ })).not.toBeChecked();
+    } finally {
+      delete (navigator as { getGamepads?: unknown }).getGamepads;
+    }
+  });
+
   it('부드러운 움직임 (17-1a / 17-1b): SETTINGS 화면 구역 토글(기본 켜짐), 끄고 경기를 진행 / 일시정지 / 재생해도 그대로, 다시 열어도 유지', async () => {
     const toggle = () => page.getByRole('checkbox', { name: /Smooth motion/ });
     await userEvent.click(button('Open settings'));

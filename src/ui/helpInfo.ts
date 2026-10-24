@@ -2,7 +2,9 @@
 // - 버그 리포트: 지정 메일을 받는 사람으로 한 Gmail 쓰기 창 링크 + 기본 메일 앱(mailto) 링크. 제목 / 본문에 버전 · 브라우저 · 화면을 미리 채운다.
 // - 조작표: 도움말과 SETTINGS 키보드 조작표가 같은 키 설정(inputConfig)을 읽는다.
 
-import { KEYBOARD_BINDINGS } from '../input/inputConfig';
+import { DEFAULT_GAMEPAD_MAPPINGS, KEYBOARD_BINDINGS } from '../input/inputConfig';
+import type { GamepadMappings } from '../input/inputConfig';
+import { mappingLabels } from './gamepadMapping';
 import { t } from './i18n';
 import type { Language, MessageKey } from './i18n';
 import { keyCodeLabel } from './settings';
@@ -64,16 +66,18 @@ export interface ControlRow {
   keys: string;    // 키보드 (inputConfig 키 이름)
 }
 
-export function controlRows(): ControlRow[] {
+/** 조작표 (18-3: 게임패드 칸은 SETTINGS의 슬롯별 매핑, 두 슬롯이 다르면 "슬롯 0 · 슬롯 1") */
+export function controlRows(mappings: GamepadMappings = DEFAULT_GAMEPAD_MAPPINGS): ControlRow[] {
   const k = (codes: string[]) => codes.map(keyCodeLabel).join(' ');
   const b = KEYBOARD_BINDINGS;
+  const g = mappingLabels(mappings);
   return [
-    { label: 'settings.keys.move', gamepad: 'L-stick', keys: k([b.forward, b.left, b.backward, b.right]) },
-    { label: 'settings.keys.turn', gamepad: 'R-stick ←→', keys: k([b.turnLeft, b.turnRight]) },
-    { label: 'settings.keys.intake', gamepad: 'LT', keys: k([b.intake]) },
-    { label: 'settings.keys.shoot', gamepad: 'RT', keys: k([b.shoot]) },
-    { label: 'settings.keys.lift', gamepad: 'A', keys: k([b.lift]) },
-    { label: 'settings.keys.drop', gamepad: 'B', keys: k([b.drop]) },
+    { label: 'settings.keys.move', gamepad: g.move, keys: k([b.forward, b.left, b.backward, b.right]) },
+    { label: 'settings.keys.turn', gamepad: g.turn, keys: k([b.turnLeft, b.turnRight]) },
+    { label: 'settings.keys.intake', gamepad: g.intake, keys: k([b.intake]) },
+    { label: 'settings.keys.shoot', gamepad: g.shoot, keys: k([b.shoot]) },
+    { label: 'settings.keys.lift', gamepad: g.lift, keys: k([b.lift]) },
+    { label: 'settings.keys.drop', gamepad: g.drop, keys: k([b.drop]) },
     { label: 'settings.keys.pause', gamepad: '—', keys: 'Space' },
     { label: 'settings.keys.stepTick', gamepad: '—', keys: '← →' },
     { label: 'settings.keys.stepSecond', gamepad: '—', keys: 'Shift + ← →' },

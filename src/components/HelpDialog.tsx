@@ -5,7 +5,7 @@ import { Bug, ExternalLink, Mail, X } from 'lucide-react';
 import { t } from '../ui/i18n';
 import type { Language, MessageKey } from '../ui/i18n';
 import { APP_VERSION, BUG_REPORT_EMAIL, LICENSE_URL, NOTICES_URL, REPO_URL, bugReportLinks, controlRows } from '../ui/helpInfo';
-import type { DeviceAssignment, RobotId } from '../input/inputConfig';
+import type { DeviceAssignment, GamepadMappings, RobotId } from '../input/inputConfig';
 import { robotLabel } from '../ui/mainScreenModel';
 
 const SECTIONS: readonly { title: MessageKey; items: readonly MessageKey[] }[] = [
@@ -15,8 +15,8 @@ const SECTIONS: readonly { title: MessageKey; items: readonly MessageKey[] }[] =
   { title: 'help.notes.title', items: ['help.notes.1', 'help.notes.2'] },
 ];
 
-// devices: SETTINGS 장치 배정 (18-2, 빠른 시작 문구가 따름)
-export default function HelpDialog({ lang, devices, onClose }: { lang: Language; devices: DeviceAssignment; onClose: () => void }) {
+// devices: SETTINGS 장치 배정 (18-2, 빠른 시작 문구가 따름), mappings: 게임패드 슬롯별 매핑 (18-3, 조작표가 따름)
+export default function HelpDialog({ lang, devices, mappings, onClose }: { lang: Language; devices: DeviceAssignment; mappings: GamepadMappings; onClose: () => void }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   useEffect(() => {
@@ -77,7 +77,7 @@ export default function HelpDialog({ lang, devices, onClose }: { lang: Language;
                 </tr>
               </thead>
               <tbody>
-                {controlRows().map(row => (
+                {controlRows(mappings).map(row => (
                   <tr key={row.label}>
                     <td>{t(lang, row.label)}</td>
                     <td>

@@ -1,6 +1,7 @@
 // SETTINGS 값 / 설정 자동 보관 (명세서 3.8 SETTINGS 탭, 09-8b)
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_DRAFT_VALUES } from '../../app/defaultSetup';
+import { DEFAULT_GAMEPAD_MAPPING } from '../../input/inputConfig';
 import {
   DEFAULT_SETTINGS,
   SETTINGS_STORAGE_KEY,
@@ -30,6 +31,7 @@ const custom: UiSettings = {
   defaultView: 'AUDIENCE',
   renderOptions: { aimGuide: true, intakeProgress: false, hitProbability: true, flightTrail: false, flightResult: true, robotPath: true },
   devices: { gamepads: { 0: 'robot2', 1: null }, keyboard: null },
+  gamepadMappings: { 0: { buttons: { intake: 4, shoot: 5, lift: 2, drop: 3 }, swapSticks: true }, 1: DEFAULT_GAMEPAD_MAPPING },
   driveModes: { robot1: 'ROBOT', robot2: 'FIELD' },
   smoothMotion: false,
 };
@@ -43,6 +45,7 @@ describe('SETTINGS / 자동 보관 (09-8b)', () => {
       defaultView: 'DRIVER',
       renderOptions: { aimGuide: false, intakeProgress: false, hitProbability: false, flightTrail: false, flightResult: false, robotPath: false },
       devices: { gamepads: { 0: 'robot1', 1: 'robot2' }, keyboard: 'robot2' },
+      gamepadMappings: { 0: DEFAULT_GAMEPAD_MAPPING, 1: DEFAULT_GAMEPAD_MAPPING },
       driveModes: { robot1: 'FIELD', robot2: 'FIELD' },
       smoothMotion: true,
     });
@@ -87,6 +90,12 @@ describe('SETTINGS / 자동 보관 (09-8b)', () => {
     expect(devicesOf({ keyboardEnabled: true })).toEqual(DEFAULT_SETTINGS.devices);
     expect(devicesOf({})).toEqual(DEFAULT_SETTINGS.devices);
     expect(devicesOf({ devices: 'pads', keyboardEnabled: false })).toEqual({ gamepads: { 0: 'robot1', 1: 'robot2' }, keyboard: null });
+    // 18-3: 매핑은 슬롯별, 버튼별 틀린 값만 기본값 / 그래서 겹치면 버튼 전체 기본값, 없으면 기본 매핑
+    const mappingsOf = (gamepadMappings: unknown) => parseStoredConfig(JSON.stringify({ version: SETTINGS_VERSION, settings: { ...custom, gamepadMappings } }), defaults).settings.gamepadMappings;
+    expect(mappingsOf(undefined)).toEqual(DEFAULT_SETTINGS.gamepadMappings);
+    expect(mappingsOf({ 0: { buttons: { intake: 4, shoot: 5, lift: 2, drop: 'x' }, swapSticks: 'yes' } })[0]).toEqual({ buttons: { intake: 4, shoot: 5, lift: 2, drop: 1 }, swapSticks: false });
+    expect(mappingsOf({ 0: { buttons: { intake: 4, shoot: 5, lift: 1, drop: 99 } } })[0].buttons).toEqual(DEFAULT_GAMEPAD_MAPPING.buttons); // 99 → 기본 1 = 리프트와 겹침
+    expect(mappingsOf({ 1: { buttons: { intake: 7, shoot: 6, lift: 1, drop: 0 }, swapSticks: true } })).toEqual({ 0: DEFAULT_GAMEPAD_MAPPING, 1: { buttons: { intake: 7, shoot: 6, lift: 1, drop: 0 }, swapSticks: true } });
     expect(partial.settings.smoothMotion).toBe(false); // 저장한 값(끔) 유지
     // 17-1a: 이전에 저장한 설정(항목 없음) / 형식 오류 → 부드러운 움직임만 기본값(켜짐, 17-1b), 다른 항목은 보존 (SETTINGS_VERSION 그대로)
     const older: Partial<UiSettings> = { ...custom };

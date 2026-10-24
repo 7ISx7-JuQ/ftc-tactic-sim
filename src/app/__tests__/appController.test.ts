@@ -3,7 +3,7 @@ import { fixedRateShotJudge } from '../../core/ballistics';
 import { createIntakeZonePreset } from '../../core/collision';
 import type { DeepReadonly, RobotConfig, ScenarioConfig, ShotProbabilityResolver, TimelineFrame } from '../../core/types';
 import type { BrowserInputEnv, GamepadLike } from '../../input/browserInput';
-import { DEVICE_ASSIGNMENT, KEYBOARD_BINDINGS, swapAssignment } from '../../input/inputConfig';
+import { DEFAULT_GAMEPAD_MAPPING, DEVICE_ASSIGNMENT, KEYBOARD_BINDINGS, swapAssignment } from '../../input/inputConfig';
 import type { FrameScheduler } from '../../input/realtimeLoop';
 import { DEFAULT_RENDER_OPTIONS } from '../../renderer/renderOptions';
 import { VIEW_ANIMATION_MS, viewAngle } from '../../renderer/viewTransform';
@@ -612,6 +612,15 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     st = h.status();
     assert(st.input.activeAssignment.keyboard === 'robot1' && st.gamepads[0].robot === 'robot2', 'resume applies the swap');
     assert(h.currentFrame().r1.x > r1x + 5 && Math.abs(h.currentFrame().r2.x - r2x) < 1e-9, 'W drives R1 after the swap, R2 stays');
+    // (18-3) 게임패드 매핑: 적용 시점은 배정과 같음 (경기 중 = 다음 재개부터)
+    h.pause();
+    const edited = { 0: { ...DEFAULT_GAMEPAD_MAPPING, swapSticks: true }, 1: DEFAULT_GAMEPAD_MAPPING };
+    h.setGamepadMappings(edited);
+    st = h.status();
+    assert(st.input.mappings[0].swapSticks && !st.input.activeMappings[0].swapSticks, 'mapping pending until resume');
+    h.resume();
+    assert(h.status().input.activeMappings[0].swapSticks, 'resume applies the mapping');
+    assert(h.gamepadButtons(0) === null, 'no pad connected -> raw buttons null');
     h.dispose();
   });
 

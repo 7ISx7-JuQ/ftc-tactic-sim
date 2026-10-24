@@ -1,15 +1,18 @@
-// SETTINGS 탭 (명세서 3.8 SETTINGS 탭, 09-8b): 장치(게임패드 슬롯 / 키보드 → R1 / R2 / 없음, R1 ↔ R2 바꾸기 — 18-2) /
+// SETTINGS 탭 (명세서 3.8 SETTINGS 탭, 09-8b): 장치(게임패드 슬롯 / 키보드 → R1 / R2 / 없음, R1 ↔ R2 바꾸기 — 18-2,
+// 슬롯별 버튼 매핑 / 스틱 좌우 바꾸기 — 18-3) /
 // 입력(출처 · 조작 모드 + 키보드 조작표) /
 // 표시 옵션 / 화면(언어 · 단위 · 기본 보기 · 부드러운 움직임 17-1a) / 초기화(RESET ALL, 경기 전만). 바꾸는 즉시 적용 (APPLY 없음).
 // 입력 출처 / 조작 모드 / 장치 배정은 다음 START / RESUME / BRANCH부터 경기에 적용된다 (컨트롤러가 보관, 배정은 경기 전이면 바로).
 // 10-2: 프리셋(PRESETS) — 줄별 EXPORT(적용 값 → 파일, 언제나) / IMPORT(파일 → 초안, 경기 전만), 거부 사유는 그 줄 아래 빨간 글자.
 // 10-4: MATCH 줄 — IMPORT(경기 파일, 경기 전만), 준비 중에는 진행 글자 + CANCEL. 내보내기는 결과 팝업에서.
-import { ArrowLeftRight, Download, TriangleAlert, Upload, X } from 'lucide-react';
+import { useState } from 'react';
+import { ArrowLeftRight, Download, Gamepad2, TriangleAlert, Upload, X } from 'lucide-react';
 import type { AppStatus } from '../app/appController';
 import { MATCH_SOURCE_CHOICES, SETUP_SOURCE_CHOICES } from '../app/inputPlan';
 import type { SourceChoice } from '../app/inputPlan';
-import { GAMEPAD_SLOTS, KEYBOARD_BINDINGS, sameAssignment, swapAssignment } from '../input/inputConfig';
-import type { DeviceAssignment, DriveMode, RobotId } from '../input/inputConfig';
+import { GAMEPAD_SLOTS, KEYBOARD_BINDINGS, sameAssignment, sameMappings, swapAssignment } from '../input/inputConfig';
+import type { DeviceAssignment, DriveMode, GamepadSlot, RobotId } from '../input/inputConfig';
+import GamepadMappingEditor from './GamepadMappingEditor';
 import { assignedDevices } from '../input/controls';
 import type { RenderOptions } from '../renderer/renderOptions';
 import type { ViewMode } from '../renderer/viewTransform';
@@ -52,6 +55,7 @@ export default function SettingsTab({
   matchImport,
   onMatchImport,
   onMatchCancel,
+  readGamepadButtons,
 }: {
   status: AppStatus;
   lang: Language;
@@ -67,12 +71,14 @@ export default function SettingsTab({
   matchImport: { loading: { text: string; error: boolean } | null; error: string | null };
   onMatchImport: () => void;
   onMatchCancel: () => void;
+  readGamepadButtons: (slot: number) => boolean[] | null; // 18-3 버튼 지정 (원시 버튼 눌림, 연결 안 됨 = null)
 }) {
   const { input } = status;
   const inMatch = status.phase !== 'SETUP';
   const sourceOptions: readonly SourceChoice[] = inMatch ? MATCH_SOURCE_CHOICES : SETUP_SOURCE_CHOICES;
   const pendingInput = inMatch && ROBOTS.some(r => input.choices[r] !== input.sources[r] || input.modes[r] !== input.activeModes[r]);
-  const pendingDevices = inMatch && !sameAssignment(input.assignment, input.activeAssignment);
+  const pendingDevices = inMatch && (!sameAssignment(input.assignment, input.activeAssignment) || !sameMappings(input.mappings, input.activeMappings));
+  const [mappingSlot, setMappingSlot] = useState<GamepadSlot | null>(null); // 버튼 매핑을 펼친 슬롯 (18-3, 한 번에 하나)
   const devices = settings.devices;
   const setDevices = (next: DeviceAssignment) => onSettings({ devices: next });
   const targetLabel = (v: DeviceTarget) => (v === 'NONE' ? t(lang, 'settings.device.none') : robotLabel(v));
@@ -111,11 +117,32 @@ export default function SettingsTab({
                   label={targetLabel}
                   onChange={v => setDevices({ ...devices, gamepads: { ...devices.gamepads, [slot]: fromTarget(v) } })}
                 />
+                <button
+                  type="button"
+                  className={`config-button gamepad-mapping-toggle${mappingSlot === slot ? ' is-primary' : ''}`}
+                  aria-expanded={mappingSlot === slot}
+                  title={t(lang, 'settings.mapping.title', { slot })}
+                  aria-label={t(lang, 'settings.mapping.title', { slot })}
+                  onClick={() => setMappingSlot(mappingSlot === slot ? null : slot)}
+                >
+                  <Gamepad2 />
+                </button>
                 {g?.connected && !g.standard && (
                   <span className="gamepad-warn">
                     <TriangleAlert />
                     {t(lang, 'settings.gamepad.nonStandard')}
                   </span>
+                )}
+                {mappingSlot === slot && (
+                  <GamepadMappingEditor
+                    slot={slot}
+                    mapping={settings.gamepadMappings[slot]}
+                    connected={!!g?.connected}
+                    standard={!!g?.standard}
+                    lang={lang}
+                    readButtons={readGamepadButtons}
+                    onChange={next => onSettings({ gamepadMappings: { ...settings.gamepadMappings, [slot]: next } })}
+                  />
                 )}
               </li>
             );

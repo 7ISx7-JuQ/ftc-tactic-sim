@@ -177,6 +177,11 @@ describe('브라우저 입력 어댑터 (명세서 3.6, 가짜 브라우저 환�
     assert(!b.gamepadStatus()[1].connected && b.gamepadStatus()[1].id === null, 'status: missing pad -> not connected');
     b.setAssignment({ gamepads: { 0: null, 1: 'robot1' }, keyboard: null });
     assert(b.gamepadStatus()[0].robot === null && b.gamepadStatus()[1].robot === 'robot1', '(18-2) status follows the applied assignment (None = null)');
+    // (18-3) 버튼 지정 화면용 원시 버튼 눌림 (매핑 / 배정과 무관), 연결 안 됨 = null
+    s.pads[0] = gamepad(0, undefined, [2, 7], { id: 'Xbox Controller' });
+    const raw = b.gamepadButtons(0)!;
+    assert(raw[2] && raw[7] && !raw[0] && raw.filter(Boolean).length === 2, 'raw buttons X / RT down');
+    assert(b.gamepadButtons(1) === null && b.gamepadButtons(3) === null, 'missing pad -> null');
   });
 
   it('D. 자동 일시정지 이벤트 (포커스 소실 / 탭 숨김 / 배정 패드 분리)', () => {

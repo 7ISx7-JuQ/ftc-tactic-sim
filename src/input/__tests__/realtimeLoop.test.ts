@@ -5,7 +5,7 @@ import { createIntakeZonePreset } from '../../core/collision';
 import type { RobotConfig, RobotPose, ScenarioConfig } from '../../core/types';
 import { NEUTRAL_TICK } from '../controls';
 import type { GamepadSnapshot, TickControls } from '../controls';
-import { DEVICE_ASSIGNMENT, KEYBOARD_BINDINGS, MAX_CATCHUP_TICKS, TICK_MS } from '../inputConfig';
+import { DEFAULT_GAMEPAD_MAPPING, DEVICE_ASSIGNMENT, KEYBOARD_BINDINGS, MAX_CATCHUP_TICKS, TICK_MS } from '../inputConfig';
 import type { RobotId } from '../inputConfig';
 import { LOG_RECORD_BYTES, MatchInputs } from '../inputLog';
 import { LiveControlCollector } from '../liveControls';
@@ -346,5 +346,15 @@ describe('실시간 루프 (명세서 3.6)', () => {
     sw.sampleKeyboard(new Set([KEYBOARD_BINDINGS.turnRight]));
     const st = sw.consumeTick();
     assert(st.robot2.forward === 1 && st.robot1.forward === 0 && st.robot1.turn === 1 && st.robot2.turn === 0, 'pad 0 -> R2, pad 1 unassigned (ignored), keyboard -> R1');
+    // (18-3) 슬롯별 매핑: 슬롯 1만 발사 = A, 바꾸면 누적 입력을 비움
+    const mc = new LiveControlCollector();
+    const slot1 = { ...DEFAULT_GAMEPAD_MAPPING, buttons: { ...DEFAULT_GAMEPAD_MAPPING.buttons, shoot: 0, lift: 7 } };
+    mc.sampleGamepad(1, pad(undefined, [7]));
+    mc.setMappings({ 0: DEFAULT_GAMEPAD_MAPPING, 1: slot1 });
+    assert(!mc.consumeTick().robot2.shoot, 'mapping change clears latched input');
+    mc.sampleGamepad(0, pad(undefined, [0]));
+    mc.sampleGamepad(1, pad(undefined, [0]));
+    const mt = mc.consumeTick();
+    assert(mt.robot1.liftPressed && !mt.robot1.shoot && mt.robot2.shoot && !mt.robot2.liftPressed, 'A = lift on slot 0, shoot on slot 1');
   });
 });

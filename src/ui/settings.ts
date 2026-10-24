@@ -4,8 +4,8 @@
 // - 마지막으로 적용한 로봇 프로필 / 시나리오도 함께 보관. 없는 항목은 기본값으로 채우고, 형식이 다르거나 검증에 실패하면 버림.
 // - 경기 기록은 보관하지 않는다 (새로고침 = 경기 폐기).
 
-import { DEFAULT_DRIVE_MODE, DEVICE_ASSIGNMENT } from '../input/inputConfig';
-import type { DeviceAssignment, DriveMode, RobotId } from '../input/inputConfig';
+import { CONTROL_BUTTONS, DEFAULT_DRIVE_MODE, DEFAULT_GAMEPAD_MAPPING, DEFAULT_GAMEPAD_MAPPINGS, DEVICE_ASSIGNMENT, MAX_GAMEPAD_BUTTON_INDEX } from '../input/inputConfig';
+import type { ControlButton, DeviceAssignment, DriveMode, GamepadMapping, GamepadMappings, RobotId } from '../input/inputConfig';
 import { DEFAULT_RENDER_OPTIONS } from '../renderer/renderOptions';
 import type { RenderOptions } from '../renderer/renderOptions';
 import type { ViewMode } from '../renderer/viewTransform';
@@ -27,6 +27,7 @@ export interface UiSettings {
   defaultView: ViewMode;                   // 새 경기의 경기 중 보기 (경기 전 화면은 항상 관중석)
   renderOptions: RenderOptions;
   devices: DeviceAssignment;               // 장치 → 로봇 배정 (18-2, 키보드 없음 = 09-8b 키보드 주행 끔을 대신함)
+  gamepadMappings: GamepadMappings;        // 게임패드 슬롯별 버튼 / 스틱 매핑 (18-3)
   driveModes: Record<RobotId, DriveMode>;  // 09-8 확정: 조작 모드도 보관 (드라이버 개인 설정)
   smoothMotion: boolean;                   // 부드러운 움직임: 진행 중 프레임 보간 (17-1a, 화면이 최대 20 ms 늦음 — 17-1b에서 기본 켜짐)
 }
@@ -37,6 +38,7 @@ export const DEFAULT_SETTINGS: Readonly<UiSettings> = {
   defaultView: 'DRIVER',
   renderOptions: { ...DEFAULT_RENDER_OPTIONS },
   devices: DEVICE_ASSIGNMENT,
+  gamepadMappings: DEFAULT_GAMEPAD_MAPPINGS,
   driveModes: { robot1: DEFAULT_DRIVE_MODE, robot2: DEFAULT_DRIVE_MODE },
   smoothMotion: true,
 };
@@ -51,6 +53,16 @@ const toView = (v: unknown): ViewMode => (v === 'AUDIENCE' ? 'AUDIENCE' : 'DRIVE
 const toMode = (v: unknown): DriveMode => (v === 'ROBOT' ? 'ROBOT' : v === 'FIELD' ? 'FIELD' : DEFAULT_DRIVE_MODE);
 const toBool = (v: unknown, fallback: boolean): boolean => (typeof v === 'boolean' ? v : fallback);
 const toTarget = (v: unknown, fallback: RobotId | null): RobotId | null => (v === 'robot1' || v === 'robot2' || v === null ? v : fallback);
+
+/** 게임패드 매핑 한 슬롯 (18-3): 버튼별로 틀린 인덱스는 그 버튼만 기본값, 그래도 겹치면 버튼 전체 기본값, 스틱 좌우 바꾸기는 불리언 */
+function toMapping(raw: unknown): GamepadMapping {
+  const r = isRecord(raw) ? raw : {};
+  const b = isRecord(r.buttons) ? r.buttons : {};
+  const valid = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= MAX_GAMEPAD_BUTTON_INDEX;
+  const buttons = Object.fromEntries(CONTROL_BUTTONS.map(k => [k, valid(b[k]) ? b[k] : DEFAULT_GAMEPAD_MAPPING.buttons[k]])) as Record<ControlButton, number>;
+  const distinct = new Set(Object.values(buttons)).size === CONTROL_BUTTONS.length;
+  return { buttons: distinct ? buttons : DEFAULT_GAMEPAD_MAPPING.buttons, swapSticks: toBool(r.swapSticks, DEFAULT_GAMEPAD_MAPPING.swapSticks) };
+}
 
 /**
  * 장치 배정 (18-2): 장치별로 R1 / R2 / 없음(null), 틀린 값은 그 장치만 기본값.
@@ -80,6 +92,7 @@ export function sanitizeSettings(raw: unknown): UiSettings {
     defaultView: toView(r.defaultView),
     renderOptions,
     devices: toDevices(r),
+    gamepadMappings: { 0: toMapping(isRecord(r.gamepadMappings) ? r.gamepadMappings[0] : null), 1: toMapping(isRecord(r.gamepadMappings) ? r.gamepadMappings[1] : null) },
     driveModes: { robot1: toMode(modes.robot1), robot2: toMode(modes.robot2) },
     smoothMotion: toBool(r.smoothMotion, DEFAULT_SETTINGS.smoothMotion),
   };
