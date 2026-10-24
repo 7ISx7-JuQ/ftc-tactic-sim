@@ -5,7 +5,7 @@
 // 09-10a: 명중 확률표(LUT) 생성 연결 — 앱 시작(자동 보관 / 기본 프리셋)과 로봇 탭 APPLY에서 요청, 두 로봇이 준비되면 경기 판정 = LUT,
 // 준비될 때까지 START를 막는다 (Worker 풀 / 캐시는 LUTTracker가 소유, React는 약 10 Hz 요약만 받음).
 // 09-10b: 필드 편집 모드(히트맵) — 로봇 탭 SHOW HIT MAP으로 열고, 그 탭을 떠나거나 창을 닫거나 START하면 끝남. 장면은 컨트롤러가 그림.
-// 09-11a: 시나리오 탭(초안 / APPLY) + 시드 REROLL(바로 적용 + 자동 보관).
+// 09-11a: 시나리오 탭(초안 / APPLY) + 시드 REROLL(바로 적용 + 자동 보관). 18-1: 시드 직접 입력은 초안 / APPLY.
 // 09-11b: 시작 자세 모드(EDIT ON FIELD) — 로봇 몸체 / 회전 핸들 끌기(포인터 캡처) = 초안 시작 자세, DONE · APPLY = SCENARIO 탭 적용.
 // 14-1a: 시작 자세 모드 → 시나리오 필드 편집 모드(SCENARIO): 겹친 자리에 놓으면 끌기 전으로 + 사유 토스트, 모드 중 시나리오 변경의
 // 되돌리기 / 다시 하기(Ctrl / ⌘ + Z, Ctrl / ⌘ + Shift + Z, Ctrl + Y, 안내 띠 버튼).
@@ -79,7 +79,7 @@ import RobotTab from './RobotTab';
 import ScenarioTab from './ScenarioTab';
 import ScenarioFieldPopover from './ScenarioFieldPopover';
 import { readSweetSpot } from '../ui/robotForm';
-import { issueFieldSet, newSeed, readScenario, rerollSeed, scenarioFormIssues, scenarioFormWarnings, scenarioIssueText } from '../ui/scenarioForm';
+import { SEED_FIELD_KEY, issueFieldSet, newSeed, readScenario, rerollSeed, scenarioFormIssues, scenarioFormWarnings, scenarioIssueText } from '../ui/scenarioForm';
 import { spawnHitTest } from '../renderer/spawnEditLayout';
 import type { SpawnPart, SpawnRobotId } from '../renderer/spawnEditLayout';
 import type { RobotPose } from '../core/types';
@@ -390,11 +390,12 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
     if (key) next = setFieldText(next, 'scenario', key, invalidText);
     commitScenario(next, key);
   };
-  // 시나리오 초안 변경 확정: 시나리오 필드 편집 모드가 열려 있으면 되돌리기 기록에 남김 (key = 숫자 칸 — 같은 칸 연속 입력은 한 단계, 14-1a)
+  // 시나리오 초안 변경 확정: 시나리오 필드 편집 모드가 열려 있으면 되돌리기 기록에 남김 (key = 숫자 칸 — 같은 칸 연속 입력은 한 단계, 14-1a).
+  // 시드 칸은 되돌리기 대상이 아니라 기록하지 않음 (18-1)
   const commitScenario = (next: ConfigDrafts, key: string | null = null) => {
     const before = scenarioSnapshot(drafts);
     setDrafts(next);
-    if (scenarioEdit) setFieldEdit(edit => (edit?.mode === 'SCENARIO' ? recordScenarioChange(edit, before, scenarioSnapshot(next), key) : edit));
+    if (scenarioEdit && key !== SEED_FIELD_KEY) setFieldEdit(edit => (edit?.mode === 'SCENARIO' ? recordScenarioChange(edit, before, scenarioSnapshot(next), key) : edit));
   };
   // 되돌리기 / 다시 하기 (모드 중, 끄는 중에는 무시)
   const stepScenarioHistory = (direction: 'undo' | 'redo') => {
@@ -1220,7 +1221,6 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
                 <ScenarioTab
                   scenario={drafts.draft.scenario}
                   robots={{ robot1: drafts.draft.robot1, robot2: drafts.draft.robot2 }}
-                  seed={readScenario(drafts.applied.scenario, drafts.applied.robot1.config, drafts.applied.robot2.config).seed}
                   fieldText={drafts.fieldText.scenario}
                   issues={scenarioFormIssues(drafts.draft)}
                   warnings={scenarioFormWarnings(drafts.draft)}

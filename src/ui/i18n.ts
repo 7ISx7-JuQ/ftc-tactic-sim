@@ -474,7 +474,8 @@ const en = {
   'scenario.spawnHint': 'Robot center in audience-view field coordinates. Heading 0° = +x (right), positive = clockwise',
   'scenario.section.seed': 'Random seed',
   'scenario.reroll': 'REROLL',
-  'scenario.seedHint': 'Sets the floor scatter, shot rolls and TIP drops. REROLL applies at once; NEW keeps the seed',
+  'scenario.seed': 'Seed',
+  'scenario.seedHint': 'Sets the floor scatter, shot rolls and TIP drops. Type a seed (0 – 4294967295) and APPLY to match a teammate; REROLL applies a new one at once; NEW keeps the seed',
   'form.decrease': 'Decrease',
   'form.increase': 'Increase',
 
@@ -954,7 +955,8 @@ const ko: Record<MessageKey, string> = {
   'scenario.spawnHint': '로봇 중심, 관중석 시점 필드 좌표. 헤딩 0° = +x(오른쪽), 양수 = 시계 방향',
   'scenario.section.seed': '난수 시드',
   'scenario.reroll': '다시 뽑기',
-  'scenario.seedHint': '바닥 산포 / 명중 판정 / TIP 낙하를 정함. 다시 뽑기는 바로 적용되고 새 경기(NEW)는 시드를 유지',
+  'scenario.seed': '시드',
+  'scenario.seedHint': '바닥 산포 / 명중 판정 / TIP 낙하를 정함. 숫자(0 ~ 4294967295)를 입력하고 APPLY하면 팀원과 같은 배치를 맞출 수 있음. 다시 뽑기는 바로 적용되고 새 경기(NEW)는 시드를 유지',
   'form.decrease': '줄이기',
   'form.increase': '늘리기',
 

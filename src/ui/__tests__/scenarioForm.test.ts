@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_DRAFT_VALUES } from '../../app/defaultSetup';
 import { DEFAULT_RNG_SEED, DEFAULT_SPAWN_POSES } from '../../core/simulationEngine';
 import type { ScenarioConfig } from '../../core/types';
-import { canResetTab, initialDrafts, isDirty, resetTabDraft, tabIssues } from '../configDraft';
+import { canApply, canResetTab, initialDrafts, isDirty, resetTabDraft, setFieldText, tabIssues, tabStatus } from '../configDraft';
+import { parseNumberField } from '../robotForm';
 import type { DraftValues } from '../configDraft';
 import {
   floorSummary,
@@ -15,6 +16,9 @@ import {
   readScenario,
   rerollSeed,
   resetSpawn,
+  SEED_FIELD_KEY,
+  SEED_FIELD_SPEC,
+  setSeed,
   scenarioFormIssues,
   scenarioIssueText,
   RP_FIELD_SPEC,
@@ -233,6 +237,43 @@ describe('시나리오 탭 폼 (09-11a)', () => {
     expect(newSeed(fixed, () => seq.shift()!)).toBe(Math.floor(0.25 * 2 ** 32));
     expect(newSeed(7, () => 0.999999999)).toBeLessThan(2 ** 32);
     expect(newSeed(0, () => 0)).toBe(1);
+  });
+
+  it('G2. (18-1) 시드 직접 입력: 부호 없는 32비트 정수만, 초안에만 들어가고 APPLY로 적용, REROLL은 틀린 글자를 지움, RESET TAB은 초안 시드 유지', () => {
+    const parse = (text: string) => parseNumberField(SEED_FIELD_SPEC, text, 'in');
+    expect(parse('0')).toEqual({ ok: true, value: 0 });
+    expect(parse('4294967295')).toEqual({ ok: true, value: 4294967295 });
+    expect(parse(' 12345 ')).toEqual({ ok: true, value: 12345 });
+    expect(parse('4294967296')).toMatchObject({ ok: false, error: { code: 'RANGE' } });
+    expect(parse('-1')).toMatchObject({ ok: false, error: { code: 'RANGE' } });
+    expect(parse('1.5')).toMatchObject({ ok: false, error: { code: 'INTEGER' } });
+    expect(parse('abc')).toMatchObject({ ok: false, error: { code: 'REQUIRED' } });
+    expect(parse('')).toMatchObject({ ok: false, error: { code: 'REQUIRED' } });
+    // 지정하지 않은 시나리오에 기본 시드 = 그대로 (수정 아님), 다른 값 = 명시 값
+    const base: ScenarioConfig = { allianceColor: 'RED' };
+    expect(setSeed(base, DEFAULT_RNG_SEED)).toBe(base);
+    expect(setSeed(base, 7)).toEqual({ allianceColor: 'RED', rngSeed: 7 });
+    expect(setSeed({ allianceColor: 'RED', rngSeed: 7 }, 7)).toEqual({ allianceColor: 'RED', rngSeed: 7 });
+    // 초안에만 → DIRTY, APPLY로 적용
+    const drafts = initialDrafts(V);
+    const typed = { ...drafts, draft: { ...drafts.draft, scenario: setSeed(drafts.draft.scenario, 424242) } };
+    expect(tabStatus(typed, 'scenario')).toBe('DIRTY');
+    expect(typed.applied.scenario.rngSeed).toBeUndefined();
+    expect(canApply(typed, 'scenario')).toBe(true);
+    // 틀린 글자 = INVALID (APPLY / START 막힘), REROLL은 적용 값 / 초안 시드를 바꾸고 틀린 글자를 지움
+    const typo = setFieldText(typed, 'scenario', SEED_FIELD_KEY, '-1');
+    expect(tabStatus(typo, 'scenario')).toBe('INVALID');
+    expect(canApply(typo, 'scenario')).toBe(false);
+    const rolled = rerollSeed(typo, 99);
+    expect(rolled.fieldText.scenario).toEqual({});
+    expect(rolled.draft.scenario.rngSeed).toBe(99);
+    expect(rolled.applied.scenario.rngSeed).toBe(99);
+    expect(isDirty(rolled, 'scenario')).toBe(false);
+    // RESET TAB: 다른 항목은 기본값, 시드는 지금 초안 값 그대로 (틀린 글자는 다른 칸처럼 지움)
+    const edited = setFieldText({ ...typed, draft: { ...typed.draft, scenario: { ...typed.draft.scenario, autoTipCount: 2 } } }, 'scenario', SEED_FIELD_KEY, 'x');
+    const reset = resetTabDraft(edited, 'scenario', V);
+    expect(reset.draft.scenario).toEqual({ allianceColor: 'RED', rngSeed: 424242 });
+    expect(reset.fieldText.scenario).toEqual({});
   });
 
   it('H. (12-5) RP 기준값 / 오토 PARK 문제: 칸 묶음 rp / 로봇별 autoMove · spawn, tabIssues에도 포함', () => {

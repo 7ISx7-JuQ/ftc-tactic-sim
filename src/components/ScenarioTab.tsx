@@ -4,6 +4,7 @@
 // 14-1a: EDIT ON FIELD = 시나리오 필드 편집 모드 — 탭 맨 위 버튼, 시작 자세 구역의 버튼도 같은 모드를 연다.
 // 14-2: 오토 이동(로봇별 NONE / LEAVE / PARK / LEAVE_PARK, 12-12) + RP 기준값(SWARM 점수 / POLLINATOR 1 · 2 TIP 수, 정수 1 ~ 99, DEFAULT = 지정 해제),
 //   로봇 2대로 도달할 수 없는 SWARM 기준은 경고(주황, 적용 허용).
+// 18-1: 난수 시드 숫자 칸 — 직접 입력은 초안 + APPLY, REROLL은 지금처럼 바로 적용.
 import { CircleAlert, CircleCheck, Dices, Move, RotateCcw } from 'lucide-react';
 import { hiveTipPollenThreshold } from '../core/types';
 import type { RobotConfig, RobotPose, ScenarioConfig } from '../core/types';
@@ -17,6 +18,9 @@ import {
   COUNT_LIMITS,
   RP_FIELD_SPEC,
   RP_KEYS,
+  SEED_FIELD_KEY,
+  SEED_FIELD_SPEC,
+  setSeed,
   resetRpThresholds,
   rpFieldKey,
   setAutoMovement,
@@ -51,7 +55,6 @@ const AXIS_LABEL: Readonly<Record<keyof RobotPose, string>> = { x: 'X', y: 'Y', 
 export interface ScenarioTabProps {
   scenario: ScenarioConfig;                         // 초안
   robots: Record<RobotId, RobotProfile>;            // 로봇 초안 (적재 한도 / NECTAR 흡입 / 몸체 크기)
-  seed: number;                                     // 지금 경기 시드 (적용 값)
   fieldText: Readonly<Record<string, string>>;      // 틀린 입력 글자
   issues: readonly ScenarioFormIssue[];
   warnings: readonly ScenarioWarning[];             // 적용은 허용하는 경고 (14-2: SWARM_UNREACHABLE)
@@ -67,7 +70,7 @@ export interface ScenarioTabProps {
 
 const ALL_SPAWN_KEYS = ROBOTS.flatMap(r => SPAWN_AXES.map(a => spawnFieldKey(r, a)));
 
-export default function ScenarioTab({ scenario, robots, seed, fieldText, issues, warnings, unit, lang, locked, onEdit, onReroll, fieldEditOn, onEditOnField }: ScenarioTabProps) {
+export default function ScenarioTab({ scenario, robots, fieldText, issues, warnings, unit, lang, locked, onEdit, onReroll, fieldEditOn, onEditOnField }: ScenarioTabProps) {
   const view = readScenario(scenario, robots.robot1.config, robots.robot2.config);
   const red = issueFieldSet(issues);
   const typoCount = Object.keys(fieldText).length;
@@ -259,8 +262,19 @@ export default function ScenarioTab({ scenario, robots, seed, fieldText, issues,
       </Section>
 
       <Section title={t(lang, 'scenario.section.seed')}>
-        <div className="settings-row">
-          <span className="seed-value">{seed}</span>
+        <div className="seed-row">
+          <NumberField
+            id="scenario-seed"
+            label={t(lang, 'scenario.seed')}
+            spec={SEED_FIELD_SPEC}
+            value={view.seed}
+            invalidText={fieldText[SEED_FIELD_KEY]}
+            unit={unit}
+            lang={lang}
+            disabled={locked}
+            onValue={v => onEdit(setSeed(scenario, v), SEED_FIELD_KEY, null)}
+            onInvalid={text => onEdit(null, SEED_FIELD_KEY, text)}
+          />
           <button type="button" className="config-button" disabled={locked} onClick={onReroll}>
             <Dices />
             {t(lang, 'scenario.reroll')}

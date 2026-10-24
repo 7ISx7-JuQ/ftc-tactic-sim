@@ -281,9 +281,13 @@ describe('필드 편집 모드 (09-10b / 09-10c / 09-11b)', () => {
     expect(back.draft.scenario).not.toHaveProperty('r1Spawn');
     expect(back.fieldText.scenario).toEqual({ 'spawn.robot2.y': 'bad' });
     expect(cancelFieldEdit(during, edit)).toEqual(back);
-    // RP 기준값 칸의 틀린 글자도 지금 그대로 (14-2)
+    // RP 기준값 칸의 틀린 글자도 지금 그대로 (14-2), 시드 칸의 틀린 글자도 지금 그대로 (18-1)
     const rpTypo = setFieldText(during, 'scenario', 'rp.swarmPoints', '0');
     expect(cancelScenarioEdit(rpTypo, edit).fieldText.scenario).toEqual({ 'spawn.robot2.y': 'bad', 'rp.swarmPoints': '0' });
+    const seedTypo = setFieldText(during, 'scenario', 'seed', '1.5');
+    expect(cancelScenarioEdit(seedTypo, edit).fieldText.scenario).toEqual({ 'spawn.robot2.y': 'bad', seed: '1.5' });
+    const enteredWithSeedTypo = openScenarioEdit(null, setFieldText(drafts, 'scenario', 'seed', 'x'));
+    expect(cancelScenarioEdit(during, enteredWithSeedTypo).fieldText.scenario).toEqual({ 'spawn.robot2.y': 'bad' }); // 지금 없으면 없음
     // 모드 중 진영 전환 → 들어오기 전 값을 새 진영으로 (점대칭)
     const blue = withScenario(during, { allianceColor: 'BLUE' });
     const backBlue = cancelScenarioEdit(blue, edit);
@@ -343,6 +347,9 @@ describe('필드 편집 모드 (09-10b / 09-10c / 09-11b)', () => {
     const r1 = redoScenarioEdit(u2.edit, u2.drafts)!;
     expect(r1.drafts.draft.scenario).toEqual({ ...d1.draft.scenario, rngSeed: 1234 });
     expect(r1.edit.history.future).toHaveLength(1);
+    // 시드 칸의 틀린 글자도 되돌리기 / 다시 하기에서 지금 그대로 (18-1)
+    const seedTypo = setFieldText(r1.drafts, 'scenario', 'seed', 'abc');
+    expect(undoScenarioEdit(r1.edit, seedTypo)!.drafts.fieldText.scenario).toEqual({ seed: 'abc' });
     // 새 단계 → 다시 하기 기록 지움, 되돌린 뒤 같은 칸을 다시 쳐도 새 단계 (lastKey 초기화)
     edit = r1.edit;
     step(r1.drafts, withScenario(r1.drafts, { autoTipCount: 1 }));

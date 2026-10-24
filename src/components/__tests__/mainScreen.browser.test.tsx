@@ -388,12 +388,42 @@ describe('config 창', () => {
   it('시나리오 REROLL은 APPLY 없이 바로 적용된다', async () => {
     await userEvent.click(button('Open settings'));
     await userEvent.click(page.getByRole('tab', { name: 'SCENARIO' }));
-    const seedText = () => document.querySelector('.seed-value')?.textContent;
+    const seed = page.getByLabelText('Seed', { exact: true });
+    const seedText = () => (seed.element() as HTMLInputElement).value;
     await expect.poll(seedText).toMatch(/^\d+$/);
     const before = seedText();
     await userEvent.click(button(/REROLL/));
     await expect.poll(seedText).not.toBe(before);
     await expect.element(button('APPLY')).toBeDisabled();
+  });
+
+  it('시드 직접 입력 (18-1): 초안에 들어가 APPLY로 적용 (다시 열어도 유지), 틀린 글자는 빨간 오류 + APPLY 막힘, REROLL은 오류를 지우고 바로 적용', async () => {
+    await userEvent.click(button('Open settings'));
+    await userEvent.click(page.getByRole('tab', { name: 'SCENARIO' }));
+    const seed = page.getByLabelText('Seed', { exact: true });
+    await userEvent.fill(seed, '4294967295');
+    await expect.element(button('APPLY')).toBeEnabled(); // 적용 안 된 수정
+    await userEvent.click(button('APPLY'));
+    await expect.element(button('APPLY')).toBeDisabled();
+    await expect.element(seed).toHaveValue('4294967295');
+    for (const [text, error] of [['4294967296', 'Must be 0 – 4294967295'], ['-1', 'Must be 0 – 4294967295'], ['1.5', 'Whole numbers only'], ['abc', 'Enter a number']]) {
+      await userEvent.fill(seed, text);
+      await expect.element(page.getByText(error)).toBeVisible();
+      await expect.element(seed).toHaveValue(text); // 틀린 글자 보관
+      await expect.element(button('APPLY')).toBeDisabled();
+    }
+    await userEvent.click(button(/REROLL/));
+    await expect.element(page.getByText('Enter a number')).not.toBeInTheDocument();
+    await expect.element(seed).not.toHaveValue('4294967295');
+    await expect.element(button('APPLY')).toBeDisabled();
+    await userEvent.fill(seed, '12345');
+    await userEvent.click(button('APPLY'));
+
+    unmount();
+    mount();
+    await userEvent.click(button('Open settings'));
+    await userEvent.click(page.getByRole('tab', { name: 'SCENARIO' }));
+    await expect.element(page.getByLabelText('Seed', { exact: true })).toHaveValue('12345');
   });
 
   it('언어를 한국어로 바꾸면 화면 문구가 바뀌고, 다시 열어도 유지된다 (설정 자동 보관)', async () => {

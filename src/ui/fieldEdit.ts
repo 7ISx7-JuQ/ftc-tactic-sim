@@ -27,7 +27,7 @@ import type { HeatmapEditScene, ScenarioEditScene, SweetSpotEditScene } from '..
 import type { SpawnPart, SpawnRobotId } from '../renderer/spawnEditLayout';
 import { canApply, deepEqual, editDraft, setFieldText, tabStatus } from './configDraft';
 import type { ConfigDrafts, ConfigTab, DraftTab, DraftValues } from './configDraft';
-import { SPAWN_AXES, SPAWN_FIELD_SPECS, floorSummary, normalizeHeading, readScenario, scenarioFormIssues, setAlliance, setSpawnPose, spawnFieldKey } from './scenarioForm';
+import { SEED_FIELD_KEY, SPAWN_AXES, SPAWN_FIELD_SPECS, floorSummary, normalizeHeading, readScenario, scenarioFormIssues, setAlliance, setSpawnPose, spawnFieldKey } from './scenarioForm';
 import type { ScenarioFormIssue } from './scenarioForm';
 import { PIECE_TYPES, isPieceFireable } from '../core/ballistics';
 import { SWEET_SPOT_AXES, readSweetSpot, robotProfileIssues, slotBallistics, sweetSpotFieldKey, writeSweetSpot } from './robotForm';
@@ -222,7 +222,7 @@ export function scenarioSnapshot(drafts: ConfigDrafts): ScenarioSnapshot {
   return { scenario: drafts.draft.scenario, fieldText: drafts.fieldText.scenario };
 }
 
-/** 시드는 되돌리기 / 취소 대상이 아니다 (REROLL은 적용 값까지 바로 바꾸므로 초안만 되돌리면 적용 안 된 수정이 생김) */
+/** 시드는 되돌리기 / 취소 대상이 아니다 (REROLL은 적용 값까지 바로 바꾸므로 초안만 되돌리면 적용 안 된 수정이 생김, 시드 칸 직접 입력 18-1도 기록하지 않음) */
 function withSeedOf(scenario: ScenarioConfig, from: ScenarioConfig): ScenarioConfig {
   const next = { ...scenario };
   if (from.rngSeed === undefined) delete next.rngSeed;
@@ -230,10 +230,14 @@ function withSeedOf(scenario: ScenarioConfig, from: ScenarioConfig): ScenarioCon
   return next;
 }
 
-/** 스냅샷을 시나리오 탭으로 (시드는 지금 값 유지) */
+/** 스냅샷을 시나리오 탭으로 (시드와 시드 칸의 틀린 글자는 지금 값 유지, 18-1) */
 export function restoreScenarioSnapshot(drafts: ConfigDrafts, snapshot: ScenarioSnapshot): ConfigDrafts {
   const next = editDraft(drafts, 'scenario', withSeedOf(snapshot.scenario, drafts.draft.scenario));
-  return { ...next, fieldText: { ...next.fieldText, scenario: { ...snapshot.fieldText } } };
+  const fieldText = { ...snapshot.fieldText };
+  delete fieldText[SEED_FIELD_KEY];
+  const seedText = drafts.fieldText.scenario[SEED_FIELD_KEY];
+  if (seedText !== undefined) fieldText[SEED_FIELD_KEY] = seedText;
+  return { ...next, fieldText: { ...next.fieldText, scenario: fieldText } };
 }
 
 /** 시나리오 탭 EDIT ON FIELD: 지금 시나리오 / 칸 글자를 기억하고 시나리오 필드 편집 모드로 (이미 그 모드면 그대로) */

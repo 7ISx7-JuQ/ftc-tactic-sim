@@ -137,7 +137,7 @@ export function canResetTab(state: ConfigDrafts, tab: DraftTab, defaults: DraftV
   return hasFieldErrors(state, tab) || !deepEqual(state.draft[tab], resetValue(state, tab, defaults));
 }
 
-/** RESET TAB으로 돌아갈 값: 기본값. 단 시나리오 시드는 REROLL로만 바뀌므로(09-11 확정) 지금 시드를 유지 */
+/** RESET TAB으로 돌아갈 값: 기본값. 단 시나리오 시드는 RESET 대상이 아니라 지금 초안 시드를 유지 (09-11 확정 — REROLL은 적용 값까지 바꾸고, 18-1 직접 입력 값도 그대로) */
 function resetValue<T extends DraftTab>(state: ConfigDrafts, tab: T, defaults: DraftValues): DraftValues[T] {
   const seed = state.draft.scenario.rngSeed;
   if (tab !== 'scenario' || seed === undefined) return defaults[tab];

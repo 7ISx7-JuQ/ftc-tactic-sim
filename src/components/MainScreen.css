@@ -2103,11 +2103,23 @@
 .form-grid.spawn-fields {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
-.seed-value {
-  font-size: calc(var(--u) * 16);
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.03em;
+/* 난수 시드 (18-1): 숫자 칸 + REROLL — 격자로 버튼을 입력칸 줄에 고정 (오류 글자가 생겨도 버튼은 그대로) */
+.seed-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: calc(var(--u) * 8);
+  row-gap: calc(var(--u) * 4);
+}
+.seed-row > .form-field {
+  display: contents;
+}
+.seed-row > .form-field > * {
+  grid-column: 1;
+}
+.seed-row > .config-button {
+  grid-column: 2;
+  grid-row: 2;
+  align-self: center;
 }
 
 /* ---------------- 시작 자세 모드 (09-11b): 커서 / 캔버스와 같은 크기의 글자 층 / 로봇 위 좌표 글자 ---------------- */

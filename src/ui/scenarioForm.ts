@@ -5,6 +5,7 @@
 //   FLOWER / GARDEN / LOADING ZONE / HIVE 셀과 같은 대칭, RED 기본 스폰 ↔ BLUE 기본 스폰), 직접 지정한 상향 셀은 반대 셀로
 //   (RED 기본 AUDIENCE ↔ BLUE 기본 OPPOSITE). 지정하지 않은 항목은 새 진영 기본값을 따른다.
 // - 시드 (09-11 확정): REROLL은 초안 / 적용을 거치지 않고 적용 값과 초안에 바로 반영 (RESET TAB도 시드는 유지).
+//   18-1: 시드 칸 직접 입력은 다른 칸처럼 초안에만 들어가고 APPLY로 적용 (부호 없는 32비트 정수만, 틀린 글자는 보관).
 // - 검증 = validateScenario + validateRobotPlacement (configDraft.tabIssues와 같은 결과). 화면용으로 로봇 / 빨간 칸을 붙인다.
 
 import { FIELD_SIZE } from '../core/collision';
@@ -30,6 +31,7 @@ import {
 import type { ScenarioWarning } from '../core/simulationEngine';
 import type { AutoMovement, FloorPiecePlacement, GamePiece, RPThresholds, RobotConfig, RobotPose, ScenarioConfig } from '../core/types';
 import type { RobotId } from '../input/inputConfig';
+import { setFieldText } from './configDraft';
 import type { ConfigDrafts, DraftValues } from './configDraft';
 import type { NumberFieldSpec } from './robotForm';
 import { t } from './i18n';
@@ -234,13 +236,28 @@ export function newSeed(current: number, random: () => number = Math.random): nu
   return (current + 1) >>> 0;
 }
 
-/** REROLL: 적용 값과 초안의 시나리오 시드만 바꿈 (다른 초안 수정은 그대로) */
+/** REROLL: 적용 값과 초안의 시나리오 시드만 바꿈 (다른 초안 수정은 그대로). 시드 칸의 틀린 글자도 지움 (18-1) */
 export function rerollSeed(drafts: ConfigDrafts, seed: number): ConfigDrafts {
-  return {
-    ...drafts,
-    applied: { ...drafts.applied, scenario: { ...drafts.applied.scenario, rngSeed: seed } },
-    draft: { ...drafts.draft, scenario: { ...drafts.draft.scenario, rngSeed: seed } },
-  };
+  return setFieldText(
+    {
+      ...drafts,
+      applied: { ...drafts.applied, scenario: { ...drafts.applied.scenario, rngSeed: seed } },
+      draft: { ...drafts.draft, scenario: { ...drafts.draft.scenario, rngSeed: seed } },
+    },
+    'scenario',
+    SEED_FIELD_KEY,
+    null,
+  );
+}
+
+/** 시드 칸 (18-1): 부호 없는 32비트 정수 0 ~ 4,294,967,295, 10진수 표시 */
+export const SEED_FIELD_SPEC: NumberFieldSpec = { kind: 'count', min: 0, max: 0xffffffff, integer: true };
+export const SEED_FIELD_KEY = 'seed';
+
+/** 시드 직접 입력 (18-1): 초안의 시드 (APPLY로 적용). 지금 시드(지정하지 않았으면 엔진 기본 시드)와 같으면 그대로 */
+export function setSeed(scenario: ScenarioConfig, seed: number): ScenarioConfig {
+  if ((scenario.rngSeed ?? DEFAULT_RNG_SEED) === seed) return scenario;
+  return { ...scenario, rngSeed: seed };
 }
 
 // ------------------------------------------------------------
