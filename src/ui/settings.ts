@@ -4,8 +4,8 @@
 // - 마지막으로 적용한 로봇 프로필 / 시나리오도 함께 보관. 없는 항목은 기본값으로 채우고, 형식이 다르거나 검증에 실패하면 버림.
 // - 경기 기록은 보관하지 않는다 (새로고침 = 경기 폐기).
 
-import { DEFAULT_DRIVE_MODE, KEYBOARD_ENABLED } from '../input/inputConfig';
-import type { DriveMode, RobotId } from '../input/inputConfig';
+import { DEFAULT_DRIVE_MODE, DEVICE_ASSIGNMENT } from '../input/inputConfig';
+import type { DeviceAssignment, DriveMode, RobotId } from '../input/inputConfig';
 import { DEFAULT_RENDER_OPTIONS } from '../renderer/renderOptions';
 import type { RenderOptions } from '../renderer/renderOptions';
 import type { ViewMode } from '../renderer/viewTransform';
@@ -26,7 +26,7 @@ export interface UiSettings {
   lengthUnit: LengthUnit;
   defaultView: ViewMode;                   // 새 경기의 경기 중 보기 (경기 전 화면은 항상 관중석)
   renderOptions: RenderOptions;
-  keyboardEnabled: boolean;
+  devices: DeviceAssignment;               // 장치 → 로봇 배정 (18-2, 키보드 없음 = 09-8b 키보드 주행 끔을 대신함)
   driveModes: Record<RobotId, DriveMode>;  // 09-8 확정: 조작 모드도 보관 (드라이버 개인 설정)
   smoothMotion: boolean;                   // 부드러운 움직임: 진행 중 프레임 보간 (17-1a, 화면이 최대 20 ms 늦음 — 17-1b에서 기본 켜짐)
 }
@@ -36,7 +36,7 @@ export const DEFAULT_SETTINGS: Readonly<UiSettings> = {
   lengthUnit: DEFAULT_LENGTH_UNIT,
   defaultView: 'DRIVER',
   renderOptions: { ...DEFAULT_RENDER_OPTIONS },
-  keyboardEnabled: KEYBOARD_ENABLED,
+  devices: DEVICE_ASSIGNMENT,
   driveModes: { robot1: DEFAULT_DRIVE_MODE, robot2: DEFAULT_DRIVE_MODE },
   smoothMotion: true,
 };
@@ -50,6 +50,21 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 const toView = (v: unknown): ViewMode => (v === 'AUDIENCE' ? 'AUDIENCE' : 'DRIVER');
 const toMode = (v: unknown): DriveMode => (v === 'ROBOT' ? 'ROBOT' : v === 'FIELD' ? 'FIELD' : DEFAULT_DRIVE_MODE);
 const toBool = (v: unknown, fallback: boolean): boolean => (typeof v === 'boolean' ? v : fallback);
+const toTarget = (v: unknown, fallback: RobotId | null): RobotId | null => (v === 'robot1' || v === 'robot2' || v === null ? v : fallback);
+
+/**
+ * 장치 배정 (18-2): 장치별로 R1 / R2 / 없음(null), 틀린 값은 그 장치만 기본값.
+ * 18-2 이전에 보관한 설정(devices 없음)은 키보드 토글을 옮긴다 — keyboardEnabled: false = 키보드 배정 없음
+ */
+function toDevices(raw: Record<string, unknown>): DeviceAssignment {
+  const d = isRecord(raw.devices) ? raw.devices : null;
+  const pads = d && isRecord(d.gamepads) ? d.gamepads : {};
+  const legacyKeyboard = raw.keyboardEnabled === false ? null : DEVICE_ASSIGNMENT.keyboard;
+  return {
+    gamepads: { 0: toTarget(pads[0], DEVICE_ASSIGNMENT.gamepads[0]), 1: toTarget(pads[1], DEVICE_ASSIGNMENT.gamepads[1]) },
+    keyboard: d ? toTarget(d.keyboard, DEVICE_ASSIGNMENT.keyboard) : legacyKeyboard,
+  };
+}
 
 /** 저장된 값 → 설정 (항목별로 형식이 틀리면 그 항목만 기본값) */
 export function sanitizeSettings(raw: unknown): UiSettings {
@@ -64,7 +79,7 @@ export function sanitizeSettings(raw: unknown): UiSettings {
     lengthUnit: toLengthUnit(r.lengthUnit),
     defaultView: toView(r.defaultView),
     renderOptions,
-    keyboardEnabled: toBool(r.keyboardEnabled, KEYBOARD_ENABLED),
+    devices: toDevices(r),
     driveModes: { robot1: toMode(modes.robot1), robot2: toMode(modes.robot2) },
     smoothMotion: toBool(r.smoothMotion, DEFAULT_SETTINGS.smoothMotion),
   };

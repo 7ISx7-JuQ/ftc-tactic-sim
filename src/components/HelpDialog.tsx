@@ -5,6 +5,8 @@ import { Bug, ExternalLink, Mail, X } from 'lucide-react';
 import { t } from '../ui/i18n';
 import type { Language, MessageKey } from '../ui/i18n';
 import { APP_VERSION, BUG_REPORT_EMAIL, LICENSE_URL, NOTICES_URL, REPO_URL, bugReportLinks, controlRows } from '../ui/helpInfo';
+import type { DeviceAssignment, RobotId } from '../input/inputConfig';
+import { robotLabel } from '../ui/mainScreenModel';
 
 const SECTIONS: readonly { title: MessageKey; items: readonly MessageKey[] }[] = [
   { title: 'help.start.title', items: ['help.start.1', 'help.start.2', 'help.start.3', 'help.start.4'] },
@@ -13,7 +15,8 @@ const SECTIONS: readonly { title: MessageKey; items: readonly MessageKey[] }[] =
   { title: 'help.notes.title', items: ['help.notes.1', 'help.notes.2'] },
 ];
 
-export default function HelpDialog({ lang, onClose }: { lang: Language; onClose: () => void }) {
+// devices: SETTINGS 장치 배정 (18-2, 빠른 시작 문구가 따름)
+export default function HelpDialog({ lang, devices, onClose }: { lang: Language; devices: DeviceAssignment; onClose: () => void }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   useEffect(() => {
@@ -37,12 +40,14 @@ export default function HelpDialog({ lang, onClose }: { lang: Language; onClose:
     userAgent: navigator.userAgent,
     screen: { width: window.screen.width, height: window.screen.height, dpr: window.devicePixelRatio || 1 },
   });
+  const target = (r: RobotId | null) => (r ? robotLabel(r) : t(lang, 'settings.device.none'));
+  const deviceParams = { pad0: target(devices.gamepads[0]), pad1: target(devices.gamepads[1]), keyboard: target(devices.keyboard) };
   const section = (s: (typeof SECTIONS)[number]) => (
     <section key={s.title} className="help-section">
       <h3>{t(lang, s.title)}</h3>
       <ul>
         {s.items.map(key => (
-          <li key={key}>{t(lang, key)}</li>
+          <li key={key}>{t(lang, key, deviceParams)}</li>
         ))}
       </ul>
     </section>

@@ -38,8 +38,8 @@ import { createAnimationFrameScheduler, createBrowserRealtimeLoop, isEditableTar
 import type { BrowserInputAdapter, BrowserInputEnv, GamepadSlotStatus } from '../input/browserInput';
 import { LOG_RECORD_BYTES, MatchInputs, createInputRecordProvider } from '../input/inputLog';
 import type { BranchInputs, InputSource } from '../input/inputLog';
-import { DEFAULT_DRIVE_MODE, KEYBOARD_ENABLED } from '../input/inputConfig';
-import type { DriveMode, RobotId } from '../input/inputConfig';
+import { DEFAULT_DRIVE_MODE, DEVICE_ASSIGNMENT, sameAssignment } from '../input/inputConfig';
+import type { DeviceAssignment, DriveMode, RobotId } from '../input/inputConfig';
 import { autoSource, resolveSource, sourceChoiceAllowed } from './inputPlan';
 import { branchDepth, canFork, createBranchTree, currentBranch, findBranch, forkBranch, removeBranch, renameBranch, restoreBranchTree, setBranchData, sharedFrameTick, switchBranch } from './branchTree';
 import type { BranchNode, BranchTree } from './branchTree';
@@ -124,8 +124,9 @@ export interface AppStatus {
 }
 
 /**
- * 입력 출처 / 조작 모드 / 키보드 (명세서 3.8 SETTINGS 탭 입력, 09-8b). 선택(choices / modes / keyboardEnabled)은
- * 다음 START / RESUME / BRANCH부터 적용되고, sources / activeModes / activeKeyboard는 지금 경기에 적용 중인 값
+ * 입력 출처 / 조작 모드 / 장치 배정 (명세서 3.8 SETTINGS 탭 입력 · 장치, 09-8b / 18-2). 선택(choices / modes / assignment)은
+ * 다음 START / RESUME / BRANCH부터 적용되고, sources / activeModes / activeAssignment는 지금 경기에 적용 중인 값.
+ * 경기 전(SETUP)에는 배정을 바로 적용한다 (진행 중인 것이 없음 — AUTO 미리보기 / 장치 표시가 고른 배정을 따름)
  */
 export interface InputStatus {
   choices: Record<RobotId, SourceChoice>;   // 경기 전 = AUTO / LIVE / NONE, 경기 중 = LIVE / REPLAY / NONE
@@ -134,13 +135,13 @@ export interface InputStatus {
   hasLog: Record<RobotId, boolean>;          // 입력 기록 있음 (REPLAY 가능)
   modes: Record<RobotId, DriveMode>;
   activeModes: Record<RobotId, DriveMode>;
-  keyboardEnabled: boolean;
-  activeKeyboard: boolean;
+  assignment: DeviceAssignment;
+  activeAssignment: DeviceAssignment;
 }
 
 /** 입력 설정 초기값 (저장된 SETTINGS에서) */
 export interface InputSettings {
-  keyboardEnabled: boolean;
+  assignment: DeviceAssignment;
   driveModes: Record<RobotId, DriveMode>;
 }
 
@@ -259,11 +260,11 @@ export class AppController {
   private setup: MatchSetup;
   private matchView: ViewMode = 'DRIVER';
   private defaultView: ViewMode = 'DRIVER';
-  // 입력 선택 (09-8b): 경기 전 선택 / 경기 중 선택 / 조작 모드 / 키보드 — 다음 START / RESUME / BRANCH부터 적용
+  // 입력 선택 (09-8b): 경기 전 선택 / 경기 중 선택 / 조작 모드 / 장치 배정(18-2) — 다음 START / RESUME / BRANCH부터 적용
   private setupChoices: Record<RobotId, SourceChoice> = { robot1: 'AUTO', robot2: 'AUTO' };
   private matchChoices: Record<RobotId, InputSource> = { robot1: 'LIVE', robot2: 'LIVE' };
   private driveModes: Record<RobotId, DriveMode> = { robot1: DEFAULT_DRIVE_MODE, robot2: DEFAULT_DRIVE_MODE };
-  private keyboardEnabled = KEYBOARD_ENABLED;
+  private assignment: DeviceAssignment = DEVICE_ASSIGNMENT;
   private options: RenderOptions = { ...DEFAULT_RENDER_OPTIONS };
   private smoothMotion = false;
   private phase: AppPhase = 'SETUP';
@@ -307,7 +308,7 @@ export class AppController {
     this.onStatus = deps.onStatus ?? (() => {});
     this.onToast = deps.onToast ?? (() => {});
     this.statusIntervalMs = deps.statusIntervalMs ?? 100;
-    this.keyboardEnabled = deps.input?.keyboardEnabled ?? KEYBOARD_ENABLED;
+    this.assignment = deps.input?.assignment ?? DEVICE_ASSIGNMENT;
     if (deps.input?.driveModes) this.driveModes = { ...deps.input.driveModes };
     this.defaultView = deps.defaultView ?? 'DRIVER';
     if (deps.options) this.options = { ...deps.options };
@@ -363,9 +364,14 @@ export class AppController {
     this.emitStatus(true);
   }
 
-  /** 키보드 주행 켜기 / 끄기, 다음 START / RESUME / BRANCH부터 (단축키는 항상 동작) */
-  setKeyboardEnabled(enabled: boolean): void {
-    this.keyboardEnabled = enabled;
+  /**
+   * 장치 → 로봇 배정 (18-2, 키보드 없음 = 키보드 주행 끔 — 단축키는 항상 동작). 경기 중에는 다음 START / RESUME / BRANCH부터,
+   * 경기 전에는 바로 적용 (진행 중인 것이 없으므로)
+   */
+  setAssignment(assignment: DeviceAssignment): void {
+    if (sameAssignment(assignment, this.assignment)) return;
+    this.assignment = assignment;
+    if (this.phase === 'SETUP') this.adapter.setAssignment(assignment);
     this.emitStatus(true);
   }
 
@@ -387,7 +393,7 @@ export class AppController {
     // 경기 전 선택을 시작 순간의 장치 상태로 풀어 적용 (AUTO → LIVE / NONE)
     const pads = this.adapter.gamepadStatus();
     for (const robot of ['robot1', 'robot2'] as const) {
-      this.matchChoices[robot] = resolveSource(this.setupChoices[robot], robot, pads, this.keyboardEnabled);
+      this.matchChoices[robot] = resolveSource(this.setupChoices[robot], robot, pads, this.assignment);
     }
     this.applyInputChoices();
     this.phase = 'ROTATING_IN';
@@ -782,7 +788,7 @@ export class AppController {
       this.inputs.sources[robot] = choice === 'REPLAY' && this.inputs.logs[robot].length === 0 ? 'NONE' : choice;
       this.inputs.modes[robot] = this.driveModes[robot];
     }
-    this.adapter.setKeyboardEnabled(this.keyboardEnabled);
+    this.adapter.setAssignment(this.assignment);
   }
 
   private inputStatus(): InputStatus {
@@ -791,13 +797,13 @@ export class AppController {
     const map = <T,>(fn: (robot: RobotId) => T): Record<RobotId, T> => ({ robot1: fn('robot1'), robot2: fn('robot2') });
     return {
       choices: inMatch ? { ...this.matchChoices } : { ...this.setupChoices },
-      autoPreview: map(robot => autoSource(robot, pads, this.keyboardEnabled)),
-      sources: inMatch ? { ...this.inputs.sources } : map(robot => resolveSource(this.setupChoices[robot], robot, pads, this.keyboardEnabled)),
+      autoPreview: map(robot => autoSource(robot, pads, this.assignment)),
+      sources: inMatch ? { ...this.inputs.sources } : map(robot => resolveSource(this.setupChoices[robot], robot, pads, this.assignment)),
       hasLog: map(robot => this.inputs.logs[robot].length > 0),
       modes: { ...this.driveModes },
       activeModes: { ...this.inputs.modes },
-      keyboardEnabled: this.keyboardEnabled,
-      activeKeyboard: this.adapter.isKeyboardEnabled,
+      assignment: this.assignment,
+      activeAssignment: this.adapter.assignment,
     };
   }
 
@@ -929,7 +935,7 @@ export class AppController {
       },
       this.env,
       this.scheduler,
-      { keyboardEnabled: this.keyboardEnabled },
+      { assignment: this.assignment },
     );
     this.loop = created.loop;
     this.adapter = created.adapter;

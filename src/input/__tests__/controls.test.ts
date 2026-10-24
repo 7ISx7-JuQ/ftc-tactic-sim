@@ -82,7 +82,9 @@ describe('입력 계층 순수 변환 (명세서 3.6)', () => {
       'keyboard actions m , . /');
     const r1 = assignedDevices('robot1'), r2 = assignedDevices('robot2');
     assert(r1.gamepadSlots.join() === '0' && !r1.keyboard && r2.gamepadSlots.join() === '1' && r2.keyboard, 'pad0 -> R1, pad1 + keyboard -> R2');
-    assert(!assignedDevices('robot2', DEVICE_ASSIGNMENT, false).keyboard, 'keyboard disabled -> not assigned');
+    assert(!assignedDevices('robot2', { ...DEVICE_ASSIGNMENT, keyboard: null }).keyboard, 'keyboard None -> not assigned');
+    const custom = assignedDevices('robot1', { gamepads: { 0: 'robot1', 1: 'robot1' }, keyboard: 'robot1' });
+    assert(custom.gamepadSlots.join() === '0,1' && custom.keyboard && assignedDevices('robot2', { gamepads: { 0: 'robot1', 1: 'robot1' }, keyboard: 'robot1' }).gamepadSlots.length === 0, '(18-2) all devices -> R1');
   });
 
   it('B. 게임패드 읽기 (축 방향 / 데드존 / 트리거 임계값)', () => {

@@ -2,12 +2,13 @@
 // 실시간 입력 수집기 (명세서 3.6항: 원시 입력 누적기)
 // 장치별 탭 래치에 원시 입력을 모으고, 틱마다 로봇별로 합성한 조작을 내준다.
 // DOM 비의존: 브라우저 어댑터(Step 07-6)가 게임패드 폴링 / 키 상태를 넘겨준다.
+// 18-2: 장치 → 로봇 배정을 바꿀 수 있다 (setAssignment, 시작 / 재개 / 분기 때 적용). 배정 없음인 장치는 무시.
 // ============================================================
 
 import { ControlLatch, NEUTRAL_SAMPLE, mergeTickControls, readGamepad, readKeyboard } from './controls';
 import type { GamepadSnapshot, TickControls } from './controls';
-import { DEVICE_ASSIGNMENT, KEYBOARD_ENABLED } from './inputConfig';
-import type { RobotId } from './inputConfig';
+import { DEVICE_ASSIGNMENT, GAMEPAD_SLOTS, sameAssignment, slotRobot } from './inputConfig';
+import type { DeviceAssignment, RobotId } from './inputConfig';
 
 // 실시간 루프가 쓰는 입력 공급 인터페이스 (테스트는 가짜 구현 주입 가능)
 export interface LiveControlSource {
@@ -20,33 +21,37 @@ export interface LiveControlSource {
 }
 
 export class LiveControlCollector implements LiveControlSource {
-  private readonly gamepadLatches = new Map<number, ControlLatch>(); // 배정된 게임패드 슬롯만
+  private readonly gamepadLatches = new Map<number, ControlLatch>(GAMEPAD_SLOTS.map(slot => [slot, new ControlLatch()]));
   private readonly keyboardLatch = new ControlLatch();
-  private readonly assignment: typeof DEVICE_ASSIGNMENT;
-  private keyboardEnabled: boolean;
+  private assignment: DeviceAssignment;
 
-  constructor(assignment = DEVICE_ASSIGNMENT, keyboardEnabled = KEYBOARD_ENABLED) {
+  constructor(assignment: DeviceAssignment = DEVICE_ASSIGNMENT) {
     this.assignment = assignment;
-    this.keyboardEnabled = keyboardEnabled;
-    for (const slot of Object.keys(assignment.gamepads)) this.gamepadLatches.set(Number(slot), new ControlLatch());
+  }
+
+  get currentAssignment(): DeviceAssignment {
+    return this.assignment;
   }
 
   // 게임패드 폴링 결과 (requestAnimationFrame마다). null = 연결 없음 / 해제 → 중립. 배정되지 않은 슬롯은 무시
   sampleGamepad(slot: number, pad: GamepadSnapshot | null): void {
+    if (!slotRobot(this.assignment, slot)) return;
     this.gamepadLatches.get(slot)?.sample(pad ? readGamepad(pad) : NEUTRAL_SAMPLE);
   }
 
-  // 키보드: 현재 눌린 키 코드 집합 (키 이벤트마다). 비활성화 시 무시
+  // 키보드: 현재 눌린 키 코드 집합 (키 이벤트마다). 키보드 배정이 없으면 무시
   sampleKeyboard(down: ReadonlySet<string>): void {
-    if (this.keyboardEnabled) this.keyboardLatch.sample(readKeyboard(down));
+    if (this.assignment.keyboard) this.keyboardLatch.sample(readKeyboard(down));
   }
 
   consumeTick(): Record<RobotId, TickControls> {
     const perRobot: Record<RobotId, TickControls[]> = { robot1: [], robot2: [] };
     // 모든 배정 장치의 래치를 틱마다 정확히 한 번 소비 (슬롯 순서 → 키보드 순, 축 동률이면 앞 장치)
-    const slots = [...this.gamepadLatches.keys()].sort((a, b) => a - b);
-    for (const slot of slots) perRobot[this.assignment.gamepads[slot]].push(this.gamepadLatches.get(slot)!.consume());
-    if (this.keyboardEnabled) perRobot[this.assignment.keyboard].push(this.keyboardLatch.consume());
+    for (const slot of GAMEPAD_SLOTS) {
+      const robot = this.assignment.gamepads[slot];
+      if (robot) perRobot[robot].push(this.gamepadLatches.get(slot)!.consume());
+    }
+    if (this.assignment.keyboard) perRobot[this.assignment.keyboard].push(this.keyboardLatch.consume());
     return { robot1: mergeTickControls(perRobot.robot1), robot2: mergeTickControls(perRobot.robot2) };
   }
 
@@ -55,10 +60,10 @@ export class LiveControlCollector implements LiveControlSource {
     this.keyboardLatch.reset();
   }
 
-  /** 키보드 주행 켜기 / 끄기 (09-8b SETTINGS 런타임 토글). 바꿀 때 키보드 누적 입력을 비움 */
-  setKeyboardEnabled(enabled: boolean): void {
-    if (enabled === this.keyboardEnabled) return;
-    this.keyboardEnabled = enabled;
-    this.keyboardLatch.reset();
+  /** 장치 배정 바꾸기 (18-2, 시작 / 재개 / 분기 때). 바뀌면 모든 누적 입력을 비움 (누르고 있는 입력은 다음 폴링에서 다시 샘플) */
+  setAssignment(assignment: DeviceAssignment): void {
+    if (sameAssignment(assignment, this.assignment)) return;
+    this.assignment = assignment;
+    this.reset();
   }
 }

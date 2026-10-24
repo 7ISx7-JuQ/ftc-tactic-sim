@@ -18,7 +18,7 @@ A 2D tactic simulator for the **FTC BioBuzz TELEOP period** (2:00). Drive your t
 
 1. **R1 / R2 tabs** — enter each robot's specs and shooter, then **APPLY**. The first hit map takes about 10–60 s.
 2. **SCENARIO tab** — pick the ALLIANCE, the state after autonomous and the start poses, then **APPLY**.
-3. **START** — gamepad slot 0 drives R1, slot 1 (or the keyboard) drives R2. Press a gamepad button once so the browser detects it.
+3. **START** — by default gamepad slot 0 drives R1, slot 1 (or the keyboard) drives R2; change this under **SETTINGS → Devices** (e.g. **SWAP R1 ↔ R2** to drive R2 with a single gamepad). Press a gamepad button once so the browser detects it.
 4. After 2:00 the result popup shows the score breakdown and RP. **EXPORT MATCH** saves a replay file.
 
 The **?** button on the right edge opens the in-app help (controls, branches, files).
@@ -74,7 +74,7 @@ Free for **non-commercial** use under the [PolyForm Noncommercial License 1.0.0]
 
 1. **R1 / R2 탭** — 로봇 제원과 슈터를 입력하고 **적용**. 처음 명중 확률표는 약 10 ~ 60초 걸립니다.
 2. **시나리오 탭** — ALLIANCE, 오토 이후 상태, 시작 자세를 정하고 **적용**.
-3. **시작** — 게임패드 슬롯 0은 R1, 슬롯 1(또는 키보드)은 R2를 조종합니다. 게임패드는 버튼을 한 번 눌러야 브라우저가 인식합니다.
+3. **시작** — 기본으로 게임패드 슬롯 0은 R1, 슬롯 1(또는 키보드)은 R2를 조종합니다. **SETTINGS → 장치**에서 바꿀 수 있습니다 (예: 패드 1개로 R2를 조종하려면 **R1 ↔ R2 바꾸기**). 게임패드는 버튼을 한 번 눌러야 브라우저가 인식합니다.
 4. 2:00이 지나면 결과 팝업에 항목별 점수와 RP가 나옵니다. **경기 내보내기**로 재생 파일을 저장할 수 있습니다.
 
 화면 오른쪽 끝의 **?** 버튼을 누르면 앱 안 도움말(조작, 가지, 파일)이 열립니다.

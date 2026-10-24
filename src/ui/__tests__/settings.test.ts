@@ -29,20 +29,20 @@ const custom: UiSettings = {
   lengthUnit: 'cm',
   defaultView: 'AUDIENCE',
   renderOptions: { aimGuide: true, intakeProgress: false, hitProbability: true, flightTrail: false, flightResult: true, robotPath: true },
-  keyboardEnabled: false,
+  devices: { gamepads: { 0: 'robot2', 1: null }, keyboard: null },
   driveModes: { robot1: 'ROBOT', robot2: 'FIELD' },
   smoothMotion: false,
 };
 const defaults = DEFAULT_DRAFT_VALUES;
 
 describe('SETTINGS / 자동 보관 (09-8b)', () => {
-  it('A. 기본값: 영어, in, 드라이버 시점, 표시 옵션 모두 꺼짐, 키보드 켬, 필드 기준, 부드러운 움직임 켜짐(17-1b)', () => {
+  it('A. 기본값: 영어, in, 드라이버 시점, 표시 옵션 모두 꺼짐, 장치 배정 = 패드 0 → R1 · 패드 1 / 키보드 → R2, 필드 기준, 부드러운 움직임 켜짐(17-1b)', () => {
     expect(DEFAULT_SETTINGS).toEqual({
       language: 'en',
       lengthUnit: 'in',
       defaultView: 'DRIVER',
       renderOptions: { aimGuide: false, intakeProgress: false, hitProbability: false, flightTrail: false, flightResult: false, robotPath: false },
-      keyboardEnabled: true,
+      devices: { gamepads: { 0: 'robot1', 1: 'robot2' }, keyboard: 'robot2' },
       driveModes: { robot1: 'FIELD', robot2: 'FIELD' },
       smoothMotion: true,
     });
@@ -79,7 +79,14 @@ describe('SETTINGS / 자동 보관 (09-8b)', () => {
     expect(partial.settings.renderOptions).toEqual({ ...DEFAULT_SETTINGS.renderOptions, flightTrail: true });
     expect(partial.settings.renderOptions.robotPath).toBe(false); // 16-3 이전에 저장한 설정 = 새 옵션은 기본값 (SETTINGS_VERSION 그대로)
     expect(partial.settings.driveModes).toEqual({ robot1: 'FIELD', robot2: 'FIELD' });
-    expect(partial.settings.keyboardEnabled).toBe(false);
+    expect(partial.settings.devices).toEqual(custom.devices);
+    // 18-2: 장치별 틀린 값은 그 장치만 기본값, 18-2 이전 설정(devices 없음)은 키보드 토글을 옮김 (끔 = 키보드 배정 없음)
+    const devicesOf = (extra: object) => parseStoredConfig(JSON.stringify({ version: SETTINGS_VERSION, settings: { ...custom, devices: undefined, ...extra } }), defaults).settings.devices;
+    expect(devicesOf({ devices: { gamepads: { 0: 'robot3', 1: null }, keyboard: 'robot1' } })).toEqual({ gamepads: { 0: 'robot1', 1: null }, keyboard: 'robot1' });
+    expect(devicesOf({ keyboardEnabled: false })).toEqual({ gamepads: { 0: 'robot1', 1: 'robot2' }, keyboard: null });
+    expect(devicesOf({ keyboardEnabled: true })).toEqual(DEFAULT_SETTINGS.devices);
+    expect(devicesOf({})).toEqual(DEFAULT_SETTINGS.devices);
+    expect(devicesOf({ devices: 'pads', keyboardEnabled: false })).toEqual({ gamepads: { 0: 'robot1', 1: 'robot2' }, keyboard: null });
     expect(partial.settings.smoothMotion).toBe(false); // 저장한 값(끔) 유지
     // 17-1a: 이전에 저장한 설정(항목 없음) / 형식 오류 → 부드러운 움직임만 기본값(켜짐, 17-1b), 다른 항목은 보존 (SETTINGS_VERSION 그대로)
     const older: Partial<UiSettings> = { ...custom };

@@ -463,6 +463,39 @@ describe('config 창', () => {
     await expect.element(toggle()).toBeChecked();
   });
 
+  it('장치 배정 (18-2): 기본 = 패드 0 → R1 · 패드 1 / 키보드 → R2, R1 ↔ R2 바꾸기, 장치 없는 로봇 경고, 다시 열어도 유지, 도움말 문구가 배정을 따름', async () => {
+    const group = (name: string) => page.getByRole('radiogroup', { name, exact: true });
+    const selected = (name: string) => group(name).getByRole('radio', { checked: true });
+    await userEvent.click(button('Open settings'));
+    await userEvent.click(page.getByRole('tab', { name: 'SETTINGS' }));
+    await expect.element(selected('Gamepad slot 0')).toHaveTextContent('R1');
+    await expect.element(selected('Gamepad slot 1')).toHaveTextContent('R2');
+    await expect.element(selected('Keyboard')).toHaveTextContent('R2');
+    await expect.element(page.getByRole('checkbox', { name: /Keyboard driving/ })).not.toBeInTheDocument(); // 키보드 토글은 배정으로 합침
+    await userEvent.click(button('SWAP R1 ↔ R2'));
+    await expect.element(selected('Gamepad slot 0')).toHaveTextContent('R2');
+    await expect.element(selected('Gamepad slot 1')).toHaveTextContent('R1');
+    await expect.element(selected('Keyboard')).toHaveTextContent('R1');
+    // R2에 장치가 하나도 없으면 경고 (적용은 막지 않음)
+    await userEvent.click(group('Gamepad slot 0').getByRole('radio', { name: 'None' }));
+    await expect.element(page.getByText('R2 has no device: LIVE input will not move it')).toBeVisible();
+    await userEvent.click(group('Gamepad slot 0').getByRole('radio', { name: 'R2' }));
+    await expect.element(page.getByText('R2 has no device: LIVE input will not move it')).not.toBeInTheDocument();
+    await userEvent.click(group('Keyboard').getByRole('radio', { name: 'None' }));
+    await userEvent.keyboard('{Escape}');
+    await userEvent.click(button('Help'));
+    await expect.element(page.getByText(/gamepad slot 0: R2, slot 1: R1, keyboard: None/)).toBeVisible();
+    await userEvent.keyboard('{Escape}');
+
+    unmount();
+    mount();
+    await userEvent.click(button('Open settings'));
+    await userEvent.click(page.getByRole('tab', { name: 'SETTINGS' }));
+    await expect.element(selected('Gamepad slot 0')).toHaveTextContent('R2');
+    await expect.element(selected('Gamepad slot 1')).toHaveTextContent('R1');
+    await expect.element(selected('Keyboard')).toHaveTextContent('None');
+  });
+
   it('부드러운 움직임 (17-1a / 17-1b): SETTINGS 화면 구역 토글(기본 켜짐), 끄고 경기를 진행 / 일시정지 / 재생해도 그대로, 다시 열어도 유지', async () => {
     const toggle = () => page.getByRole('checkbox', { name: /Smooth motion/ });
     await userEvent.click(button('Open settings'));

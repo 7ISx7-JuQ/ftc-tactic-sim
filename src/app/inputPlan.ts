@@ -3,8 +3,8 @@
 // - 경기 중(일시정지 / 복기): LIVE / REPLAY / NONE. REPLAY는 그 로봇의 입력 기록이 있을 때만.
 // - 선택은 다음 START / RESUME / BRANCH부터 적용 (조작 모드 / 키보드 토글도 같음).
 
-import { DEVICE_ASSIGNMENT } from '../input/inputConfig';
-import type { RobotId } from '../input/inputConfig';
+import { DEVICE_ASSIGNMENT, slotRobot } from '../input/inputConfig';
+import type { DeviceAssignment, RobotId } from '../input/inputConfig';
 import type { GamepadSlotStatus } from '../input/browserInput';
 import type { InputSource } from '../input/inputLog';
 
@@ -13,18 +13,17 @@ export const SETUP_SOURCE_CHOICES: readonly SourceChoice[] = ['AUTO', 'LIVE', 'N
 export const MATCH_SOURCE_CHOICES: readonly InputSource[] = ['LIVE', 'REPLAY', 'NONE'];
 
 /**
- * 기본 규칙: 그 로봇에 배정된 게임패드 슬롯 중 하나라도 연결 → LIVE, 키보드가 그 로봇에 배정되어 있고 켜져 있으면 → LIVE, 아니면 NONE
- * (기본 배정: R1 = 패드 0, R2 = 패드 1 + 키보드 → 패드 없이도 키보드로 R2 조종, 키보드를 끄면 패드 1개일 때 R2 = NONE)
+ * 기본 규칙: 그 로봇에 배정된 게임패드 슬롯 중 하나라도 연결 → LIVE, 키보드가 그 로봇에 배정되어 있으면 → LIVE, 아니면 NONE
+ * (기본 배정: R1 = 패드 0, R2 = 패드 1 + 키보드 → 패드 없이도 키보드로 R2 조종, 키보드 배정을 없애면 패드 1개일 때 R2 = NONE).
+ * 18-2: 배정은 SETTINGS 장치 구역에서 고른 값
  */
 export function autoSource(
   robot: RobotId,
   gamepads: readonly Pick<GamepadSlotStatus, 'slot' | 'connected'>[],
-  keyboardEnabled: boolean,
-  assignment: typeof DEVICE_ASSIGNMENT = DEVICE_ASSIGNMENT,
+  assignment: DeviceAssignment = DEVICE_ASSIGNMENT,
 ): InputSource {
-  const padConnected = gamepads.some(g => g.connected && assignment.gamepads[g.slot] === robot);
-  const keyboard = keyboardEnabled && assignment.keyboard === robot;
-  return padConnected || keyboard ? 'LIVE' : 'NONE';
+  const padConnected = gamepads.some(g => g.connected && slotRobot(assignment, g.slot) === robot);
+  return padConnected || assignment.keyboard === robot ? 'LIVE' : 'NONE';
 }
 
 /** 선택 → 실제 출처 (AUTO만 규칙으로 풀림) */
@@ -32,9 +31,9 @@ export function resolveSource(
   choice: SourceChoice,
   robot: RobotId,
   gamepads: readonly Pick<GamepadSlotStatus, 'slot' | 'connected'>[],
-  keyboardEnabled: boolean,
+  assignment: DeviceAssignment = DEVICE_ASSIGNMENT,
 ): InputSource {
-  return choice === 'AUTO' ? autoSource(robot, gamepads, keyboardEnabled) : choice;
+  return choice === 'AUTO' ? autoSource(robot, gamepads, assignment) : choice;
 }
 
 /** 지금 고를 수 있는 선택지인지: 경기 전 = AUTO / LIVE / NONE, 경기 중 = LIVE / NONE / (입력 기록이 있으면) REPLAY */

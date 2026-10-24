@@ -259,7 +259,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
       setup: setupOf(initialApplied.current),
       onStatus,
       onToast,
-      input: { keyboardEnabled: s0.keyboardEnabled, driveModes: s0.driveModes },
+      input: { assignment: s0.devices, driveModes: s0.driveModes },
       defaultView: s0.defaultView,
       options: s0.renderOptions,
       smoothMotion: s0.smoothMotion,
@@ -440,7 +440,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
     if (!prev || next.renderOptions !== prev.renderOptions) controller.setOptions(next.renderOptions);
     if (!prev || next.defaultView !== prev.defaultView) controller.setDefaultView(next.defaultView);
     if (!prev || next.smoothMotion !== prev.smoothMotion) controller.setSmoothMotion(next.smoothMotion);
-    if (!prev || next.keyboardEnabled !== prev.keyboardEnabled) controller.setKeyboardEnabled(next.keyboardEnabled);
+    if (!prev || next.devices !== prev.devices) controller.setAssignment(next.devices);
     if (!prev || next.driveModes !== prev.driveModes) {
       controller.setDriveMode('robot1', next.driveModes.robot1);
       controller.setDriveMode('robot2', next.driveModes.robot2);
@@ -1253,7 +1253,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
         />
       )}
       {confirm && <ConfirmDialog request={confirm.request} anchor={confirm.anchor} onClose={closeConfirm} />}
-      {helpOpen && <HelpDialog lang={lang} onClose={closeHelp} />}
+      {helpOpen && <HelpDialog lang={lang} devices={settings.devices} onClose={closeHelp} />}
       {branchBusy && (
         <div className="branch-busy" role="status">
           <LoaderCircle />

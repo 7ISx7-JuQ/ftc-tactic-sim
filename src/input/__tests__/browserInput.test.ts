@@ -111,31 +111,38 @@ describe('브라우저 입력 어댑터 (명세서 3.6, 가짜 브라우저 환�
     a.poll();
     assert(a.consumeTick().robot2.forward === 0, 'keyup releases');
 
-    // 키보드 비활성화: 무시 + 가로채지 않음
+    // 키보드 배정 없음: 무시 + 가로채지 않음
     const off = fakeEnv();
-    const b = new BrowserInputAdapter(off.env, { keyboardEnabled: false });
+    const noKeyboard = { ...DEVICE_ASSIGNMENT, keyboard: null };
+    const b = new BrowserInputAdapter(off.env, { assignment: noKeyboard });
     pausesOf(b);
     const w2 = key('keydown', K.forward);
     off.win.dispatchEvent(w2);
     b.poll();
-    assert(!w2.defaultPrevented && b.consumeTick().robot2.forward === 0, 'KEYBOARD_ENABLED = false -> keyboard ignored entirely');
+    assert(!w2.defaultPrevented && b.consumeTick().robot2.forward === 0, 'keyboard None -> keyboard ignored entirely');
 
-    // (09-8b) 런타임 토글: 켜면 주행, 누른 채로 끄면 눌린 키를 비우고 무시, 다시 켜면 새로 누른 키부터
-    b.setKeyboardEnabled(true);
-    assert(b.isKeyboardEnabled, 'toggled on');
+    // (18-2, 09-8b 토글 대신) 배정 바꾸기: 키보드 → R2면 주행, 누른 채로 없음으로 바꾸면 눌린 키를 비우고 무시, 다시 배정하면 새로 누른 키부터
+    b.setAssignment(DEVICE_ASSIGNMENT);
+    assert(b.assignment.keyboard === 'robot2', 'keyboard assigned');
     off.win.dispatchEvent(key('keydown', K.forward));
     b.poll();
-    assert(b.consumeTick().robot2.forward === 1, 'on at runtime -> W drives R2');
-    b.setKeyboardEnabled(false);
+    assert(b.consumeTick().robot2.forward === 1, 'assigned at runtime -> W drives R2');
+    b.setAssignment(noKeyboard);
     b.poll();
     const w3 = key('keydown', K.shoot);
     off.win.dispatchEvent(w3);
     b.poll();
     const offTick = b.consumeTick().robot2;
-    assert(offTick.forward === 0 && !offTick.shoot && !w3.defaultPrevented, 'off at runtime (W still held) -> held key cleared, new keys ignored');
-    b.setKeyboardEnabled(true);
+    assert(offTick.forward === 0 && !offTick.shoot && !w3.defaultPrevented, 'None at runtime (W still held) -> held key cleared, new keys ignored');
+    b.setAssignment(DEVICE_ASSIGNMENT);
     b.poll();
-    assert(b.consumeTick().robot2.forward === 0, 'back on: the key held before turning off is not resurrected');
+    assert(b.consumeTick().robot2.forward === 0, 'assigned again: the key held before is not resurrected');
+    // 키보드 → R1
+    b.setAssignment({ ...DEVICE_ASSIGNMENT, keyboard: 'robot1' });
+    off.win.dispatchEvent(key('keydown', K.backward));
+    b.poll();
+    const kb = b.consumeTick();
+    assert(kb.robot1.forward === -1 && kb.robot2.forward === 0, 'keyboard -> R1');
   });
 
   it('C. 게임패드 폴링 (슬롯 배정 / 연결 상태 / API 없음)', () => {
@@ -168,6 +175,8 @@ describe('브라우저 입력 어댑터 (명세서 3.6, 가짜 브라우저 환�
     assert(st[1].robot === 'robot2' && st[1].connected && !st[1].standard, 'status: non-standard mapping flagged (warning in GUI)');
     s.pads[1] = null;
     assert(!b.gamepadStatus()[1].connected && b.gamepadStatus()[1].id === null, 'status: missing pad -> not connected');
+    b.setAssignment({ gamepads: { 0: null, 1: 'robot1' }, keyboard: null });
+    assert(b.gamepadStatus()[0].robot === null && b.gamepadStatus()[1].robot === 'robot1', '(18-2) status follows the applied assignment (None = null)');
   });
 
   it('D. 자동 일시정지 이벤트 (포커스 소실 / 탭 숨김 / 배정 패드 분리)', () => {
@@ -191,6 +200,10 @@ describe('브라우저 입력 어댑터 (명세서 3.6, 가짜 브라우저 환�
     assert(reasons.length === 2, 'unassigned pad disconnect -> no pause');
     win.dispatchEvent(disc(1));
     assert(reasons.join() === 'BLUR,HIDDEN,GAMEPAD_DISCONNECTED', 'assigned pad (slot 1) disconnect -> pause');
+    a.setAssignment({ ...DEVICE_ASSIGNMENT, gamepads: { 0: 'robot1', 1: null } });
+    win.dispatchEvent(disc(1));
+    assert(reasons.length === 3, '(18-2) slot 1 set to None -> its disconnect does not pause');
+    a.setAssignment(DEVICE_ASSIGNMENT);
     a.detach();
     win.dispatchEvent(new Event('blur'));
     win.dispatchEvent(key('keydown', K.forward));

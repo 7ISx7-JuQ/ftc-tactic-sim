@@ -7,8 +7,8 @@
 
 import type { SimulationEngine } from '../core/simulationEngine';
 import type { GamepadSnapshot, TickControls } from './controls';
-import { DEVICE_ASSIGNMENT, KEYBOARD_BINDINGS, KEYBOARD_ENABLED } from './inputConfig';
-import type { RobotId } from './inputConfig';
+import { DEVICE_ASSIGNMENT, GAMEPAD_SLOTS, KEYBOARD_BINDINGS, slotRobot } from './inputConfig';
+import type { DeviceAssignment, RobotId } from './inputConfig';
 import type { MatchInputs } from './inputLog';
 import { LiveControlCollector } from './liveControls';
 import type { LiveControlSource } from './liveControls';
@@ -18,7 +18,7 @@ import type { FrameScheduler, PauseReason, RealtimeLoopHooks } from './realtimeL
 // 게임패드 슬롯 상태 (연결 표시용, Step 9 GUI)
 export interface GamepadSlotStatus {
   slot: number;
-  robot: RobotId;
+  robot: RobotId | null;    // 지금 적용된 배정 (없음 = null, 18-2)
   connected: boolean;
   id: string | null;       // 브라우저가 알려주는 패드 이름
   standard: boolean;       // mapping === 'standard' (아니면 매핑이 다를 수 있어 경고)
@@ -39,8 +39,7 @@ export interface GamepadLike extends GamepadSnapshot {
 }
 
 export interface BrowserInputOptions {
-  assignment?: typeof DEVICE_ASSIGNMENT;
-  keyboardEnabled?: boolean;
+  assignment?: DeviceAssignment;
 }
 
 const BOUND_KEYS: ReadonlySet<string> = new Set(Object.values(KEYBOARD_BINDINGS));
@@ -66,16 +65,12 @@ export function createAnimationFrameScheduler(
 export class BrowserInputAdapter implements LiveControlSource {
   readonly collector: LiveControlCollector;
   private readonly keys = new Set<string>(); // 현재 눌린 매핑 키 (event.code)
-  private readonly assignment: typeof DEVICE_ASSIGNMENT;
-  private keyboardEnabled: boolean;
   private readonly env: BrowserInputEnv;
   private detachFn: (() => void) | null = null;
 
   constructor(env: BrowserInputEnv, options: BrowserInputOptions = {}) {
     this.env = env;
-    this.assignment = options.assignment ?? DEVICE_ASSIGNMENT;
-    this.keyboardEnabled = options.keyboardEnabled ?? KEYBOARD_ENABLED;
-    this.collector = new LiveControlCollector(this.assignment, this.keyboardEnabled);
+    this.collector = new LiveControlCollector(options.assignment ?? DEVICE_ASSIGNMENT);
   }
 
   // 이벤트 연결. onPause: 탭 숨김 / 포커스 소실 / 배정된 게임패드 분리 시 호출 (보통 loop.pause)
@@ -85,7 +80,7 @@ export class BrowserInputAdapter implements LiveControlSource {
 
     const onKeyDown = (e: Event) => {
       const k = e as KeyboardEvent;
-      if (!this.keyboardEnabled || !BOUND_KEYS.has(k.code) || isEditableTarget(k.target)) return;
+      if (!this.assignment.keyboard || !BOUND_KEYS.has(k.code) || isEditableTarget(k.target)) return;
       k.preventDefault();                   // 방향키 스크롤, Firefox '/' 빠른 찾기 방지
       if (k.repeat || this.keys.has(k.code)) return; // 자동 반복은 새 눌림이 아님
       this.keys.add(k.code);
@@ -108,7 +103,7 @@ export class BrowserInputAdapter implements LiveControlSource {
     };
     const onGamepadDisconnected = (e: Event) => {
       const index = (e as GamepadEvent).gamepad?.index;
-      if (index === undefined || !(index in this.assignment.gamepads)) return;
+      if (index === undefined || !slotRobot(this.assignment, index)) return; // 배정된 패드만
       this.collector.sampleGamepad(index, null);
       onPause('GAMEPAD_DISCONNECTED');
     };
@@ -137,7 +132,7 @@ export class BrowserInputAdapter implements LiveControlSource {
   // 프레임 시작 시 (RealtimeLoop가 틱 소비 전에 호출): 배정된 게임패드 폴링 + 키 상태 재샘플
   poll(): void {
     const pads = this.readGamepads();
-    for (const slot of Object.keys(this.assignment.gamepads).map(Number)) {
+    for (const slot of GAMEPAD_SLOTS) {
       const pad = pads[slot];
       this.collector.sampleGamepad(slot, pad && pad.connected ? pad : null);
     }
@@ -153,34 +148,34 @@ export class BrowserInputAdapter implements LiveControlSource {
     this.collector.reset();
   }
 
-  /** 키보드 주행 켜기 / 끄기 (09-8b 런타임 토글). 끄면 주행 키를 무시(기본 동작도 막지 않음)하고 눌린 키를 비운다 */
-  setKeyboardEnabled(enabled: boolean): void {
-    if (enabled === this.keyboardEnabled) return;
-    this.keyboardEnabled = enabled;
-    this.keys.clear();
-    this.collector.setKeyboardEnabled(enabled);
+  /** 지금 적용된 장치 배정 (18-2) */
+  get assignment(): DeviceAssignment {
+    return this.collector.currentAssignment;
   }
 
-  get isKeyboardEnabled(): boolean {
-    return this.keyboardEnabled;
+  /**
+   * 장치 배정 바꾸기 (18-2, 시작 / 재개 / 분기 때). 키보드 배정이 없으면 주행 키를 무시(기본 동작도 막지 않음)하고 눌린 키를 비운다 —
+   * 09-8b 키보드 토글을 대신함. 배정이 바뀌면 누적 입력을 비우고, 누르고 있는 입력은 다음 폴링에서 다시 샘플된다
+   */
+  setAssignment(assignment: DeviceAssignment): void {
+    if (!assignment.keyboard) this.keys.clear();
+    this.collector.setAssignment(assignment);
   }
 
-  // 배정된 슬롯별 연결 상태 (슬롯 오름차순)
+  // 배정할 수 있는 슬롯(0 / 1)별 연결 상태 + 적용된 배정 (슬롯 오름차순, 18-2)
   gamepadStatus(): GamepadSlotStatus[] {
     const pads = this.readGamepads();
-    return Object.entries(this.assignment.gamepads)
-      .map(([slot, robot]) => {
-        const pad = pads[Number(slot)];
-        const connected = !!pad && pad.connected;
-        return {
-          slot: Number(slot),
-          robot,
-          connected,
-          id: connected ? pad!.id : null,
-          standard: connected ? pad!.mapping === 'standard' : false,
-        };
-      })
-      .sort((a, b) => a.slot - b.slot);
+    return GAMEPAD_SLOTS.map(slot => {
+      const pad = pads[slot];
+      const connected = !!pad && pad.connected;
+      return {
+        slot,
+        robot: this.assignment.gamepads[slot],
+        connected,
+        id: connected ? pad!.id : null,
+        standard: connected ? pad!.mapping === 'standard' : false,
+      };
+    });
   }
 
   private readGamepads(): readonly (GamepadLike | null)[] {

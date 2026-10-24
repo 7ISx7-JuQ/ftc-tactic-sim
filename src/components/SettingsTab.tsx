@@ -1,14 +1,16 @@
-// SETTINGS 탭 (명세서 3.8 SETTINGS 탭, 09-8b): 게임패드(읽기 전용) / 입력(출처 · 조작 모드 · 키보드 + 키보드 조작표) /
+// SETTINGS 탭 (명세서 3.8 SETTINGS 탭, 09-8b): 장치(게임패드 슬롯 / 키보드 → R1 / R2 / 없음, R1 ↔ R2 바꾸기 — 18-2) /
+// 입력(출처 · 조작 모드 + 키보드 조작표) /
 // 표시 옵션 / 화면(언어 · 단위 · 기본 보기 · 부드러운 움직임 17-1a) / 초기화(RESET ALL, 경기 전만). 바꾸는 즉시 적용 (APPLY 없음).
-// 입력 출처 / 조작 모드 / 키보드는 다음 START / RESUME / BRANCH부터 경기에 적용된다 (컨트롤러가 보관).
+// 입력 출처 / 조작 모드 / 장치 배정은 다음 START / RESUME / BRANCH부터 경기에 적용된다 (컨트롤러가 보관, 배정은 경기 전이면 바로).
 // 10-2: 프리셋(PRESETS) — 줄별 EXPORT(적용 값 → 파일, 언제나) / IMPORT(파일 → 초안, 경기 전만), 거부 사유는 그 줄 아래 빨간 글자.
 // 10-4: MATCH 줄 — IMPORT(경기 파일, 경기 전만), 준비 중에는 진행 글자 + CANCEL. 내보내기는 결과 팝업에서.
-import { Download, TriangleAlert, Upload, X } from 'lucide-react';
+import { ArrowLeftRight, Download, TriangleAlert, Upload, X } from 'lucide-react';
 import type { AppStatus } from '../app/appController';
 import { MATCH_SOURCE_CHOICES, SETUP_SOURCE_CHOICES } from '../app/inputPlan';
 import type { SourceChoice } from '../app/inputPlan';
-import { KEYBOARD_BINDINGS } from '../input/inputConfig';
-import type { DriveMode, RobotId } from '../input/inputConfig';
+import { GAMEPAD_SLOTS, KEYBOARD_BINDINGS, sameAssignment, swapAssignment } from '../input/inputConfig';
+import type { DeviceAssignment, DriveMode, RobotId } from '../input/inputConfig';
+import { assignedDevices } from '../input/controls';
 import type { RenderOptions } from '../renderer/renderOptions';
 import type { ViewMode } from '../renderer/viewTransform';
 import { LANGUAGES, t } from '../ui/i18n';
@@ -27,6 +29,11 @@ const ROBOTS: readonly RobotId[] = ['robot1', 'robot2'];
 const OPTION_KEYS: readonly (keyof RenderOptions)[] = ['aimGuide', 'intakeProgress', 'hitProbability', 'flightTrail', 'flightResult', 'robotPath'];
 const DRIVE_MODES: readonly DriveMode[] = ['FIELD', 'ROBOT'];
 const VIEWS: readonly ViewMode[] = ['DRIVER', 'AUDIENCE'];
+// 장치 배정 선택지 (18-2): R1 / R2 / 없음
+type DeviceTarget = RobotId | 'NONE';
+const DEVICE_TARGETS: readonly DeviceTarget[] = ['robot1', 'robot2', 'NONE'];
+const toTarget = (r: RobotId | null): DeviceTarget => r ?? 'NONE';
+const fromTarget = (v: DeviceTarget): RobotId | null => (v === 'NONE' ? null : v);
 // 로봇 프리셋 줄 설명: 적용된 팀 번호 + 팀명 (없으면 빈칸)
 const teamText = ({ teamNumber, teamName }: { teamNumber: string; teamName: string }) =>
   [teamNumber.trim() && `#${teamNumber.trim()}`, teamName.trim()].filter(Boolean).join(' ');
@@ -64,9 +71,15 @@ export default function SettingsTab({
   const { input } = status;
   const inMatch = status.phase !== 'SETUP';
   const sourceOptions: readonly SourceChoice[] = inMatch ? MATCH_SOURCE_CHOICES : SETUP_SOURCE_CHOICES;
-  const pendingInput =
-    inMatch &&
-    (ROBOTS.some(r => input.choices[r] !== input.sources[r] || input.modes[r] !== input.activeModes[r]) || input.keyboardEnabled !== input.activeKeyboard);
+  const pendingInput = inMatch && ROBOTS.some(r => input.choices[r] !== input.sources[r] || input.modes[r] !== input.activeModes[r]);
+  const pendingDevices = inMatch && !sameAssignment(input.assignment, input.activeAssignment);
+  const devices = settings.devices;
+  const setDevices = (next: DeviceAssignment) => onSettings({ devices: next });
+  const targetLabel = (v: DeviceTarget) => (v === 'NONE' ? t(lang, 'settings.device.none') : robotLabel(v));
+  const unassigned = ROBOTS.filter(r => {
+    const d = assignedDevices(r, devices);
+    return d.gamepadSlots.length === 0 && !d.keyboard;
+  });
   const keyRows: [string, MessageKey][] = [
     [[KEYBOARD_BINDINGS.forward, KEYBOARD_BINDINGS.left, KEYBOARD_BINDINGS.backward, KEYBOARD_BINDINGS.right].map(keyCodeLabel).join(' '), 'settings.keys.move'],
     [[KEYBOARD_BINDINGS.turnLeft, KEYBOARD_BINDINGS.turnRight].map(keyCodeLabel).join(' '), 'settings.keys.turn'],
@@ -82,21 +95,59 @@ export default function SettingsTab({
 
   return (
     <div className="settings-tab">
-      <Section title={t(lang, 'settings.section.gamepads')}>
+      <Section title={t(lang, 'settings.section.devices')}>
         <ul className="gamepad-list">
-          {status.gamepads.map(g => (
-            <li key={g.slot} className={`gamepad-row${g.connected ? ' is-connected' : ''}`}>
-              <span className="gamepad-slot">{t(lang, 'settings.gamepad.slot', { slot: g.slot, robot: robotLabel(g.robot) })}</span>
-              <span className="gamepad-name">{g.connected ? g.id : t(lang, 'settings.gamepad.empty')}</span>
-              {g.connected && !g.standard && (
-                <span className="gamepad-warn">
-                  <TriangleAlert />
-                  {t(lang, 'settings.gamepad.nonStandard')}
-                </span>
-              )}
-            </li>
-          ))}
+          {GAMEPAD_SLOTS.map(slot => {
+            const g = status.gamepads.find(p => p.slot === slot);
+            const name = t(lang, 'settings.device.gamepad', { slot });
+            return (
+              <li key={slot} className={`gamepad-row${g?.connected ? ' is-connected' : ''}`}>
+                <span className="gamepad-slot">{name}</span>
+                <span className="gamepad-name">{g?.connected ? g.id : t(lang, 'settings.gamepad.empty')}</span>
+                <Segmented<DeviceTarget>
+                  ariaLabel={name}
+                  value={toTarget(devices.gamepads[slot])}
+                  options={DEVICE_TARGETS}
+                  label={targetLabel}
+                  onChange={v => setDevices({ ...devices, gamepads: { ...devices.gamepads, [slot]: fromTarget(v) } })}
+                />
+                {g?.connected && !g.standard && (
+                  <span className="gamepad-warn">
+                    <TriangleAlert />
+                    {t(lang, 'settings.gamepad.nonStandard')}
+                  </span>
+                )}
+              </li>
+            );
+          })}
+          <li className="gamepad-row is-connected">
+            <span className="gamepad-slot">{t(lang, 'settings.device.keyboard')}</span>
+            <span className="gamepad-name" />
+            <Segmented<DeviceTarget>
+              ariaLabel={t(lang, 'settings.device.keyboard')}
+              value={toTarget(devices.keyboard)}
+              options={DEVICE_TARGETS}
+              label={targetLabel}
+              onChange={v => setDevices({ ...devices, keyboard: fromTarget(v) })}
+            />
+          </li>
         </ul>
+        <div className="settings-row">
+          <button type="button" className="config-button" onClick={() => setDevices(swapAssignment(devices))}>
+            <ArrowLeftRight />
+            {t(lang, 'settings.device.swap')}
+          </button>
+        </div>
+        {unassigned.map(r => (
+          <p key={r} className="form-warning" role="status">
+            {t(lang, 'settings.device.unassigned', { robot: robotLabel(r) })}
+          </p>
+        ))}
+        <p className="settings-note">{t(lang, 'settings.device.hint')}</p>
+        <p className="settings-note">
+          {t(lang, 'settings.input.applyNote')}
+          {pendingDevices && <span className="settings-pending">{t(lang, 'settings.input.pending')}</span>}
+        </p>
       </Section>
 
       <Section title={t(lang, 'settings.section.input')}>
@@ -130,12 +181,6 @@ export default function SettingsTab({
             </div>
           ))}
         </div>
-        <Toggle
-          checked={settings.keyboardEnabled}
-          onChange={v => onSettings({ keyboardEnabled: v })}
-          label={t(lang, 'settings.input.keyboard')}
-          hint={t(lang, 'settings.input.keyboardHint')}
-        />
         <p className="settings-note">
           {t(lang, 'settings.input.applyNote')}
           {pendingInput && <span className="settings-pending">{t(lang, 'settings.input.pending')}</span>}

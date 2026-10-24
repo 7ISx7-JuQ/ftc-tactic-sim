@@ -1,7 +1,7 @@
 // ============================================================
 // 입력 계층 설정 (명세서 3.6항)
-// 키 매핑 / 데드존 / 임계값 / 장치 배정을 한곳에 모은 파일.
-// 매핑 편집 GUI는 두지 않으므로 값을 바꿀 때는 이 파일만 수정한다.
+// 키 매핑 / 데드존 / 임계값 / 장치 배정 기본값을 한곳에 모은 파일.
+// 장치 → 로봇 배정은 SETTINGS 장치 구역에서 바꾼다 (18-2, 여기 값은 기본값). 키 매핑을 바꿀 때는 이 파일만 수정한다.
 // ============================================================
 
 export type RobotId = 'robot1' | 'robot2';
@@ -51,14 +51,42 @@ export const KEYBOARD_BINDINGS = {
   drop: 'Slash',
 } as const;
 
-// 개발자 디버그용 비공개 입력 (사용자 안내 없음). 정식 배포 시 false로 비활성화 가능
+// 키보드 주행 기본값: true면 기본 배정에서 키보드 → R2, false면 키보드 배정 없음
 export const KEYBOARD_ENABLED = true;
 
-// 장치 → 로봇 배정: 게임패드 슬롯(navigator.getGamepads() 인덱스) 0 → R1, 1 → R2, 키보드 → R2
-export const DEVICE_ASSIGNMENT: Readonly<{ gamepads: Readonly<Record<number, RobotId>>; keyboard: RobotId }> = {
+// 배정할 수 있는 게임패드 슬롯 (navigator.getGamepads() 인덱스, 18-2 확정: 0 / 1)
+export const GAMEPAD_SLOTS = [0, 1] as const;
+export type GamepadSlot = (typeof GAMEPAD_SLOTS)[number];
+
+// 장치 → 로봇 배정 (18-2): 장치마다 R1 / R2 / 없음(null). 한 로봇에 여러 장치 허용 (합성은 mergeTickControls).
+// 키보드 없음 = 키보드 주행 끔 (주행 키를 가로채지 않음, 단축키는 그대로)
+export interface DeviceAssignment {
+  readonly gamepads: Readonly<Record<GamepadSlot, RobotId | null>>;
+  readonly keyboard: RobotId | null;
+}
+
+// 기본 배정: 게임패드 슬롯 0 → R1, 1 → R2, 키보드 → R2
+export const DEVICE_ASSIGNMENT: DeviceAssignment = {
   gamepads: { 0: 'robot1', 1: 'robot2' },
-  keyboard: 'robot2',
+  keyboard: KEYBOARD_ENABLED ? 'robot2' : null,
 };
+
+/** 게임패드 슬롯(아무 인덱스)의 배정 로봇 — 배정할 수 없는 슬롯 / 배정 없음은 null */
+export function slotRobot(a: DeviceAssignment, slot: number): RobotId | null {
+  return (GAMEPAD_SLOTS as readonly number[]).includes(slot) ? a.gamepads[slot as GamepadSlot] : null;
+}
+
+const OTHER_ROBOT: Readonly<Record<RobotId, RobotId>> = { robot1: 'robot2', robot2: 'robot1' };
+
+/** 배정 바꾸기 (R1 ↔ R2): 모든 장치의 로봇을 서로 바꿈 (없음은 그대로) */
+export function swapAssignment(a: DeviceAssignment): DeviceAssignment {
+  const swap = (r: RobotId | null) => (r ? OTHER_ROBOT[r] : null);
+  return { gamepads: { 0: swap(a.gamepads[0]), 1: swap(a.gamepads[1]) }, keyboard: swap(a.keyboard) };
+}
+
+export function sameAssignment(a: DeviceAssignment, b: DeviceAssignment): boolean {
+  return a.keyboard === b.keyboard && GAMEPAD_SLOTS.every(s => a.gamepads[s] === b.gamepads[s]);
+}
 
 export const TRIGGER_THRESHOLD = 0.5; // LT / RT 눌림 판정 (value 0 ~ 1)
 export const DEADZONE_LEFT = 0.08;    // 좌스틱 원형 데드존 (크기 기준)

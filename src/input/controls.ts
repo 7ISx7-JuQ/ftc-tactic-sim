@@ -11,14 +11,14 @@ import {
   DEADZONE_LEFT,
   DEADZONE_RIGHT_X,
   DEVICE_ASSIGNMENT,
+  GAMEPAD_SLOTS,
   GAMEPAD_AXES,
   GAMEPAD_BUTTONS,
   KEYBOARD_BINDINGS,
-  KEYBOARD_ENABLED,
   QUANT_MAX,
   TRIGGER_THRESHOLD,
 } from './inputConfig';
-import type { ControlButton, DriveMode, GamepadAxisBinding, GamepadButtonBinding, RobotId } from './inputConfig';
+import type { ControlButton, DeviceAssignment, DriveMode, GamepadAxisBinding, GamepadButtonBinding, RobotId } from './inputConfig';
 
 // ============================================================
 // 1. 타입
@@ -200,17 +200,9 @@ export class ControlLatch {
 // 4. 장치 배정 / 합성
 // ============================================================
 
-// 로봇에 배정된 장치 (키보드 비활성화 시 제외)
-export function assignedDevices(
-  robot: RobotId,
-  assignment = DEVICE_ASSIGNMENT,
-  keyboardEnabled = KEYBOARD_ENABLED,
-): { gamepadSlots: number[]; keyboard: boolean } {
-  const gamepadSlots = Object.entries(assignment.gamepads)
-    .filter(([, id]) => id === robot)
-    .map(([slot]) => Number(slot))
-    .sort((a, b) => a - b);
-  return { gamepadSlots, keyboard: keyboardEnabled && assignment.keyboard === robot };
+// 로봇에 배정된 장치 (게임패드 슬롯 오름차순, 키보드 배정 없음 = 키보드 주행 끔)
+export function assignedDevices(robot: RobotId, assignment: DeviceAssignment = DEVICE_ASSIGNMENT): { gamepadSlots: number[]; keyboard: boolean } {
+  return { gamepadSlots: GAMEPAD_SLOTS.filter(slot => assignment.gamepads[slot] === robot), keyboard: assignment.keyboard === robot };
 }
 
 // 한 로봇에 배정된 여러 장치 합성: 축은 채널별로 절댓값이 큰 값(같으면 앞 장치), 유지형 버튼 OR, 토글 에지 OR

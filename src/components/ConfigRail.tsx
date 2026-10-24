@@ -52,7 +52,7 @@ export default function ConfigRail({
     ...status.gamepads.map(g =>
       t(lang, 'rail.gamepadSlot', {
         slot: g.slot,
-        robot: robotLabel(g.robot),
+        robot: g.robot ? robotLabel(g.robot) : t(lang, 'settings.device.none'),
         name: !g.connected ? t(lang, 'rail.gamepadEmpty') : g.standard ? (g.id ?? '') : t(lang, 'rail.gamepadNonStandard', { name: g.id ?? '' }),
       }),
     ),

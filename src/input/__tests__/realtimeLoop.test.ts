@@ -333,8 +333,18 @@ describe('실시간 루프 (명세서 3.6)', () => {
     c.reset();
     const v = c.consumeTick();
     assert(v.robot1.forward === 0 && v.robot2.forward === 0, 'reset clears all device levels');
-    const off = new LiveControlCollector(DEVICE_ASSIGNMENT, false);
+    const off = new LiveControlCollector({ ...DEVICE_ASSIGNMENT, keyboard: null });
     off.sampleKeyboard(new Set([KEYBOARD_BINDINGS.forward]));
-    assert(off.consumeTick().robot2.forward === 0, 'keyboard disabled -> ignored');
+    assert(off.consumeTick().robot2.forward === 0, 'keyboard None -> ignored');
+    // (18-2) 배정 바꾸기: 바꾸면 누적 입력을 비우고, 이후 샘플은 새 배정으로 합성 (배정 없는 패드는 무시)
+    const sw = new LiveControlCollector();
+    sw.sampleGamepad(0, pad([0, -1, 0, 0]));
+    sw.setAssignment({ gamepads: { 0: 'robot2', 1: null }, keyboard: 'robot1' });
+    assert(sw.consumeTick().robot2.forward === 0, 'assignment change clears latched input');
+    sw.sampleGamepad(0, pad([0, -1, 0, 0]));
+    sw.sampleGamepad(1, pad([0, -1, 0, 0]));
+    sw.sampleKeyboard(new Set([KEYBOARD_BINDINGS.turnRight]));
+    const st = sw.consumeTick();
+    assert(st.robot2.forward === 1 && st.robot1.forward === 0 && st.robot1.turn === 1 && st.robot2.turn === 0, 'pad 0 -> R2, pad 1 unassigned (ignored), keyboard -> R1');
   });
 });

@@ -3,7 +3,7 @@ import { fixedRateShotJudge } from '../../core/ballistics';
 import { createIntakeZonePreset } from '../../core/collision';
 import type { DeepReadonly, RobotConfig, ScenarioConfig, ShotProbabilityResolver, TimelineFrame } from '../../core/types';
 import type { BrowserInputEnv, GamepadLike } from '../../input/browserInput';
-import { KEYBOARD_BINDINGS } from '../../input/inputConfig';
+import { DEVICE_ASSIGNMENT, KEYBOARD_BINDINGS, swapAssignment } from '../../input/inputConfig';
 import type { FrameScheduler } from '../../input/realtimeLoop';
 import { DEFAULT_RENDER_OPTIONS } from '../../renderer/renderOptions';
 import { VIEW_ANIMATION_MS, viewAngle } from '../../renderer/viewTransform';
@@ -34,6 +34,7 @@ vi.mock('../../renderer/sceneRenderer', async importOriginal => {
   };
 });
 
+const NO_KEYBOARD = { ...DEVICE_ASSIGNMENT, keyboard: null };
 // 각 검증은 메시지와 함께 expect로 확인 (실패 시 어떤 조건이 깨졌는지 메시지로 표시)
 const assert = (c: boolean, m: string) => {
   expect(c, m).toBe(true);
@@ -521,16 +522,16 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     h.dispose();
   });
 
-  it('H. 입력 출처 / 조작 모드 / 키보드 / 기본 보기 (09-8b): 다음 START · RESUME · BRANCH부터, 녹화 덧입히기', () => {
+  it('H. 입력 출처 / 조작 모드 / 키보드 배정 / 기본 보기 (09-8b): 다음 START · RESUME · BRANCH부터, 녹화 덧입히기', () => {
     const { h, frames, win } = setup();
     // 경기 전: AUTO 예상 (패드 없음 + 키보드 켬 → R1 NONE, R2 LIVE), REPLAY / 진행 중 선택 불가
     let input = h.status().input;
     assert(input.choices.robot1 === 'AUTO' && input.autoPreview.robot1 === 'NONE' && input.autoPreview.robot2 === 'LIVE', 'AUTO preview before the match');
     assert(!h.setSourceChoice('robot2', 'REPLAY'), 'REPLAY not selectable before the match');
-    // 키보드를 끄면 AUTO 예상도 바뀜 (R2 → NONE), 다시 켬
-    h.setKeyboardEnabled(false);
-    assert(h.status().input.autoPreview.robot2 === 'NONE', 'keyboard off -> R2 AUTO resolves to NONE');
-    h.setKeyboardEnabled(true);
+    // 키보드 배정을 없애면 AUTO 예상도 바뀜 (R2 → NONE), 다시 배정
+    h.setAssignment(NO_KEYBOARD);
+    assert(h.status().input.autoPreview.robot2 === 'NONE', 'keyboard None -> R2 AUTO resolves to NONE');
+    h.setAssignment(DEVICE_ASSIGNMENT);
     // 기본 보기 AUTO → 시작하면 관중석에서 회전 없음
     h.setDefaultView('AUDIENCE');
     h.start();
@@ -567,12 +568,12 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     h.stepView(10_000);
     h.setSourceChoice('robot2', 'LIVE');
     h.setDriveMode('robot2', 'ROBOT');
-    h.setKeyboardEnabled(false);
+    h.setAssignment(NO_KEYBOARD);
     input = h.status().input;
-    assert(input.modes.robot2 === 'ROBOT' && input.activeModes.robot2 === 'FIELD' && !input.keyboardEnabled && input.activeKeyboard, 'mode / keyboard pending until resume');
+    assert(input.modes.robot2 === 'ROBOT' && input.activeModes.robot2 === 'FIELD' && input.assignment.keyboard === null && input.activeAssignment.keyboard === 'robot2', 'mode / assignment pending until resume');
     h.resume();
     input = h.status().input;
-    assert(input.activeModes.robot2 === 'ROBOT' && !input.activeKeyboard && input.sources.robot2 === 'LIVE', 'resume applies mode / keyboard / source');
+    assert(input.activeModes.robot2 === 'ROBOT' && input.activeAssignment.keyboard === null && input.sources.robot2 === 'LIVE', 'resume applies mode / assignment / source');
     const xBefore = h.currentFrame().r2.x;
     win.dispatchEvent(key('keydown', KEYBOARD_BINDINGS.forward));
     frames.advance(600, 20);
@@ -585,6 +586,32 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     frames.advance(VIEW_ANIMATION_MS + 50);
     input = h.status().input;
     assert(h.status().phase === 'SETUP' && h.status().matchView === 'AUDIENCE' && input.choices.robot2 === 'AUTO', 'NEW: view back to the default, choices back to the pre-match choices');
+    h.dispose();
+  });
+
+  it('H4. (18-2) 장치 배정: 경기 전에는 바로 적용(장치 표시 / AUTO 예상), 경기 중에는 다음 재개부터 — 바꾸기 후 키보드가 R1을 조종', () => {
+    const { h, frames, win } = setup();
+    const swapped = swapAssignment(DEVICE_ASSIGNMENT);
+    h.setAssignment(swapped);
+    let st = h.status();
+    assert(st.gamepads[0].robot === 'robot2' && st.gamepads[1].robot === 'robot1' && st.input.activeAssignment.keyboard === 'robot1', 'before the match: applied at once (pad status follows)');
+    assert(st.input.autoPreview.robot1 === 'LIVE' && st.input.autoPreview.robot2 === 'NONE', 'AUTO preview: keyboard now drives R1');
+    h.setAssignment(DEVICE_ASSIGNMENT);
+    h.start();
+    frames.advance(VIEW_ANIMATION_MS + 50);
+    h.pause();
+    h.setAssignment(swapped);
+    st = h.status();
+    assert(st.input.assignment.keyboard === 'robot1' && st.input.activeAssignment.keyboard === 'robot2' && st.gamepads[0].robot === 'robot1', 'paused: pending until resume (pad status = applied)');
+    h.setSourceChoice('robot1', 'LIVE');
+    h.resume();
+    const [r1x, r2x] = [h.currentFrame().r1.x, h.currentFrame().r2.x];
+    win.dispatchEvent(key('keydown', KEYBOARD_BINDINGS.forward));
+    frames.advance(800, 20);
+    win.dispatchEvent(key('keyup', KEYBOARD_BINDINGS.forward));
+    st = h.status();
+    assert(st.input.activeAssignment.keyboard === 'robot1' && st.gamepads[0].robot === 'robot2', 'resume applies the swap');
+    assert(h.currentFrame().r1.x > r1x + 5 && Math.abs(h.currentFrame().r2.x - r2x) < 1e-9, 'W drives R1 after the swap, R2 stays');
     h.dispose();
   });
 
