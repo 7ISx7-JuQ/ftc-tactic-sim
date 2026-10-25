@@ -698,6 +698,14 @@
 .lift-toast.is-leaving {
   opacity: 0;
 }
+/* 19-2b-2: 알림 토스트 (경고 아님) */
+.lift-toast.is-info {
+  background: #1f2937;
+  border: 1px solid var(--panel-border);
+}
+.main-screen .lift-toast.is-info svg.lucide {
+  color: #22c55e;
+}
 .main-screen .lift-toast svg.lucide {
   width: calc(var(--u) * 18);
   height: calc(var(--u) * 18);
@@ -2355,8 +2363,21 @@
 }
 .result-exports {
   display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 8);
+}
+.result-export-row {
+  display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: calc(var(--u) * 8);
+}
+/* 19-2b-2: 브라우저 저장 줄 = 안내 글자(왼쪽, 줄바꿈) + SAVE MATCH */
+.result-save-notice {
+  flex: 1;
+  text-align: right;
+  font-size: calc(var(--u) * 12);
+  color: var(--text-muted);
 }
 .match-notice {
   pointer-events: auto;
@@ -2434,6 +2455,7 @@
 .branch-popover-footer {
   display: flex;
   justify-content: flex-end;
+  gap: calc(var(--u) * 8);
   margin-top: calc(var(--u) * 6);
   padding: calc(var(--u) * 6) calc(var(--u) * 4) 0;
   border-top: 1px solid var(--panel-border);

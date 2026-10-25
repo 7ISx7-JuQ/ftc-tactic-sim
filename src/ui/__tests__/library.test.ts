@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_DRAFT_VALUES } from '../../app/defaultSetup';
 import { createMemoryLibrary, newLibraryId } from '../../app/libraryStore';
 import type { LibraryItem } from '../../app/libraryStore';
+import type { BranchInfo } from '../../app/appController';
 import {
   LIBRARY_MATCH_MAX_ITEMS,
   LIBRARY_MAX_ITEMS,
@@ -11,6 +12,10 @@ import {
   libraryMaxItems,
   libraryName,
   libraryTeamText,
+  matchItemMeta,
+  matchItemName,
+  matchItemSummary,
+  parseMatchMeta,
   robotItemSummary,
   saveDecision,
   scenarioItemSummary,
@@ -83,6 +88,29 @@ describe('브라우저 안 목록 (19-2a)', () => {
     expect(setupItemSummary('en', { ...setupItem, text: '{' }, V)).toBeNull();
   });
 
+  it('C3. 경기 항목 (19-2b-2): 요약 = 상태 알림의 지금 가지, 목록 글자 왕복 / 틀린 글자 null, 설명 · 자동 이름(겹치면 (2))', () => {
+    const branch = (over: Partial<BranchInfo>): BranchInfo => ({ id: 1, number: 1, name: null, parentId: null, forkTick: 0, depth: 0, headTick: 6000, ended: true, totalScore: 38, ...over });
+    const tree = { alliance: 'RED' as const, currentBranchId: 3, branches: [branch({}), branch({ id: 3, number: 3, parentId: 1, forkTick: 1200, depth: 1, headTick: 3000, ended: false, totalScore: null })] };
+    const meta = matchItemMeta(tree)!;
+    expect(meta).toEqual({ alliance: 'RED', branchCount: 2, branch: { number: 3, name: null, main: false }, total: null, headTick: 3000 });
+    expect(matchItemMeta({ ...tree, currentBranchId: 9 })).toBeNull();
+    expect(parseMatchMeta(JSON.stringify(meta))).toEqual(meta);
+    expect(parseMatchMeta('{')).toBeNull();
+    expect(parseMatchMeta(JSON.stringify({ ...meta, alliance: 'GREEN' }))).toBeNull();
+    expect(parseMatchMeta(JSON.stringify({ ...meta, branch: { number: 1, name: 3, main: true } }))).toBeNull();
+    const saved = new Date(2026, 9, 25, 14, 32);
+    const matchItem = (m: object, name = 'm'): LibraryItem => ({ id: name, kind: 'MATCH', name, savedAt: saved.getTime(), text: JSON.stringify(m) });
+    expect(matchItemSummary('en', matchItem(meta))).toEqual({ text: 'RED · Branch 3 · to 1:00 · 2 branches', saved: 'saved 2026-10-25 14:32' });
+    const main = matchItemMeta({ ...tree, currentBranchId: 1, branches: [branch({ name: 'Plan A' })] })!;
+    expect(matchItemSummary('ko', matchItem(main))?.text).toBe('RED · Plan A · 38점');
+    expect(matchItemSummary('en', matchItem({ nope: 1 }))).toBeNull();
+    // 자동 이름: 시각 + 진영 + 점수 / 머리 시각, 같은 이름이면 (2), (3)
+    expect(matchItemName('en', main, saved, [])).toBe('2026-10-25 14:32 RED 38 pts');
+    expect(matchItemName('ko', meta, saved, [])).toBe('2026-10-25 14:32 RED 1:00까지');
+    const taken = [matchItem(main, '2026-10-25 14:32 RED 38 pts'), matchItem(main, '2026-10-25 14:32 red 38 PTS (2)')];
+    expect(matchItemName('en', main, saved, taken)).toBe('2026-10-25 14:32 RED 38 pts (3)');
+  });
+
   it('D. 메모리 저장소: 종류별 목록, 같은 id = 바꾸기, 삭제, id는 매번 다름', async () => {
     const store = createMemoryLibrary([{ ...item('r', 'robot', 1), kind: 'ROBOT' }]);
     expect(await store.list('SCENARIO')).toEqual([]);
@@ -92,6 +120,13 @@ describe('브라우저 안 목록 (19-2a)', () => {
     expect(await store.list('ROBOT')).toHaveLength(1);
     await store.delete('a');
     expect(await store.list('SCENARIO')).toEqual([]);
+    // 본문 (19-2b-2): 함께 쓰기 / 본문 없이 put = 유지 / 삭제 = 둘 다
+    const m: LibraryItem = { id: 'm', kind: 'MATCH', name: 'M', savedAt: 1, text: '{}' };
+    await store.put(m, 'recipe');
+    await store.put({ ...m, name: 'M2' });
+    expect(await store.body('m')).toBe('recipe');
+    await store.delete('m');
+    expect(await store.body('m')).toBeNull();
     expect(new Set(Array.from({ length: 20 }, newLibraryId)).size).toBe(20);
   });
 });

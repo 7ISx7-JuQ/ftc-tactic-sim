@@ -2,9 +2,10 @@
 // 값은 종료 프레임(scoreBreakdown / RP / TIP)만 읽는다 (3.2항 실시간 / 확정 분리). 표시 규칙은 src/ui/resultModel.ts.
 // 09-12 확정: 헤더 아래 두 로봇 칩(좌측 패널과 같은 팀 표시), 항목별 점수 + 한 줄 근거, RP 카드 = 조건 + 지금 값.
 // 10-4: 동작 줄 위에 EXPORT MATCH(경기 레시피 .json) / EXPORT SUMMARY(요약 .txt) 줄.
+// 19-2b-2: 그 줄에 SAVE MATCH(브라우저 안 경기 목록, 저장소가 있을 때만) + 저장 안내 글자.
 // 10-6: 가지가 2개 이상이면 진영 옆에 지금 가지 이름, 종료한 가지가 2개 이상이면 가지 비교 줄(점수, 지금 가지 강조, 최고 점수 표시).
 // 16-1: 가지 비교 칩을 누르면 그 가지로 전환 (팝업은 열린 채 그 가지의 결과로 바뀜, 지금 가지 칩은 그대로).
-import { Check, Download, FileText, GitFork, Trophy } from 'lucide-react';
+import { Check, Download, FileText, GitFork, Save, Trophy } from 'lucide-react';
 import type { MatchResult } from '../app/appController';
 import { ALLIANCE_COLORS } from '../renderer/canvasRenderer';
 import { t } from '../ui/i18n';
@@ -29,6 +30,8 @@ export default function ResultPopup({
   onReview,
   onRestart,
   onExportMatch,
+  onSaveMatch,
+  saveNotice,
   onExportSummary,
   onSwitchBranch,
   branchName,
@@ -41,6 +44,8 @@ export default function ResultPopup({
   onReview: () => void;
   onRestart: () => void;
   onExportMatch: () => void;   // 경기 파일 (.json, 10-4)
+  onSaveMatch?: () => void;    // 브라우저 안 경기 목록에 저장 (19-2b-2, 없으면 버튼 없음)
+  saveNotice: string | null;   // 저장 결과 안내
   onExportSummary: () => void; // 요약 (.txt, 10-4)
   onSwitchBranch: (id: number) => void; // 가지 비교 칩 → 그 가지로 전환 (16-1)
   branchName: string | null;    // 지금 가지 이름 (가지 2개 이상일 때만, 10-6)
@@ -138,14 +143,29 @@ export default function ResultPopup({
         )}
 
         <div className="result-exports">
-          <button type="button" className="config-button" onClick={onExportMatch}>
-            <Download />
-            {t(lang, 'result.exportMatch')}
-          </button>
-          <button type="button" className="config-button" onClick={onExportSummary}>
-            <FileText />
-            {t(lang, 'result.exportSummary')}
-          </button>
+          {onSaveMatch && (
+            <div className="result-export-row">
+              {saveNotice && (
+                <span className="result-save-notice" role="status">
+                  {saveNotice}
+                </span>
+              )}
+              <button type="button" className="config-button" onClick={onSaveMatch}>
+                <Save />
+                {t(lang, 'result.saveMatch')}
+              </button>
+            </div>
+          )}
+          <div className="result-export-row">
+            <button type="button" className="config-button" onClick={onExportMatch}>
+              <Download />
+              {t(lang, 'result.exportMatch')}
+            </button>
+            <button type="button" className="config-button" onClick={onExportSummary}>
+              <FileText />
+              {t(lang, 'result.exportSummary')}
+            </button>
+          </div>
         </div>
 
         <div className="result-actions">

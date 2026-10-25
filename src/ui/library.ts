@@ -2,14 +2,19 @@
 // - 항목 = 파일 대신 이름 붙여 두는 칸: 저장 = 프리셋 EXPORT(적용 값, buildPresetFile), 불러오기 = 프리셋 IMPORT(초안, parsePresetFile).
 // - 이름: 앞뒤 공백을 지우고 1 ~ LIBRARY_NAME_MAX자. 같은 종류 안에서 이름(대소문자 무시)이 같으면 같은 항목으로 보고 덮어쓸지 묻는다.
 // - 목록: 최근 저장 순, 종류마다 최대 libraryMaxItems개 (경기는 항목이 커서 LIBRARY_MATCH_MAX_ITEMS, 19-2b).
+// - 경기 항목 (19-2b-2): 목록 글자 = 요약 JSON(MatchItemMeta — 진영 / 가지 수 / 지금 가지 / 점수 · 머리 틱), 경기 파일 글자는 저장소 본문.
+//   이름 = "YYYY-MM-DD HH:mm {진영} {점수 / 머리 시각}"(같은 이름이 있으면 " (2)" …), 목록에서 바꿀 수 있다.
 
+import type { AppStatus } from '../app/appController';
 import type { LibraryItem, LibraryKind } from '../app/libraryStore';
+import { DT, MATCH_TICKS } from '../core/simulationEngine';
+import { branchLabel, currentBranchInfo } from './branchView';
 import type { DraftValues } from './configDraft';
 import { t } from './i18n';
 import type { Language } from './i18n';
 import { parsePresetFile } from './presetFile';
 import { readScenario } from './scenarioForm';
-import { formatLocalDateTime } from './units';
+import { formatLocalDateTime, formatMatchTime } from './units';
 
 export const LIBRARY_NAME_MAX = 40;
 export const LIBRARY_MAX_ITEMS = 50;
@@ -85,4 +90,58 @@ export function setupItemSummary(lang: Language, item: LibraryItem, defaults: Dr
     text: t(lang, 'library.setupSummary', { r1: libraryTeamText(lang, robot1), r2: libraryTeamText(lang, robot2), color: scenario.allianceColor }),
     saved: savedLine(lang, item),
   };
+}
+
+/** 경기 항목 요약 (목록 글자, 19-2b-2) */
+export interface MatchItemMeta {
+  alliance: 'RED' | 'BLUE';
+  branchCount: number;
+  branch: { number: number; name: string | null; main: boolean }; // 지금 가지
+  total: number | null; // 지금 가지가 끝났으면 최종 점수
+  headTick: number;     // 지금 가지 머리 틱
+}
+
+/** 상태 알림에서 경기 항목 요약 (지금 가지가 없으면 null) */
+export function matchItemMeta(status: Pick<AppStatus, 'alliance' | 'branches' | 'currentBranchId'>): MatchItemMeta | null {
+  const b = currentBranchInfo(status);
+  if (!b) return null;
+  return { alliance: status.alliance, branchCount: status.branches.length, branch: { number: b.number, name: b.name, main: b.parentId === null }, total: b.totalScore, headTick: b.headTick };
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+const isInt = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v);
+
+/** 목록 글자 → 경기 항목 요약 (틀리면 null) */
+export function parseMatchMeta(text: string): MatchItemMeta | null {
+  let v: unknown;
+  try {
+    v = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!isRecord(v) || !isRecord(v.branch)) return null;
+  const { alliance, branchCount, branch, total, headTick } = v;
+  if ((alliance !== 'RED' && alliance !== 'BLUE') || !isInt(branchCount) || branchCount < 1 || !isInt(headTick) || (total !== null && !isInt(total))) return null;
+  if (!isInt(branch.number) || (branch.name !== null && typeof branch.name !== 'string') || typeof branch.main !== 'boolean') return null;
+  return { alliance, branchCount, branch: { number: branch.number, name: branch.name, main: branch.main }, total, headTick };
+}
+
+const matchState = (lang: Language, meta: MatchItemMeta) =>
+  meta.total !== null ? t(lang, 'branch.score', { score: meta.total }) : t(lang, 'branch.head', { time: formatMatchTime((MATCH_TICKS - meta.headTick) * DT) });
+
+/** 경기: "{진영} · {지금 가지} · {점수 / 머리 시각}" (+ 가지가 2개 이상이면 " · 가지 n개") */
+export function matchItemSummary(lang: Language, item: LibraryItem): LibrarySummary | null {
+  const meta = parseMatchMeta(item.text);
+  if (!meta) return null;
+  const branch = branchLabel(lang, { name: meta.branch.name, number: meta.branch.number, parentId: meta.branch.main ? null : 0 });
+  const count = meta.branchCount >= 2 ? t(lang, 'library.matchBranches', { count: meta.branchCount }) : '';
+  return { text: `${t(lang, 'library.matchSummary', { color: meta.alliance, branch, state: matchState(lang, meta) })}${count}`, saved: savedLine(lang, item) };
+}
+
+/** 저장할 경기 이름: "YYYY-MM-DD HH:mm {진영} {점수 / 머리 시각}", 같은 이름이 있으면 " (2)", " (3)" … */
+export function matchItemName(lang: Language, meta: MatchItemMeta, date: Date, items: readonly LibraryItem[]): string {
+  const base = `${formatLocalDateTime(date)} ${meta.alliance} ${matchState(lang, meta)}`.slice(0, LIBRARY_NAME_MAX - 5);
+  let name = base;
+  for (let n = 2; findByName(items, name); n++) name = `${base} (${n})`;
+  return name;
 }

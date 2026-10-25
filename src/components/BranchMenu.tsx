@@ -2,8 +2,9 @@
 // 줄 = 깊이 들여쓰기 + 이름(누르면 전환) / 분기 시각 / 상태(종료 = 점수, 미종료 = 머리 시각) / 지금 가지 표시 / 이름 바꾸기 / 삭제(원본 제외).
 // 일시정지 / 복기 중에만 열리고, 열 수 없는 상태가 되면 닫힌다. 바깥 클릭 / Esc로 닫기. 삭제 확인창은 MainScreen.
 // 15-3: 목록 맨 아래 EXPORT MATCH = 분기 트리 전체 경기 파일 (끝나지 않은 가지도, 결과 팝업과 같은 내보내기)
+// 19-2b-2: 그 옆 SAVE MATCH = 같은 내용을 브라우저 안 경기 목록에 저장 (누르면 메뉴가 닫히고 토스트로 알림)
 import { useEffect, useRef, useState } from 'react';
-import { Check, ChevronUp, Download, GitFork, Pencil, Trash2 } from 'lucide-react';
+import { Check, ChevronUp, Download, GitFork, Pencil, Save, Trash2 } from 'lucide-react';
 import type { AppStatus } from '../app/appController';
 import { BRANCH_NAME_MAX_LENGTH } from '../app/branchTree';
 import { branchLabel, branchRows, currentBranchInfo } from '../ui/branchView';
@@ -15,6 +16,7 @@ export interface BranchActions {
   renameBranch: (id: number, name: string) => void;
   deleteBranch: (id: number) => void; // 확인창은 호출하는 쪽
   exportMatch: () => void;             // 트리 전체 경기 파일 내보내기 (15-3)
+  saveMatch?: () => void;              // 트리 전체를 브라우저 안 경기 목록에 저장 (19-2b-2, 없으면 저장소 없음)
 }
 
 export default function BranchMenu({ status, lang, enabled, actions }: { status: AppStatus; lang: Language; enabled: boolean; actions: BranchActions }) {
@@ -131,6 +133,19 @@ export default function BranchMenu({ status, lang, enabled, actions }: { status:
               <Download />
               {t(lang, 'result.exportMatch')}
             </button>
+            {actions.saveMatch && (
+              <button
+                type="button"
+                className="text-button branch-export"
+                onClick={() => {
+                  actions.saveMatch?.();
+                  setOpen(false);
+                }}
+              >
+                <Save />
+                {t(lang, 'result.saveMatch')}
+              </button>
+            )}
           </div>
         </div>
       )}

@@ -952,6 +952,66 @@ describe('경기 흐름', () => {
     }
   });
 
+  it('저장된 경기 (19-2b-2): 결과 팝업 / 가지 목록 SAVE MATCH = 트리 전체를 브라우저 안 목록에(자동 이름), SETTINGS 탭 LOAD = 경기 불러오기와 같은 흐름, 경기 중 LOAD 막힘', async () => {
+    const store = createMemoryLibrary();
+    const services: MainScreenServices = { ...SERVICES, createLibrary: () => store };
+    unmount();
+    mount(services);
+    const restore = interceptFilePick(
+      neutralRecipeText(
+        [
+          { number: 1, parent: null, forkTick: 0, name: null, headTick: 6000 },
+          { number: 2, parent: 1, forkTick: 3000, name: 'Plan B', headTick: 6000 },
+        ],
+        2,
+      ),
+    );
+    try {
+      await importMatchFile(2);
+      await expect.element(button('RESULT'), { timeout: 10000 }).toBeEnabled();
+      // 결과 팝업 SAVE MATCH → 팝업 안 안내, 항목 = 요약 / 본문 = 트리 전체
+      await userEvent.click(button('RESULT'));
+      await userEvent.click(button('SAVE MATCH'));
+      await expect.element(page.getByText(/^Saved ".+" in this browser \(SETTINGS → Saved matches\)$/)).toBeVisible();
+      expect(store.items.map(i => i.kind)).toEqual(['MATCH']);
+      const [first] = store.items;
+      expect(first.name).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2} (RED|BLUE) \d+ pts$/);
+      const body = JSON.parse(store.bodies.get(first.id)!);
+      expect(body.branches).toHaveLength(2);
+      expect(body.current).toBe(2);
+      await userEvent.click(button('REVIEW'));
+
+      // 경기 중: SETTINGS 탭 목록은 보이지만 LOAD 막힘
+      await userEvent.click(button('Open settings'));
+      await userEvent.click(page.getByRole('tab', { name: 'SETTINGS' }));
+      await expect.element(page.getByText(/· Plan B · \d+ pts · 2 branches$/)).toBeVisible();
+      await expect.element(button(`LOAD ${first.name}`)).toBeDisabled();
+      await userEvent.click(button('Close settings'));
+
+      // 가지 목록 SAVE MATCH → 메뉴가 닫히고 토스트, 같은 이름이면 (2)
+      await userEvent.click(page.getByRole('button', { name: /Plan B/ }));
+      await userEvent.click(button('SAVE MATCH'));
+      await expect.element(page.getByRole('menu')).not.toBeInTheDocument();
+      await expect.element(page.getByText(/^Saved ".+" in this browser/)).toBeVisible();
+      await expect.poll(() => store.items.length).toBe(2);
+
+      // NEW → 경기 전 → 저장된 경기 LOAD → 확인창(가지 수) → 재계산 → 복기
+      await userEvent.click(button('NEW'));
+      await userEvent.keyboard('{Enter}');
+      await expect.element(button('START'), { timeout: 5000 }).toBeEnabled();
+      await userEvent.click(button('Open settings'));
+      await userEvent.click(page.getByRole('tab', { name: 'SETTINGS' }));
+      await userEvent.click(button(`LOAD ${first.name}`));
+      await expect.poll(() => document.querySelector('[role="alertdialog"]')?.textContent ?? '').toContain('Loads 2 branches.');
+      await userEvent.keyboard('{Enter}');
+      await expect.element(button('RESULT'), { timeout: 10000 }).toBeEnabled();
+      expect(document.body.textContent).not.toContain('Results differ from the file');
+      await expect.element(page.getByRole('button', { name: /Plan B/ })).toBeVisible();
+    } finally {
+      restore();
+    }
+  });
+
   it('가지 전환 재계산 (16-2): 다른 가지는 프레임 없이 보관 → 전환 / 지금 가지 삭제 때 "가지 계산 중"을 먼저 보이고 다시 계산해 전환', async () => {
     // 1 (끝) ─(100) 2 (끝, 지금 가지) / ─(50) 3 (3000틱까지)
     const restore = interceptFilePick(

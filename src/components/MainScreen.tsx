@@ -37,17 +37,30 @@ import { buildMatchRecipe, parseMatchRecipe, recipeLoadTree, serializeMatchRecip
 import type { MatchRecipe, RecipeWarning } from '../app/matchRecipe';
 import { AutosaveScheduler, autosaveSignature, createBrowserAutosave } from '../app/matchAutosave';
 import type { AutosaveStore } from '../app/matchAutosave';
-import { createBrowserLibrary, newLibraryId } from '../app/libraryStore';
-import type { LibraryItem, LibraryStore } from '../app/libraryStore';
-import { findByName, libraryMaxItems, robotItemSummary, saveDecision, scenarioItemSummary, setupItemSummary, sortLibrary } from '../ui/library';
+import { LIBRARY_KINDS, createBrowserLibrary, newLibraryId } from '../app/libraryStore';
+import type { LibraryItem, LibraryKind, LibraryStore } from '../app/libraryStore';
+import {
+  findByName,
+  libraryMaxItems,
+  matchItemMeta,
+  matchItemName,
+  matchItemSummary,
+  robotItemSummary,
+  saveDecision,
+  scenarioItemSummary,
+  setupItemSummary,
+  sortLibrary,
+} from '../ui/library';
+import type { LibrarySummary } from '../ui/library';
 import LibrarySection from './LibrarySection';
 import type { LibrarySectionKind } from './LibrarySection';
 import { autosaveRestoreMessage, matchComputingText, matchFileName, matchImportConfirmMessage, matchImportErrorMessage, matchImportProgress, matchSummaryText, mismatchBanner, summaryFileName } from '../ui/matchFile';
 import type { MatchImportError } from '../ui/matchFile';
 import { t } from '../ui/i18n';
+import type { Language } from '../ui/i18n';
 import { DEFAULT_SETTINGS, browserSettingsStorage, loadStoredConfig, saveStoredConfig } from '../ui/settings';
 import { ROW_KIND, ROW_TABS, buildPresetFile, importOverwriteTabs, importPresetToDrafts, parsePresetFile, presetErrorMessage, presetFileName, presetLoadedNotice, tabNames } from '../ui/presetFile';
-import type { PresetError, PresetKind, PresetRow } from '../ui/presetFile';
+import type { PresetError, PresetRow } from '../ui/presetFile';
 import { downloadTextFile, pickTextFile } from '../ui/fileTransfer';
 import type { UiSettings } from '../ui/settings';
 import { fieldCanvasSize, layoutCssVars, robotLabel } from '../ui/mainScreenModel';
@@ -68,7 +81,7 @@ import {
   resetTabDraft,
   tabStatus,
 } from '../ui/configDraft';
-import type { ConfigDrafts, ConfigTab, DraftTab, TabStatus } from '../ui/configDraft';
+import type { ConfigDrafts, ConfigTab, DraftTab, DraftValues, TabStatus } from '../ui/configDraft';
 import ConfigPanel from './ConfigPanel';
 import ConfigRail from './ConfigRail';
 import ConfirmDialog from './ConfirmDialog';
@@ -143,9 +156,14 @@ const setupOf = setupFromDrafts;
 const TOAST_VISIBLE_MS = 1500; // 경고 토스트 표시 시간 (그 뒤 흐려지며 사라짐)
 const TOAST_FADE_MS = 300;
 const EDIT_TOAST_VISIBLE_MS = 2500; // 편집 안내 토스트 (놓지 않은 사유 — 읽을 시간을 조금 더, 14-1a)
-const PRESET_LIBRARY_KINDS: readonly PresetKind[] = ['SCENARIO', 'ROBOT', 'SETUP']; // 프리셋 파일과 같은 글자로 두는 목록 (19-2a · 19-2b)
-const LIBRARY_SECTION_KIND: Readonly<Record<PresetKind, LibrarySectionKind>> = { SCENARIO: 'scenario', ROBOT: 'robot', SETUP: 'setup' };
-const LIBRARY_SUMMARY = { SCENARIO: scenarioItemSummary, ROBOT: robotItemSummary, SETUP: setupItemSummary } as const;
+// 브라우저 안 목록 종류별 구역 문구 / 설명 줄 (19-2a · 19-2b)
+const LIBRARY_SECTION_KIND: Readonly<Record<LibraryKind, LibrarySectionKind>> = { SCENARIO: 'scenario', ROBOT: 'robot', SETUP: 'setup', MATCH: 'match' };
+const LIBRARY_SUMMARY: Readonly<Record<LibraryKind, (lang: Language, item: LibraryItem, defaults: DraftValues) => LibrarySummary | null>> = {
+  SCENARIO: scenarioItemSummary,
+  ROBOT: robotItemSummary,
+  SETUP: setupItemSummary,
+  MATCH: matchItemSummary,
+};
 // 설정 자동 보관 (09-8b): 앱 시작 시 한 번 읽음 (SETTINGS + 마지막으로 적용한 로봇 / 시나리오)
 const settingsStorage = browserSettingsStorage();
 const sameResults = (a: MatchLUTResults | null, b: MatchLUTResults | null) => a?.robot1 === b?.robot1 && a?.robot2 === b?.robot2;
@@ -183,7 +201,8 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
   const [configNotice, setConfigNotice] = useState<string | null>(null);
   // 브라우저 안 목록 (19-2a): 저장소(마운트 때 한 번) + 저장된 시나리오 (최근 저장 순)
   const libraryRef = useRef<LibraryStore | null>(null);
-  const [libraryItems, setLibraryItems] = useState<Readonly<Record<PresetKind, LibraryItem[]>> | null>(null); // null = 목록 없음 (저장소 없음)
+  const [matchSaveNotice, setMatchSaveNotice] = useState<{ endSeq: number; text: string } | null>(null); // 결과 팝업 안 경기 저장 안내 (19-2b-2)
+  const [libraryItems, setLibraryItems] = useState<Readonly<Record<LibraryKind, LibraryItem[]>> | null>(null); // null = 목록 없음 (저장소 없음)
   // 프리셋 불러오기 거부 사유 (그 줄 아래 빨간 글자, 10-2)
   const [presetError, setPresetError] = useState<{ row: PresetRow; error: PresetError } | null>(null);
   // 도움말 창 (v1.0.0): 열면 진행 중인 경기 / 재생을 멈추고 단축키를 끔
@@ -333,12 +352,12 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
     // 웹폰트(Pretendard)가 늦게 도착하면 캔버스 글자(로봇 번호 / HIVE 알약)를 다시 그림
     let alive = true;
     void document.fonts?.ready.then(() => alive && controller.redraw());
-    // 저장된 시나리오 / 로봇 / 전체 설정 목록 (19-2a · 19-2b)
+    // 저장된 시나리오 / 로봇 / 전체 설정 / 경기 목록 (19-2a · 19-2b, 경기는 요약만 — 본문은 불러올 때)
     const library = servicesRef.current.createLibrary();
     libraryRef.current = library;
     if (library)
-      void Promise.all(PRESET_LIBRARY_KINDS.map(kind => library.list(kind))).then(
-        lists => alive && setLibraryItems(Object.fromEntries(PRESET_LIBRARY_KINDS.map((kind, i) => [kind, sortLibrary(lists[i])])) as Record<PresetKind, LibraryItem[]>),
+      void Promise.all(LIBRARY_KINDS.map(kind => library.list(kind))).then(
+        lists => alive && setLibraryItems(Object.fromEntries(LIBRARY_KINDS.map((kind, i) => [kind, sortLibrary(lists[i])])) as Record<LibraryKind, LibraryItem[]>),
       );
     // 자동 저장된 지난 경기가 있으면 복구 제안 (19-1, 확인창). 탭 숨김(자동 일시정지 뒤) / 페이지 닫힘에 예약 저장을 바로
     void autosave?.load().then(text => alive && text && offerRestoreRef.current(text));
@@ -461,8 +480,8 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
     setDrafts(result.drafts);
     setFieldEdit(result.edit);
   };
-  // 편집 안내 토스트 (놓지 않은 사유 등): 이전 편집 토스트를 바꾸고 약 2.5초 뒤 흐려지며 사라짐
-  const showEditToast = (text: string) => {
+  // 편집 안내 토스트 (놓지 않은 사유 등): 이전 편집 토스트를 바꾸고 약 2.5초 뒤 흐려지며 사라짐. info = 알림 모양 (경기 저장 결과, 19-2b-2)
+  const showEditToast = (text: string, info = false) => {
     const id = ++toastSeq.current;
     const timers = toastTimers.current;
     const later = (ms: number, fn: () => void) => {
@@ -472,7 +491,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
       }, ms);
       timers.add(handle);
     };
-    setToasts(list => [...list.filter(x => x.text === undefined), { id, text, leaving: false }]);
+    setToasts(list => [...list.filter(x => x.text === undefined), { id, text, info, leaving: false }]);
     later(EDIT_TOAST_VISIBLE_MS, () => setToasts(list => list.map(x => (x.id === id ? { ...x, leaving: true } : x))));
     later(EDIT_TOAST_VISIBLE_MS + TOAST_FADE_MS, () => setToasts(list => list.filter(x => x.id !== id)));
   };
@@ -523,16 +542,18 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
       saveStoredConfig(settingsStorage, { settings: next, applied: d.applied });
     });
   };
-  // ---------------- 저장된 시나리오 / 로봇 / 전체 설정 (19-2a · 19-2b): 파일 대신 브라우저 안 이름 붙인 칸 ----------------
+  // ---------------- 저장된 시나리오 / 로봇 / 전체 설정 / 경기 (19-2a · 19-2b): 파일 대신 브라우저 안 이름 붙인 칸 ----------------
   // 저장 = 그 줄의 프리셋 EXPORT(적용 값), 불러오기 = 그 줄의 프리셋 IMPORT(초안). 로봇 항목은 R1 / R2 공용이라 줄 = 지금 로봇 탭.
-  const refreshLibrary = (kind: PresetKind) =>
+  // 경기 = EXPORT MATCH와 같은 글자를 본문으로(자동 이름), 불러오기 = IMPORT MATCH와 같은 흐름 (row = null).
+  const refreshLibrary = (kind: LibraryKind) =>
     void libraryRef.current?.list(kind).then(items => setLibraryItems(current => current && { ...current, [kind]: sortLibrary(items) }));
   const putLibraryItem = (item: LibraryItem, notice: string) =>
     void libraryRef.current?.put(item).then(ok => {
       setConfigNotice(ok ? notice : t(lang, 'library.failed'));
-      refreshLibrary(item.kind as PresetKind);
+      refreshLibrary(item.kind);
     });
-  const saveToLibrary = (row: PresetRow, name: string) => {
+  const saveToLibrary = (row: PresetRow | null, name: string) => {
+    if (row === null) return;
     const kind = ROW_KIND[row];
     if (ROW_TABS[row].some(tab => tabStatus(drafts, tab) !== 'OK')) return;
     const text = buildPresetFile(row, drafts.applied);
@@ -550,8 +571,12 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
       if (ok) putLibraryItem({ ...item, name, savedAt: new Date().getTime(), text }, t(lang, 'library.saved', { name }));
     });
   };
-  const loadFromLibrary = (row: PresetRow, item: LibraryItem) => {
+  const loadFromLibrary = (row: PresetRow | null, item: LibraryItem) => {
     if (locked) return;
+    if (row === null) {
+      loadMatchFromLibrary(item);
+      return;
+    }
     const parsed = parsePresetFile(item.text, row, DEFAULT_DRAFT_VALUES);
     if (!parsed.ok) {
       setConfigNotice(t(lang, 'library.broken'));
@@ -570,8 +595,43 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
         if (ok) doLoad();
       });
   };
+  // 경기 저장 (결과 팝업 / 가지 목록): 트리 전체 = EXPORT MATCH와 같은 글자, 자동 이름. 알릴 글자를 돌려줌 (null = 저장할 경기 없음)
+  const saveMatchToLibrary = async (): Promise<string | null> => {
+    const library = libraryRef.current;
+    const src = c()?.recipeSource();
+    const meta = status && matchItemMeta(status);
+    if (!library || !libraryItems || !src || !meta) return null;
+    const items = libraryItems.MATCH;
+    const now = new Date();
+    const name = matchItemName(lang, meta, now, items);
+    if (saveDecision(items, name, libraryMaxItems('MATCH')).kind === 'FULL') return t(lang, 'library.full', { max: libraryMaxItems('MATCH') });
+    const body = serializeMatchRecipe(buildMatchRecipe({ setup: drafts.applied, ...src, createdAt: now }));
+    const ok = await library.put({ id: newLibraryId(), kind: 'MATCH', name, savedAt: now.getTime(), text: JSON.stringify(meta) }, body);
+    refreshLibrary('MATCH');
+    return ok ? t(lang, 'library.matchSaved', { name }) : t(lang, 'library.failed');
+  };
+  const saveMatchFromResult = () => {
+    const endSeq = status?.endSeq ?? 0;
+    void saveMatchToLibrary().then(text => text && setMatchSaveNotice({ endSeq, text }));
+  };
+  const saveMatchFromMenu = () => void saveMatchToLibrary().then(text => text && showEditToast(text, true));
+  // 경기 불러오기: 본문 → 경기 파일과 같은 해석 / 확인창 / 확률표 준비 / 재계산
+  const loadMatchFromLibrary = (item: LibraryItem) => {
+    if (matchImport) return;
+    setMatchImportError(null);
+    void libraryRef.current?.body(item.id).then(text => {
+      const parsed = text === null ? null : parseMatchRecipe(text, DEFAULT_DRAFT_VALUES);
+      if (!parsed?.ok) {
+        setConfigNotice(parsed ? `${t(lang, 'library.broken')} · ${matchImportErrorMessage(lang, parsed.error)}` : t(lang, 'library.broken'));
+        return;
+      }
+      void ask(matchImportConfirmMessage(lang, parsed.warnings, parsed.recipe.branches.length), t(lang, 'library.load')).then(ok => {
+        if (ok) beginMatchImport(parsed.recipe, parsed.warnings);
+      });
+    });
+  };
   const renameLibraryItem = (item: LibraryItem, name: string) => {
-    if (findByName(libraryItems?.[item.kind as PresetKind] ?? [], name, item.id)) {
+    if (findByName(libraryItems?.[item.kind] ?? [], name, item.id)) {
       setConfigNotice(t(lang, 'library.nameTaken', { name }));
       return;
     }
@@ -579,11 +639,11 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
   };
   const deleteLibraryItem = (item: LibraryItem) =>
     void ask(t(lang, 'confirm.libraryDelete', { name: item.name }), t(lang, 'library.delete')).then(ok => {
-      if (ok) void libraryRef.current?.delete(item.id).then(() => refreshLibrary(item.kind as PresetKind));
+      if (ok) void libraryRef.current?.delete(item.id).then(() => refreshLibrary(item.kind));
     });
-  /** 목록 구역 (저장소가 없으면 그리지 않음) */
-  const librarySection = (row: PresetRow) => {
-    const kind = ROW_KIND[row];
+  /** 목록 구역 (저장소가 없으면 그리지 않음, row = null이면 경기 목록) */
+  const librarySection = (row: PresetRow | null) => {
+    const kind = row === null ? 'MATCH' : ROW_KIND[row];
     const items = libraryItems?.[kind];
     if (!items) return null;
     const summarize = LIBRARY_SUMMARY[kind];
@@ -594,9 +654,9 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
         items={items}
         lang={lang}
         summary={item => summarize(lang, item, DEFAULT_DRAFT_VALUES)}
-        canSave={ROW_TABS[row].every(tab => statuses[tab] === 'OK')}
-        canLoad={!locked}
-        onSave={saveToLibrary}
+        canSave={row !== null && ROW_TABS[row].every(tab => statuses[tab] === 'OK')}
+        canLoad={!locked && (row !== null || !matchImport)}
+        onSave={row === null ? undefined : saveToLibrary}
         onLoad={loadFromLibrary}
         onRename={renameLibraryItem}
         onDelete={deleteLibraryItem}
@@ -1218,6 +1278,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
       });
     },
     exportMatch,
+    saveMatch: libraryItems ? saveMatchFromMenu : undefined,
   };
 
   // NEW: 진행 중이면 먼저 일시정지하고 확인, 취소하면 일시정지 상태로 남음 (09-7 확정)
@@ -1399,7 +1460,12 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
                   onMatchImport={importMatch}
                   onMatchCancel={cancelMatchImport}
                   readGamepadButtons={slot => c()?.gamepadButtons(slot) ?? null}
-                  library={librarySection('all')}
+                  library={
+                    <>
+                      {librarySection('all')}
+                      {librarySection(null)}
+                    </>
+                  }
                 />
               ) : configTab === 'robot1' || configTab === 'robot2' ? (
                 <RobotTab
@@ -1458,6 +1524,8 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
         <ResultPopup result={status.result} alliance={status.alliance} teams={{ robot1: drafts.applied.robot1, robot2: drafts.applied.robot2 }} lang={lang} onReview={() => c()?.closeResult()}
           onRestart={newMatch}
           onExportMatch={exportMatch}
+          onSaveMatch={libraryItems ? saveMatchFromResult : undefined}
+          saveNotice={matchSaveNotice?.endSeq === status.endSeq ? matchSaveNotice.text : null}
           onExportSummary={exportSummary}
           onSwitchBranch={switchBranch}
           branchName={shownBranchName(lang, status)}
