@@ -7,6 +7,8 @@
 // 13-3: 슈터 구성 선택(NONE / POLLEN_ONLY / SHARED / PER_PIECE, NECTAR 흡입 불가면 NONE / SHARED만) + 한 줄 설명, 슈터 카드
 // (주 슈터 / PER_PIECE의 NECTAR 슈터 — 같은 칸, NECTAR 카드는 스윗스팟 X / Y 포함), 좌우 오프셋, 리프트 주행 속도,
 // 투입 방향 구역 편집기(흡입 구역 편집기와 같은 ZoneEditor). NONE이면 슈터 칸 / 스윗스팟 구역을 숨긴다.
+// 19-2b: 맨 위에 저장된 로봇 목록 (library — 화면이 만들어 넘김, R1 / R2 공용).
+import type { ReactNode } from 'react';
 import { Copy, Crosshair, Map as MapIcon, Plus, Trash2 } from 'lucide-react';
 import { sweetSpotBasisCell } from '../core/ballistics';
 import { createIntakeZonePreset } from '../core/collision';
@@ -68,6 +70,7 @@ export interface RobotTabProps {
   /** 초안 편집: 새 프로필(없으면 값은 그대로) + 칸 키가 있으면 그 칸의 틀린 글자(null = 지움) + 함께 지울 칸 글자 */
   onEdit: (profile: RobotProfile | null, key: string | null, invalidText: string | null, clearKeys?: readonly string[]) => void;
   onCopy: () => void;
+  library?: ReactNode;                              // 저장된 로봇 목록 (19-2b, 탭 맨 위)
 }
 
 type MainFieldKey = Exclude<NumberFieldKey, `nectar.${string}`>;
@@ -99,7 +102,7 @@ const labelKey = (key: NumberFieldKey): MessageKey => LABELS[(key.startsWith('ne
 // 숨는 슈터 칸의 틀린 글자 키 (구성 / 형식을 바꿔 칸이 사라질 때 지움 — 보이지 않는 칸이 탭을 막지 않도록)
 const slotTextKeys = (slot: ShooterSlot): string[] => [...SHOOTER_FIELD_KEYS.map(k => shooterFieldKey(slot, k)), ...SWEET_SPOT_AXES.map(a => sweetSpotFieldKey(a, slot))];
 
-export default function RobotTab({ robotId, profile, fieldText, unit, lang, locked, canCopy, alliance, lut, appliedSetup, lutPending, onRetry, heatmapOn, onHeatmap, spotEditSlot, onSetOnField, onEdit, onCopy }: RobotTabProps) {
+export default function RobotTab({ robotId, profile, fieldText, unit, lang, locked, canCopy, alliance, lut, appliedSetup, lutPending, onRetry, heatmapOn, onHeatmap, spotEditSlot, onSetOnField, onEdit, onCopy, library }: RobotTabProps) {
   const other: RobotId = robotId === 'robot1' ? 'robot2' : 'robot1';
   const { config } = profile;
   const setup = config.shooterSetup;
@@ -256,6 +259,7 @@ export default function RobotTab({ robotId, profile, fieldText, unit, lang, lock
 
   return (
     <div className="settings-tab robot-tab">
+      {library}
       <RobotPreview profile={profile} lang={lang} />
       <Section title={t(lang, 'robot.section.team')}>
         <div className="form-grid">

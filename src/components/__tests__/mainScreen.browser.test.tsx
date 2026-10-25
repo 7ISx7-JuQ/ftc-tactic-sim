@@ -463,6 +463,65 @@ describe('config 창', () => {
     expect(store.items).toHaveLength(0);
   });
 
+  it('저장된 로봇 / 전체 설정 (19-2b): 로봇 목록 = 로봇 탭 맨 위(R1 / R2 공용, LOAD = 지금 로봇 초안), 전체 설정 = SETTINGS 탭(세 탭 적용 값 → 세 탭 초안), 다시 열어도 유지', async () => {
+    const store = createMemoryLibrary();
+    const services: MainScreenServices = { ...SERVICES, createLibrary: () => store };
+    unmount();
+    mount(services);
+    const openTab = async (tab: string, open = true) => {
+      if (open) await userEvent.click(button('Open settings'));
+      await userEvent.click(page.getByRole('tab', { name: new RegExp(`^${tab}`) })); // 적용 안 된 수정이 있으면 탭 이름 뒤에 표시가 붙음
+    };
+    const teamNumber = page.getByLabelText('Team number', { exact: true });
+    const nameInput = page.getByLabelText('Name', { exact: true });
+    await openTab('R1');
+    await expect.element(page.getByText('No saved robots yet')).toBeVisible();
+    await userEvent.fill(teamNumber, '12345');
+    await userEvent.fill(page.getByLabelText('Team name', { exact: true }), 'Bumblebots');
+    await userEvent.fill(nameInput, 'Worlds');
+    await expect.element(button('SAVE')).toBeDisabled(); // 적용 안 된 수정
+    await expect.element(page.getByText('APPLY this robot first: SAVE keeps the applied values')).toBeVisible();
+    await userEvent.click(button('APPLY'));
+    await userEvent.click(button('SAVE'));
+    await expect.element(page.getByText('Worlds', { exact: true })).toBeVisible();
+    await expect.element(page.getByText('#12345 Bumblebots · shooter: Shared', { exact: true })).toBeVisible();
+    expect(store.items.map(i => i.kind)).toEqual(['ROBOT']);
+
+    // R2 탭에도 같은 목록 → LOAD = R2 초안 → APPLY
+    await openTab('R2', false);
+    await expect.element(page.getByText('Worlds', { exact: true })).toBeVisible();
+    await userEvent.click(button('LOAD Worlds'));
+    await expect.element(teamNumber).toHaveValue('12345');
+    await expect.element(page.getByText('Loaded "Worlds" into the R2 draft. APPLY it to use')).toBeVisible();
+    await userEvent.click(button('APPLY'));
+
+    // 전체 설정 = SETTINGS 탭: 세 탭 적용 값 저장
+    await openTab('SETTINGS', false);
+    await expect.element(page.getByText('No saved setups yet')).toBeVisible();
+    await userEvent.fill(nameInput, 'Practice');
+    await userEvent.click(button('SAVE'));
+    await expect.element(page.getByText('R1 #12345 Bumblebots · R2 #12345 Bumblebots · RED', { exact: true })).toBeVisible();
+    expect(store.items.map(i => i.kind).sort()).toEqual(['ROBOT', 'SETUP']);
+
+    // R1을 바꿔 적용한 뒤 전체 설정 LOAD → R1 초안이 저장 값으로 (APPLY 필요)
+    await openTab('R1', false);
+    await userEvent.fill(teamNumber, '999');
+    await userEvent.click(button('APPLY'));
+    await openTab('SETTINGS', false);
+    await userEvent.click(button('LOAD Practice'));
+    await expect.element(page.getByText('Loaded "Practice" into the R1 / R2 / SCENARIO draft. APPLY it to use')).toBeVisible();
+    await openTab('R1', false);
+    await expect.element(teamNumber).toHaveValue('12345');
+    await expect.element(button('APPLY')).toBeEnabled();
+
+    unmount();
+    mount(services);
+    await openTab('R2');
+    await expect.element(page.getByText('Worlds', { exact: true })).toBeVisible();
+    await openTab('SETTINGS', false);
+    await expect.element(page.getByText('Practice', { exact: true })).toBeVisible();
+  });
+
   it('TIP 진행 목표 (14-3): 좌측 패널 TIP 목표 = 적용한 시나리오의 POLLINATOR 1 기준 (기본 4)', async () => {
     const tipTarget = () => document.querySelector('.tip-target')?.textContent?.trim();
     await expect.poll(tipTarget).toBe('/ 4');

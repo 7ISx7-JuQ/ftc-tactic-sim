@@ -39,14 +39,15 @@ import { AutosaveScheduler, autosaveSignature, createBrowserAutosave } from '../
 import type { AutosaveStore } from '../app/matchAutosave';
 import { createBrowserLibrary, newLibraryId } from '../app/libraryStore';
 import type { LibraryItem, LibraryStore } from '../app/libraryStore';
-import { LIBRARY_MAX_ITEMS, findByName, saveDecision, sortLibrary } from '../ui/library';
-import ScenarioLibrary from './ScenarioLibrary';
+import { findByName, libraryMaxItems, robotItemSummary, saveDecision, scenarioItemSummary, setupItemSummary, sortLibrary } from '../ui/library';
+import LibrarySection from './LibrarySection';
+import type { LibrarySectionKind } from './LibrarySection';
 import { autosaveRestoreMessage, matchComputingText, matchFileName, matchImportConfirmMessage, matchImportErrorMessage, matchImportProgress, matchSummaryText, mismatchBanner, summaryFileName } from '../ui/matchFile';
 import type { MatchImportError } from '../ui/matchFile';
 import { t } from '../ui/i18n';
 import { DEFAULT_SETTINGS, browserSettingsStorage, loadStoredConfig, saveStoredConfig } from '../ui/settings';
-import { buildPresetFile, importOverwriteTabs, importPresetToDrafts, parsePresetFile, presetErrorMessage, presetFileName, presetLoadedNotice, tabNames } from '../ui/presetFile';
-import type { PresetError, PresetRow } from '../ui/presetFile';
+import { ROW_KIND, ROW_TABS, buildPresetFile, importOverwriteTabs, importPresetToDrafts, parsePresetFile, presetErrorMessage, presetFileName, presetLoadedNotice, tabNames } from '../ui/presetFile';
+import type { PresetError, PresetKind, PresetRow } from '../ui/presetFile';
 import { downloadTextFile, pickTextFile } from '../ui/fileTransfer';
 import type { UiSettings } from '../ui/settings';
 import { fieldCanvasSize, layoutCssVars, robotLabel } from '../ui/mainScreenModel';
@@ -142,6 +143,9 @@ const setupOf = setupFromDrafts;
 const TOAST_VISIBLE_MS = 1500; // 경고 토스트 표시 시간 (그 뒤 흐려지며 사라짐)
 const TOAST_FADE_MS = 300;
 const EDIT_TOAST_VISIBLE_MS = 2500; // 편집 안내 토스트 (놓지 않은 사유 — 읽을 시간을 조금 더, 14-1a)
+const PRESET_LIBRARY_KINDS: readonly PresetKind[] = ['SCENARIO', 'ROBOT', 'SETUP']; // 프리셋 파일과 같은 글자로 두는 목록 (19-2a · 19-2b)
+const LIBRARY_SECTION_KIND: Readonly<Record<PresetKind, LibrarySectionKind>> = { SCENARIO: 'scenario', ROBOT: 'robot', SETUP: 'setup' };
+const LIBRARY_SUMMARY = { SCENARIO: scenarioItemSummary, ROBOT: robotItemSummary, SETUP: setupItemSummary } as const;
 // 설정 자동 보관 (09-8b): 앱 시작 시 한 번 읽음 (SETTINGS + 마지막으로 적용한 로봇 / 시나리오)
 const settingsStorage = browserSettingsStorage();
 const sameResults = (a: MatchLUTResults | null, b: MatchLUTResults | null) => a?.robot1 === b?.robot1 && a?.robot2 === b?.robot2;
@@ -179,7 +183,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
   const [configNotice, setConfigNotice] = useState<string | null>(null);
   // 브라우저 안 목록 (19-2a): 저장소(마운트 때 한 번) + 저장된 시나리오 (최근 저장 순)
   const libraryRef = useRef<LibraryStore | null>(null);
-  const [scenarioItems, setScenarioItems] = useState<LibraryItem[] | null>(null); // null = 목록 없음 (저장소 없음)
+  const [libraryItems, setLibraryItems] = useState<Readonly<Record<PresetKind, LibraryItem[]>> | null>(null); // null = 목록 없음 (저장소 없음)
   // 프리셋 불러오기 거부 사유 (그 줄 아래 빨간 글자, 10-2)
   const [presetError, setPresetError] = useState<{ row: PresetRow; error: PresetError } | null>(null);
   // 도움말 창 (v1.0.0): 열면 진행 중인 경기 / 재생을 멈추고 단축키를 끔
@@ -329,10 +333,13 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
     // 웹폰트(Pretendard)가 늦게 도착하면 캔버스 글자(로봇 번호 / HIVE 알약)를 다시 그림
     let alive = true;
     void document.fonts?.ready.then(() => alive && controller.redraw());
-    // 저장된 시나리오 목록 (19-2a)
+    // 저장된 시나리오 / 로봇 / 전체 설정 목록 (19-2a · 19-2b)
     const library = servicesRef.current.createLibrary();
     libraryRef.current = library;
-    void library?.list('SCENARIO').then(items => alive && setScenarioItems(sortLibrary(items)));
+    if (library)
+      void Promise.all(PRESET_LIBRARY_KINDS.map(kind => library.list(kind))).then(
+        lists => alive && setLibraryItems(Object.fromEntries(PRESET_LIBRARY_KINDS.map((kind, i) => [kind, sortLibrary(lists[i])])) as Record<PresetKind, LibraryItem[]>),
+      );
     // 자동 저장된 지난 경기가 있으면 복구 제안 (19-1, 확인창). 탭 숨김(자동 일시정지 뒤) / 페이지 닫힘에 예약 저장을 바로
     void autosave?.load().then(text => alive && text && offerRestoreRef.current(text));
     document.addEventListener('visibilitychange', onVisibility);
@@ -516,61 +523,86 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
       saveStoredConfig(settingsStorage, { settings: next, applied: d.applied });
     });
   };
-  // ---------------- 저장된 시나리오 (19-2a): 파일 대신 브라우저 안 이름 붙인 칸 — 저장 = EXPORT(적용 값), 불러오기 = IMPORT(초안) ----------------
-  const refreshScenarioLibrary = () => void libraryRef.current?.list('SCENARIO').then(items => setScenarioItems(sortLibrary(items)));
-  const putScenarioItem = (item: LibraryItem, notice: string) =>
+  // ---------------- 저장된 시나리오 / 로봇 / 전체 설정 (19-2a · 19-2b): 파일 대신 브라우저 안 이름 붙인 칸 ----------------
+  // 저장 = 그 줄의 프리셋 EXPORT(적용 값), 불러오기 = 그 줄의 프리셋 IMPORT(초안). 로봇 항목은 R1 / R2 공용이라 줄 = 지금 로봇 탭.
+  const refreshLibrary = (kind: PresetKind) =>
+    void libraryRef.current?.list(kind).then(items => setLibraryItems(current => current && { ...current, [kind]: sortLibrary(items) }));
+  const putLibraryItem = (item: LibraryItem, notice: string) =>
     void libraryRef.current?.put(item).then(ok => {
       setConfigNotice(ok ? notice : t(lang, 'library.failed'));
-      refreshScenarioLibrary();
+      refreshLibrary(item.kind as PresetKind);
     });
-  const saveScenarioToLibrary = (name: string) => {
-    const items = scenarioItems ?? [];
-    if (tabStatus(drafts, 'scenario') !== 'OK') return;
-    const text = buildPresetFile('scenario', drafts.applied);
-    const decision = saveDecision(items, name);
+  const saveToLibrary = (row: PresetRow, name: string) => {
+    const kind = ROW_KIND[row];
+    if (ROW_TABS[row].some(tab => tabStatus(drafts, tab) !== 'OK')) return;
+    const text = buildPresetFile(row, drafts.applied);
+    const decision = saveDecision(libraryItems?.[kind] ?? [], name, libraryMaxItems(kind));
     if (decision.kind === 'FULL') {
-      setConfigNotice(t(lang, 'library.full', { max: LIBRARY_MAX_ITEMS }));
+      setConfigNotice(t(lang, 'library.full', { max: libraryMaxItems(kind) }));
       return;
     }
     if (decision.kind === 'NEW') {
-      putScenarioItem({ id: newLibraryId(), kind: 'SCENARIO', name, savedAt: new Date().getTime(), text }, t(lang, 'library.saved', { name }));
+      putLibraryItem({ id: newLibraryId(), kind, name, savedAt: new Date().getTime(), text }, t(lang, 'library.saved', { name }));
       return;
     }
     const { item } = decision;
     void ask(t(lang, 'confirm.libraryOverwrite', { name: item.name }), t(lang, 'library.saveAs')).then(ok => {
-      if (ok) putScenarioItem({ ...item, name, savedAt: new Date().getTime(), text }, t(lang, 'library.saved', { name }));
+      if (ok) putLibraryItem({ ...item, name, savedAt: new Date().getTime(), text }, t(lang, 'library.saved', { name }));
     });
   };
-  const loadScenarioFromLibrary = (item: LibraryItem) => {
+  const loadFromLibrary = (row: PresetRow, item: LibraryItem) => {
     if (locked) return;
-    const parsed = parsePresetFile(item.text, 'scenario', DEFAULT_DRAFT_VALUES);
+    const parsed = parsePresetFile(item.text, row, DEFAULT_DRAFT_VALUES);
     if (!parsed.ok) {
       setConfigNotice(t(lang, 'library.broken'));
       return;
     }
     cancelMatchImport();
-    // 시나리오 필드 편집 모드가 열려 있으면 되돌리기 기록에 남김 (commitScenario)
+    // 시나리오 필드 편집 모드가 열려 있으면 되돌리기 기록에 남김 (commitScenario, 모드가 없으면 setDrafts와 같음)
     const doLoad = () => {
       commitScenario(importPresetToDrafts(drafts, parsed.preset));
-      setConfigNotice(t(lang, 'library.loaded', { name: item.name }));
+      setConfigNotice(t(lang, 'library.loaded', { name: item.name, tabs: tabNames(lang, ROW_TABS[row]) }));
     };
-    if (importOverwriteTabs(drafts, 'scenario').length === 0) doLoad();
+    const overwrite = importOverwriteTabs(drafts, row);
+    if (overwrite.length === 0) doLoad();
     else
-      void ask(t(lang, 'confirm.importOverwrite', { tabs: tabNames(lang, ['scenario']) }), t(lang, 'library.load')).then(ok => {
+      void ask(t(lang, 'confirm.importOverwrite', { tabs: tabNames(lang, overwrite) }), t(lang, 'library.load')).then(ok => {
         if (ok) doLoad();
       });
   };
-  const renameScenarioItem = (item: LibraryItem, name: string) => {
-    if (findByName(scenarioItems ?? [], name, item.id)) {
+  const renameLibraryItem = (item: LibraryItem, name: string) => {
+    if (findByName(libraryItems?.[item.kind as PresetKind] ?? [], name, item.id)) {
       setConfigNotice(t(lang, 'library.nameTaken', { name }));
       return;
     }
-    putScenarioItem({ ...item, name }, t(lang, 'library.saved', { name }));
+    putLibraryItem({ ...item, name }, t(lang, 'library.saved', { name }));
   };
-  const deleteScenarioItem = (item: LibraryItem) =>
+  const deleteLibraryItem = (item: LibraryItem) =>
     void ask(t(lang, 'confirm.libraryDelete', { name: item.name }), t(lang, 'library.delete')).then(ok => {
-      if (ok) void libraryRef.current?.delete(item.id).then(refreshScenarioLibrary);
+      if (ok) void libraryRef.current?.delete(item.id).then(() => refreshLibrary(item.kind as PresetKind));
     });
+  /** 목록 구역 (저장소가 없으면 그리지 않음) */
+  const librarySection = (row: PresetRow) => {
+    const kind = ROW_KIND[row];
+    const items = libraryItems?.[kind];
+    if (!items) return null;
+    const summarize = LIBRARY_SUMMARY[kind];
+    return (
+      <LibrarySection
+        kind={LIBRARY_SECTION_KIND[kind]}
+        row={row}
+        items={items}
+        lang={lang}
+        summary={item => summarize(lang, item, DEFAULT_DRAFT_VALUES)}
+        canSave={ROW_TABS[row].every(tab => statuses[tab] === 'OK')}
+        canLoad={!locked}
+        onSave={saveToLibrary}
+        onLoad={loadFromLibrary}
+        onRename={renameLibraryItem}
+        onDelete={deleteLibraryItem}
+      />
+    );
+  };
 
   // ---------------- 프리셋 파일 (10-2): EXPORT = 적용 값 → 파일(언제나), IMPORT = 파일 → 초안(경기 전만, APPLY는 각 탭) ----------------
   const exportPreset = (row: PresetRow) => {
@@ -1367,6 +1399,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
                   onMatchImport={importMatch}
                   onMatchCancel={cancelMatchImport}
                   readGamepadButtons={slot => c()?.gamepadButtons(slot) ?? null}
+                  library={librarySection('all')}
                 />
               ) : configTab === 'robot1' || configTab === 'robot2' ? (
                 <RobotTab
@@ -1393,6 +1426,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
                   }}
                   onEdit={editRobot(configTab)}
                   onCopy={() => copyRobot(configTab)}
+                  library={librarySection(configTab)}
                 />
               ) : configTab === 'scenario' ? (
                 <ScenarioTab
@@ -1406,21 +1440,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
                   locked={locked}
                   onEdit={editScenario}
                   onReroll={rerollScenarioSeed}
-                  library={
-                    scenarioItems && (
-                      <ScenarioLibrary
-                        items={scenarioItems}
-                        lang={lang}
-                        defaults={DEFAULT_DRAFT_VALUES}
-                        canSave={statuses.scenario === 'OK'}
-                        canLoad={!locked}
-                        onSave={saveScenarioToLibrary}
-                        onLoad={loadScenarioFromLibrary}
-                        onRename={renameScenarioItem}
-                        onDelete={deleteScenarioItem}
-                      />
-                    )
-                  }
+                  library={librarySection('scenario')}
                   fieldEditOn={!!scenarioEdit}
                   onEditOnField={() => {
                     clearEditPointer();

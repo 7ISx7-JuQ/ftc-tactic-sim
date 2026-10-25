@@ -1,22 +1,28 @@
-// 저장된 시나리오 (명세서 3.8 시나리오 탭 저장된 시나리오, 19-2a): 시나리오 탭 맨 위. 이름 + 저장(적용 값) / 목록(최근 저장 순) —
+// 브라우저 안 목록 구역 (명세서 3.8 저장된 시나리오 / 로봇 / 전체 설정, 19-2a · 19-2b): 이름 + 저장(적용 값) / 목록(최근 저장 순) —
 // 줄마다 불러오기(초안, 경기 전만) / 이름 바꾸기(그 자리에서, Enter = 확인 · Esc = 취소) / 삭제(확인창은 화면이 띄움).
+// 시나리오 = 시나리오 탭 맨 위, 로봇 = 로봇 탭 맨 위(R1 / R2 공용), 전체 설정 = SETTINGS 탭. 종류별 문구 / 설명 줄만 다르다.
 import { useState } from 'react';
 import { FolderOpen, Pencil, Save, Trash2 } from 'lucide-react';
 import type { LibraryItem } from '../app/libraryStore';
-import type { DraftValues } from '../ui/configDraft';
 import { t } from '../ui/i18n';
 import type { Language } from '../ui/i18n';
-import { LIBRARY_NAME_MAX, libraryName, scenarioItemSummary } from '../ui/library';
+import { LIBRARY_NAME_MAX, libraryName } from '../ui/library';
+import type { LibrarySummary } from '../ui/library';
+import type { PresetRow } from '../ui/presetFile';
 import { Section } from './FormControls';
 
-export default function ScenarioLibrary({ items, lang, defaults, canSave, canLoad, onSave, onLoad, onRename, onDelete }: {
+export type LibrarySectionKind = 'scenario' | 'robot' | 'setup';
+
+export default function LibrarySection({ kind, row, items, lang, summary: summarize, canSave, canLoad, onSave, onLoad, onRename, onDelete }: {
+  kind: LibrarySectionKind;       // 문구 종류
+  row: PresetRow;                 // 저장 / 불러오기 대상 줄 (로봇 = 지금 로봇 탭) — 처리 함수에 그대로 넘김
   items: readonly LibraryItem[];  // 최근 저장 순
   lang: Language;
-  defaults: DraftValues;          // 한 줄 설명 해석용
-  canSave: boolean;               // 시나리오 탭에 적용 안 된 수정 / 틀린 입력이 없음 (저장 = 적용 값)
+  summary: (item: LibraryItem) => LibrarySummary | null; // 설명 두 줄 (null = 읽을 수 없는 항목)
+  canSave: boolean;               // 저장할 탭에 적용 안 된 수정 / 틀린 입력이 없음 (저장 = 적용 값)
   canLoad: boolean;               // 경기 전 (초안은 경기 전에만 편집)
-  onSave: (name: string) => void;
-  onLoad: (item: LibraryItem) => void;
+  onSave: (row: PresetRow, name: string) => void;
+  onLoad: (row: PresetRow, item: LibraryItem) => void;
   onRename: (item: LibraryItem, name: string) => void;
   onDelete: (item: LibraryItem) => void;
 }) {
@@ -25,7 +31,7 @@ export default function ScenarioLibrary({ items, lang, defaults, canSave, canLoa
   const valid = libraryName(name);
   const save = () => {
     if (!valid || !canSave) return;
-    onSave(valid);
+    onSave(row, valid);
     setName('');
   };
   const finishRename = (item: LibraryItem) => {
@@ -35,12 +41,12 @@ export default function ScenarioLibrary({ items, lang, defaults, canSave, canLoa
   };
 
   return (
-    <Section title={t(lang, 'library.scenario.title')}>
+    <Section title={t(lang, `library.${kind}.title`)}>
       <div className="library-save">
         <input
           className="form-input library-name-input"
           aria-label={t(lang, 'library.name')}
-          placeholder={t(lang, 'library.namePlaceholder')}
+          placeholder={t(lang, `library.${kind}.placeholder`)}
           maxLength={LIBRARY_NAME_MAX}
           value={name}
           onChange={e => setName(e.target.value)}
@@ -53,13 +59,13 @@ export default function ScenarioLibrary({ items, lang, defaults, canSave, canLoa
           {t(lang, 'library.saveAs')}
         </button>
       </div>
-      <p className="settings-note">{canSave ? t(lang, 'library.saveHint') : t(lang, 'library.applyFirst')}</p>
+      <p className="settings-note">{canSave ? t(lang, `library.${kind}.saveHint`) : t(lang, `library.${kind}.applyFirst`)}</p>
       {items.length === 0 ? (
-        <p className="settings-note">{t(lang, 'library.empty')}</p>
+        <p className="settings-note">{t(lang, `library.${kind}.empty`)}</p>
       ) : (
         <ul className="library-list">
           {items.map(item => {
-            const summary = scenarioItemSummary(lang, item, defaults);
+            const summary = summarize(item);
             const editing = renaming?.id === item.id;
             return (
               <li key={item.id} className="library-row">
@@ -87,7 +93,7 @@ export default function ScenarioLibrary({ items, lang, defaults, canSave, canLoa
                   <span className={`library-summary${summary ? '' : ' is-broken'}`}>{summary?.text ?? t(lang, 'library.broken')}</span>
                   {summary && <span className="library-summary">{summary.saved}</span>}
                 </div>
-                <button type="button" className="config-button" disabled={!canLoad || !summary} onClick={() => onLoad(item)} aria-label={`${t(lang, 'library.load')} ${item.name}`}>
+                <button type="button" className="config-button" disabled={!canLoad || !summary} onClick={() => onLoad(row, item)} aria-label={`${t(lang, 'library.load')} ${item.name}`}>
                   <FolderOpen />
                   {t(lang, 'library.load')}
                 </button>

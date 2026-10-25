@@ -5,7 +5,9 @@
 // 입력 출처 / 조작 모드 / 장치 배정은 다음 START / RESUME / BRANCH부터 경기에 적용된다 (컨트롤러가 보관, 배정은 경기 전이면 바로).
 // 10-2: 프리셋(PRESETS) — 줄별 EXPORT(적용 값 → 파일, 언제나) / IMPORT(파일 → 초안, 경기 전만), 거부 사유는 그 줄 아래 빨간 글자.
 // 10-4: MATCH 줄 — IMPORT(경기 파일, 경기 전만), 준비 중에는 진행 글자 + CANCEL. 내보내기는 결과 팝업에서.
+// 19-2b: PRESETS 위에 저장된 전체 설정 목록 (library — 화면이 만들어 넘김).
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import { ArrowLeftRight, Download, Gamepad2, TriangleAlert, Upload, X } from 'lucide-react';
 import type { AppStatus } from '../app/appController';
 import { MATCH_SOURCE_CHOICES, SETUP_SOURCE_CHOICES } from '../app/inputPlan';
@@ -56,6 +58,7 @@ export default function SettingsTab({
   onMatchImport,
   onMatchCancel,
   readGamepadButtons,
+  library,
 }: {
   status: AppStatus;
   lang: Language;
@@ -72,6 +75,7 @@ export default function SettingsTab({
   onMatchImport: () => void;
   onMatchCancel: () => void;
   readGamepadButtons: (slot: number) => boolean[] | null; // 18-3 버튼 지정 (원시 버튼 눌림, 연결 안 됨 = null)
+  library?: ReactNode;                                   // 저장된 전체 설정 목록 (19-2b, PRESETS 위)
 }) {
   const { input } = status;
   const inMatch = status.phase !== 'SETUP';
@@ -269,6 +273,7 @@ export default function SettingsTab({
         />
       </Section>
 
+      {library}
       <Section title={t(lang, 'settings.section.presets')}>
         <p className="settings-note">{t(lang, 'preset.hint')}</p>
         <ul className="preset-file-list">
