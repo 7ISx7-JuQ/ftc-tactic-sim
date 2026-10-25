@@ -648,6 +648,12 @@
   gap: calc(var(--u) * 8);
   pointer-events: none;
 }
+/* 필드 편집 모드: 위쪽 편집 안내 띠와 겹치지 않게 필드 아래쪽 중앙 */
+.field-notices.is-below {
+  top: auto;
+  bottom: calc(var(--u) * 16);
+  flex-direction: column-reverse;
+}
 .pause-banner {
   display: flex;
   align-items: center;
@@ -1788,6 +1794,11 @@
   height: calc(var(--u) * 28);
 }
 /* 시나리오 필드 편집 안내 띠: 두 줄로 줄여 필드 위쪽을 덜 가림, 끄는 중에는 흐리게 + 포인터 통과 (14-1b) */
+.field-edit-note {
+  margin: 0;
+  font-size: calc(var(--u) * 11);
+  color: var(--text-muted);
+}
 .field-edit-banner.is-compact {
   gap: calc(var(--u) * 4);
   padding: calc(var(--u) * 6) calc(var(--u) * 10);

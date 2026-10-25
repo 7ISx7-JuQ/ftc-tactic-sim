@@ -33,12 +33,12 @@ describe('브라우저 안 목록 (19-2a)', () => {
     expect(sortLibrary(items).map(i => i.id)).toEqual(['b', 'c', 'a']);
   });
 
-  it('C. 한 줄 설명: 진영 · 오토 TIP · 시드 · 저장 시각, 읽을 수 없는 항목은 null / 항목 글자 = 시나리오 프리셋 파일 (시드 포함)', () => {
+  it('C. 설명 두 줄: 진영 · 오토 TIP · 시드 / 저장 시각, 읽을 수 없는 항목은 null / 항목 글자 = 시나리오 프리셋 파일 (시드 포함)', () => {
     const applied = { ...V, scenario: { allianceColor: 'BLUE' as const, autoTipCount: 2, rngSeed: 4242 } };
     const text = buildPresetFile('scenario', applied);
     const saved = new Date(2026, 9, 24, 14, 5).getTime();
-    expect(scenarioItemSummary('en', item('x', 'Auto B', saved, text), V)).toBe('BLUE · auto TIP 2 · seed 4242 · saved 2026-10-24 14:05');
-    expect(scenarioItemSummary('ko', item('x', 'Auto B', saved, text), V)).toBe('BLUE · 오토 TIP 2 · 시드 4242 · 저장 2026-10-24 14:05');
+    expect(scenarioItemSummary('en', item('x', 'Auto B', saved, text), V)).toEqual({ text: 'BLUE · auto TIP 2 · seed 4242', saved: 'saved 2026-10-24 14:05' });
+    expect(scenarioItemSummary('ko', item('x', 'Auto B', saved, text), V)).toEqual({ text: 'BLUE · 오토 TIP 2 · 시드 4242', saved: '저장 2026-10-24 14:05' });
     const parsed = parsePresetFile(text, 'scenario', V);
     expect(parsed.ok && parsed.preset.values.scenario).toEqual(applied.scenario);
     expect(scenarioItemSummary('en', item('y', 'bad', saved, '{nope'), V)).toBeNull();

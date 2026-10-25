@@ -216,7 +216,7 @@ describe('config 창', () => {
     await expect.element(button('APPLY')).toBeDisabled();
   });
 
-  it('시나리오 필드 편집 바닥 기물 (14-1b): + POLLEN → 놓을 기물 없음 토스트, GARDEN을 줄이면 바닥 클릭으로 추가, 겹치면 거부, Esc = 추가만 끝, 필드 밖으로 끌어 빼기, 되돌리기', async () => {
+  it('시나리오 필드 편집 바닥 기물 (14-1b): + POLLEN → 놓을 기물 없음 토스트(필드 아래쪽), GARDEN을 줄이면 바닥 클릭으로 추가, 겹치면 거부, Esc = 추가만 끝, 필드 밖으로 끌어 빼기, 클릭 → 빼기 / Delete, 되돌리기', async () => {
     await userEvent.click(button('Open settings'));
     await userEvent.click(page.getByRole('tab', { name: 'SCENARIO' }));
     await userEvent.click(button('EDIT ON FIELD').first());
@@ -235,6 +235,8 @@ describe('config 창', () => {
     await expect.element(addPollen).toHaveAttribute('aria-pressed', 'true');
     await userEvent.click(field, { position: at(40, 40) });
     await expect.element(page.getByText(/^No POLLEN left for the floor/)).toBeVisible();
+    expect(document.querySelector('.field-notices')!.classList.contains('is-below')).toBe(true); // 편집 안내 띠와 겹치지 않게 필드 아래쪽
+    await expect.element(banner.getByText(/^To take a placed ball back, click it and REMOVE/)).toBeVisible();
     await expect.poll(summary).toMatch(/POLLEN \d+ \(placed 0/);
 
     // 아군 GARDEN 4 → 3 (바닥 POLLEN 1개) → 바닥 클릭으로 추가
@@ -254,6 +256,24 @@ describe('config 창', () => {
     await expect.element(banner).toBeVisible();
     // 필드 밖으로 끌어 빼기 → 되돌리기로 다시
     await userEvent.dragAndDrop(field, field, { sourcePosition: at(40, 40), targetPosition: at(-5, 40) });
+    await expect.poll(summary).toMatch(/POLLEN \d+ \(placed 0/);
+    await userEvent.click(banner.getByRole('button', { name: 'UNDO' }));
+    await expect.poll(summary).toMatch(/POLLEN \d+ \(placed 1/);
+    // 끌지 않고 클릭 = 그 기물 팝오버(빼기), 다시 클릭 = 닫기, 빼기 / Delete 키 = 빼기 (되돌리기 기록에 남음)
+    const piecePopover = page.getByRole('dialog', { name: 'POLLEN' });
+    await userEvent.click(field, { position: at(40, 40) });
+    await expect.element(piecePopover).toBeVisible();
+    await userEvent.click(field, { position: at(40, 40) });
+    await expect.element(piecePopover).not.toBeInTheDocument();
+    await userEvent.click(field, { position: at(40, 40) });
+    await userEvent.click(piecePopover.getByRole('button', { name: 'REMOVE' }));
+    await expect.poll(summary).toMatch(/POLLEN \d+ \(placed 0/);
+    await expect.element(piecePopover).not.toBeInTheDocument();
+    await userEvent.click(banner.getByRole('button', { name: 'UNDO' }));
+    await expect.poll(summary).toMatch(/POLLEN \d+ \(placed 1/);
+    await userEvent.click(field, { position: at(40, 40) });
+    await expect.element(piecePopover).toBeVisible();
+    await userEvent.keyboard('{Delete}');
     await expect.poll(summary).toMatch(/POLLEN \d+ \(placed 0/);
     await userEvent.click(banner.getByRole('button', { name: 'UNDO' }));
     await expect.poll(summary).toMatch(/POLLEN \d+ \(placed 1/);
@@ -396,7 +416,8 @@ describe('config 창', () => {
     await userEvent.fill(nameInput, '  Auto A ');
     await userEvent.click(button('SAVE'));
     await expect.element(page.getByText('Auto A', { exact: true })).toBeVisible();
-    await expect.element(page.getByText(new RegExp(`RED · auto TIP 0 · seed ${firstSeed} · saved`))).toBeVisible();
+    await expect.element(page.getByText(`RED · auto TIP 0 · seed ${firstSeed}`, { exact: true })).toBeVisible();
+    await expect.element(page.getByText(/^saved \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)).toBeVisible(); // 저장 시각은 둘째 줄
     await expect.element(nameInput).toHaveValue('');
 
     // 적용 안 된 수정 → SAVE 막힘 + 안내

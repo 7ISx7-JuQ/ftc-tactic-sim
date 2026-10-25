@@ -100,6 +100,7 @@ import {
   dragFloorPoint,
   editTab,
   finishFloorDrag,
+  removeFloorPiece,
   finishRobotDrag,
   floorPieceHitTest,
   floorRefusalText,
@@ -221,7 +222,8 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
   const spawnDragRef = useRef<{ robot: SpawnRobotId; part: SpawnPart; pointerStart: { x: number; y: number }; poseStart: RobotPose; before: ScenarioSnapshot; lastPose: RobotPose | null; popoverWasOpen: boolean } | null>(null);
   const [spawnActive, setSpawnActive] = useState<{ robot: SpawnRobotId; part: SpawnPart } | null>(null);
   // 바닥 기물 (14-1b): 끄는 중(누른 점 / 끌기 전 자리 · 스냅샷 / 마지막 자리 · 포인터), 강조, 추가 상태(켜진 기물) / 추가 미리보기
-  const floorDragRef = useRef<{ index: number; pointerStart: { x: number; y: number }; start: { x: number; y: number }; before: ScenarioSnapshot; lastPoint: { x: number; y: number } | null; lastPointer: { x: number; y: number } | null } | null>(null);
+  // popoverWasOpen: 누를 때 그 기물 팝오버가 열려 있었음 (끌지 않고 클릭 = 열기 / 닫기, 14-1b 보완)
+  const floorDragRef = useRef<{ index: number; pointerStart: { x: number; y: number }; start: { x: number; y: number }; before: ScenarioSnapshot; lastPoint: { x: number; y: number } | null; lastPointer: { x: number; y: number } | null; popoverWasOpen: boolean } | null>(null);
   const [floorActive, setFloorActive] = useState<ScenarioSceneUi['floorActive']>(null);
   const [addTool, setAddTool] = useState<'POLLEN' | 'NECTAR' | null>(null);
   const [addPreview, setAddPreview] = useState<ScenarioSceneUi['addPreview']>(null);
@@ -894,7 +896,15 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
     if (pieceHit !== null) {
       e.preventDefault();
       e.currentTarget.setPointerCapture(e.pointerId);
-      floorDragRef.current = { index: pieceHit, pointerStart: p, start: { x: pieces[pieceHit].x, y: pieces[pieceHit].y }, before: scenarioSnapshot(drafts), lastPoint: null, lastPointer: null };
+      floorDragRef.current = {
+        index: pieceHit,
+        pointerStart: p,
+        start: { x: pieces[pieceHit].x, y: pieces[pieceHit].y },
+        before: scenarioSnapshot(drafts),
+        lastPoint: null,
+        lastPointer: null,
+        popoverWasOpen: sameTarget(popover, { kind: 'FLOOR', index: pieceHit }),
+      };
       setFloorActive({ index: pieceHit, state: 'DRAG' });
       setSpawnActive(null);
       setAddPreview(null);
@@ -929,6 +939,26 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
     const target = scenarioTargetHitTest(drafts.draft.scenario.allianceColor, p);
     setPopover(current => (target && !sameTarget(current, target) ? target : null));
   };
+  // 바닥 기물 빼기 (14-1b 보완: 팝오버 빼기 / Delete 키) — 되돌리기 기록에 남김
+  const removeFloorAt = (index: number) => {
+    commitScenario(removeFloorPiece(drafts, index));
+    setPopover(null);
+    setFloorActive(null);
+  };
+  // 바닥 기물 팝오버가 열려 있으면 Delete / Backspace = 빼기 (14-1b 보완, 글자 입력칸에서는 글자 지우기, 확인창이 떠 있으면 확인창이 먼저)
+  useEffect(() => {
+    if (!scenarioEdit || popover?.kind !== 'FLOOR' || confirm) return;
+    const index = popover.index;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.key !== 'Delete' && e.key !== 'Backspace') || e.defaultPrevented) return;
+      const target = e.target;
+      if (target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return;
+      e.preventDefault();
+      removeFloorAt(index);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  });
   // 놓기: 그 로봇이 겹치는 자리면 끌기 전으로 되돌리고 사유 토스트, 아니면 확정 + 되돌리기 기록 (14-1a)
   const onFieldPointerUp = (e: ReactPointerEvent) => {
     // 바닥 기물: 필드 밖이면 빼기, 겹치는 자리면 끌기 전으로 + 사유, 아니면 확정 + 되돌리기 기록 (14-1b)
@@ -942,6 +972,10 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
       if (result.refusal) showEditToast(floorRefusalText(result.refusal, lang));
       else setFieldEdit(edit => (edit?.mode === 'SCENARIO' ? recordScenarioChange(edit, floorDrag.before, scenarioSnapshot(result.drafts)) : edit));
       setFloorActive(null);
+      // 끌지 않고 클릭한 기물 = 그 기물 팝오버(빼기) 열기 / 닫기. 0.1 in 반올림으로 자리가 그대로인 아주 작은 끌기도 클릭으로 본다
+      const { lastPoint, start } = floorDrag;
+      const clicked = !result.removed && (!lastPoint || (lastPoint.x === start.x && lastPoint.y === start.y));
+      if (clicked) setPopover(floorDrag.popoverWasOpen ? null : { kind: 'FLOOR', index: floorDrag.index });
       return;
     }
     const drag = spawnDragRef.current;
@@ -1213,6 +1247,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
           lang={lang}
           matchNotice={matchNotice && mismatchBanner(lang, matchNotice.comparison, matchNotice.warnings, matchNotice.branch && { label: branchLabel(lang, matchNotice.branch), others: matchNotice.branch.others })}
           onDismissMatchNotice={() => setMatchNotice(null)}
+          below={!!activeEdit}
         />
         {scenarioEdit && (
           <ScenarioEditBanner
@@ -1235,7 +1270,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
           />
         )}
         <div className="field-overlay" ref={overlayRef}>
-          {scenarioEdit && popover && status && (
+          {scenarioEdit && popover && status && (popover.kind !== 'FLOOR' || popover.index < (drafts.draft.scenario.floorPieces?.length ?? 0)) && (
             <ScenarioFieldPopover
               target={popover}
               scenario={drafts.draft.scenario}
@@ -1246,6 +1281,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
               at={popoverPlacement(popover)}
               lang={lang}
               onEdit={next => editScenario(next, null, null)}
+              onRemoveFloor={() => popover.kind === 'FLOOR' && removeFloorAt(popover.index)}
               onClose={() => setPopover(null)}
             />
           )}

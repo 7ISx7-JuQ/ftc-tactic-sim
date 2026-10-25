@@ -39,16 +39,14 @@ export function sortLibrary(items: readonly LibraryItem[]): LibraryItem[] {
   return [...items].sort((a, b) => b.savedAt - a.savedAt || a.name.localeCompare(b.name));
 }
 
-/** 시나리오 항목 한 줄 설명: "{진영} · 오토 TIP n · 시드 s · 저장 YYYY-MM-DD HH:mm", 읽을 수 없으면 null */
-export function scenarioItemSummary(lang: Language, item: LibraryItem, defaults: DraftValues): string | null {
+/** 시나리오 항목 설명 두 줄: "{진영} · 오토 TIP n · 시드 s" + "저장 YYYY-MM-DD HH:mm", 읽을 수 없으면 null */
+export function scenarioItemSummary(lang: Language, item: LibraryItem, defaults: DraftValues): { text: string; saved: string } | null {
   const parsed = parsePresetFile(item.text, 'scenario', defaults);
   const scenario = parsed.ok ? parsed.preset.values.scenario : undefined;
   if (!scenario) return null;
   const view = readScenario(scenario, defaults.robot1.config, defaults.robot2.config);
-  return t(lang, 'library.scenarioSummary', {
-    color: scenario.allianceColor,
-    tips: view.autoTipCount,
-    seed: view.seed,
-    time: formatLocalDateTime(new Date(item.savedAt)),
-  });
+  return {
+    text: t(lang, 'library.scenarioSummary', { color: scenario.allianceColor, tips: view.autoTipCount, seed: view.seed }),
+    saved: t(lang, 'library.savedAt', { time: formatLocalDateTime(new Date(item.savedAt)) }),
+  };
 }

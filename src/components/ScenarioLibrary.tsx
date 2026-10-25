@@ -84,7 +84,8 @@ export default function ScenarioLibrary({ items, lang, defaults, canSave, canLoa
                   ) : (
                     <span className="library-name">{item.name}</span>
                   )}
-                  <span className={`library-summary${summary ? '' : ' is-broken'}`}>{summary ?? t(lang, 'library.broken')}</span>
+                  <span className={`library-summary${summary ? '' : ' is-broken'}`}>{summary?.text ?? t(lang, 'library.broken')}</span>
+                  {summary && <span className="library-summary">{summary.saved}</span>}
                 </div>
                 <button type="button" className="config-button" disabled={!canLoad || !summary} onClick={() => onLoad(item)} aria-label={`${t(lang, 'library.load')} ${item.name}`}>
                   <FolderOpen />

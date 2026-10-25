@@ -423,6 +423,13 @@ export function moveFloorPiece(drafts: ConfigDrafts, index: number, at: Point): 
  * 바닥 기물 끌기를 놓음: 움직이지 않았으면 그대로, 필드 밖이면 뺌, 겹치는 자리면 끌기 전(before)으로 + 사유.
  * pointer = 놓은 포인터의 필드 좌표 (빼기 판정), lastPoint = 끌어서 정한 기물 자리
  */
+/** 지정 바닥 기물 빼기 (14-1b 보완: 클릭 팝오버의 빼기 / Delete 키 — 필드 밖으로 끌어 놓기와 같은 결과). 없는 번호면 그대로 */
+export function removeFloorPiece(drafts: ConfigDrafts, index: number): ConfigDrafts {
+  const pieces = drafts.draft.scenario.floorPieces ?? [];
+  if (index < 0 || index >= pieces.length) return drafts;
+  return withFloorPieces(drafts, pieces.filter((_, i) => i !== index));
+}
+
 export function finishFloorDrag(
   drafts: ConfigDrafts,
   index: number,
@@ -476,7 +483,13 @@ export function autoTipNectarSpots(values: DraftValues): Point[] {
 // ------------------------------------------------------------
 
 /** 팝오버 대상: 우리 HIVE(상향 셀 / 개수), FLOWER k(FLOWER_CIRCLES 순서), GARDEN 우리 / 상대, 로봇(적재물 / 오토 이동, 14-1d — 끌지 않고 클릭) */
-export type ScenarioTarget = { kind: 'HIVE' } | { kind: 'FLOWER'; index: number } | { kind: 'GARDEN'; side: 'ally' | 'opponent' } | { kind: 'ROBOT'; robot: RobotId };
+// FLOOR (14-1b 보완): 끌지 않고 클릭한 지정 바닥 기물 (floorPieces 번호) — 팝오버의 빼기 버튼 / Delete 키
+export type ScenarioTarget =
+  | { kind: 'HIVE' }
+  | { kind: 'FLOWER'; index: number }
+  | { kind: 'GARDEN'; side: 'ally' | 'opponent' }
+  | { kind: 'ROBOT'; robot: RobotId }
+  | { kind: 'FLOOR'; index: number };
 
 /** 대상 잡기 여유 (inch): FLOWER 원(반지름 2 in) / GARDEN(폭 2 in)은 작아서 넓혀 잡는다 */
 export const TARGET_HIT_SLOP = 3;
@@ -520,6 +533,13 @@ export function scenarioTargetAnchor(values: DraftValues, target: ScenarioTarget
     const y = (box.minY + box.maxY) / 2;
     return { x: (box.minX + box.maxX) / 2, y, below: y < half };
   }
+  if (target.kind === 'FLOOR') {
+    const piece = values.scenario.floorPieces?.[target.index];
+    if (!piece) return { x: half, y: half, below: true };
+    const r = PIECE_PHYSICS[piece.type].radius;
+    const below = piece.y < half;
+    return { x: piece.x, y: below ? piece.y + r : piece.y - r, below };
+  }
   if (target.kind === 'ROBOT') {
     const { pose, size } = spawnRobots(values)[target.robot];
     const r = Math.hypot(size.length, size.width) / 2;
@@ -535,7 +555,7 @@ export const sameTarget = (a: ScenarioTarget | null, b: ScenarioTarget | null): 
   (!!a &&
     !!b &&
     a.kind === b.kind &&
-    (a.kind !== 'FLOWER' || a.index === (b as { index: number }).index) &&
+    ((a.kind !== 'FLOWER' && a.kind !== 'FLOOR') || a.index === (b as { index: number }).index) &&
     (a.kind !== 'GARDEN' || a.side === (b as { side: string }).side) &&
     (a.kind !== 'ROBOT' || a.robot === (b as { robot: RobotId }).robot));
 
@@ -620,14 +640,15 @@ export function scenarioEditScene(values: DraftValues, active: { robot: SpawnRob
     gardenPieces: [...gardenPiecePositions(view.alliance, count(view.garden.ally)), ...gardenPiecePositions(opponent, count(view.garden.opponent))],
     active,
     floorPieces: view.floorPieces.map((p, k) => ({ ...p, bad: badFloor.has(k) })),
-    floorActive: ui.floorActive ?? null,
+    // 클릭한 바닥 기물(팝오버 FLOOR)은 바닥 기물 강조로 (렌더러의 대상 강조는 구조물 / 로봇만)
+    floorActive: ui.floorActive ?? (ui.target?.kind === 'FLOOR' ? { index: ui.target.index, state: 'HOVER' } : null),
     autoTipNectar: autoTipNectarSpots(values),
     addPreview: ui.addPreview ?? null,
     // 14-1c: FLOWER 게이지 / HIVE 상향 셀 내용 / NECTAR 재고 게이지 (엔진과 같이 범위로 자름), 강조 대상
     flowers: view.flowers.map(n => clampInt(n, FLOWER_MAX_START_PIECES)),
     hive: { upwardCell: view.hiveUpwardCell, nectar: clampInt(view.hiveNectar, NECTAR_IN_PLAY), pollen: clampInt(view.hivePollen, TOTAL_POLLEN) },
     stock: INITIAL_HUMAN_NECTAR_STOCK - clampInt(view.autoTipCount, INITIAL_HUMAN_NECTAR_STOCK),
-    target: ui.target ?? null,
+    target: ui.target && ui.target.kind !== 'FLOOR' ? ui.target : null,
     parkZone: autoMovementParks(view.autoMovement.robot1) || autoMovementParks(view.autoMovement.robot2),
   };
 }

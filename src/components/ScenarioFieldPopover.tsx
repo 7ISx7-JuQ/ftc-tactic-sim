@@ -1,10 +1,11 @@
 // 시나리오 필드 편집 팝오버 (명세서 3.8 필드 편집 모드, 14-1c): 필드에서 누른 대상 옆의 작은 창.
 // HIVE = 상향 셀 + 상향 셀 POLLEN / NECTAR 개수 + TIP 임계 안내, FLOWER k = POLLEN 개수, GARDEN 우리 / 상대 = POLLEN 개수,
 // 로봇(14-1d, 끌지 않고 클릭) = 적재물 칸(탭과 같은 순환) + 오토 이동 NONE / LEAVE / PARK / LEAVE_PARK + 그 로봇의 문제(빨강).
+// 바닥 기물(14-1b 보완, 끌지 않고 클릭) = 종류 + 빼기 버튼(Delete 키도 같음 — MainScreen이 처리).
 // 시나리오 탭과 같은 고치기 함수 / 범위 / 빨간 표시를 쓰고, 값은 탭과 같이 초안으로 (되돌리기 기록 포함 — MainScreen이 처리).
 // 위치: 캔버스와 같은 크기의 글자 층에서 대상 가운데 기준, 필드 위쪽 절반이면 아래로 / 아래쪽 절반이면 위로 펼치고, 필드 밖으로 나가지 않게 가로로 밀어 넣는다.
 import { useLayoutEffect, useRef } from 'react';
-import { X } from 'lucide-react';
+import { Trash2, X } from 'lucide-react';
 import { hiveTipPollenThreshold } from '../core/types';
 import type { ScenarioConfig } from '../core/types';
 import type { ScenarioTarget } from '../ui/fieldEdit';
@@ -31,6 +32,7 @@ export default function ScenarioFieldPopover({
   at,
   lang,
   onEdit,
+  onRemoveFloor,
   onClose,
 }: {
   target: ScenarioTarget;
@@ -42,6 +44,7 @@ export default function ScenarioFieldPopover({
   at: { leftPct: number; topPct: number; below: boolean }; // 대상 가운데의 장면 비율(%, 캔버스 크기 글자 층 기준), 아래로 펼침 여부
   lang: Language;
   onEdit: (scenario: ScenarioConfig) => void;
+  onRemoveFloor: () => void;          // 바닥 기물 팝오버의 빼기
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -66,7 +69,9 @@ export default function ScenarioFieldPopover({
         ? t(lang, 'scenario.flower', { n: target.index + 1 })
         : target.kind === 'GARDEN'
           ? t(lang, target.side === 'ally' ? 'scenario.gardenAlly' : 'scenario.gardenOpponent')
-          : robotLabel(target.robot, robots[target.robot].teamNumber);
+          : target.kind === 'FLOOR'
+            ? (scenario.floorPieces?.[target.index]?.type ?? '')
+            : robotLabel(target.robot, robots[target.robot].teamNumber);
   return (
     <div
       ref={ref}
@@ -97,6 +102,15 @@ export default function ScenarioFieldPopover({
             <Stepper label={t(lang, 'scenario.hiveNectar')} value={view.hiveNectar} min={0} max={COUNT_LIMITS.hiveNectar} invalid={red.has('hive')} lang={lang} onChange={v => onEdit(setHivePieces(scenario, { nectarCount: v }))} />
           </div>
           <p className="settings-note">{t(lang, 'scenario.tipThreshold', { nectarCount: view.hiveNectar, threshold: hiveTipPollenThreshold(view.hiveNectar) })}</p>
+        </div>
+      )}
+      {target.kind === 'FLOOR' && (
+        <div className="field-popover-section">
+          <button type="button" className="config-button" onClick={onRemoveFloor}>
+            <Trash2 />
+            {t(lang, 'edit.floorRemove')}
+          </button>
+          <span className="settings-note">{t(lang, 'edit.floorRemoveHint')}</span>
         </div>
       )}
       {target.kind === 'FLOWER' && (

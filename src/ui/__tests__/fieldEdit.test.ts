@@ -49,6 +49,7 @@ import {
   placeSpawn,
   recordScenarioChange,
   redoScenarioEdit,
+  removeFloorPiece,
   robotPlacementIssues,
   scenarioEditScene,
   scenarioSnapshot,
@@ -495,6 +496,26 @@ describe('시나리오 필드 편집 팝오버 대상 (14-1c)', () => {
     expect(hive.below).toBe(true);
     expect(hive.y).toBeCloseTo(91.475, 6);
     expect(hive.x).toBeCloseTo(59.25, 6);
+  });
+
+  it('V2. 바닥 기물 팝오버 / 빼기: 기준점 = 기물 가장자리(위쪽 절반이면 아래로), 같은 대상 = 같은 순번, 장면은 강조(HOVER)로만, 빼기는 그 기물만', () => {
+    const d = editDraft(initialDrafts(DEFAULT_DRAFT_VALUES), 'scenario', {
+      ...DEFAULT_DRAFT_VALUES.scenario,
+      floorPieces: [{ type: 'POLLEN', x: 40, y: 30 }, { type: 'NECTAR', x: 100, y: 110 }],
+    });
+    expect(scenarioTargetAnchor(d.draft, { kind: 'FLOOR', index: 0 })).toEqual({ x: 40, y: 31.4, below: true });
+    expect(scenarioTargetAnchor(d.draft, { kind: 'FLOOR', index: 1 })).toEqual({ x: 100, y: 108.2, below: false });
+    expect(scenarioTargetAnchor(d.draft, { kind: 'FLOOR', index: 5 })).toEqual({ x: 72, y: 72, below: true }); // 없는 기물
+    expect(sameTarget({ kind: 'FLOOR', index: 1 }, { kind: 'FLOOR', index: 1 })).toBe(true);
+    expect(sameTarget({ kind: 'FLOOR', index: 0 }, { kind: 'FLOOR', index: 1 })).toBe(false);
+    expect(sameTarget({ kind: 'FLOOR', index: 1 }, { kind: 'FLOWER', index: 1 })).toBe(false);
+    const scene = scenarioEditScene(d.draft, null, { target: { kind: 'FLOOR', index: 1 } });
+    expect(scene.floorActive).toEqual({ index: 1, state: 'HOVER' });
+    expect(scene.target).toBeNull();
+    const removed = removeFloorPiece(d, 0);
+    expect(removed.draft.scenario.floorPieces).toEqual([{ type: 'NECTAR', x: 100, y: 110 }]);
+    expect(removeFloorPiece(d, 2)).toBe(d);
+    expect(removeFloorPiece(d, -1)).toBe(d);
   });
 
   it('W. 장면: FLOWER 개수 / HIVE 상향 셀 · 개수 / 재고(5 − 오토 TIP), 범위 밖 값은 엔진처럼 자름, 강조 대상 전달', () => {

@@ -215,6 +215,7 @@ export function ScenarioEditBanner({
         </span>
         <span className="field-edit-esc">{t(lang, 'edit.escCancel')}</span>
       </div>
+      <p className="field-edit-note">{t(lang, 'edit.floor.removeHint')}</p>
       {issues.length > 0 && (
         <div className="field-edit-spot">
           {issues.map(text => (

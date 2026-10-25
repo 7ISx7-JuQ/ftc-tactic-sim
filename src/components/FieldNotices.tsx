@@ -1,6 +1,7 @@
 // 필드 위쪽 중앙 알림 (명세서 3.8 필드 영역, 09-7b): 자동 일시정지 배너(일시정지 동안 유지) + 경고 토스트(약 1.5초 후 흐려지며 사라짐)
 // 10-4: 불러온 경기의 체크섬 불일치 배너 (닫기 가능, NEW에서 사라짐)
 // 14-1a: 시나리오 필드 편집 안내 토스트 (놓지 않은 사유 등, 글자를 그대로 — 같은 모양)
+// 필드 편집 모드에서는 위쪽을 편집 안내 띠가 차지하므로 필드 아래쪽 중앙에 (below)
 import { CircleAlert, TriangleAlert, X } from 'lucide-react';
 import type { PauseReason } from '../input/realtimeLoop';
 import { t } from '../ui/i18n';
@@ -20,15 +21,17 @@ export default function FieldNotices({
   lang,
   matchNotice,
   onDismissMatchNotice,
+  below = false,
 }: {
   autoPauseReason: Exclude<PauseReason, 'USER'> | null;
   matchNotice: { title: string; hint: string } | null;
   onDismissMatchNotice: () => void;
   toasts: readonly ToastItem[];
   lang: Language;
+  below?: boolean;
 }) {
   return (
-    <div className="field-notices" aria-live="polite">
+    <div className={`field-notices${below ? ' is-below' : ''}`} aria-live="polite">
       {matchNotice && (
         <div className="pause-banner match-notice" role="status">
           <TriangleAlert />
