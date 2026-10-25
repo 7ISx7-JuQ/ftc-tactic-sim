@@ -13,6 +13,7 @@ import type { LUTWorkerLike } from '../../workers/lutManager';
 import { DEFAULT_DRAFT_VALUES, setupFromDrafts } from '../../app/defaultSetup';
 import { buildMatchRecipe, serializeMatchRecipe, timelineRecord } from '../../app/matchRecipe';
 import { createMemoryAutosave } from '../../app/matchAutosave';
+import { createMemoryLibrary } from '../../app/libraryStore';
 import { MATCH_TICKS, SimulationEngine } from '../../core/simulationEngine';
 import '../../index.css';
 
@@ -27,6 +28,7 @@ const SERVICES: MainScreenServices = {
   createLUTWorker: idleWorker,
   createLUTCache: () => ({ get: async () => READY_ENTRY, put: async () => {} }),
   createAutosave: () => null, // 다른 테스트끼리 자동 저장이 이어지지 않게 (19-1 테스트만 메모리 저장소)
+  createLibrary: () => null, // 저장된 시나리오 목록도 테스트마다 따로 (19-2a 테스트만 메모리 저장소)
 };
 
 let container: HTMLDivElement | null = null;
@@ -374,6 +376,70 @@ describe('config 창', () => {
     await expect.element(button('APPLY')).toBeEnabled();
     await userEvent.click(button('APPLY'));
     await expect.element(button('APPLY')).toBeDisabled();
+  });
+
+  it('저장된 시나리오 (19-2a): 이름 + SAVE = 적용 값(시드 포함), 적용 안 된 수정이면 SAVE 막힘, LOAD = 초안(덮어쓰기 확인) → APPLY, 같은 이름 = 덮어쓰기 확인, 이름 바꾸기 / 삭제, 다시 열어도 유지', async () => {
+    const store = createMemoryLibrary();
+    const services: MainScreenServices = { ...SERVICES, createLibrary: () => store };
+    unmount();
+    mount(services);
+    const openScenario = async () => {
+      await userEvent.click(button('Open settings'));
+      await userEvent.click(page.getByRole('tab', { name: 'SCENARIO' }));
+    };
+    await openScenario();
+    await expect.element(page.getByText('No saved scenarios yet')).toBeVisible();
+    const seed = page.getByLabelText('Seed', { exact: true });
+    const nameInput = page.getByLabelText('Name', { exact: true });
+    const firstSeed = (seed.element() as HTMLInputElement).value;
+    await expect.element(button('SAVE')).toBeDisabled(); // 이름 없음
+    await userEvent.fill(nameInput, '  Auto A ');
+    await userEvent.click(button('SAVE'));
+    await expect.element(page.getByText('Auto A', { exact: true })).toBeVisible();
+    await expect.element(page.getByText(new RegExp(`RED · auto TIP 0 · seed ${firstSeed} · saved`))).toBeVisible();
+    await expect.element(nameInput).toHaveValue('');
+
+    // 적용 안 된 수정 → SAVE 막힘 + 안내
+    await userEvent.fill(seed, '777');
+    await userEvent.fill(nameInput, 'Auto B');
+    await expect.element(button('SAVE')).toBeDisabled();
+    await expect.element(page.getByText('APPLY the scenario first: SAVE keeps the applied values')).toBeVisible();
+    await userEvent.click(button('APPLY'));
+    await userEvent.fill(nameInput, '');
+
+    // LOAD = 초안 (적용 안 된 수정 없음 → 바로), APPLY로 적용
+    await userEvent.click(button('LOAD Auto A'));
+    await expect.element(seed).toHaveValue(firstSeed);
+    await expect.element(button('APPLY')).toBeEnabled();
+    await userEvent.click(button('APPLY'));
+    // 적용 안 된 수정이 있으면 덮어쓰기 확인
+    await userEvent.fill(seed, '888');
+    await userEvent.click(button('LOAD Auto A'));
+    await expect.element(page.getByRole('alertdialog')).toBeVisible();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(seed).toHaveValue(firstSeed);
+
+    // 같은 이름(대소문자 무시) 저장 = 덮어쓰기 확인 (Esc = 그대로)
+    await userEvent.fill(nameInput, 'auto a');
+    await userEvent.click(button('SAVE'));
+    await expect.element(page.getByRole('alertdialog')).toBeVisible();
+    await userEvent.keyboard('{Escape}');
+    expect(store.items).toHaveLength(1);
+
+    // 이름 바꾸기 (그 자리에서, Enter)
+    await userEvent.click(button('Rename Auto A'));
+    await userEvent.fill(page.getByLabelText('Rename', { exact: true }), 'Auto A — 4 shots');
+    await userEvent.keyboard('{Enter}');
+    await expect.element(page.getByText('Auto A — 4 shots', { exact: true })).toBeVisible();
+
+    unmount();
+    mount(services);
+    await openScenario();
+    await expect.element(page.getByText('Auto A — 4 shots', { exact: true })).toBeVisible();
+    await userEvent.click(button('Delete Auto A — 4 shots'));
+    await userEvent.keyboard('{Enter}');
+    await expect.element(page.getByText('No saved scenarios yet')).toBeVisible();
+    expect(store.items).toHaveLength(0);
   });
 
   it('TIP 진행 목표 (14-3): 좌측 패널 TIP 목표 = 적용한 시나리오의 POLLINATOR 1 기준 (기본 4)', async () => {

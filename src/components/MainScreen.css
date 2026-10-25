@@ -2138,6 +2138,52 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 /* 난수 시드 (18-1): 숫자 칸 + REROLL — 격자로 버튼을 입력칸 줄에 고정 (오류 글자가 생겨도 버튼은 그대로) */
+/* 저장된 시나리오 (19-2a): 이름 + 저장 한 줄, 목록 줄 = 이름 / 한 줄 설명 | 불러오기 | 이름 바꾸기 | 삭제 */
+.library-save {
+  display: flex;
+  gap: calc(var(--u) * 8);
+}
+.library-name-input {
+  flex: 1;
+  min-width: 0;
+  height: calc(var(--u) * 32);
+  border: 1px solid var(--panel-border);
+  border-radius: calc(var(--u) * 6);
+}
+.library-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 6);
+}
+.library-row {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 6);
+  padding: calc(var(--u) * 6) calc(var(--u) * 8);
+  border: 1px solid var(--panel-border);
+  border-radius: calc(var(--u) * 8);
+}
+.library-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 2);
+}
+.library-name {
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+.library-summary {
+  font-size: calc(var(--u) * 11);
+  color: var(--text-muted);
+}
+.library-summary.is-broken {
+  color: var(--warn);
+}
 .seed-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

@@ -175,6 +175,13 @@ export function formatMatchTime(remainingSec: number): string {
   return `0:${String(Math.floor(tenths / 10)).padStart(2, '0')}.${tenths % 10}`;
 }
 
+/** 로컬 날짜 · 시각 "YYYY-MM-DD HH:mm" (자동 저장 복구 확인창 19-1 / 브라우저 안 목록 19-2), 날짜가 틀리면 "—" */
+export function formatLocalDateTime(date: Date): string {
+  if (Number.isNaN(date.getTime())) return '—';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 /** 남은 시간이 ENDGAME(60초 이하)인지 (타이머 색) */
 export function isEndgameTime(remainingSec: number): boolean {
   return remainingSec <= ENDGAME_REMAINING_SEC;

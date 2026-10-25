@@ -5,6 +5,8 @@
 // 14-2: 오토 이동(로봇별 NONE / LEAVE / PARK / LEAVE_PARK, 12-12) + RP 기준값(SWARM 점수 / POLLINATOR 1 · 2 TIP 수, 정수 1 ~ 99, DEFAULT = 지정 해제),
 //   로봇 2대로 도달할 수 없는 SWARM 기준은 경고(주황, 적용 허용).
 // 18-1: 난수 시드 숫자 칸 — 직접 입력은 초안 + APPLY, REROLL은 지금처럼 바로 적용.
+// 19-2a: 맨 위에 저장된 시나리오 목록 (library — 화면이 만들어 넘김).
+import type { ReactNode } from 'react';
 import { CircleAlert, CircleCheck, Dices, Move, RotateCcw } from 'lucide-react';
 import { hiveTipPollenThreshold } from '../core/types';
 import type { RobotConfig, RobotPose, ScenarioConfig } from '../core/types';
@@ -66,11 +68,12 @@ export interface ScenarioTabProps {
   onReroll: () => void;
   fieldEditOn: boolean;                             // 시나리오 필드 편집 모드가 열려 있음 (14-1a)
   onEditOnField: () => void;
+  library?: ReactNode;                              // 저장된 시나리오 목록 (19-2a, 탭 맨 위)
 }
 
 const ALL_SPAWN_KEYS = ROBOTS.flatMap(r => SPAWN_AXES.map(a => spawnFieldKey(r, a)));
 
-export default function ScenarioTab({ scenario, robots, fieldText, issues, warnings, unit, lang, locked, onEdit, onReroll, fieldEditOn, onEditOnField }: ScenarioTabProps) {
+export default function ScenarioTab({ scenario, robots, fieldText, issues, warnings, unit, lang, locked, onEdit, onReroll, fieldEditOn, onEditOnField, library }: ScenarioTabProps) {
   const view = readScenario(scenario, robots.robot1.config, robots.robot2.config);
   const red = issueFieldSet(issues);
   const typoCount = Object.keys(fieldText).length;
@@ -86,6 +89,7 @@ export default function ScenarioTab({ scenario, robots, fieldText, issues, warni
 
   return (
     <div className="scenario-tab">
+      {library}
       <div className={`scenario-badge ${problems === 0 ? 'is-valid' : 'is-invalid'}`} role="status">
         {problems === 0 ? <CircleCheck /> : <CircleAlert />}
         <span>{problems === 0 ? t(lang, 'scenario.valid') : t(lang, 'scenario.invalid', { count: problems })}</span>

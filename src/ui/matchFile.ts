@@ -18,7 +18,7 @@ import { branchLabel } from './branchView';
 import { robotLabel } from './mainScreenModel';
 import { fileTimestamp, safeFileName } from './presetFile';
 import { resultBasisText, resultRows, rpCardProgressText, rpCards } from './resultModel';
-import { formatMatchTime } from './units';
+import { formatLocalDateTime, formatMatchTime } from './units';
 
 const ROBOTS: readonly RobotId[] = ['robot1', 'robot2'];
 const SHORT: Readonly<Record<RobotId, string>> = { robot1: 'R1', robot2: 'R2' };
@@ -76,11 +76,7 @@ export function autosaveRestoreMessage(lang: Language, recipe: Pick<MatchRecipe,
     current.headTick >= MATCH_TICKS && current.result
       ? t(lang, 'autosave.ended', { score: current.result.totalScore })
       : formatMatchTime((MATCH_TICKS - current.headTick) * DT);
-  const saved = new Date(recipe.createdAt);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const time = Number.isNaN(saved.getTime())
-    ? '—'
-    : `${saved.getFullYear()}-${pad(saved.getMonth() + 1)}-${pad(saved.getDate())} ${pad(saved.getHours())}:${pad(saved.getMinutes())}`;
+  const time = formatLocalDateTime(new Date(recipe.createdAt));
   const lines = [t(lang, 'autosave.confirm'), t(lang, 'autosave.detail', { time, branch: label, state })];
   if (recipe.branches.length >= 2) lines.push(t(lang, 'matchImport.branches', { count: recipe.branches.length }));
   return [...lines, ...warningLines(lang, warnings)].join('\n');
