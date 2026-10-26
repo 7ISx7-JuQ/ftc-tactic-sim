@@ -92,8 +92,8 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       const e = eng();
       let tip = -1;
       for (let i = 0; i < 200; i++) { e.step(SHOOT); if (tip < 0 && e.field.hive.tipCount === 1) tip = e.currentTick; }
-      const third = arrivalOf(e, 45);
-      assert(third > 46 && tip === third, `default hive {N3,P0}: 3rd POLLEN (fired tick 45 = 3 × 300ms) reaches {3,3} and tips on arrival (tick ${tip}, arrive ${third})`);
+      const fourth = arrivalOf(e, 60);
+      assert(fourth > 61 && tip === fourth, `default hive {N3,P0}: 4th POLLEN (fired tick 60 = 4 × 300ms) reaches {3,4} and tips on arrival (tick ${tip}, arrive ${fourth})`);
       assert(e.timeline[tip].totalScore === 20, 'tip score 20 live');
       assert(e.field.hive.upwardCell === 'OPPOSITE_CELL' && e.field.nectarStock === 4, 'cell flipped, human nectar spawned');
       assert(!e.field.hive.isTipping && e.r1.controlledPieces.length === 0, 'drops finished, all shot');
@@ -377,7 +377,7 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       const codes = (sc: Partial<ScenarioConfig>, c1 = C1) => validateScenario({ allianceColor: 'RED', ...sc }, c1, C2).map(i => i.code);
       assert(codes({ flowerPiecesCount: [5, 4, 4, 4] }).includes('FLOWER_COUNT'), 'validate: FLOWER > 4');
       // 팁 임계 테이블: 도달 조합은 오류, 한 개 모자란 조합은 허용 (시작 NECTAR는 최대 3)
-      for (const [n, p] of [[3, 3], [2, 5], [1, 6], [0, 8]]) {
+      for (const [n, p] of [[3, 4], [2, 5], [1, 7], [0, 8]]) {
         const small = { flowerPiecesCount: [0, 0, 0, 0] as [number, number, number, number] };
         assert(codes({ ...small, hiveInitialPieces: { nectarCount: n, pollenCount: p } }).includes('HIVE_OVER_THRESHOLD'), `validate: HIVE {N${n},P${p}} reaches tip table -> error`);
         assert(!codes({ ...small, hiveInitialPieces: { nectarCount: n, pollenCount: p - 1 } }).includes('HIVE_OVER_THRESHOLD'), `validate: HIVE {N${n},P${p - 1}} below table -> ok`);
@@ -390,8 +390,8 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       // 엔진 안전장치: 검증 실패 값도 잘라서 수용, 총량 보존
       const bad = eng({ flowerPiecesCount: [9, 9, 9, 9], gardenPiecesCount: { ally: 20, opponent: 20 }, hiveInitialPieces: { pollenCount: 5, nectarCount: 5 }, autoTipCount: 10 });
       const types = (t: string) => bad.pieces.filter(p => p.type === t).length;
-      assert(bad.field.flowers.every(f => f.pieces.length === 4) && bad.field.hive.nectarInUpwardCell === 3 && bad.field.hive.pollenInUpwardCell === 2 && bad.field.nectarStock === 0 && types('POLLEN') === 32 && types('NECTAR') === 8,
-        'engine clamps invalid scenario (flower 4, hive {N3,P2} below table, stock ≥ 0), totals conserved');
+      assert(bad.field.flowers.every(f => f.pieces.length === 4) && bad.field.hive.nectarInUpwardCell === 3 && bad.field.hive.pollenInUpwardCell === 3 && bad.field.nectarStock === 0 && types('POLLEN') === 32 && types('NECTAR') === 8,
+        'engine clamps invalid scenario (flower 4, hive {N3,P3} below table, stock ≥ 0), totals conserved');
     }
   }, TEST_TIMEOUT_MS);
 
@@ -493,7 +493,7 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
   it('M. HIVE 팁 임계 테이블 / 팁 중 빗맞음 / RP 오토 팁 합산', () => {
     {
       // 시작 {N, P-1}에서 POLLEN 1발 명중 → {N, P} 도달 즉시 팁 (NECTAR 0~3)
-      for (const [n, p] of [[0, 8], [1, 6], [2, 5], [3, 3]]) {
+      for (const [n, p] of [[0, 8], [1, 7], [2, 5], [3, 4]]) {
         const e = eng({ flowerPiecesCount: [0, 0, 0, 0], hiveInitialPieces: { nectarCount: n, pollenCount: p - 1 } });
         for (let i = 0; i < 15; i++) e.step(SHOOT);
         settle(e);
@@ -506,9 +506,10 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       {
         const e = eng({ flowerPiecesCount: [0, 0, 0, 0], hiveInitialPieces: { nectarCount: 3, pollenCount: 0 } });
         e.field.hive.nectarInUpwardCell = 4;
+        e.field.hive.pollenInUpwardCell = 1;
         for (let i = 0; i < 15; i++) e.step(SHOOT);
         settle(e);
-        assert(e.field.hive.tipCount === 1, '{N4,P0} + 1 POLLEN -> {4,1} tips');
+        assert(e.field.hive.tipCount === 1, '{N4,P1} + 1 POLLEN -> {4,2} tips');
         const e5 = eng({ r1Loadout: ['NECTAR', 'POLLEN'], flowerPiecesCount: [0, 0, 0, 0], hiveInitialPieces: { nectarCount: 2, pollenCount: 0 } });
         e5.field.hive.nectarInUpwardCell = 4;
         for (let i = 0; i < 15; i++) e5.step(SHOOT);
@@ -525,7 +526,7 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       // 팁 진행 중 발사 / 도착은 명중률 100%여도 전부 빗맞음
       // (1발째 15틱 발사 → 도착 틱에 팁, 2~4발째는 팁 전에 발사됐어도 전복 중에 도착하면 반사 방출, 팁 후 발사는 발사 시점에 빗맞음)
       {
-        const e = eng({ flowerPiecesCount: [0, 0, 0, 0], hiveInitialPieces: { nectarCount: 3, pollenCount: 2 } });
+        const e = eng({ flowerPiecesCount: [0, 0, 0, 0], hiveInitialPieces: { nectarCount: 3, pollenCount: 3 } });
         for (let i = 0; i < 60; i++) e.step(SHOOT);
         settle(e);
         const f = e.getFrame(e.currentTick)!;
@@ -536,7 +537,7 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       // RP: 오토 팁 + 텔레옵 팁 합산, 점수는 텔레옵 팁만
       {
         const fin = (autoTipCount: number) => {
-          const e = eng({ autoTipCount, r1Spawn: pose(60, 20), flowerPiecesCount: [0, 0, 0, 0], hiveInitialPieces: { nectarCount: 3, pollenCount: 2 } });
+          const e = eng({ autoTipCount, r1Spawn: pose(60, 20), flowerPiecesCount: [0, 0, 0, 0], hiveInitialPieces: { nectarCount: 3, pollenCount: 3 } });
           for (let i = 0; i < 20; i++) e.step(SHOOT);
           while (e.currentTick < 6000) e.step();
           return e.getFrame(6000)!;
@@ -612,7 +613,8 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       // 엔진 판정을 직접 확인: 투입 후 {P, N}이 테이블 이내면 투입, 초과면 요청 거부
       // FLOWER는 slot[0] 불변식을 지켜 구성: NECTAR가 있으면 slot[0]은 실제 POLLEN(normal) 또는 빈칸(jam)
       // e = 계산상 POLLEN 수 (jam이면 빈 slot[0] 1개 포함)
-      const table: [number, number][] = [[9, 0], [8, 1], [6, 2], [5, 3], [3, 4], [2, 5], [1, 6]];
+      // 21-1 실측 (득점 볼륨 안 최대, 회수구 제외) + slot[0] 1개 = 판정 테이블
+      const table: [number, number][] = [[9, 0], [8, 1], [7, 2], [5, 3], [4, 4], [2, 5], [1, 6]];
       const tryDrop = (e: number, nectarInFlower: number, type: 'POLLEN' | 'NECTAR', jam: boolean) => {
         const en = eng({ r2Loadout: [type], r2Spawn: pose(9, 107.9), flowerPiecesCount: [0, 4, 4, 4], hiveInitialPieces: { pollenCount: 0, nectarCount: 0 } });
         while (en.currentTick < 3000) en.step();                           // ENDGAME (NECTAR 투입 허용)
@@ -751,16 +753,16 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
     const shooter = shooterBallisticsFrom(ballistics, robotLUTs);
     assert(shooter.POLLEN.headingNoiseRad === 0.02 && shooter.POLLEN.v0NoisePercent === 0.02 && shooter.POLLEN.pitchNoiseRad === 0.006, 'shooter ballistics carry the default shot noise');
     const aim = hiveCellAimPoint('RED', 'AUDIENCE_CELL');
-    // 사격 결과: 판정 결과 기록 + HIVE 적재 / 팁 (시작 HIVE {N3, P2}: POLLEN 1발 명중으로 팁)
+    // 사격 결과: 판정 결과 기록 + HIVE 적재 / 팁 (시작 HIVE {N3, P3}: POLLEN 1발 명중으로 팁)
     const shoot = (x: number, y: number, heading: number, config = C1) => {
       const judged: ShotJudgement[] = [];
       const spy: ShotJudge = (input) => { const j = judgeShotTrajectory(input); judged.push(j); return j; };
       const e = new SimulationEngine(config, C2, spy, 'RED',
-        { allianceColor: 'RED', r1Spawn: pose(x, y, heading), r2Spawn: pose(20, 20), hiveInitialPieces: { nectarCount: 3, pollenCount: 2 } },
+        { allianceColor: 'RED', r1Spawn: pose(x, y, heading), r2Spawn: pose(20, 20), hiveInitialPieces: { nectarCount: 3, pollenCount: 3 } },
         { robot1: shooter, robot2: shooter });
       for (let i = 0; i < 80; i++) e.step(SHOOT);
       settle(e);
-      return { e, judged, tips: e.field.hive.tipCount, scoredNothing: e.field.hive.tipCount === 0 && e.field.hive.pollenInUpwardCell === 2, upward: e.field.hive.upwardCell };
+      return { e, judged, tips: e.field.hive.tipCount, scoredNothing: e.field.hive.tipCount === 0 && e.field.hive.pollenInUpwardCell === 3, upward: e.field.hive.upwardCell };
     };
     const onTarget = bearingTo(60.5, 134.5, aim.x, aim.y);
     const sweet = shoot(60.5, 134.5, onTarget);
@@ -868,8 +870,8 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
     }
     // 무효 명중: 명중으로 발사됐지만 도착 시점에 HIVE 전복 중 → 조준점에서 셀 앞면 바깥으로 반사 낙하 (08-2)
     {
-      // 상향 셀 {NECTAR 3, POLLEN 2}: 첫 발 명중 도착으로 팁, 둘째 발(팁 전 발사)은 전복 중 도착
-      const e = eng({ r1Spawn: front, r1Loadout: ['POLLEN', 'POLLEN'], hiveInitialPieces: { nectarCount: 3, pollenCount: 2 } }, C1, C2, fixedP(1));
+      // 상향 셀 {NECTAR 3, POLLEN 3}: 첫 발 명중 도착으로 팁, 둘째 발(팁 전 발사)은 전복 중 도착
+      const e = eng({ r1Spawn: front, r1Loadout: ['POLLEN', 'POLLEN'], hiveInitialPieces: { nectarCount: 3, pollenCount: 3 } }, C1, C2, fixedP(1));
       for (let i = 0; i < 30; i++) e.step(SHOOT);
       const launched = e.field.pendingShots.find(sh => sh.launchTick === 30)!;
       const hitArrive = launched.arriveTick;
@@ -1643,7 +1645,7 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
     }
     // HIVE TIP 낙하: 착지 자리에 로봇이 있음 → 로봇 밖 빈 자리 (속도 0). 같은 틱 같은 자리 두 기물 → 뒤 기물이 앞 기물을 피함
     {
-      const e = eng({ flowerPiecesCount: [0, 0, 0, 0], hiveInitialPieces: { nectarCount: 3, pollenCount: 2 } });
+      const e = eng({ flowerPiecesCount: [0, 0, 0, 0], hiveInitialPieces: { nectarCount: 3, pollenCount: 3 } });
       for (let i = 0; i < 15; i++) e.step(SHOOT);
       while (!e.field.hive.isTipping && e.currentTick < 200) e.step();
       const drops = e.field.hive.pendingDrops;

@@ -396,15 +396,16 @@ export interface TimelineFrame {
 /**
  * HIVE 팁(전복) 임계 테이블: 상향 셀 NECTAR 개수별 팁이 발동하는 POLLEN 개수
  * Key: NECTAR 개수, Value: 팁 발동 POLLEN 개수 (FLOWER_MAX_POLLEN_BY_NECTAR와 같은 구조)
- * 임계 조합 {NECTAR, POLLEN}: {5,0} {4,1} {3,3} {2,5} {1,6} {0,8}
+ * 임계 조합 {NECTAR, POLLEN}: {0,8} {1,7} {2,5} {3,4} {4,2} {5,0}
  * NECTAR가 테이블 최대 키(5) 이상이면 POLLEN 0개로 즉시 팁
+ * (21-1: 지역 워크샵 실측값. HIVE 보정(calibration) 상태에 따라 달라질 수 있어 경기장에서 재확인 예정, 명세서 2.6.1)
  */
 export const HIVE_TIP_POLLEN_BY_NECTAR: Record<number, number> = {
   0: 8,
-  1: 6,
+  1: 7,
   2: 5,
-  3: 3,
-  4: 1,
+  3: 4,
+  4: 2,
   5: 0,
 };
 
@@ -425,11 +426,11 @@ export const FLOWER_DEQ_GRAVITY_COOLDOWN = 0.12;
 
 /**
  * FLOWER 내부 NECTAR 수량에 따른 최대 POLLEN 수용 한도 테이블
- * 바닥(slot[0] 포함)부터 높이 21.5in 원통에 최대로 채울 수 있는 조합
- * {POLLEN, NECTAR} = {9,0} {8,1} {6,2} {5,3} {3,4} {2,5} {1,6}
- * (계산상의 {0,7}은 slot[0]이 NECTAR여야 하므로 제외: slot[0]에는 NECTAR가 올 수 없고,
- *  NECTAR가 있는 FLOWER의 slot[0]은 항상 POLLEN 또는 POLLEN으로 계산하는 빈칸이라 POLLEN ≥ 1)
- * (지그재그 적층 + 최상단 기물이 일부라도 원통 내부에 걸치면 인정하는 기준의 계산값. 실측 가능 시 교체 예정)
+ * 21-1 실측: 득점 볼륨(slot[1..N]) 안 최대 {NECTAR, POLLEN} = {0,8} {1,7} {2,6} {3,4} {4,3} {5,1} {6,0}
+ *   (회수구 slot[0] POLLEN은 세지 않음, 쌓는 순서와 무관하게 최대 개수, NECTAR 7개는 불가능)
+ * 이 테이블 값 = 실측 볼륨 POLLEN + 1 (slot[0] 포함 기준 — 판정 canFlowerAccept가 slot[0]까지 센다)
+ *   → {POLLEN, NECTAR} = {9,0} {8,1} {7,2} {5,3} {4,4} {2,5} {1,6}
+ * slot[0]에는 NECTAR가 올 수 없으므로 NECTAR가 있는 FLOWER의 slot[0]은 항상 POLLEN 또는 POLLEN으로 계산하는 빈칸이다.
  * Key: NECTAR 개수, Value: 최대 POLLEN 개수 (slot[0] 포함 원통 내 전체 개수 기준)
  * NECTAR 잼 상태(slot[0] = null)에서는 빈 slot[0]을 POLLEN 1개로 계산하여 같은 테이블 사용
  * (턱 위 받침과 공 위 받침의 미세 차이는 단순화를 위해 의도적으로 무시, 명세서 2.6.3)
@@ -437,9 +438,9 @@ export const FLOWER_DEQ_GRAVITY_COOLDOWN = 0.12;
 export const FLOWER_MAX_POLLEN_BY_NECTAR: Record<number, number> = {
   0: 9,
   1: 8,
-  2: 6,
+  2: 7,
   3: 5,
-  4: 3,
+  4: 4,
   5: 2,
   6: 1,
 };
