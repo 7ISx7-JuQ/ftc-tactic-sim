@@ -236,6 +236,11 @@ describe('저장 레시피 (10-3)', () => {
     expect(code(edit(['setup', DEL]))).toEqual({ code: 'INVALID_FIELD', field: 'setup.robot1' });
     expect(code(edit(['lut.samples', 0]))).toEqual({ code: 'INVALID_FIELD', field: 'lut' });
     expect(code(edit(['branches.0.headTick', 5999]))).toEqual({ code: 'INVALID_INPUTS', field: 'branches[0].robot1' }); // 입력 길이 ≠ 머리 − 분기
+    // 틱 범위 밖은 입력을 풀기 전에 거부 (손상된 파일의 큰 머리 틱이 거대한 배열을 잡지 않음)
+    expect(code(edit(['branches.0.headTick', 1e9]))).toEqual({ code: 'INVALID_FIELD', field: 'branches[0]' });
+    expect(code(edit(['branches.0.headTick', 6001]))).toEqual({ code: 'INVALID_FIELD', field: 'branches[0]' });
+    expect(code(edit(['branches.0.forkTick', 6001]))).toEqual({ code: 'INVALID_FIELD', field: 'branches[0]' });
+    expect(code(edit(['branches.0.forkTick', -1]))).toEqual({ code: 'INVALID_FIELD', field: 'branches[0]' });
     expect(code(edit(['branches.0.inputs.robot2', (old: unknown) => String(old).slice(0, -8)]))).toEqual({ code: 'INVALID_INPUTS', field: 'branches[0].robot2' });
     expect(code(edit(['branches.0.checksums', (old: unknown) => (old as string[]).slice(0, -1)]))).toEqual({ code: 'INVALID_CHECKSUMS', field: 'branches[0]' });
     expect(code(edit(['branches.0.checksums.3', 'ABCDEF12']))).toEqual({ code: 'INVALID_CHECKSUMS', field: 'branches[0]' });

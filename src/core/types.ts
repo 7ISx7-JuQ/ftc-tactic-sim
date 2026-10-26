@@ -10,7 +10,7 @@ export interface BumperZone {
   depth: number;            // 변에서 바깥 수직으로 뻗는 깊이 (inch, > 0)
 }
 
-// 슈터 구성 (명세서 4장 / 5.4 v2.0.0 항목 규칙): 발사 가능 기물 = NONE 없음 / POLLEN_ONLY POLLEN / SHARED · PER_PIECE 둘 다
+// 슈터 구성 (명세서 2.6항 / 4장): 발사 가능 기물 = NONE 없음 / POLLEN_ONLY POLLEN / SHARED · PER_PIECE 둘 다
 // SHARED = 한 슈터로 두 기물 (v1 동작), PER_PIECE = 기물별 슈터 2개 (NECTAR 슈터 = nectarShooter)
 export type ShooterSetup = 'NONE' | 'POLLEN_ONLY' | 'SHARED' | 'PER_PIECE';
 
@@ -57,7 +57,7 @@ export interface RobotConfig {
   flowerDropDelay: number;  // 연속으로 기물을 떨어뜨리는 간격 (ms)
   flowerDropZones: BumperZone[]; // 투입 방향 구역 (인테이크 구역과 같은 형식). 빈 배열 = 방향 무관 (v1)
   // 리프트 상태 최고 속도 (inch/s). 0 = Stationary Lock (v1). 비율 r = min(이 값, maxSpeed) / maxSpeed를
-  // 최고 속도 / 최고 각속도에 함께 적용 (명세서 4장 / 5.4 v2.0.0 항목 규칙)
+  // 최고 속도 / 최고 각속도에 함께 적용 (명세서 4장)
   liftMaxSpeed: number;
 }
 

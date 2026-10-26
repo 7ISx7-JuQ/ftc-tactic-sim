@@ -1078,7 +1078,7 @@ export function generateRobotLUTs(
 // 8. 런타임 명중 확률 판정 함수 (엔진 주입용, 명세서 2.6.2)
 // ============================================================
 
-// 슈터 구성 (12-3, 명세서 5.4 v2.0.0 항목 규칙): 로봇 제원에서 기물별 슈터를 고르는 규칙의 단일 출처.
+// 슈터 구성 (12-3, 명세서 2.6항): 로봇 제원에서 기물별 슈터를 고르는 규칙의 단일 출처.
 // 엔진 발사 대기열 / 판정 함수 / 비행 계획 / (13-x) 렌더러 · 화면이 같은 함수를 쓴다
 // (판정 함수는 발사 딜레이가 필요 없으므로 shooterDelay는 선택, 없으면 0)
 type ShooterSetupSource = Pick<RobotConfig, 'turretType' | 'turretRange'> & Partial<Pick<RobotConfig, 'shooterDelay' | 'shooterSetup' | 'nectarShooter'>>;

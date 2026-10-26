@@ -33,7 +33,7 @@ import type { LengthUnit, QuantityKind } from './units';
 
 /**
  * 슈터 1개의 탄도 = 엔진 BallisticsConfig (편차 3종 / 좌우 오프셋은 값을 항상 채움). dz = 림 높이 − 발사구 지상고,
- * 스윗스팟 = 기준 셀 RED_AUDIENCE 좌표, 좌우 오프셋 + = 로봇 오른쪽 (명세서 4장 / 5.4 v2.0.0 항목 규칙)
+ * 스윗스팟 = 기준 셀 RED_AUDIENCE 좌표, 좌우 오프셋 + = 로봇 오른쪽 (명세서 4장)
  */
 export interface ProfileShooterBallistics {
   dz: number;

@@ -419,10 +419,6 @@ export function moveFloorPiece(drafts: ConfigDrafts, index: number, at: Point): 
   return withFloorPieces(drafts, pieces);
 }
 
-/**
- * 바닥 기물 끌기를 놓음: 움직이지 않았으면 그대로, 필드 밖이면 뺌, 겹치는 자리면 끌기 전(before)으로 + 사유.
- * pointer = 놓은 포인터의 필드 좌표 (빼기 판정), lastPoint = 끌어서 정한 기물 자리
- */
 /** 지정 바닥 기물 빼기 (14-1b 보완: 클릭 팝오버의 빼기 / Delete 키 — 필드 밖으로 끌어 놓기와 같은 결과). 없는 번호면 그대로 */
 export function removeFloorPiece(drafts: ConfigDrafts, index: number): ConfigDrafts {
   const pieces = drafts.draft.scenario.floorPieces ?? [];
@@ -430,6 +426,10 @@ export function removeFloorPiece(drafts: ConfigDrafts, index: number): ConfigDra
   return withFloorPieces(drafts, pieces.filter((_, i) => i !== index));
 }
 
+/**
+ * 바닥 기물 끌기를 놓음: 움직이지 않았으면 그대로, 필드 밖이면 뺌, 겹치는 자리면 끌기 전(before)으로 + 사유.
+ * pointer = 놓은 포인터의 필드 좌표 (빼기 판정), lastPoint = 끌어서 정한 기물 자리
+ */
 export function finishFloorDrag(
   drafts: ConfigDrafts,
   index: number,

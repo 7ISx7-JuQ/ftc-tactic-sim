@@ -406,9 +406,11 @@ function parseV2Tree(data: Record<string, unknown>): TreeParsed {
     if (!isRecord(b) || !Number.isInteger(b.headTick) || !Number.isInteger(b.forkTick) || !(b.parent === null || Number.isInteger(b.parent))) return fail({ code: 'INVALID_FIELD', field });
     const headTick = b.headTick as number;
     const forkTick = b.forkTick as number;
+    // 틱 범위를 먼저 (입력 기록은 틱 수만큼 배열을 잡으므로, 손상된 파일의 큰 머리 틱이 메모리를 잡거나 RangeError를 내지 않게)
+    if (forkTick < 0 || headTick < forkTick || headTick > MATCH_TICKS) return fail({ code: 'INVALID_FIELD', field });
     const ticks = headTick - forkTick;
     const inputs = b.inputs;
-    const in1 = ticks >= 0 && isRecord(inputs) ? decodeInputRecord(inputs.robot1, ticks) : null;
+    const in1 = isRecord(inputs) ? decodeInputRecord(inputs.robot1, ticks) : null;
     if (!in1) return fail({ code: 'INVALID_INPUTS', field: `${field}.robot1` });
     const in2 = isRecord(inputs) ? decodeInputRecord(inputs.robot2, ticks) : null;
     if (!in2) return fail({ code: 'INVALID_INPUTS', field: `${field}.robot2` });
