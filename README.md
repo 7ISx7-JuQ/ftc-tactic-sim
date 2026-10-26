@@ -6,20 +6,27 @@ A 2D tactic simulator for the **FTC BioBuzz TELEOP period** (2:00). Drive your t
 
 **▶ Open the app: https://biobuzz-tacticsim.7isx7juq.workers.dev**
 
+![FTC TacticSim during a match](docs/images/match.png)
+
 - 50 Hz deterministic engine: the same setup and inputs always give the same match.
-- Your robot specs: size, speed, intake zones and shooter (launch height, angle, sweet spot). Hit maps are generated automatically and cached.
-- Scenario: ALLIANCE, what autonomous left behind (HIVE, loadouts, remaining pieces, auto TIPs) and start poses.
+- Your robot specs: size, speed, intake zones and shooters (none / POLLEN only / shared / one per piece; launch height, angle, sweet spot). Hit maps are generated automatically and cached.
+- Scenario: ALLIANCE, what autonomous left behind (HIVE, FLOWERS, GARDENS, loadouts, floor pieces, auto TIPs and moves) and start poses — set it on the field itself with **EDIT ON FIELD**.
 - Review and branches: scrub, replay at 0.25–2×, branch from an earlier moment (up to 16 branches) and compare results.
-- Save and share: robot / scenario presets and small replay files of whole matches (JSON).
+- Save and share: keep robots, scenarios, setups and matches by name in your browser, or share them as small JSON files. The last match is saved automatically.
+
+What changed in 2.0: see the [changelog](CHANGELOG.md).
 
 > Simulation only: opponent robots and the autonomous period are not simulated, and some physics values are estimates. Use it to compare plans, not to predict exact scores.
 
 ## Quick start
 
 1. **R1 / R2 tabs** — enter each robot's specs and shooter, then **APPLY**. The first hit map takes about 10–60 s.
-2. **SCENARIO tab** — pick the ALLIANCE, the state after autonomous and the start poses, then **APPLY**.
+2. **SCENARIO tab** — pick the ALLIANCE, the state after autonomous and the start poses (**EDIT ON FIELD** to place them on the field), then **APPLY**. Save each auto routine under **Saved scenarios** to pick it again later.
+
+![Editing the scenario on the field](docs/images/scenario-edit.png)
+
 3. **START** — by default gamepad slot 0 drives R1, slot 1 (or the keyboard) drives R2; change this under **SETTINGS → Devices** (e.g. **SWAP R1 ↔ R2** to drive R2 with a single gamepad). Press a gamepad button once so the browser detects it.
-4. After 2:00 the result popup shows the score breakdown and RP. **EXPORT MATCH** saves a replay file.
+4. After 2:00 the result popup shows the score breakdown and RP. **SAVE MATCH** keeps the match in this browser; **EXPORT MATCH** saves a replay file to share.
 
 The **?** button on the right edge opens the in-app help (controls, branches, files).
 
@@ -64,20 +71,27 @@ Free for **non-commercial** use under the [PolyForm Noncommercial License 1.0.0]
 
 **▶ 앱 열기: https://biobuzz-tacticsim.7isx7juq.workers.dev**
 
+![경기 중인 FTC TacticSim](docs/images/match.png)
+
 - 50 Hz 결정론적 엔진: 같은 설정과 입력이면 항상 같은 경기가 나옵니다.
-- 우리 로봇 제원: 크기, 속도, 흡입 구역, 슈터(발사구 높이 · 발사각 · 스윗스팟). 명중 확률표는 자동으로 만들어지고 저장됩니다.
-- 시나리오: ALLIANCE, 오토가 남긴 상태(HIVE, 적재물, 남은 기물, 오토 TIP), 시작 자세.
+- 우리 로봇 제원: 크기, 속도, 흡입 구역, 슈터(없음 / POLLEN 전용 / 공용 1개 / 기물별 2개, 발사구 높이 · 발사각 · 스윗스팟). 명중 확률표는 자동으로 만들어지고 저장됩니다.
+- 시나리오: ALLIANCE, 오토가 남긴 상태(HIVE, FLOWER, GARDEN, 적재물, 바닥 기물, 오토 TIP · 이동), 시작 자세 — **필드에서 편집**으로 필드 위에서 바로 정합니다.
 - 복기와 가지: 타임라인 이동, 0.25 ~ 2배속 재생, 이전 시점에서 분기(최대 16개)와 결과 비교.
-- 저장과 공유: 로봇 / 시나리오 프리셋, 경기 전체를 담은 작은 재생 파일(JSON).
+- 저장과 공유: 로봇 · 시나리오 · 전체 설정 · 경기를 브라우저에 이름 붙여 두거나 작은 JSON 파일로 공유합니다. 마지막 경기는 자동으로 저장됩니다.
+
+2.0에서 바뀐 점은 [변경 기록](CHANGELOG.md#한국어)을 참고하세요.
 
 > 시뮬레이션 전용입니다. 상대 로봇과 오토 구간은 시뮬레이션하지 않으며 일부 물리 값은 추정치입니다. 정확한 점수 예측보다 작전 비교에 활용하세요.
 
 ### 빠른 시작
 
 1. **R1 / R2 탭** — 로봇 제원과 슈터를 입력하고 **적용**. 처음 명중 확률표는 약 10 ~ 60초 걸립니다.
-2. **시나리오 탭** — ALLIANCE, 오토 이후 상태, 시작 자세를 정하고 **적용**.
-3. **시작** — 기본으로 게임패드 슬롯 0은 R1, 슬롯 1(또는 키보드)은 R2를 조종합니다. **SETTINGS → 장치**에서 바꿀 수 있습니다 (예: 패드 1개로 R2를 조종하려면 **R1 ↔ R2 바꾸기**). 게임패드는 버튼을 한 번 눌러야 브라우저가 인식합니다.
-4. 2:00이 지나면 결과 팝업에 항목별 점수와 RP가 나옵니다. **경기 내보내기**로 재생 파일을 저장할 수 있습니다.
+2. **시나리오 탭** — ALLIANCE, 오토 이후 상태, 시작 자세를 정하고(**필드에서 편집**으로 필드 위에 배치) **적용**. 오토 루틴마다 **저장된 시나리오**에 저장해 두면 다음에 바로 고를 수 있습니다.
+
+![필드에서 시나리오 편집](docs/images/scenario-edit.png)
+
+3. **시작** — 기본으로 게임패드 슬롯 0은 R1, 슬롯 1(또는 키보드)은 R2를 조종합니다. **환경 및 조작 → 장치**에서 바꿀 수 있습니다 (예: 패드 1개로 R2를 조종하려면 **R1 ↔ R2 바꾸기**). 게임패드는 버튼을 한 번 눌러야 브라우저가 인식합니다.
+4. 2:00이 지나면 결과 팝업에 항목별 점수와 RP가 나옵니다. **경기 저장**은 이 브라우저에 경기를 두고, **경기 내보내기**는 공유용 재생 파일을 저장합니다.
 
 화면 오른쪽 끝의 **?** 버튼을 누르면 앱 안 도움말(조작, 가지, 파일)이 열립니다.
 
@@ -88,7 +102,7 @@ Free for **non-commercial** use under the [PolyForm Noncommercial License 1.0.0]
 | 리프트 올림 · 내림 / FLOWER 투입 | A / B | . / / |
 | 일시정지 · 재개 | — | Space |
 
-게임패드 버튼(과 왼쪽 / 오른쪽 스틱)은 **SETTINGS → 장치**에서 슬롯별로 바꿀 수 있습니다.
+게임패드 버튼(과 왼쪽 / 오른쪽 스틱)은 **환경 및 조작 → 장치**에서 슬롯별로 바꿀 수 있습니다.
 
 1366 × 768 이상의 데스크톱 브라우저용입니다. 위 주소는 HTTPS입니다. 직접 호스팅할 때도 명중 확률표 저장을 위해 HTTPS로 제공하세요.
 
