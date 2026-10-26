@@ -289,6 +289,7 @@ export class AppController {
   private endStageAt = 0;
   private endSeq = 0;
   private tree!: BranchTree<BranchData>;
+  private readonly leftRecords = new WeakMap<BranchInputs, Record<RobotId, Int8Array>>(); // 떠난 가지 입력 사본 → 적용 입력 기록 (recipeSource)
   private loadedEnd = false;            // 불러온 경기: 회전 뒤 루프가 곧바로 ENDED → 종료 연출 없이 복기 (10-4)
   private loadedPause = false;          // 불러온 미종료 가지: 회전 뒤 시작하자마자 일시정지 → 머리에서 RESUME 가능 (15-2)
   private shortcutsEnabled = true;
@@ -526,11 +527,18 @@ export class AppController {
         parent: numberOf(n.parentId),
         forkTick: n.forkTick,
         name: n.name,
-        inputs: appliedRecords(isCurrent ? this.inputs : n.data.inputs!),
+        inputs: isCurrent ? appliedRecords(this.inputs) : this.leftBranchRecords(n.data.inputs!),
         record: isCurrent ? timelineRecord(this.engine.timeline) : n.data.record!,
       };
     });
     return { branches, current: currentBranch(this.tree).number, nextNumber: this.tree.nextNumber };
+  }
+
+  /** 떠난 가지의 적용 입력 기록: 입력 사본은 불변이라 같은 배열을 돌려준다 (자동 저장의 RecipeInputCache가 정체성으로 재사용) */
+  private leftBranchRecords(inputs: BranchInputs): Record<RobotId, Int8Array> {
+    let records = this.leftRecords.get(inputs);
+    if (!records) this.leftRecords.set(inputs, (records = appliedRecords(inputs)));
+    return records;
   }
 
   pause(): void {

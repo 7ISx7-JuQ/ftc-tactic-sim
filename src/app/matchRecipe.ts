@@ -89,8 +89,9 @@ const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
 function toBase64(bytes: Uint8Array): string {
   let bin = '';
-  const CHUNK = 0x8000;
-  for (let i = 0; i < bytes.length; i += CHUNK) bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  // apply로 넘김: 펼침(...)은 형식 배열을 반복자로 돌아 약 10배 느림 (6000틱 1.9 ms → 0.17 ms). 4K = 엔진별 인자 수 한도 안
+  const CHUNK = 0x1000;
+  for (let i = 0; i < bytes.length; i += CHUNK) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK) as unknown as number[]);
   return btoa(bin);
 }
 
@@ -108,7 +109,8 @@ function fromBase64(text: string): Uint8Array | null {
 /** 로봇 입력 기록(틱당 4 B, 앞에서 ticks틱) → RLE + Base64 */
 export function encodeInputRecord(data: ArrayLike<number>, ticks = MATCH_TICKS): string {
   if (data.length < ticks * LOG_RECORD_BYTES) throw new RangeError(`input record shorter than ${ticks} ticks`);
-  const runs: number[] = [];
+  const runs = new Uint8Array(ticks * RUN_BYTES); // 최악 = 틱마다 1묶음 (아날로그 스틱 입력은 거의 매 틱 바뀜)
+  let size = 0;
   const same = (a: number, b: number) => {
     for (let k = 0; k < LOG_RECORD_BYTES; k++) if (data[a * LOG_RECORD_BYTES + k] !== data[b * LOG_RECORD_BYTES + k]) return false;
     return true;
@@ -116,11 +118,12 @@ export function encodeInputRecord(data: ArrayLike<number>, ticks = MATCH_TICKS):
   for (let t = 0; t < ticks; ) {
     let n = 1;
     while (t + n < ticks && n < 0xffff && same(t, t + n)) n++;
-    runs.push(n & 0xff, n >>> 8);
-    for (let k = 0; k < LOG_RECORD_BYTES; k++) runs.push(data[t * LOG_RECORD_BYTES + k] & 0xff);
+    runs[size++] = n & 0xff;
+    runs[size++] = n >>> 8;
+    for (let k = 0; k < LOG_RECORD_BYTES; k++) runs[size++] = data[t * LOG_RECORD_BYTES + k] & 0xff;
     t += n;
   }
-  return toBase64(Uint8Array.from(runs));
+  return toBase64(runs.subarray(0, size));
 }
 
 /** RLE + Base64 → 로봇 입력 기록 (ticks × 4 B). Base64 / 묶음 길이 / 반복 수 합 ≠ ticks / 값 범위 밖(q = −128, 행동 코드 밖)이면 null */
@@ -193,13 +196,41 @@ export interface RecipeSource {
   lut?: RecipeLutSettings;            // 기본 = 현재 앱 값
 }
 
-/** 분기 트리 → 레시피. 입력이 머리 틱보다 짧거나 트리 구조가 틀리면 RangeError */
-export function buildMatchRecipe(src: RecipeSource): MatchRecipe {
+/**
+ * 가지 입력 재료 캐시 (자동 저장, 3.9항): 같은 입력 배열(정체성) + 같은 분기 / 머리 틱이면 잘라 낸 입력과 부호화 글자를 다시 만들지 않는다.
+ * 진행 중에는 지금 가지만 자라고 떠난 가지의 입력 사본은 불변이라(AppController.recipeSource), 저장 비용이 가지 수와 거의 무관해진다.
+ * 키는 약한 참조라 버린 가지 / 지난 저장의 항목은 저절로 사라진다. 넘긴 입력 배열을 나중에 바꾸지 않는 호출자만 쓴다
+ */
+export class RecipeInputCache {
+  private readonly cuts = new WeakMap<ArrayLike<number>, { forkTick: number; headTick: number; data: Int8Array }>();
+  private readonly texts = new WeakMap<ArrayLike<number>, { ticks: number; text: string }>();
+
+  cut(data: ArrayLike<number>, forkTick: number, headTick: number, make: () => Int8Array): Int8Array {
+    const hit = this.cuts.get(data);
+    if (hit && hit.forkTick === forkTick && hit.headTick === headTick) return hit.data;
+    const out = make();
+    this.cuts.set(data, { forkTick, headTick, data: out });
+    return out;
+  }
+
+  encode(data: ArrayLike<number>, ticks: number): string {
+    const hit = this.texts.get(data);
+    if (hit && hit.ticks === ticks) return hit.text;
+    const text = encodeInputRecord(data, ticks);
+    this.texts.set(data, { ticks, text });
+    return text;
+  }
+}
+
+/** 분기 트리 → 레시피. 입력이 머리 틱보다 짧거나 트리 구조가 틀리면 RangeError. cache = 자동 저장의 가지 입력 재료 캐시 (결과는 같음) */
+export function buildMatchRecipe(src: RecipeSource, cache?: RecipeInputCache): MatchRecipe {
   const branches = src.branches.map((b): RecipeBranch => {
     const { headTick } = b.record;
     const cut = (data: ArrayLike<number>) => {
       if (data.length < headTick * LOG_RECORD_BYTES) throw new RangeError(`branch ${b.number}: input record shorter than its head tick`);
-      return Int8Array.from({ length: (headTick - b.forkTick) * LOG_RECORD_BYTES }, (_, i) => data[b.forkTick * LOG_RECORD_BYTES + i]);
+      const [start, end] = [b.forkTick * LOG_RECORD_BYTES, headTick * LOG_RECORD_BYTES];
+      const make = () => (data instanceof Int8Array ? data.slice(start, end) : Int8Array.from({ length: end - start }, (_, i) => data[start + i]));
+      return cache ? cache.cut(data, b.forkTick, headTick, make) : make();
     };
     return {
       number: b.number,
@@ -282,8 +313,9 @@ export function recipeLoadTree(recipe: Pick<MatchRecipe, 'branches' | 'current' 
   };
 }
 
-/** 레시피 → 파일 문자열 (형식 버전 2, 2칸 들여쓰기) */
-export function serializeMatchRecipe(recipe: MatchRecipe): string {
+/** 레시피 → 파일 문자열 (형식 버전 2, 2칸 들여쓰기). cache = 자동 저장의 가지 입력 재료 캐시 (결과는 같음) */
+export function serializeMatchRecipe(recipe: MatchRecipe, cache?: RecipeInputCache): string {
+  const encode = (data: ArrayLike<number>, ticks: number) => (cache ? cache.encode(data, ticks) : encodeInputRecord(data, ticks));
   const file = {
     format: RECIPE_FORMAT,
     recipeVersion: RECIPE_VERSION,
@@ -303,7 +335,7 @@ export function serializeMatchRecipe(recipe: MatchRecipe): string {
         forkTick: b.forkTick,
         name: b.name,
         headTick: b.headTick,
-        inputs: { robot1: encodeInputRecord(b.inputs.robot1, ticks), robot2: encodeInputRecord(b.inputs.robot2, ticks) },
+        inputs: { robot1: encode(b.inputs.robot1, ticks), robot2: encode(b.inputs.robot2, ticks) },
         checksums: b.checksums,
         result: b.result,
       };

@@ -11,6 +11,7 @@ import { DEFAULT_DRAFT_VALUES, setupFromDrafts } from '../defaultSetup';
 import {
   CURRENT_LUT_SETTINGS,
   RECIPE_VERSION,
+  RecipeInputCache,
   appliedInputRecords,
   branchInputRecords,
   buildMatchRecipe,
@@ -112,6 +113,11 @@ describe('저장 레시피 (10-3)', () => {
     const idle = encodeInputRecord(new Int8Array(MATCH_TICKS * 4));
     expect(Array.from(atob(idle), c => c.charCodeAt(0))).toEqual([0x70, 0x17, 0, 0, 0, 0]); // 6000 = 0x1770 LE
     expect(() => encodeInputRecord(new Int8Array(10))).toThrow(RangeError);
+    // 틱마다 바뀌는 입력(최악, 아날로그 스틱) = 틱마다 1묶음, 왕복
+    const varying = Int8Array.from({ length: MATCH_TICKS * 4 }, (_, i) => (i % 4 === 3 ? (i >> 2) % 5 : ((i * 37) % 255) - 127));
+    const varyingText = encodeInputRecord(varying);
+    expect(atob(varyingText).length).toBe(MATCH_TICKS * 6);
+    expect(Array.from(decodeInputRecord(varyingText)!)).toEqual(Array.from(varying));
 
     const bytes = (runs: number[][]) => btoa(String.fromCharCode(...runs.flat().map(b => b & 0xff)));
     expect(decodeInputRecord(bytes([[0x70, 0x17, 1, 2, 3, 4]]))).not.toBeNull();
@@ -431,4 +437,46 @@ describe('저장 레시피 (10-3)', () => {
     expect(worstText.length).toBeLessThan(MAX_IMPORT_BYTES);
     expect(parse(worstText).ok).toBe(true);
   }, TEST_TIMEOUT_MS);
+
+  it('J. 가지 입력 재료 캐시 (자동 저장): 글자는 캐시 없이와 같음, 같은 입력 배열 + 같은 분기 · 머리 틱이면 재사용, 머리가 자라거나 배열이 바뀌면 다시 만듦', () => {
+    const data = (seed: number) => Int8Array.from({ length: MATCH_TICKS * 4 }, (_, i) => (i % 4 === 3 ? ((i >> 2) + seed) % 5 : ((i * 37 + seed * 11) % 255) - 127));
+    const record = (headTick: number) => ({ headTick, checksums: ['00000000'], result: null });
+    const left = { robot1: data(1), robot2: data(2) };
+    const src = (current: Record<RobotId, ArrayLike<number>>, head: number, root: Record<RobotId, ArrayLike<number>> = left) => ({
+      setup: values,
+      branches: [
+        { number: 1, parent: null, forkTick: 0, name: null, inputs: root, record: record(MATCH_TICKS) },
+        { number: 2, parent: 1, forkTick: 3000, name: 'Plan B', inputs: current, record: record(head) },
+      ],
+      current: 2,
+      nextNumber: 3,
+      createdAt: new Date(2026, 9, 26, 9, 0, 0),
+    });
+    const plain = (s: ReturnType<typeof src>) => serializeMatchRecipe(buildMatchRecipe(s));
+    const cache = new RecipeInputCache();
+    const withCache = (s: ReturnType<typeof src>) => {
+      const recipe = buildMatchRecipe(s, cache);
+      return { recipe, text: serializeMatchRecipe(recipe, cache) };
+    };
+    // 진행 중 저장 두 번: 지금 가지는 저장마다 새 사본(머리가 자람), 떠난 가지는 같은 배열
+    const live = { robot1: data(3), robot2: data(4) };
+    const cut = (head: number) => ({ robot1: live.robot1.slice(0, head * 4), robot2: live.robot2.slice(0, head * 4) });
+    const first = withCache(src(cut(4000), 4000));
+    expect(first.text).toBe(plain(src(cut(4000), 4000)));
+    const second = withCache(src(cut(4500), 4500));
+    expect(second.text).toBe(plain(src(cut(4500), 4500)));
+    expect(second.recipe.branches[0].inputs.robot1).toBe(first.recipe.branches[0].inputs.robot1); // 떠난 가지 재사용
+    expect(second.recipe.branches[1].inputs.robot1).not.toBe(first.recipe.branches[1].inputs.robot1);
+    expect(second.recipe.branches[1].inputs.robot1).toHaveLength(1500 * 4);
+    // 같은 배열이라도 머리 틱이 다르면 다시 자름 / 부호화
+    const grown = withCache(src(live, 5200));
+    expect(withCache(src(live, 5200)).recipe.branches[1].inputs.robot1).toBe(grown.recipe.branches[1].inputs.robot1);
+    const longer = withCache(src(live, 5600));
+    expect(longer.recipe.branches[1].inputs.robot1).toHaveLength(2600 * 4);
+    expect(longer.text).toBe(plain(src(live, 5600)));
+    // 다른 배열(가지 전환 뒤 새 사본)이면 내용이 같아도 새로, 일반 배열 입력도 같은 글자
+    const copy = { robot1: left.robot1.slice(), robot2: left.robot2.slice() };
+    expect(withCache(src(live, 5600, copy)).recipe.branches[0].inputs.robot1).not.toBe(first.recipe.branches[0].inputs.robot1);
+    expect(plain(src(live, 5600, { robot1: Array.from(left.robot1), robot2: Array.from(left.robot2) }))).toBe(longer.text);
+  });
 });

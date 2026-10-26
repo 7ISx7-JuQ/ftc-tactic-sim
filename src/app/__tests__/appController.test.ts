@@ -636,6 +636,14 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     assert(src.branches.length === 1 && b.record.headTick === head && b.inputs.robot1.length === head * 4 && b.record.checksums.length === Math.floor(head / 50) + 1, `running: head ${head}, inputs / checkpoints up to the head`);
     const recipe = buildMatchRecipe({ setup: DEFAULT_DRAFT_VALUES, ...src, createdAt: new Date(0) });
     assert(recipe.branches[0].headTick === head && recipe.current === 1, 'builds a recipe mid-run');
+    // 자동 저장 캐시 재료: 떠난 가지는 부를 때마다 같은 배열(불변 사본), 지금 가지는 저장마다 새 사본
+    h.pause();
+    h.setViewTick(10);
+    h.branch();
+    frames.advance(300, 20);
+    const [a, b2] = [h.recipeSource({ whileRunning: true })!, h.recipeSource({ whileRunning: true })!];
+    assert(a.branches.length === 2 && a.branches[0].inputs.robot1 === b2.branches[0].inputs.robot1 && a.branches[0].inputs.robot2 === b2.branches[0].inputs.robot2, 'left branch: same arrays');
+    assert(a.branches[1].inputs.robot1 !== b2.branches[1].inputs.robot1, 'current branch: fresh copy each call');
     h.dispose();
   });
 

@@ -33,7 +33,7 @@ import type { RobotLutView } from '../ui/lutView';
 import { DEFAULT_RNG_SEED } from '../core/simulationEngine';
 import { compareCheckpoints } from '../core/checksum';
 import type { CheckpointComparison } from '../core/checksum';
-import { buildMatchRecipe, parseMatchRecipe, recipeLoadTree, serializeMatchRecipe } from '../app/matchRecipe';
+import { RecipeInputCache, buildMatchRecipe, parseMatchRecipe, recipeLoadTree, serializeMatchRecipe } from '../app/matchRecipe';
 import type { MatchRecipe, RecipeWarning } from '../app/matchRecipe';
 import { AutosaveScheduler, autosaveSignature, createBrowserAutosave } from '../app/matchAutosave';
 import type { AutosaveStore } from '../app/matchAutosave';
@@ -226,6 +226,8 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
   const autosaveRef = useRef<AutosaveStore | null>(null);
   const autosaveSchedulerRef = useRef<AutosaveScheduler | null>(null);
   const saveAutosaveRef = useRef<() => void>(() => {});
+  // 떠난 가지의 잘라 낸 입력 / 부호화 글자 재사용 (22-1c) — 아래 효과는 렌더마다 다시 묶이므로 캐시는 화면 수명 동안 하나
+  const [autosaveInputCache] = useState(() => new RecipeInputCache());
   const offerRestoreRef = useRef<(text: string) => void>(() => {});
   const initialApplied = useRef(drafts.applied);
   const initialSettings = useRef(settings);
@@ -1198,13 +1200,14 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
 
   // 자동 저장 / 복구 제안 (19-1): 렌더마다 최신 상태로 다시 묶음 (마운트 효과의 저장 예약 / 복구 제안이 부름)
   useEffect(() => {
-    // 자동 저장 (19-1): 저장하는 순간의 분기 트리 전체를 경기 파일과 같은 레시피 글자로 (진행 중에도, 설정 = 적용 값)
+    // 자동 저장 (19-1): 저장하는 순간의 분기 트리 전체를 경기 파일과 같은 레시피 글자로 (진행 중에도, 설정 = 적용 값).
+    // 바뀌지 않은 가지(떠난 가지)는 캐시에서 재사용 → 진행 중 저장은 지금 가지만 새로 부호화
     saveAutosaveRef.current = () => {
       const store = autosaveRef.current;
       const src = c()?.recipeSource({ whileRunning: true });
       if (!store || !src) return;
       try {
-        void store.save(serializeMatchRecipe(buildMatchRecipe({ setup: appliedRef.current, ...src, createdAt: new Date() })));
+        void store.save(serializeMatchRecipe(buildMatchRecipe({ setup: appliedRef.current, ...src, createdAt: new Date() }, autosaveInputCache), autosaveInputCache));
       } catch {
         // 재료가 틀리면(있을 수 없음) 이번 저장만 건너뜀
       }
