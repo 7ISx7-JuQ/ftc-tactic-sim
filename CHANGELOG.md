@@ -21,6 +21,7 @@ Match results differ from 1.x: the engine rules and several field values changed
 - **Side offset** of the shooter (the aim compensates for it).
 - **Driving with the lift up:** a lift speed limit (0 keeps the 1.x lock).
 - **FLOWER drop zones:** the sides of the robot that can drop into a FLOWER.
+- **Launch point** display option (a reticle where shots leave the robot), separate from the aim guide.
 
 ### Scenario
 
@@ -80,6 +81,7 @@ First release.
 - 슈터 **좌우 오프셋** (조준이 보정함).
 - **리프트를 올린 채 주행:** 리프트 상태 최고 속도 (0이면 1.x처럼 잠금).
 - **FLOWER 투입 방향 구역:** FLOWER에 넣을 수 있는 로봇 면.
+- **사출구** 표시 옵션 (공이 로봇에서 출발하는 지점을 조준경으로, 조준선과 따로).
 
 ### 시나리오
 

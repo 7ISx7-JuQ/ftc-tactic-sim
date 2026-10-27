@@ -31,7 +31,7 @@ import { Section, Segmented, Toggle } from './FormControls';
 import type { UiSettings } from '../ui/settings';
 
 const ROBOTS: readonly RobotId[] = ['robot1', 'robot2'];
-const OPTION_KEYS: readonly (keyof RenderOptions)[] = ['aimGuide', 'intakeProgress', 'hitProbability', 'flightTrail', 'flightResult', 'robotPath'];
+const OPTION_KEYS: readonly (keyof RenderOptions)[] = ['aimGuide', 'muzzleMark', 'intakeProgress', 'hitProbability', 'flightTrail', 'flightResult', 'robotPath'];
 const DRIVE_MODES: readonly DriveMode[] = ['FIELD', 'ROBOT'];
 const VIEWS: readonly ViewMode[] = ['DRIVER', 'AUDIENCE'];
 // 장치 배정 선택지 (18-2): R1 / R2 / 없음

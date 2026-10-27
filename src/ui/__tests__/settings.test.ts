@@ -29,7 +29,7 @@ const custom: UiSettings = {
   language: 'ko',
   lengthUnit: 'cm',
   defaultView: 'AUDIENCE',
-  renderOptions: { aimGuide: true, intakeProgress: false, hitProbability: true, flightTrail: false, flightResult: true, robotPath: true },
+  renderOptions: { aimGuide: true, muzzleMark: true, intakeProgress: false, hitProbability: true, flightTrail: false, flightResult: true, robotPath: true },
   devices: { gamepads: { 0: 'robot2', 1: null }, keyboard: null },
   gamepadMappings: { 0: { buttons: { intake: 4, shoot: 5, lift: 2, drop: 3 }, swapSticks: true }, 1: DEFAULT_GAMEPAD_MAPPING },
   driveModes: { robot1: 'ROBOT', robot2: 'FIELD' },
@@ -43,7 +43,7 @@ describe('SETTINGS / 자동 보관 (09-8b)', () => {
       language: 'en',
       lengthUnit: 'in',
       defaultView: 'DRIVER',
-      renderOptions: { aimGuide: false, intakeProgress: false, hitProbability: false, flightTrail: false, flightResult: false, robotPath: false },
+      renderOptions: { aimGuide: false, muzzleMark: false, intakeProgress: false, hitProbability: false, flightTrail: false, flightResult: false, robotPath: false },
       devices: { gamepads: { 0: 'robot1', 1: 'robot2' }, keyboard: 'robot2' },
       gamepadMappings: { 0: DEFAULT_GAMEPAD_MAPPING, 1: DEFAULT_GAMEPAD_MAPPING },
       driveModes: { robot1: 'FIELD', robot2: 'FIELD' },
@@ -81,6 +81,9 @@ describe('SETTINGS / 자동 보관 (09-8b)', () => {
     expect(partial.settings.lengthUnit).toBe('cm');
     expect(partial.settings.renderOptions).toEqual({ ...DEFAULT_SETTINGS.renderOptions, flightTrail: true });
     expect(partial.settings.renderOptions.robotPath).toBe(false); // 16-3 이전에 저장한 설정 = 새 옵션은 기본값 (SETTINGS_VERSION 그대로)
+    // 13-6 이전(조준선에 사출구 포함) 설정: 조준선을 켜 두었어도 새 사출구 옵션은 기본값(꺼짐)
+    const before136 = parseStoredConfig(JSON.stringify({ version: SETTINGS_VERSION, settings: { ...custom, renderOptions: { ...DEFAULT_SETTINGS.renderOptions, aimGuide: true, muzzleMark: undefined } } }), defaults);
+    expect(before136.settings.renderOptions).toEqual({ ...DEFAULT_SETTINGS.renderOptions, aimGuide: true, muzzleMark: false });
     expect(partial.settings.driveModes).toEqual({ robot1: 'FIELD', robot2: 'FIELD' });
     expect(partial.settings.devices).toEqual(custom.devices);
     // 18-2: 장치별 틀린 값은 그 장치만 기본값, 18-2 이전 설정(devices 없음)은 키보드 토글을 옮김 (끔 = 키보드 배정 없음)

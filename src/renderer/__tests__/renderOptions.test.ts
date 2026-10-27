@@ -30,7 +30,7 @@ const engine = (judge: ShotJudge = fixedRateShotJudge(0.5)) =>
 // 모든 메서드를 받아 아무것도 하지 않는 캔버스 (Node에서 renderScene 실행용, measureText만 폭 반환)
 const noopCtx = () =>
   new Proxy({}, { get: (_t, prop) => (prop === 'measureText' ? () => ({ width: 10 }) : () => undefined), set: () => true }) as unknown as CanvasRenderingContext2D;
-const ALL_ON: RenderOptions = { aimGuide: true, intakeProgress: true, hitProbability: true, flightTrail: true, flightResult: true, robotPath: true };
+const ALL_ON: RenderOptions = { aimGuide: true, muzzleMark: true, intakeProgress: true, hitProbability: true, flightTrail: true, flightResult: true, robotPath: true };
 
 describe('표시 옵션 (명세서 3.7, 08-6)', () => {
   it('A. 조준선 (터렛 범위 부채꼴 / 고정형은 부채꼴 없음, 발사 방향)', () => {

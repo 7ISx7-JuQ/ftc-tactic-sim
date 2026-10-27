@@ -611,6 +611,25 @@ describe('config 창', () => {
     await expect.element(toggle()).toBeChecked();
   });
 
+  it('표시 옵션 사출구 (13-6): 조준선과 따로 켜고 끔, 다시 열어도 유지 (설정 자동 보관)', async () => {
+    const aim = () => page.getByRole('checkbox', { name: /Aim guide/ });
+    const muzzle = () => page.getByRole('checkbox', { name: /Launch point/ });
+    await userEvent.click(button('Open settings'));
+    await userEvent.click(page.getByRole('tab', { name: 'SETTINGS' }));
+    await expect.element(aim()).not.toBeChecked(); // 둘 다 기본 꺼짐
+    await expect.element(muzzle()).not.toBeChecked();
+    await userEvent.click(page.getByText('Launch point', { exact: true })); // 스위치 라벨 (입력칸은 숨김)
+    await expect.element(muzzle()).toBeChecked();
+    await expect.element(aim()).not.toBeChecked();
+
+    unmount();
+    mount();
+    await userEvent.click(button('Open settings'));
+    await userEvent.click(page.getByRole('tab', { name: 'SETTINGS' }));
+    await expect.element(muzzle()).toBeChecked();
+    await expect.element(aim()).not.toBeChecked();
+  });
+
   it('장치 배정 (18-2): 기본 = 패드 0 → R1 · 패드 1 / 키보드 → R2, R1 ↔ R2 바꾸기, 장치 없는 로봇 경고, 다시 열어도 유지, 도움말 문구가 배정을 따름', async () => {
     const group = (name: string) => page.getByRole('radiogroup', { name, exact: true });
     const selected = (name: string) => group(name).getByRole('radio', { checked: true });

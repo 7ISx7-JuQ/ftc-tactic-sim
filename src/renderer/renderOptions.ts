@@ -19,6 +19,7 @@ import type { DeepReadonly, GamePiece, RobotConfig, RobotShooterBallistics, Robo
 
 export interface RenderOptions {
   aimGuide: boolean;       // 조준선 (발사 방향 + 터렛 범위 부채꼴)
+  muzzleMark: boolean;     // 사출구 (비행 공이 출발하는 점, 조준경 모양 — 13-6에서 조준선과 분리)
   intakeProgress: boolean; // 흡입 접촉 진행 호
   hitProbability: boolean; // 실시간 명중 확률 (좌측 HTML 득점 패널 글자, 09-6d — 캔버스에는 그리지 않음)
   flightTrail: boolean;    // 비행 잔상
@@ -28,6 +29,7 @@ export interface RenderOptions {
 
 export const DEFAULT_RENDER_OPTIONS: Readonly<RenderOptions> = {
   aimGuide: false,
+  muzzleMark: false,
   intakeProgress: false,
   hitProbability: false,
   flightTrail: false,

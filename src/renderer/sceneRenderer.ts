@@ -91,6 +91,7 @@ const SCENE_COLORS = {
   pageBg: '#15171c', // 필드 둘레 (어두운 테마)
   robot: { RED: ALLIANCE_COLORS.RED.base, BLUE: ALLIANCE_COLORS.BLUE.base } as Record<Alliance, string>,
   robotStroke: '#111827',
+  muzzleHalo: '#ffffff',
   heading: '#ffffff',
   intakeIdle: 'rgba(22, 163, 74, 0.18)',
   intakeIdleStroke: 'rgba(21, 128, 61, 0.45)',
@@ -515,9 +516,11 @@ function drawRobotPaths(ctx: CanvasRenderingContext2D, paths: ScenePaths, ally: 
 }
 
 // 표시 옵션 aimGuide: 다음에 발사할 기물의 슈터 기준 (13-2) — 터렛형은 사출구를 꼭짓점으로 회전 범위 부채꼴 (고정형은 없음, 13-5)
-// + 사출구에서 발사 방향으로 조준점 거리만큼 점선 (로봇 아래) + 사출구 점 (비행 공이 출발하는 점, 몸체 안이라 로봇 위 — drawMuzzleMarks)
+// + 사출구에서 발사 방향으로 조준점 거리만큼 점선 (로봇 아래).
+// 표시 옵션 muzzleMark (13-6): 같은 슈터의 사출구 (비행 공이 출발하는 점, 몸체 안이라 로봇 위 — drawMuzzleMarks)
 const AIM_SECTOR_RADIUS = 24; // inch
-const MUZZLE_MARK_RADIUS = 0.8; // inch
+const MUZZLE_RING_RADIUS = 0.9; // inch (조준경 고리)
+const MUZZLE_TICK_RADIUS = 1.7; // inch (눈금 바깥 끝)
 
 function sceneAimGuides(frame: DeepReadonly<TimelineFrame>, scene: SceneInput): AimGuide[] {
   const { allianceColor, hive } = frame.field;
@@ -554,9 +557,32 @@ function drawAimGuides(ctx: CanvasRenderingContext2D, guides: readonly AimGuide[
   ctx.restore();
 }
 
-function drawMuzzleMarks(ctx: CanvasRenderingContext2D, guides: readonly AimGuide[], ally: Alliance): void {
+/**
+ * 사출구 = 조준경 (13-6): 속이 빈 고리 + 발사 방향 앞뒤 / 좌우 짧은 눈금 4개, 흰 테두리 + 진한 선.
+ * 기본 오프셋 0이면 사출구가 적재함 칸 위라(로봇 중심) 기물 색 원은 적재물로 보였다 → 속을 비워 아래 기물 색이 보이게,
+ * 기물 색 대신 중립색 (어느 기물의 슈터인지는 적재함의 다음 발사 강조가 보여 줌). 눈금 하나가 발사 방향이라 터렛 방향도 읽힘
+ */
+function drawMuzzleMarks(ctx: CanvasRenderingContext2D, guides: readonly AimGuide[]): void {
   ctx.save();
-  for (const g of guides) drawCircle(ctx, g.muzzle.x, g.muzzle.y, MUZZLE_MARK_RADIUS, pieceColors({ type: g.pieceType, alliance: ally }).fill, SCENE_COLORS.robotStroke, 1.5);
+  for (const g of guides) {
+    const cx = inchToPx(g.muzzle.x);
+    const cy = inchToPx(g.muzzle.y);
+    const ring = inchToPx(MUZZLE_RING_RADIUS);
+    const tick = inchToPx(MUZZLE_TICK_RADIUS);
+    ctx.beginPath();
+    ctx.arc(cx, cy, ring, 0, Math.PI * 2);
+    for (let k = 0; k < 4; k++) {
+      const a = g.launchHeading + (k * Math.PI) / 2;
+      ctx.moveTo(cx + Math.cos(a) * ring, cy + Math.sin(a) * ring);
+      ctx.lineTo(cx + Math.cos(a) * tick, cy + Math.sin(a) * tick);
+    }
+    ctx.lineWidth = 3.5;
+    ctx.strokeStyle = SCENE_COLORS.muzzleHalo;
+    ctx.stroke();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = SCENE_COLORS.robotStroke;
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
@@ -754,7 +780,7 @@ function drawBadge(ctx: CanvasRenderingContext2D, robot: DeepReadonly<RobotState
 /**
  * 장면 전체를 그림. ctx는 SCENE_WIDTH_PX × SCENE_HEIGHT_PX(= 필드 뷰포트 800 × 800) 논리 크기 × dpr 버퍼의 캔버스
  * 순서: 둘레 배경 → 정적 레이어(HIVE 기둥 부분, 게이지 틀 포함) → HIVE 셀 상태(기둥 부분) / 게이지 내용 → [로봇 동선] → 바닥 기물(득점 GARDEN 포함)
- *       → 종료 강조(FLOWER) → [조준선] → 로봇 → [사출구 점] → 종료 강조(주차) → [흡입 진행] → 터널 지붕(지붕 불투명도, 13-1) → 팁 낙하
+ *       → 종료 강조(FLOWER) → [조준선] → 로봇 → [사출구 조준경] → 종료 강조(주차) → [흡입 진행] → 터널 지붕(지붕 불투명도, 13-1) → 팁 낙하
  *       → 비행 공([잔상] / [결과 색])
  *       → HIVE 셀 알약 / 번호 / 배지   ([ ] = 표시 옵션)
  */
@@ -782,11 +808,11 @@ export function renderScene(ctx: CanvasRenderingContext2D, scene: SceneInput, dp
   if (scene.paths) drawRobotPaths(ctx, scene.paths, ally);
   drawFloorPieces(ctx, frame);
   drawScoredFieldMarks(ctx, frame, ally);
-  const guides = options.aimGuide ? sceneAimGuides(frame, scene) : [];
-  drawAimGuides(ctx, guides);
+  const guides = options.aimGuide || options.muzzleMark ? sceneAimGuides(frame, scene) : [];
+  if (options.aimGuide) drawAimGuides(ctx, guides);
   drawRobotBody(ctx, frame.r1, scene.r1Config, ally);
   drawRobotBody(ctx, frame.r2, scene.r2Config, ally);
-  drawMuzzleMarks(ctx, guides, ally);
+  if (options.muzzleMark) drawMuzzleMarks(ctx, guides);
   drawParkedMarks(ctx, frame, scene);
   if (options.intakeProgress) drawIntakeProgress(ctx, frame, scene, view);
   const roofRobots = [{ pose: frame.r1, size: scene.r1Config }, { pose: frame.r2, size: scene.r2Config }];
