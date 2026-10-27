@@ -1392,7 +1392,7 @@ export function planShotFlight(input: ShotFlightInput): ShotFlightPlan {
 // 모든 구간은 발사 시점(무효 명중은 도착 시점)에 확정되고, 엔진은 최종 착지 틱에만 기물을 반영한다.
 // ============================================================
 
-/** HIVE 반사 세기 산포: 반발 계수 × (1 ± 0.2) (bounceRestitutionRoll 0 → 0.8배, 1 → 1.2배) */
+/** HIVE 반사 세기 산포: HIVE 반발 계수(hiveRestitution) × (1 ± 0.2) (bounceRestitutionRoll 0 → 0.8배, 1 → 1.2배) */
 export const HIVE_BOUNCE_RESTITUTION_SPREAD = 0.2;
 /** HIVE 반사 방향 산포: 반사 후 수평 속도를 ± 15° 회전 (bounceAngleRoll) */
 export const HIVE_BOUNCE_ANGLE_SPREAD = Math.PI / 12;
@@ -1595,7 +1595,7 @@ function safeLandingPoint(x: number, y: number, r: number): { x: number; y: numb
 }
 
 function bounceRestitution(pieceType: PieceType, rolls: BounceRolls): number {
-  return PIECE_PHYSICS[pieceType].restitution * (1 + HIVE_BOUNCE_RESTITUTION_SPREAD * (2 * rolls.restitution - 1));
+  return PIECE_PHYSICS[pieceType].hiveRestitution * (1 + HIVE_BOUNCE_RESTITUTION_SPREAD * (2 * rolls.restitution - 1));
 }
 
 function rotateHorizontal(s: FlightState, angle: number): FlightState {

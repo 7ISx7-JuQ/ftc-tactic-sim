@@ -526,7 +526,8 @@ describe('발사 비행 계획 (06-6)', () => {
 
 describe('충돌 후 낙하 (08-2, 06-6 개정)', () => {
   it('P. HIVE 옆면 / 윗면 반사, 벽 반사, 무효 명중 반사', () => {
-    const E_POLLEN = PIECE_PHYSICS.POLLEN.restitution;
+    const E_POLLEN = PIECE_PHYSICS.POLLEN.restitution;   // 필드 벽 반사
+    const E_HIVE = PIECE_PHYSICS.POLLEN.hiveRestitution; // HIVE 옆면 / 윗면 반사 (21-2a)
     const box = { minX: HIVE_AABB.minX - R_POLLEN, maxX: HIVE_AABB.maxX + R_POLLEN, minY: HIVE_AABB.minY - R_POLLEN, maxY: HIVE_AABB.maxY + R_POLLEN };
     const topZ = HIVE_HEIGHT + R_POLLEN;
     const insideBox = (x: number, y: number) => x > box.minX && x < box.maxX && y > box.minY && y < box.maxY;
@@ -559,21 +560,21 @@ describe('충돌 후 낙하 (08-2, 06-6 개정)', () => {
       const contact: FlightState = { t: 0.5, x: 72, y: box.maxY, z: 30, vx: 40, vy: -150, vz: -50 };
       const f = planHiveBounce(contact, 'SIDE', 'POLLEN');
       const s0 = f.segments[0];
-      assert(near(s0.vy, E_POLLEN * 150, 1e-9) && s0.vx === 40 && s0.vz === -50, `front face: vy -150 -> +${(E_POLLEN * 150).toFixed(1)}, tangential / vertical kept`);
+      assert(near(s0.vy, E_HIVE * 150, 1e-9) && s0.vx === 40 && s0.vz === -50, `front face: vy -150 -> +${(E_HIVE * 150).toFixed(1)}, tangential / vertical kept`);
       chain(contact, f, 'side');
       assert(f.landing.y > box.maxY && near(f.landingVy, s0.vy * PIECE_PHYSICS.POLLEN.landingSpeedRetention, 1e-9), 'lands in front of the face, horizontal speed × landingSpeedRetention');
       // 옆면 x 쪽 (−x 면): 법선 (−1, 0)
       const side = planHiveBounce({ t: 0, x: box.minX, y: 72, z: 20, vx: 100, vy: 10, vz: 0 }, 'SIDE', 'POLLEN');
-      assert(near(side.segments[0].vx, -E_POLLEN * 100, 1e-9) && side.segments[0].vy === 10 && side.landing.x < box.minX, 'left face reflects -x');
+      assert(near(side.segments[0].vx, -E_HIVE * 100, 1e-9) && side.segments[0].vy === 10 && side.landing.x < box.minX, 'left face reflects -x');
     }
     // 산포 난수: 반사 세기 × (1 ± 0.2), 방향 ± 15° 회전, 바깥 법선 성분 최소 속도 보장
     {
       const contact: FlightState = { t: 0, x: 72, y: box.maxY, z: 30, vx: 0, vy: -150, vz: 0 };
       const weak = planHiveBounce(contact, 'SIDE', 'POLLEN', { restitution: 0, angle: 0.5 }).segments[0];
       const strong = planHiveBounce(contact, 'SIDE', 'POLLEN', { restitution: 0.75, angle: 0.5 }).segments[0];
-      assert(near(weak.vy, E_POLLEN * (1 - HIVE_BOUNCE_RESTITUTION_SPREAD) * 150, 1e-9) && near(strong.vy, E_POLLEN * (1 + 0.5 * HIVE_BOUNCE_RESTITUTION_SPREAD) * 150, 1e-9), 'restitution roll scales the rebound');
+      assert(near(weak.vy, E_HIVE * (1 - HIVE_BOUNCE_RESTITUTION_SPREAD) * 150, 1e-9) && near(strong.vy, E_HIVE * (1 + 0.5 * HIVE_BOUNCE_RESTITUTION_SPREAD) * 150, 1e-9), 'restitution roll scales the rebound');
       const turned = planHiveBounce(contact, 'SIDE', 'POLLEN', { restitution: 0.5, angle: 0 }).segments[0];
-      assert(near(Math.atan2(turned.vy, turned.vx), Math.PI / 2 - HIVE_BOUNCE_ANGLE_SPREAD, 1e-9) && near(Math.hypot(turned.vx, turned.vy), E_POLLEN * 150, 1e-9), 'angle roll rotates the rebound by -15°');
+      assert(near(Math.atan2(turned.vy, turned.vx), Math.PI / 2 - HIVE_BOUNCE_ANGLE_SPREAD, 1e-9) && near(Math.hypot(turned.vx, turned.vy), E_HIVE * 150, 1e-9), 'angle roll rotates the rebound by -15°');
       const graze = planHiveBounce({ ...contact, vx: 150, vy: -1 }, 'SIDE', 'POLLEN').segments[0];
       assert(near(graze.vy, HIVE_BOUNCE_MIN_SPEED, 1e-9) && near(graze.vx, 150, 1e-9), 'grazing hit: outward speed topped up to the minimum');
       const grazeTurned = planHiveBounce({ ...contact, vx: 150, vy: -1 }, 'SIDE', 'POLLEN', { restitution: 0.5, angle: 0 }).segments[0];
@@ -584,7 +585,7 @@ describe('충돌 후 낙하 (08-2, 06-6 개정)', () => {
       // 가장자리 12.9 in 앞, 60 in/s: 첫 튐 체공(0.27 s) 안에 박스를 벗어남 (벽에는 닿지 않음)
       const contact: FlightState = { t: 1, x: 72, y: 80, z: topZ, vx: 0, vy: 60, vz: -150 };
       const f = planHiveBounce(contact, 'TOP', 'POLLEN');
-      assert(f.segments.length === 1 && near(f.segments[0].vz, E_POLLEN * 150, 1e-9) && f.segments[0].vy === 60, 'top: vertical speed reversed × e, horizontal kept, leaves the box in the air');
+      assert(f.segments.length === 1 && near(f.segments[0].vz, E_HIVE * 150, 1e-9) && f.segments[0].vy === 60, 'top: vertical speed reversed × e, horizontal kept, leaves the box in the air');
       chain(contact, f, 'top fast');
       assert(f.landing.y > box.maxY, 'lands beyond the far side');
     }
@@ -598,7 +599,7 @@ describe('충돌 후 낙하 (08-2, 06-6 개정)', () => {
         const s = f.segments[i];
         assert(near(s.z, topZ, 1e-9) && near(flightSegmentPoint(s, s.t1).z, topZ, 1e-9) && insideBox(flightSegmentPoint(s, s.t1).x, flightSegmentPoint(s, s.t1).y), `bounce ${i + 1} starts and ends on the top`);
       }
-      assert(near(f.segments[1].vz, E_POLLEN * f.segments[0].vz, 1e-9), 'each bounce loses speed by e');
+      assert(near(f.segments[1].vz, E_HIVE * f.segments[0].vz, 1e-9), 'each bounce loses speed by e');
       const roll = f.segments[HIVE_TOP_MAX_BOUNCES];
       assert(roll.vy === 30 && near(flightSegmentPoint(roll, roll.t1).y, box.maxY, 1e-9), 'roll along the velocity to the edge');
       chain(contact, f, 'top slow');
@@ -638,6 +639,26 @@ describe('충돌 후 낙하 (08-2, 06-6 개정)', () => {
     {
       const f = planHiveBounce({ t: 0, x: 72, y: 90, z: 2, vx: 0, vy: -10, vz: 0 }, 'SIDE', 'POLLEN');
       assert(!insideBox(f.landing.x, f.landing.y) && f.landing.y > box.maxY, 'degenerate contact inside the box -> landing pushed outside');
+    }
+  });
+
+  it('P-2. (21-2a) HIVE 반사는 hiveRestitution, 필드 벽 반사는 restitution — 서로 따로 (지금 값은 같음)', () => {
+    for (const type of ['POLLEN', 'NECTAR'] as const) {
+      expect(PIECE_PHYSICS[type].hiveRestitution).toBe(PIECE_PHYSICS[type].restitution); // 실측 전 = 벽 값 (결과 불변)
+    }
+    const saved = { ...PIECE_PHYSICS.POLLEN };
+    try {
+      PIECE_PHYSICS.POLLEN.hiveRestitution = 0.6;
+      PIECE_PHYSICS.POLLEN.restitution = 0.2;
+      const r = PIECE_PHYSICS.POLLEN.radius;
+      const hive = planHiveBounce({ t: 0.5, x: 72, y: HIVE_AABB.maxY + r, z: 30, vx: 40, vy: -150, vz: -50 }, 'SIDE', 'POLLEN').segments[0];
+      expect(hive.vy).toBeCloseTo(0.6 * 150, 9); // 옆면: HIVE 값
+      const top = planHiveBounce({ t: 0.5, x: 72, y: 72, z: HIVE_HEIGHT + r, vx: 0, vy: 60, vz: -150 }, 'TOP', 'POLLEN').segments[0];
+      expect(top.vz).toBeCloseTo(0.6 * 150, 9); // 윗면: HIVE 값
+      const wall = planFallToFloor({ t: 0, x: 140, y: 72, z: 40, vx: 100, vy: 0, vz: 0 }, 'POLLEN').segments[1];
+      expect(wall.vx).toBeCloseTo(-0.2 * 100, 9); // 필드 벽: 벽 값
+    } finally {
+      Object.assign(PIECE_PHYSICS.POLLEN, saved);
     }
   });
 });

@@ -133,16 +133,18 @@ export interface PiecePhysics {
   radius: number;         // inch
   mass: number;           // g
   frictionDecel: number;  // 쿨롱 마찰 감속도 (inch/s^2)
-  restitution: number;    // 반발 계수 e
+  restitution: number;    // 반발 계수 e (바닥 공의 벽 / 범퍼 / HIVE 기둥 / FLOWER 충돌, 공중 필드 벽 반사)
+  hiveRestitution: number; // 공중 HIVE 반사(옆면 / 윗면 / 무효 명중) 반발 계수 (21-2a 분리, 실측 기록지 측정 4)
   // 발사 비행 후 바닥 착지 시 수평 속도 유지 비율 (0 ~ 1): 착지 바운스/타일 충격 손실 반영.
   // 비행 중에는 공기 저항을 무시하므로 수평 속도가 v0·cosθ로 유지되고, 손실은 착지 순간에만 적용 (명세서 2.5)
   landingSpeedRetention: number;
 }
 
 // landingSpeedRetention 0.3은 실측 전 임시값 (실측 방법: 명세서 2.5)
+// hiveRestitution은 21-2a에서 restitution과 나눴고 실측 전이라 같은 값 (민감도 분석: 빗나간 공이 멈추는 자리를 이 값이 정함, 명세서 2.5)
 export const PIECE_PHYSICS: Record<GamePiece['type'], PiecePhysics> = {
-  POLLEN: { radius: 1.4, mass: 24.95, frictionDecel: 65.0, restitution: 0.35, landingSpeedRetention: 0.3 },
-  NECTAR: { radius: 1.8, mass: 41.28, frictionDecel: 85.0, restitution: 0.25, landingSpeedRetention: 0.3 },
+  POLLEN: { radius: 1.4, mass: 24.95, frictionDecel: 65.0, restitution: 0.35, hiveRestitution: 0.35, landingSpeedRetention: 0.3 },
+  NECTAR: { radius: 1.8, mass: 41.28, frictionDecel: 85.0, restitution: 0.25, hiveRestitution: 0.25, landingSpeedRetention: 0.3 },
 };
 
 // 중력 가속도 (inch/s^2): 표준 중력 9.80665 m/s^2 환산 (≈ 386.09). 공기 저항 / 공 회전 무시
