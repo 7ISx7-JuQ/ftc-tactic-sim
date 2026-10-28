@@ -49,7 +49,7 @@ export interface RecipeBranch {
   headTick: number;                     // 마지막 기록 틱 (분기 틱 이상, 6000 = 경기 종료)
   inputs: Record<RobotId, Int8Array>;   // 로봇별 적용 입력 기록 분기 틱 ~ 머리 틱 − 1 (틱당 4 B)
   checksums: string[];                  // 이 가지 전체 타임라인의 체크포인트 (0, 50, … ≤ 머리 틱)
-  result: RecipeResult | null;          // 종료한 가지의 점수 (사람이 알아보기 위한 정보, 불러오기 판정에 쓰지 않음)
+  result: RecipeResult | null;          // 종료한 가지의 판정 점수 · RP (사람이 알아보기 위한 정보 + 불러오기 때 정착 구간 비교, 12-16 — 재계산에는 쓰지 않음)
 }
 
 export interface MatchRecipe {

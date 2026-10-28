@@ -821,7 +821,7 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     statuses.length = 0;
     frames.advance(VIEW_ANIMATION_MS + 50);
     s = h.status();
-    assert(s.phase === 'MATCH' && s.loopState === 'ENDED' && s.endStage === 'REVIEW' && s.tick === 0 && s.headTick >= MATCH_TICKS, 'review state at tick 0 after the rotation');
+    assert(s.phase === 'MATCH' && s.loopState === 'ENDED' && s.endStage === 'REVIEW' && s.tick === 0 && s.headTick === MATCH_TICKS && s.endTick >= MATCH_TICKS, 'review state at tick 0 after the rotation');
     assert(s.viewAngle === viewAngle('DRIVER', 'BLUE'), 'default view (DRIVER) of the file alliance');
     assert(s.endSeq === 0 && statuses.every(x => x.endStage !== 'HIGHLIGHT' && x.endStage !== 'RESULT'), 'no end highlight / result popup / end signal');
     assert(!!s.result && s.result.total === ref.endFrame!.totalScore && !s.canResume && s.canBranch, 'result available, no RESUME, BRANCH possible');
@@ -859,6 +859,56 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     h.pause();
     const paused = h.recipeSource();
     assert(!!paused && paused.branches[0].record.headTick === h.status().headTick && paused.branches[0].inputs.robot1.length === h.status().headTick * 4, 'paused unfinished match: recipe source up to the head');
+    h.dispose();
+  }, FULL_MATCH_TIMEOUT_MS);
+
+  it('J2. (12-16) 정착 구간: 입력 머리 6000 / 프레임 끝 = 판정 틱, 정착 구간 분기 불가 · 스크러빙 / 재생 가능, 결과 다시 열기 = 판정 프레임, 내보내기 머리 6000', () => {
+    // R1이 0:00까지 왕복 주행 → 0:00에 움직이는 중이라 정착 구간(제동)이 생김
+    const data = new Int8Array(MATCH_TICKS * 4);
+    for (let t = 0; t < MATCH_TICKS; t++) data.set([t % 200 < 100 ? 100 : -100, 0, 0, 0], t * 4);
+    const records = { robot1: data, robot2: new Int8Array(MATCH_TICKS * 4) };
+    const { h, frames } = setup();
+    frames.advance(16);
+    const loaded = h.loadMatch(makeSetup('RED'), { branches: [{ number: 1, parent: null, forkTick: 0, name: null, headTick: MATCH_TICKS, records }], current: 1, nextNumber: 2 });
+    frames.advance(VIEW_ANIMATION_MS + 50);
+    let s = h.status();
+    const end = s.endTick;
+    const total = s.result!.total;
+    assert(s.endStage === 'REVIEW' && s.matchEnded && s.headTick === MATCH_TICKS && end > MATCH_TICKS, `input head 6000, frame end = judged tick ${end}`);
+    assert(loaded![0].result!.totalScore === total && loaded![0].checksums.length === 121, 'loaded record: 121 checkpoints (0 ~ 6000) + judged result');
+
+    // 스크러빙: 정착 구간 끝(판정 틱)까지, 분기는 0:00 전에서만, 재개 없음, 시계 0:00
+    h.setViewTick(end + 100);
+    s = h.status();
+    assert(s.tick === end && s.score === total && !s.canBranch && !s.canResume && s.remainingSec === 0, 'scrub clamps to the judged tick: final score, no BRANCH / RESUME');
+    h.setViewTick(MATCH_TICKS + 1);
+    s = h.status();
+    assert(!s.canBranch && s.score === s.tipCount * 20 && s.remainingSec === 0, 'settle frame: no BRANCH, live TIP score, clock 0:00');
+    h.setViewTick(MATCH_TICKS);
+    assert(!h.status().canBranch, 'no BRANCH at 0:00 (input end)');
+    h.setViewTick(MATCH_TICKS - 1);
+    assert(h.status().canBranch, 'BRANCH before 0:00');
+
+    // 기록 재생: 0:00을 지나 정착 구간까지 이어 재생하고 판정 틱에서 멈춤
+    h.setViewTick(MATCH_TICKS - 10);
+    h.play();
+    frames.advance(12_000, 50);
+    s = h.status();
+    assert(!s.playing && s.tick === end, `playback runs through the settle frames to the judged tick (${s.tick})`);
+
+    // 결과 다시 열기 = 판정 프레임 (닫아도 그 틱)
+    h.setViewTick(100);
+    h.openResult();
+    s = h.status();
+    assert(s.endStage === 'RESULT' && s.tick === end, 'RESULT shows the judged frame');
+    h.closeResult();
+    assert(h.status().tick === end, 'closing keeps the judged frame');
+
+    // 가지 목록 / 내보내기 재료: 머리 = 입력 머리 6000, 결과 = 판정
+    const b = h.status().branches[0];
+    assert(b.headTick === MATCH_TICKS && b.ended && b.totalScore === total, 'branch list: head 6000, judged score');
+    const root = h.recipeSource()?.branches[0];
+    assert(root!.record.headTick === MATCH_TICKS && root!.record.result!.totalScore === total && root!.record.checksums.length === 121, 'recipe record: head 6000, judged result');
     h.dispose();
   }, FULL_MATCH_TIMEOUT_MS);
 

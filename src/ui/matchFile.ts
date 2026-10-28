@@ -1,13 +1,14 @@
 // 경기 파일 화면 규칙 (명세서 3.9 경기 불러오기 / 경기 내보내기, 10-4): React / DOM 비의존 순수 함수
 // - 자동 저장 복구 확인창 (19-1, 지금 가지 / 저장 시각 / 가지 수 / 불러오기와 같은 경고 줄).
 // - 불러오기: 거부 사유 문구, 확인창(설정 교체 안내 + 가지 수 + 버전 / LUT 설정 경고 줄), 준비 진행(두 로봇 명중 확률표 → 가지 단위 재계산, 15-3),
-//   체크섬 불일치 배너(처음 어긋난 가지 이름 + 구간, 15-3).
+//   체크섬 불일치 배너(처음 어긋난 가지 이름 + 구간, 15-3). 체크포인트(0 ~ 6000틱)가 같아도 판정 결과(0:00 뒤 정착 구간)가 다르면 같은 배너 (12-16).
 // - 내보내기: 경기 파일 이름(지금 가지 상태 / _b{번호} / _{가지 수}br, 15-3), 요약 파일 이름, 요약 텍스트(결과 팝업과 같은 규칙, 현재 화면 언어).
 
 import type { MatchResult } from '../app/appController';
 import { MAX_BRANCHES } from '../app/branchTree';
-import type { MatchRecipe, RecipeError, RecipeWarning } from '../app/matchRecipe';
+import type { MatchRecipe, RecipeError, RecipeResult, RecipeWarning } from '../app/matchRecipe';
 import { BALLISTICS_MODEL_VERSION } from '../core/ballistics';
+import { compareCheckpoints } from '../core/checksum';
 import type { CheckpointComparison } from '../core/checksum';
 import { DT, ENGINE_VERSION, MATCH_TICKS } from '../core/simulationEngine';
 import type { RobotId } from '../input/inputConfig';
@@ -104,18 +105,41 @@ export interface MismatchBranch {
  * 체크섬 불일치 배너: 제목 + (가지가 2개 이상인 트리면 처음 어긋난 가지 이름) 처음 달라진 구간(경기 타이머 표시)
  * + 그 밖에 어긋난 가지 수 + 버전이 달랐으면 그 사유. 일치하면 null
  */
+/**
+ * 불러온 가지 비교 (12-16): 체크포인트(0 ~ 6000틱)를 먼저 보고, 같으면 판정 결과(총점 · RP)를 비교한다.
+ * 정착 구간(0:00 뒤)은 입력 없이 다시 계산되어 체크포인트에 들어가지 않으므로, 그 구간만 어긋나면 결과로만 드러난다
+ */
+export type MatchComparison = CheckpointComparison | { match: false; settle: { file: number | null; now: number | null } };
+
+export function compareLoadedBranch(
+  file: { checksums: readonly string[]; result: RecipeResult | null },
+  loaded: { checksums: readonly string[]; result: RecipeResult | null },
+): MatchComparison {
+  const checkpoints = compareCheckpoints(file.checksums, loaded.checksums);
+  if (!checkpoints.match) return checkpoints;
+  const a = file.result;
+  const b = loaded.result;
+  const same = a === null || b === null
+    ? a === b
+    : a.totalScore === b.totalScore && a.rp.swarm === b.rp.swarm && a.rp.pollinator1 === b.rp.pollinator1 && a.rp.pollinator2 === b.rp.pollinator2;
+  return same ? checkpoints : { match: false, settle: { file: a?.totalScore ?? null, now: b?.totalScore ?? null } };
+}
+
 export function mismatchBanner(
   lang: Language,
-  comparison: CheckpointComparison,
+  comparison: MatchComparison,
   warnings: readonly RecipeWarning[],
   branch: MismatchBranch | null = null,
 ): { title: string; hint: string } | null {
   if (comparison.match) return null;
   const clock = (tick: number) => formatMatchTime((MATCH_TICKS - tick) * DT);
+  const points = (n: number | null) => (n === null ? '–' : String(n));
   let hint =
-    comparison.lastMatchTick === null
-      ? t(lang, 'matchImport.mismatchStart')
-      : t(lang, 'matchImport.mismatchFrom', { from: clock(comparison.lastMatchTick), to: clock(comparison.firstMismatchTick) });
+    'settle' in comparison
+      ? t(lang, 'matchImport.mismatchSettle', { file: points(comparison.settle.file), now: points(comparison.settle.now) })
+      : comparison.lastMatchTick === null
+        ? t(lang, 'matchImport.mismatchStart')
+        : t(lang, 'matchImport.mismatchFrom', { from: clock(comparison.lastMatchTick), to: clock(comparison.firstMismatchTick) });
   if (branch) hint = `${branch.label} · ${hint}${branch.others > 0 ? t(lang, 'matchImport.mismatchOthers', { count: branch.others }) : ''}`;
   if (warnings.some(w => w.code !== 'LUT_SETTINGS')) hint += t(lang, 'matchImport.mismatchVersion');
   return { title: t(lang, 'matchImport.mismatch'), hint };

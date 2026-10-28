@@ -755,7 +755,8 @@ function neutralRecipeText(branches: { number: number; parent: number | null; fo
   return serializeMatchRecipe(
     buildMatchRecipe({
       setup: DEFAULT_DRAFT_VALUES,
-      branches: branches.map(({ headTick, ...b }) => ({ ...b, inputs: neutral, record: timelineRecord(engine.timeline.slice(0, headTick + 1)) })),
+      // 끝난 가지는 정착 구간(0:00 뒤)까지 포함한 타임라인 (기록 결과 = 판정 프레임, 12-16)
+      branches: branches.map(({ headTick, ...b }) => ({ ...b, inputs: neutral, record: timelineRecord(engine.timeline.slice(0, headTick >= MATCH_TICKS ? undefined : headTick + 1)) })),
       current,
       nextNumber: Math.max(...branches.map(b => b.number)) + 1,
       createdAt: new Date(),
@@ -969,6 +970,29 @@ describe('경기 흐름', () => {
       await userEvent.click(button('REVIEW'));
       await expect.element(popup).not.toBeInTheDocument();
       await expect.element(page.getByRole('button', { name: /Main/ })).toBeVisible();
+    } finally {
+      restore();
+    }
+  });
+
+  it('결과 불일치 배너 (12-16): 체크포인트(0 ~ 6000틱)는 같고 파일의 판정 결과만 다르면 같은 배너 + 정착 구간 힌트', async () => {
+    const text = neutralRecipeText(
+      [
+        { number: 1, parent: null, forkTick: 0, name: null, headTick: 6000 },
+        { number: 2, parent: 1, forkTick: 3000, name: 'Plan B', headTick: 6000 },
+      ],
+      2,
+    );
+    // 원본 가지의 파일 결과만 바꿈 (체크포인트 그대로 = 0:00까지는 같고 정착 구간 / 판정만 어긋난 경우)
+    const recipe = JSON.parse(text);
+    const now = recipe.branches[0].result.totalScore;
+    recipe.branches[0].result.totalScore = now + 5;
+    const restore = interceptFilePick(JSON.stringify(recipe));
+    try {
+      await importMatchFile(2);
+      await expect.element(button('RESULT'), { timeout: 10000 }).toBeEnabled();
+      await expect.poll(() => document.body.textContent ?? '').toContain('Results differ from the file');
+      expect(document.body.textContent).toContain(`Main · After 0:00, while settling (file ${now + 5} pts → now ${now} pts)`);
     } finally {
       restore();
     }

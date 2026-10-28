@@ -7,6 +7,8 @@
 //   → NEW(리셋) → ROTATING_OUT(관중석 시점으로 회전, 같은 설정으로 0틱 새 엔진) → SETUP
 //   MATCH 안: 진행(RUNNING) ⇄ 일시정지(PAUSED) / 재생(PLAYBACK, 기록 불변) / 6000틱 → 종료 강조 5초 → 결과 → 복기(REVIEW)
 // 보는 틱(viewTick)과 엔진 머리(headTick)를 구분한다: 일시정지 중 틱 이동 / 재생 / 타임라인은 보는 틱만 바꾸고 그 프레임을 그린다.
+// 12-16: 머리는 둘 — 입력 머리(≤ 6000, 재개 / 분기 / 가지 목록 / 경기 파일)와 프레임 끝(0:00 뒤 정착 구간 끝 = 판정 틱, 스크러빙 / 재생 범위).
+//   정착 구간(6000틱 이후)은 입력 없이 엔진이 따라 만드는 프레임이라 분기할 수 없고, 결과는 판정 프레임(engine.endFrame)에서 읽는다.
 // 기록을 바꾸는 동작은 재개(보는 틱 = 머리, 경기 미종료)와 분기(보는 틱 < 머리 → 새 가지에서 재개, 원래 가지는 보존 — 10-5)뿐이다.
 // 분기 트리 (10-5): BRANCH는 기록을 지우지 않고 새 가지를 만든다 (0 ~ 분기 틱 프레임은 부모와 참조 공유). 가지 전환 / 삭제 / 이름 바꾸기,
 //   최대 MAX_BRANCHES개(원본 포함). 입력 허브는 지금 가지의 작업본이고, 떠나는 가지는 입력 기록 사본을 보관한다.
@@ -97,11 +99,12 @@ export interface AppStatus {
   // 자동 일시정지 배너 사유 (창 포커스 소실 / 탭 숨김 / 게임패드 해제로 멈췄을 때만, 재개 · 분기 · 재생 시작 · NEW에서 사라짐)
   autoPauseReason: Exclude<PauseReason, 'USER'> | null;
   tick: number;                 // 보는 틱 (진행 중에는 엔진 머리와 같음). 아래 프레임 값은 모두 이 틱 기준
-  headTick: number;             // 마지막 기록 틱 (엔진 머리)
-  matchEnded: boolean;          // 머리가 6000틱 (종료 기록 있음)
+  headTick: number;             // 입력 머리 (≤ 6000, 진행 중에는 엔진 현재 틱 — 12-16)
+  endTick: number;              // 마지막 기록 프레임 틱 (경기 종료 후 = 판정 틱 ≥ 6000, 그 전 = headTick — 스크러빙 / 재생 범위)
+  matchEnded: boolean;          // 입력 머리가 6000틱 (판정 프레임 있음)
   canScrub: boolean;            // 보는 틱 이동 / 재생 가능 (경기 중 + 진행 중 아님 + 종료 강조 / 결과 팝업 아님)
   canResume: boolean;           // 일시정지 + 보는 틱 = 머리 + 경기 미종료 (+ 종료 강조 / 결과 팝업 아님)
-  canBranch: boolean;           // 진행 중 아님 + 보는 틱 < 머리 (+ 종료 강조 / 결과 팝업 아님)
+  canBranch: boolean;           // 진행 중 아님 + 보는 틱 < 입력 머리 (정착 구간 불가, + 종료 강조 / 결과 팝업 아님)
   playing: boolean;             // 기록 재생 중
   playbackSpeed: PlaybackSpeed;
   endStage: EndStage;
@@ -110,9 +113,9 @@ export interface AppStatus {
   currentBranchId: number;
   canFork: boolean;             // 가지 수 < MAX_BRANCHES (가득 차면 BRANCH는 분기하지 않음, 안내는 화면 10-6)
   endSeq: number;               // 이 경기에서 실제로 6000틱에 도달한 횟수 (종료 연출 트리거: 분기 후 재종료마다 +1, 재생 / 스크러빙으로는 불변)
-  result: MatchResult | null;   // 종료 프레임 기준 결과 (경기 종료 후, 결과 팝업용 — 보는 틱과 무관)
+  result: MatchResult | null;   // 판정 프레임 기준 결과 (경기 종료 후, 결과 팝업용 — 보는 틱과 무관)
   remainingSec: number;
-  score: number;                // 확정 점수 (경기 중 = 텔레옵 TIP × 20, 종료 프레임 = 최종 합계)
+  score: number;                // 확정 점수 (경기 중 · 정착 구간 = 텔레옵 TIP × 20, 판정 프레임 = 최종 합계)
   tipCount: number;             // 텔레옵 TIP 횟수
   autoTipCount: number;         // 오토 TIP 횟수 (좌측 패널 TIP 표시 = 오토 + 텔레옵, 점수에는 미포함)
   rpThresholds: RPThresholds;   // 이 경기 RP 기준값 (시나리오 값, 틀리면 엔진처럼 기본값 — resolveRPThresholds, 14-3: TIP 진행 목표)
@@ -178,10 +181,11 @@ export interface MatchLoadTree {
   nextNumber: number;
 }
 
-/** 다시 계산한 가지 (체크포인트 비교용, 16-2: 프레임은 지금 가지 외 해제하므로 체크포인트만) */
+/** 다시 계산한 가지 (체크포인트 / 결과 비교용, 16-2: 프레임은 지금 가지 외 해제하므로 기록 요약만 — 결과는 정착 구간 비교, 12-16) */
 export interface LoadedBranch {
   number: number;
   checksums: string[];
+  result: BranchRecord['result'];
 }
 
 /**
@@ -217,12 +221,12 @@ export interface BranchInfo {
   parentId: number | null;
   forkTick: number;
   depth: number;             // 원본 = 0
-  headTick: number;          // 마지막 기록 틱
+  headTick: number;          // 입력 머리 (≤ 6000)
   ended: boolean;            // 6000틱 도달
   totalScore: number | null; // 종료했으면 최종 점수
 }
 
-/** 결과 팝업 값 (종료 프레임 = 6000틱에서 읽음, 명세서 3.8 경기 종료와 결과 팝업) */
+/** 결과 팝업 값 (판정 프레임 = 0:00 뒤 정착 구간 끝에서 읽음, 12-15, 명세서 3.8 경기 종료와 결과 팝업) */
 export interface MatchResult {
   total: number;
   breakdown: DeepReadonly<ScoreBreakdown>;
@@ -491,7 +495,7 @@ export class AppController {
       this.editScene = null;
       this.animator.start(viewAngle(this.matchView, this.alliance), this.now());
       this.changed();
-      return tree.branches.map(b => ({ number: b.number, checksums: computed.get(b.number)!.record.checksums }));
+      return tree.branches.map(b => ({ number: b.number, checksums: computed.get(b.number)!.record.checksums, result: computed.get(b.number)!.record.result }));
     };
     return {
       total,
@@ -715,6 +719,7 @@ export class AppController {
   openResult(): void {
     if (this.endStage !== 'REVIEW') return;
     this.stopPlayback();
+    this.viewTick = this.headTick(); // 팝업 뒤 필드 = 판정 프레임 (점수 · 근거와 같은 상태, 닫아도 그 틱 — 12-16)
     this.setEndStage('RESULT');
   }
 
@@ -767,6 +772,7 @@ export class AppController {
     const frame = this.currentFrame();
     const { hive } = frame.field;
     const head = this.headTick();
+    const inputHead = this.inputHeadTick();
     return {
       phase: this.phase,
       alliance: this.alliance,
@@ -776,8 +782,9 @@ export class AppController {
       pauseReason: this.loop.pauseReason,
       autoPauseReason: this.autoPauseReason,
       tick: frame.tick,
-      headTick: head,
-      matchEnded: head >= MATCH_TICKS,
+      headTick: inputHead,
+      endTick: head,
+      matchEnded: inputHead >= MATCH_TICKS,
       canScrub: this.canScrub(),
       canResume: this.canResume(),
       canBranch: this.canBranch(),
@@ -789,7 +796,7 @@ export class AppController {
       currentBranchId: this.tree.currentId,
       canFork: canFork(this.tree),
       endSeq: this.endSeq,
-      result: head >= MATCH_TICKS ? this.matchResult() : null,
+      result: inputHead >= MATCH_TICKS ? this.matchResult() : null,
       remainingSec: Math.max(0, (MATCH_TICKS - frame.tick) * DT),
       score: frame.totalScore,
       tipCount: hive.tipCount,
@@ -860,9 +867,14 @@ export class AppController {
     return this.loop.state === 'RUNNING' ? this.engine.currentTick : this.viewTick;
   }
 
-  /** 마지막 기록 틱: 진행 중에는 엔진 현재 틱, 그 외에는 기록된 마지막 프레임 (분기 직후 첫 틱 전에는 옛 기록 포함) */
+  /** 마지막 기록 틱 = 프레임 끝: 진행 중에는 엔진 현재 틱, 그 외에는 기록된 마지막 프레임 (경기 종료 후 = 판정 틱, 분기 직후 첫 틱 전에는 옛 기록 포함) */
   private headTick(): number {
     return this.loop.state === 'RUNNING' ? this.engine.currentTick : this.engine.timeline.length - 1;
+  }
+
+  /** 입력 머리 (12-16): 0:00(6000틱) 뒤 정착 구간은 입력이 없으므로 프레임 끝을 6000으로 자름 */
+  private inputHeadTick(): number {
+    return Math.min(this.headTick(), MATCH_TICKS);
   }
 
   private endBusy(): boolean {
@@ -883,7 +895,7 @@ export class AppController {
   private branchInfos(): BranchInfo[] {
     return this.tree.nodes.map(n => {
       const current = n.id === this.tree.currentId;
-      const headTick = current ? this.headTick() : n.data.record!.headTick;
+      const headTick = current ? this.inputHeadTick() : n.data.record!.headTick;
       const ended = headTick >= MATCH_TICKS;
       return {
         id: n.id,
@@ -909,8 +921,9 @@ export class AppController {
     return Math.min(sharedFrameTick(this.tree, this.tree.currentId, id), this.headTick());
   }
 
+  // 정착 구간(보는 틱 ≥ 6000)에서는 분기 불가 (입력 없음, 12-16)
   private canBranch(): boolean {
-    return this.canScrub() && this.viewTick < this.headTick();
+    return this.canScrub() && this.viewTick < this.inputHeadTick();
   }
 
   private setEndStage(stage: EndStage): void {

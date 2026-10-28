@@ -14,6 +14,7 @@ import {
   matchImportErrorMessage,
   matchImportProgress,
   matchSummaryText,
+  compareLoadedBranch,
   mismatchBanner,
   summaryFileName,
 } from '../matchFile';
@@ -152,6 +153,23 @@ describe('경기 파일 화면 규칙 (10-4)', () => {
       'Main · From between 1:56 and 1:55 (+1 more branches) · the file was made with a different engine or ballistics version',
     );
     expect(mismatchBanner('en', { match: true }, [], { label: 'Main', others: 3 })).toBeNull();
+  });
+
+  it('D2. (12-16) 불러온 가지 비교: 체크포인트가 먼저, 같으면 판정 결과(정착 구간) — 다르면 같은 배너 + 정착 구간 힌트', () => {
+    const sums = ['a', 'b', 'c'];
+    const res = (totalScore: number, swarm = false) => ({ totalScore, rp: { swarm, pollinator1: false, pollinator2: false } });
+    expect(compareLoadedBranch({ checksums: sums, result: res(42) }, { checksums: [...sums], result: res(42) })).toEqual({ match: true });
+    expect(compareLoadedBranch({ checksums: sums, result: null }, { checksums: sums, result: null })).toEqual({ match: true }); // 미종료 가지
+    // 체크포인트가 다르면 그쪽이 먼저 (결과도 다르더라도)
+    expect(compareLoadedBranch({ checksums: sums, result: res(42) }, { checksums: ['a', 'x', 'c'], result: res(47) })).toEqual({ match: false, index: 1, lastMatchTick: 0, firstMismatchTick: 50 });
+    // 체크포인트는 같고 판정만 다름 (총점 / RP / 한쪽만 결과)
+    const settle = compareLoadedBranch({ checksums: sums, result: res(42) }, { checksums: sums, result: res(47) });
+    expect(settle).toEqual({ match: false, settle: { file: 42, now: 47 } });
+    expect(compareLoadedBranch({ checksums: sums, result: res(42) }, { checksums: sums, result: res(42, true) })).toEqual({ match: false, settle: { file: 42, now: 42 } });
+    expect(compareLoadedBranch({ checksums: sums, result: null }, { checksums: sums, result: res(42) })).toEqual({ match: false, settle: { file: null, now: 42 } });
+    expect(mismatchBanner('en', settle, [])).toEqual({ title: 'Results differ from the file', hint: 'After 0:00, while settling (file 42 pts → now 47 pts)' });
+    expect(mismatchBanner('ko', settle, [], { label: '가지 2', others: 1 })!.hint).toBe('가지 2 · 0:00 뒤 정착 구간부터 (파일 42점 → 지금 47점) (외 1개 가지)');
+    expect(mismatchBanner('ko', { match: false, settle: { file: null, now: 42 } }, [])!.hint).toBe('0:00 뒤 정착 구간부터 (파일 –점 → 지금 42점)');
   });
 
   it('E. 파일 이름: 로컬 시각 / 진영 / 지금 가지 상태(총점 · 미종료면 남은 시간) / _b{번호} / _{가지 수}br, 요약은 같은 이름의 .txt', () => {

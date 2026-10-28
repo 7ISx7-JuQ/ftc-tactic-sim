@@ -31,8 +31,6 @@ import type { LUTWorkerLike } from '../workers/lutManager';
 import { PENDING_LUT_VIEW, lutInputsChanged, startBlocker } from '../ui/lutView';
 import type { RobotLutView } from '../ui/lutView';
 import { DEFAULT_RNG_SEED } from '../core/simulationEngine';
-import { compareCheckpoints } from '../core/checksum';
-import type { CheckpointComparison } from '../core/checksum';
 import { RecipeInputCache, buildMatchRecipe, parseMatchRecipe, recipeLoadTree, serializeMatchRecipe } from '../app/matchRecipe';
 import type { MatchRecipe, RecipeWarning } from '../app/matchRecipe';
 import { AutosaveScheduler, autosaveSignature, createBrowserAutosave } from '../app/matchAutosave';
@@ -54,8 +52,8 @@ import {
 import type { LibrarySummary } from '../ui/library';
 import LibrarySection from './LibrarySection';
 import type { LibrarySectionKind } from './LibrarySection';
-import { autosaveRestoreMessage, matchComputingText, matchFileName, matchImportConfirmMessage, matchImportErrorMessage, matchImportProgress, matchSummaryText, mismatchBanner, summaryFileName } from '../ui/matchFile';
-import type { MatchImportError } from '../ui/matchFile';
+import { autosaveRestoreMessage, compareLoadedBranch, matchComputingText, matchFileName, matchImportConfirmMessage, matchImportErrorMessage, matchImportProgress, matchSummaryText, mismatchBanner, summaryFileName } from '../ui/matchFile';
+import type { MatchComparison, MatchImportError } from '../ui/matchFile';
 import { t } from '../ui/i18n';
 import type { Language } from '../ui/i18n';
 import { DEFAULT_SETTINGS, browserSettingsStorage, loadStoredConfig, saveStoredConfig } from '../ui/settings';
@@ -212,7 +210,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
   const [matchImportError, setMatchImportError] = useState<MatchImportError | null>(null);
   // 체크섬 불일치 배너: 처음 어긋난 가지(가지가 2개 이상인 트리일 때) + 그 밖에 어긋난 가지 수 (15-3)
   const [matchNotice, setMatchNotice] = useState<{
-    comparison: CheckpointComparison;
+    comparison: MatchComparison;
     warnings: RecipeWarning[];
     branch: { name: string | null; number: number; parentId: number | null; others: number } | null;
   } | null>(null);
@@ -762,11 +760,11 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
           setMatchImport(null);
           const loaded = job.commit();
           if (!loaded) return;
-          // 체크포인트: 가지마다 비교, 배너 = 처음 어긋난 가지(만든 순서) + 그 밖에 어긋난 가지 수
+          // 체크포인트 + 판정 결과(12-16): 가지마다 비교, 배너 = 처음 어긋난 가지(만든 순서) + 그 밖에 어긋난 가지 수
           const mismatches = loaded
             .map(b => {
               const branch = recipe.branches.find(r => r.number === b.number)!;
-              return { branch, comparison: compareCheckpoints(branch.checksums, b.checksums) };
+              return { branch, comparison: compareLoadedBranch(branch, b) };
             })
             .filter(m => !m.comparison.match);
           const first = mismatches[0];
