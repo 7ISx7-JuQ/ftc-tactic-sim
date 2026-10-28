@@ -819,7 +819,7 @@ RoadRunner / Pedro Pathing 오도메트리 제원(최고 속도, 가속도 등)�
 
 - **구성 (`vitest.config.ts`):** 테스트 프로젝트 2개 — `unit`(Node, `src/**/*.test.ts`, `npm test`)과 `browser`(`src/**/*.browser.test.{ts,tsx}`, `npm run test:browser`). 둘 다 = `npm run test:all`. 브라우저 프로젝트는 headless Chromium, 화면 크기 1366 × 650(3.8항 설계 기준 가용 영역), React 등 의존성을 미리 묶어(`optimizeDeps.include`) 실행 중 재최적화로 React가 두 벌 로드되지 않게 한다. 실패 스크린샷(`.vitest/`)은 저장소에 넣지 않는다.
 - **준비:** `playwright`는 Chromium 리비전을 고정하는 정확한 버전(`1.56.1`, Chromium 1194)으로, `@vitest/browser-playwright`는 Vitest와 같은 버전으로 고정한다. 처음 한 번 `npx playwright install chromium`이 필요하다 (Playwright 브라우저가 미리 설치된 환경은 생략).
-- **명중 확률표 주입:** `MainScreen`은 선택 인자 `services`(`createLUTWorker` / `createLUTCache`, 기본 = 브라우저 Worker 풀 + IndexedDB 캐시)를 받는다. 화면 테스트는 모든 요청에 바로 적중하는 캐시와 아무것도 하지 않는 Worker를 넣어 생성 시간(10 ~ 60초)을 건너뛴다.
+- **명중 확률표 주입:** `MainScreen`은 선택 인자 `services`(`createLUTWorker` / `createLUTCache`, 기본 = 브라우저 Worker 풀 + IndexedDB 캐시)를 받는다. 화면 테스트는 모든 요청에 바로 적중하는 캐시와 아무것도 하지 않는 Worker를 넣어 생성 시간(PC에 따라 10 ~ 90초 — 2코어 보급형 노트북은 1분 남짓)을 건너뛴다.
 - **`src/app/__tests__/libraryStore.browser.test.ts`:** 브라우저 안 목록 실제 IndexedDB (19-2) — 종류별 목록 / 같은 id 바꾸기 / 삭제 / 새 연결로 읽기, 경기 본문(2 MB, 목록에 본문 없음 · 이름 바꾸기는 본문 유지 · 삭제는 둘 다 · 버전 1 DB 올리기, 19-2b-2), 다른 DB와 이름이 다름, IndexedDB 없음 · 열기 실패 = 빈 목록.
 - **`src/app/__tests__/matchAutosave.browser.test.ts`:** 경기 자동 저장 실제 IndexedDB (19-1) — 저장 / 새 연결로 읽기(1.6 MB) / 덮어쓰기 / 지우기, 확률표 캐시 DB 열기에 영향 없음, IndexedDB 없음 · 열기 실패 = 자동 저장 없음.
 - **`src/workers/__tests__/lutWorker.browser.test.ts`:** 번들된 실제 LUT Worker의 v0 탐색 / 행 묶음 결과가 메인 스레드 계산과 비트 단위로 같음, 실제 IndexedDB + `crypto.subtle` 캐시 저장 / 조회 (v1의 일회성 점검을 자동화).

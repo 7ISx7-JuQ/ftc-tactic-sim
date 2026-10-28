@@ -1,5 +1,5 @@
 // 메인 화면 브라우저 테스트 (명세서 3.7 테스트, 3.8 웹 화면): 실제 Chromium에서 앱 화면을 띄워 주요 상호작용 흐름을 확인한다.
-// 명중 확률표는 바로 준비되는 캐시를 주입해 Worker 생성 시간(10 ~ 60초)을 건너뛴다 (실제 Worker / IndexedDB는 lutWorker.browser.test.ts).
+// 명중 확률표는 바로 준비되는 캐시를 주입해 Worker 생성 시간(PC에 따라 10 ~ 90초)을 건너뛴다 (실제 Worker / IndexedDB는 lutWorker.browser.test.ts).
 // 스크린샷 비교는 하지 않는다 (글꼴 / 안티앨리어싱 차이로 불안정). 화면 문구는 영어 기본값 기준.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { page, userEvent } from 'vitest/browser';

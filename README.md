@@ -20,7 +20,7 @@ What changed in 2.0: see the [changelog](CHANGELOG.md).
 
 ## Quick start
 
-1. **R1 / R2 tabs** — enter each robot's specs and shooter, then **APPLY**. The first hit map takes about 10–60 s.
+1. **R1 / R2 tabs** — enter each robot's specs and shooter, then **APPLY**. The first hit map takes about 10–90 s depending on the PC.
 2. **SCENARIO tab** — pick the ALLIANCE, the state after autonomous and the start poses (**EDIT ON FIELD** to place them on the field), then **APPLY**. Save each auto routine under **Saved scenarios** to pick it again later.
 
 ![Editing the scenario on the field](docs/images/scenario-edit.png)
@@ -85,7 +85,7 @@ Free for **non-commercial** use under the [PolyForm Noncommercial License 1.0.0]
 
 ### 빠른 시작
 
-1. **R1 / R2 탭** — 로봇 제원과 슈터를 입력하고 **적용**. 처음 명중 확률표는 약 10 ~ 60초 걸립니다.
+1. **R1 / R2 탭** — 로봇 제원과 슈터를 입력하고 **적용**. 처음 명중 확률표는 PC에 따라 약 10 ~ 90초 걸립니다.
 2. **시나리오 탭** — ALLIANCE, 오토 이후 상태, 시작 자세를 정하고(**필드에서 편집**으로 필드 위에 배치) **적용**. 오토 루틴마다 **저장된 시나리오**에 저장해 두면 다음에 바로 고를 수 있습니다.
 
 ![필드에서 시나리오 편집](docs/images/scenario-edit.png)
