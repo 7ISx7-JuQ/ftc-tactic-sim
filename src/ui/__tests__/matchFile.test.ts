@@ -38,8 +38,6 @@ const result: MatchResult = {
     gardenPieces: { nectar: 1, pollen: 3 },
     parkedRobots: ['robot1'],
     cellPieces: { nectar: 1, pollen: 1 },
-    teleopTips: 1,
-    settle: { ticks: 0, robots: [], pieces: [] },
   },
   rp: { swarm: false, pollinator1: true, pollinator2: false },
   tips: 6,

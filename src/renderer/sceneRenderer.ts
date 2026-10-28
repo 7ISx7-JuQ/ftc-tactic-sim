@@ -38,8 +38,6 @@ import {
 } from './canvasRenderer';
 import type { Alliance, HiveCell, HivePart, Rect } from './canvasRenderer';
 import { tunnelRoofOpacity } from './tunnelRoof';
-import { SETTLED_DASH, SETTLED_FILL_ALPHA, settledView } from './settledMarks';
-import type { SettledView } from './settledMarks';
 import {
   GAUGE_PIECE_RADIUS,
   GAUGE_THICKNESS,
@@ -292,9 +290,8 @@ function drawCircle(ctx: CanvasRenderingContext2D, x: number, y: number, radius:
 
 // 바닥 기물: ON_FIELD / IN_GARDEN만 좌표에 그림 (다른 상태는 HIVE / 게이지 / 적재물 / 비행 표시로, 명세서 3.7 표)
 // IN_GARDEN은 초록 테두리. 경기 종료 프레임에서 득점 인정된 GARDEN 기물은 초록 대신 주황 테두리 (09-6b, 겹쳐 그리지 않음)
-// — 0:00 뒤 움직인 기물의 인정 테두리는 정착 자리에 (drawSettledPieces, 12-14)
-function drawFloorPieces(ctx: CanvasRenderingContext2D, frame: DeepReadonly<TimelineFrame>, settled: SettledView | null): void {
-  const scored = new Set((frame.scoreBreakdown?.gardenPieceIds ?? []).filter((id) => !settled?.movedPieces.has(id)));
+function drawFloorPieces(ctx: CanvasRenderingContext2D, frame: DeepReadonly<TimelineFrame>): void {
+  const scored = new Set(frame.scoreBreakdown?.gardenPieceIds ?? []);
   ctx.save();
   for (const piece of frame.pieces) {
     if (piece.state !== 'ON_FIELD' && piece.state !== 'IN_GARDEN') continue;
@@ -430,50 +427,13 @@ function drawScoredFieldMarks(ctx: CanvasRenderingContext2D, frame: DeepReadonly
   ctx.restore();
 }
 
-// 경기 종료 정착 자리 (12-14): 0:00 뒤 움직인 바닥 기물 = 기물색 흐린 채움 + 점선 윤곽 (GARDEN 인정이면 주황 점선)
-function drawSettledPieces(ctx: CanvasRenderingContext2D, frame: DeepReadonly<TimelineFrame>, settled: SettledView | null): void {
-  if (!settled || settled.pieces.length === 0) return;
-  ctx.save();
-  ctx.setLineDash([...SETTLED_DASH]);
-  for (const p of settled.pieces) {
-    const piece = frame.pieces.find((q) => q.id === p.id);
-    const { fill, stroke } = pieceColors({ type: p.type, alliance: piece?.alliance ?? 'NONE' });
-    const radius = PIECE_PHYSICS[p.type].radius;
-    ctx.globalAlpha = SETTLED_FILL_ALPHA;
-    drawCircle(ctx, p.x, p.y, radius, fill, 'transparent', 0);
-    ctx.globalAlpha = 1;
-    drawCircle(ctx, p.x, p.y, radius, 'transparent', p.scored ? SCENE_COLORS.scored : stroke, p.scored ? 2.5 : 1.5);
-  }
-  ctx.restore();
-}
-
-// 경기 종료 정착 자리 (12-14): 0:00 뒤 움직인 로봇 = 진영색 흐린 몸체 + 점선 윤곽 (로봇 위에 겹쳐 그림)
-function drawSettledRobots(ctx: CanvasRenderingContext2D, settled: SettledView | null, scene: SceneInput, ally: Alliance): void {
-  if (!settled || settled.robots.length === 0) return;
-  ctx.save();
-  for (const r of settled.robots) {
-    const body = getRobotOBB(r, r.id === 'robot1' ? scene.r1Config : scene.r2Config);
-    pathPolygon(ctx, obbCorners(body));
-    ctx.globalAlpha = SETTLED_FILL_ALPHA;
-    ctx.fillStyle = SCENE_COLORS.robot[ally];
-    ctx.fill();
-    ctx.globalAlpha = 1;
-    ctx.setLineDash([...SETTLED_DASH]);
-    ctx.lineWidth = ROBOT_OUTLINE_PX;
-    ctx.strokeStyle = SCENE_COLORS.robotStroke;
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-
-// 경기 종료 강조: 주차 인정 로봇 외곽 (몸체보다 1.5 in 크게). 0:00 뒤 움직인 로봇은 판정한 정착 자세에 (12-14)
-function drawParkedMarks(ctx: CanvasRenderingContext2D, frame: DeepReadonly<TimelineFrame>, scene: SceneInput, settled: SettledView | null): void {
+// 경기 종료 강조: 주차 인정 로봇 외곽 (몸체보다 1.5 in 크게)
+function drawParkedMarks(ctx: CanvasRenderingContext2D, frame: DeepReadonly<TimelineFrame>, scene: SceneInput): void {
   const breakdown = frame.scoreBreakdown;
   if (!breakdown) return;
   ctx.save();
   for (const id of breakdown.parkedRobots) {
-    const config = id === 'robot1' ? scene.r1Config : scene.r2Config;
-    const robot = settled?.robots.find((r) => r.id === id) ?? (id === 'robot1' ? frame.r1 : frame.r2);
+    const [robot, config] = id === 'robot1' ? [frame.r1, scene.r1Config] : [frame.r2, scene.r2Config];
     const body = getRobotOBB(robot, config);
     pathPolygon(ctx, obbCorners({ ...body, halfExtents: [body.halfExtents[0] + 1.5, body.halfExtents[1] + 1.5] }));
     ctx.lineWidth = 3.5;
@@ -820,7 +780,7 @@ function drawBadge(ctx: CanvasRenderingContext2D, robot: DeepReadonly<RobotState
 /**
  * 장면 전체를 그림. ctx는 SCENE_WIDTH_PX × SCENE_HEIGHT_PX(= 필드 뷰포트 800 × 800) 논리 크기 × dpr 버퍼의 캔버스
  * 순서: 둘레 배경 → 정적 레이어(HIVE 기둥 부분, 게이지 틀 포함) → HIVE 셀 상태(기둥 부분) / 게이지 내용 → [로봇 동선] → 바닥 기물(득점 GARDEN 포함)
- *       → 종료 정착 기물 → 종료 강조(FLOWER) → [조준선] → 로봇 → [사출구 조준경] → 종료 정착 로봇 → 종료 강조(주차) → [흡입 진행] → 터널 지붕(지붕 불투명도, 13-1) → 팁 낙하
+ *       → 종료 강조(FLOWER) → [조준선] → 로봇 → [사출구 조준경] → 종료 강조(주차) → [흡입 진행] → 터널 지붕(지붕 불투명도, 13-1) → 팁 낙하
  *       → 비행 공([잔상] / [결과 색])
  *       → HIVE 셀 알약 / 번호 / 배지   ([ ] = 표시 옵션)
  */
@@ -846,17 +806,14 @@ export function renderScene(ctx: CanvasRenderingContext2D, scene: SceneInput, dp
   drawHiveState(ctx, frame.field.hive, ally, 'PILLARS');
   drawGaugeContents(ctx, frame.field, ally);
   if (scene.paths) drawRobotPaths(ctx, scene.paths, ally);
-  const settled = settledView(frame.scoreBreakdown);
-  drawFloorPieces(ctx, frame, settled);
-  drawSettledPieces(ctx, frame, settled);
+  drawFloorPieces(ctx, frame);
   drawScoredFieldMarks(ctx, frame, ally);
   const guides = options.aimGuide || options.muzzleMark ? sceneAimGuides(frame, scene) : [];
   if (options.aimGuide) drawAimGuides(ctx, guides);
   drawRobotBody(ctx, frame.r1, scene.r1Config, ally);
   drawRobotBody(ctx, frame.r2, scene.r2Config, ally);
   if (options.muzzleMark) drawMuzzleMarks(ctx, guides);
-  drawSettledRobots(ctx, settled, scene, ally);
-  drawParkedMarks(ctx, frame, scene, settled);
+  drawParkedMarks(ctx, frame, scene);
   if (options.intakeProgress) drawIntakeProgress(ctx, frame, scene, view);
   const roofRobots = [{ pose: frame.r1, size: scene.r1Config }, { pose: frame.r2, size: scene.r2Config }];
   drawTunnelRoof(ctx, ally, frame.field.hive, tunnelRoofOpacity(roofRobots, frame.pieces), dpr);

@@ -4,13 +4,14 @@
 // 아래 EXPECTED(버전 + 체크섬)를 새 값으로 갱신한다 (이전 버전의 저장 레시피는 불러올 때 "엔진 버전 다름" 경고가 뜬다).
 import { describe, expect, it } from 'vitest';
 import { createIntakeZonePreset } from '../collision';
-import { fnv1a32, timelineCheckpoints } from '../checksum';
+import { fnv1a32, frameChecksum, timelineCheckpoints } from '../checksum';
 import { ENGINE_VERSION, SimulationEngine } from '../simulationEngine';
 import { fixedRateShotJudge } from '../ballistics';
 import type { DriveInputProvider, RobotDriveInput } from '../simulationEngine';
 import type { RobotConfig } from '../types';
 
-const EXPECTED = { engineVersion: 2, final: '627edc51', all: 'ee6e7fd7' };
+// final = 0:00(6000틱) 프레임, judged = 판정 프레임 (0:00 뒤 정착 구간 끝 — 체크포인트에 들어가지 않아 따로, 12-15)
+const EXPECTED = { engineVersion: 2, final: 'c40804aa', all: 'fabd7ae9', judged: 'e5cc30e3' };
 
 const cfg = (id: 'robot1' | 'robot2', over: Partial<RobotConfig> = {}): RobotConfig => ({
   id, name: id, width: 18, length: 18, maxSpeed: 60, maxTurnRate: 4, maxLinearAccel: 120, maxAngularAccel: 10,
@@ -48,6 +49,6 @@ describe('엔진 결과 버전 (10-3)', () => {
     expect(Math.hypot(last.r1.x - first.r1.x, last.r1.y - first.r1.y)).toBeGreaterThan(1);
     expect(last.field.hive.tipCount).toBe(2); // HIVE TIP 2회 (12-11: 명중률 0.8 고정 결과 판정, 21-1 워크샵 TIP 임계)
     expect(sums).toHaveLength(121);
-    expect({ engineVersion: ENGINE_VERSION, final: sums[120], all: fnv1a32(sums.join('')) }).toEqual(EXPECTED);
+    expect({ engineVersion: ENGINE_VERSION, final: sums[120], all: fnv1a32(sums.join('')), judged: frameChecksum(engine.endFrame!) }).toEqual(EXPECTED);
   }, 120_000);
 });

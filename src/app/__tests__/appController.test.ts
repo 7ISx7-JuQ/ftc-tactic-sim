@@ -347,7 +347,7 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     const r = s.result!;
     const b = r.breakdown;
     assert(r.total === b.hive + b.cell + b.flower + b.garden + b.park && r.total === s.score, 'result total = breakdown sum = final score');
-    assert(r.teleopTips === b.teleopTips && s.tipCount === b.teleopTips && b.hive === b.teleopTips * 20, 'TIP count = settled judgement (12-14) in result and panel');
+    assert(r.teleopTips === s.tipCount && b.hive === r.teleopTips * 20 && s.tick === s.headTick, 'TIP count = judged frame (12-15) in result and panel');
     // 14-3: RP 카드 재료 = 이 경기 기준값 + 오토 이동 점수 (기본 LEAVE · LEAVE = 6)
     assert(r.thresholds.swarmPoints === 16 && r.thresholds.pollinator2Tips === 7 && r.autoMovementPoints === 6, 'result carries thresholds / auto movement points');
     assert(r.rp.swarm === r.autoMovementPoints + b.park >= r.thresholds.swarmPoints, 'SWARM = auto movement + TELEOP PARK >= threshold');
@@ -821,10 +821,10 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     statuses.length = 0;
     frames.advance(VIEW_ANIMATION_MS + 50);
     s = h.status();
-    assert(s.phase === 'MATCH' && s.loopState === 'ENDED' && s.endStage === 'REVIEW' && s.tick === 0 && s.headTick === MATCH_TICKS, 'review state at tick 0 after the rotation');
+    assert(s.phase === 'MATCH' && s.loopState === 'ENDED' && s.endStage === 'REVIEW' && s.tick === 0 && s.headTick >= MATCH_TICKS, 'review state at tick 0 after the rotation');
     assert(s.viewAngle === viewAngle('DRIVER', 'BLUE'), 'default view (DRIVER) of the file alliance');
     assert(s.endSeq === 0 && statuses.every(x => x.endStage !== 'HIGHLIGHT' && x.endStage !== 'RESULT'), 'no end highlight / result popup / end signal');
-    assert(!!s.result && s.result.total === ref.getFrame(MATCH_TICKS)!.totalScore && !s.canResume && s.canBranch, 'result available, no RESUME, BRANCH possible');
+    assert(!!s.result && s.result.total === ref.endFrame!.totalScore && !s.canResume && s.canBranch, 'result available, no RESUME, BRANCH possible');
     assert(s.input.sources.robot1 === 'REPLAY' && s.input.sources.robot2 === 'REPLAY' && s.input.hasLog.robot1 && s.input.hasLog.robot2, 'both robots REPLAY from the loaded records');
     h.openResult();
     assert(h.status().endStage === 'RESULT', 'RESULT opens the popup');
@@ -833,7 +833,7 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     // 내보내기 재료 = 불러온 기록 그대로 (트리 = 원본 하나)
     const src = h.recipeSource();
     const root = src?.branches[0];
-    assert(!!src && src.branches.length === 1 && src.current === 1 && src.nextNumber === 2 && root!.name === 'Branch 3' && root!.parent === null && root!.record.headTick === MATCH_TICKS && root!.record.result!.totalScore === ref.getFrame(MATCH_TICKS)!.totalScore, 'recipe source available after the end');
+    assert(!!src && src.branches.length === 1 && src.current === 1 && src.nextNumber === 2 && root!.name === 'Branch 3' && root!.parent === null && root!.record.headTick === MATCH_TICKS && root!.record.result!.totalScore === ref.endFrame!.totalScore, 'recipe source available after the end');
     assert(Array.from(root!.inputs.robot1).join() === Array.from(records.robot1).join() && Array.from(root!.inputs.robot2).join() === Array.from(records.robot2).join(), 'recipe inputs = loaded records');
 
     // 분기: 두 로봇 REPLAY로 끝까지 → 같은 결과 (녹화 덧입히기 재료 확인), 이번에는 실제 종료 → 종료 연출
@@ -843,7 +843,7 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     frames.advance(70_000, 100);
     s = h.status();
     assert(s.loopState === 'ENDED' && (s.endStage === 'HIGHLIGHT' || s.endStage === 'RESULT') && s.endSeq === 1, `branched run reached the end -> end sequence (${s.endStage})`);
-    assert(JSON.stringify(h.currentFrame()) === JSON.stringify(ref.getFrame(MATCH_TICKS)), 'REPLAY of both robots reproduces the loaded result');
+    assert(JSON.stringify(h.currentFrame()) === JSON.stringify(ref.endFrame), 'REPLAY of both robots reproduces the loaded result');
     const afterBranch = h.recipeSource()!;
     assert(afterBranch.current === 2 && Array.from(afterBranch.branches[1].inputs.robot1).join() === Array.from(records.robot1).join(), 'applied record after the branch = same inputs');
 
@@ -971,7 +971,7 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     const ref = new SimulationEngine(base.r1Config, base.r2Config, base.shotJudge, 'RED', base.scenario);
     ref.inputProvider = createInputRecordProvider(rootSrc.inputs);
     ref.runFullMatch();
-    assert(timelineCheckpoints(ref.timeline).join() === rootSrc.record.checksums.join() && ref.getFrame(MATCH_TICKS)!.totalScore === rootSrc.record.result!.totalScore, 'root inputs reproduce the root result');
+    assert(timelineCheckpoints(ref.timeline).join() === rootSrc.record.checksums.join() && ref.endFrame!.totalScore === rootSrc.record.result!.totalScore, 'root inputs reproduce the root result');
     // 다른 가지도 그 가지의 입력 사본 = 머리까지 (부모 번호 = 부모 가지의 번호)
     for (const b of src.branches) {
       assert(b.inputs.robot1.length === b.record.headTick * 4 && (b.parent === null || src.branches.some(p => p.number === b.parent)), `branch #${b.number}: inputs up to its head, parent by number`);

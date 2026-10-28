@@ -363,7 +363,7 @@ export type DeepReadonly<T> = T extends (infer U)[]
     ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
     : T;
 
-// 경기 종료(Tick 6000) 득점 내역 (명세서 3.2, 08-3 — 12-14부터 0:00 뒤 정착 상태로 판정). hive + cell + flower + garden + park = totalScore
+// 경기 종료 득점 내역 (명세서 3.2, 08-3): 판정 프레임(0:00 뒤 정착 구간의 마지막 프레임, 12-15)에만 기록. hive + cell + flower + garden + park = totalScore
 // 렌더러 / 스코어보드는 이 기록만 읽고 득점 규칙을 다시 계산하지 않음 (규칙의 단일 출처 = 엔진)
 export interface ScoreBreakdown {
   hive: number;   // 텔레옵 팁 × 20
@@ -377,14 +377,6 @@ export interface ScoreBreakdown {
   gardenPieces: { nectar: number; pollen: number }; // 득점 인정 GARDEN 기물 종류별 수 (garden 근거)
   parkedRobots: ('robot1' | 'robot2')[]; // 주차 인정 로봇
   cellPieces: { nectar: number; pollen: number }; // 상향 셀에 남은 기물 수 (cell 근거)
-  teleopTips: number; // 판정한 텔레옵 TIP 수 (hive = × 20) — 정착 중 TIP 포함이라 종료 프레임 field.hive.tipCount보다 클 수 있음
-  // 종료 정착 판정 (12-14): 내역은 0:00 뒤 모두 멈춘 상태로 판정. ticks = 0:00 뒤 진행한 틱 수 (최대 SETTLE_MAX_TICKS),
-  // robots / pieces = 0:00 뒤 움직인 로봇 / 바닥 기물의 정착 위치 (0:00에 비행 / TIP 낙하 중이던 기물 포함, 렌더러 흐린 윤곽선)
-  settle: {
-    ticks: number;
-    robots: { id: 'robot1' | 'robot2'; x: number; y: number; heading: number }[];
-    pieces: { id: string; type: GamePiece['type']; x: number; y: number }[];
-  };
 }
 
 // 6. 타임라인 프레임 스냅샷

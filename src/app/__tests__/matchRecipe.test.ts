@@ -158,7 +158,7 @@ describe('저장 레시피 (10-3)', () => {
     expect(recipe.ballisticsModelVersion).toBe(BALLISTICS_MODEL_VERSION);
     expect(recipe.lut).toEqual(CURRENT_LUT_SETTINGS);
     expect(recipe.branches[0].checksums).toHaveLength(CHECKPOINT_COUNT);
-    expect(recipe.branches[0].result).toEqual({ totalScore: engine.getFrame(6000)!.totalScore, rp: engine.getFrame(6000)!.rpAchieved });
+    expect(recipe.branches[0].result).toEqual({ totalScore: engine.endFrame!.totalScore, rp: engine.endFrame!.rpAchieved });
 
     const file = JSON.parse(text);
     expect(RECIPE_VERSION).toBe(2);

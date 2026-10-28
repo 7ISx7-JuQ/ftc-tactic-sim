@@ -600,7 +600,8 @@ export class AppController {
     }
     this.tree = setBranchData(switchBranch(this.tree, id), id, CURRENT_BRANCH_DATA);
     const head = this.headTick();
-    this.viewTick = Math.min(this.viewTick, head);
+    // 결과 팝업에서 전환: 그 가지의 판정 프레임(정착 구간 끝, 12-15)을 보여 줌. 그 외에는 보는 틱 유지 (머리를 넘으면 머리로)
+    this.viewTick = fromResult ? head : Math.min(this.viewTick, head);
     this.endStage = fromResult ? 'RESULT' : head >= MATCH_TICKS ? 'REVIEW' : 'NONE';
     this.autoPauseReason = null;
     this.changed();
@@ -791,7 +792,7 @@ export class AppController {
       result: head >= MATCH_TICKS ? this.matchResult() : null,
       remainingSec: Math.max(0, (MATCH_TICKS - frame.tick) * DT),
       score: frame.totalScore,
-      tipCount: frame.scoreBreakdown?.teleopTips ?? hive.tipCount, // 종료 프레임은 정착 판정 값 (0:00 뒤 TIP 포함, 12-14)
+      tipCount: hive.tipCount,
       autoTipCount: hive.autoTipCount,
       rpThresholds: resolveRPThresholds(this.setup.scenario),
       rp: { ...frame.rpAchieved },
@@ -838,18 +839,17 @@ export class AppController {
   }
 
   private matchResult(): MatchResult | null {
-    const end = this.engine.getFrame(MATCH_TICKS);
+    // 판정 프레임 = 0:00 뒤 정착 구간의 마지막 프레임 (12-15)
+    const end = this.engine.endFrame;
     if (!end?.scoreBreakdown) return null;
     const { hive } = end.field;
-    // 텔레옵 TIP은 정착 판정 값 (0:00 뒤 도착한 공의 TIP 포함, 12-14)
-    const teleopTips = end.scoreBreakdown.teleopTips;
     return {
       total: end.totalScore,
       breakdown: end.scoreBreakdown,
       rp: { ...end.rpAchieved },
-      tips: hive.autoTipCount + teleopTips,
+      tips: hive.autoTipCount + hive.tipCount,
       autoTips: hive.autoTipCount,
-      teleopTips,
+      teleopTips: hive.tipCount,
       thresholds: resolveRPThresholds(this.setup.scenario),
       autoMovementPoints: autoMovementPoints(this.setup.scenario),
     };
@@ -894,7 +894,7 @@ export class AppController {
         depth: branchDepth(this.tree, n.id),
         headTick,
         ended,
-        totalScore: !ended ? null : current ? this.engine.timeline[MATCH_TICKS].totalScore : (n.data.record!.result?.totalScore ?? null),
+        totalScore: !ended ? null : current ? (this.engine.endFrame?.totalScore ?? null) : (n.data.record!.result?.totalScore ?? null),
       };
     });
   }

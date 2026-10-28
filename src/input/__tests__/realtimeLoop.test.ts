@@ -308,7 +308,7 @@ describe('실시간 루프 (명세서 3.6)', () => {
         h.frame(f % 97 === 0 ? 180 : 8 + (f * 7919) % 17);   // 8~24 ms 흔들림 + 가끔 180 ms 끊김
         if (f % 1500 === 0) { h.loop.pause('BLUR'); h.loop.resume(); }
       }
-      assert(h.loop.state === 'ENDED' && h.e.currentTick === MATCH_TICKS, `jittery real-time run reached the end (${f} frames)`);
+      assert(h.loop.state === 'ENDED' && h.e.currentTick === h.e.endFrame?.tick, `jittery real-time run reached the end (${f} frames)`);
       const replay = eng({ r2Spawn: pose(40, 115) });
       replay.inputProvider = h.inputs.createReplayProvider();
       replay.runFullMatch();

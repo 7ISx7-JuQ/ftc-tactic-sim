@@ -166,10 +166,11 @@ export function isoLocal(date: Date): string {
 /** 가지 기록 요약 (16-2): 머리 틱 / 전체 타임라인의 체크포인트 / 종료 결과. 프레임을 해제한 가지도 목록 · 비교 · 내보내기에 쓴다 */
 export type BranchRecord = Pick<RecipeBranch, 'headTick' | 'checksums' | 'result'>;
 
-/** 0 ~ 머리 틱 프레임 → 가지 기록 요약 (체크포인트 121개 해시, 약 10 ms) */
+/** 0 ~ 머리 틱 프레임 → 가지 기록 요약 (체크포인트 121개 해시, 약 10 ms).
+ *  머리 틱 = 입력 머리 (≤ 6000 — 0:00 뒤 정착 구간 프레임은 입력 없이 다시 계산되므로 기록하지 않음), 결과 = 마지막(판정) 프레임 (12-15) */
 export function timelineRecord(timeline: readonly DeepReadonly<TimelineFrame>[]): BranchRecord {
-  const headTick = timeline.length - 1;
-  const last = timeline[headTick];
+  const headTick = Math.min(timeline.length - 1, MATCH_TICKS);
+  const last = timeline[timeline.length - 1];
   return {
     headTick,
     checksums: timelineCheckpoints(timeline),

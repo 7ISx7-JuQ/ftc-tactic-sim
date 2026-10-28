@@ -135,7 +135,7 @@ describe('입력 로그 / 입력 출처 / 녹화 덧입히기 (명세서 3.6)', 
     assert(logBytes(m, 'robot1').join() === before[0] && logBytes(m, 'robot2').join() === before[1], 'replay provider never writes the logs');
     // 경기 종료 후 step: 기록 없이 마지막 프레임
     const last = m.step(live, both(MATCH_TICKS, 0, 0));
-    assert(last.tick === MATCH_TICKS && m.logs.robot1.length === MATCH_TICKS, 'step after the final tick: no write, last frame');
+    assert(last === live.endFrame && last.tick >= MATCH_TICKS && m.logs.robot1.length === MATCH_TICKS, 'step after the final tick: no write, judged (last) frame');
   }, TEST_TIMEOUT_MS);
 
   it('D. 녹화 덧입히기 (1회차 R1 기록 → 되감기 → 2회차 R1 재생 + R2 실시간)', () => {

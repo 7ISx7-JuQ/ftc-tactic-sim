@@ -29,7 +29,7 @@ import {
 } from './collision';
 import type { AABB, Circle, OBB, RobotBody, Vector2D } from './collision';
 import { DEFAULT_SHOOTER_BALLISTICS, nextFireablePieceIndex, nominalShot, planShotFlight, planVoidedHitBounce, shooterFor, shotNoiseOf } from './ballistics';
-import { isLiftState, liftDriveRatio, normalizeAngle, stepRobotKinematics } from './kinematics';
+import { isLiftState, liftDriveRatio, stepRobotKinematics } from './kinematics';
 import {
   FLOWER_DEQ_GRAVITY_COOLDOWN,
   FLOWER_MAX_NECTAR_CAPACITY,
@@ -79,10 +79,9 @@ const EPSILON = 1e-9;
 // Stationary Lock 완전 정지 각속도 임계치 (rad/s)
 const ANGULAR_STOP_THRESHOLD = 0.05;
 
-// 경기 종료 정착 판정 (12-14, 룰북 10.5): 0:00 뒤 모든 기물 / 로봇이 멈출 때까지(최대 10초) 내부로 더 진행해 그 상태로 득점을 판정
+// 경기 종료 정착 구간 (12-14 / 12-15, 룰북 10.5): 0:00(6000틱) 뒤 모든 기물 / 로봇이 멈출 때까지(최대 10초) 프레임을 이어 기록하고
+// 마지막 프레임(판정 프레임)에서 득점을 판정. 타임라인 최대 길이 = MATCH_TICKS + SETTLE_MAX_TICKS + 1
 export const SETTLE_MAX_TICKS = 500;
-const SETTLE_MOVE_EPSILON = 0.25;  // in — 정착 위치 기록 대상 (이보다 덜 움직인 로봇 / 기물은 생략)
-const SETTLE_TURN_EPSILON = 0.01;  // rad
 
 // 기물 총량 및 시작 상황 룰 (명세서 2.4)
 export const TOTAL_POLLEN = 32;
@@ -680,11 +679,6 @@ function cloneScoreBreakdown(src: ScoreBreakdown | null): ScoreBreakdown | null 
     gardenPieces: { ...src.gardenPieces },
     parkedRobots: [...src.parkedRobots],
     cellPieces: { ...src.cellPieces },
-    settle: {
-      ticks: src.settle.ticks,
-      robots: src.settle.robots.map((r) => ({ ...r })),
-      pieces: src.settle.pieces.map((p) => ({ ...p })),
-    },
   };
 }
 
@@ -728,7 +722,7 @@ export interface EngineTimeline {
 }
 
 export class SimulationEngine {
-  // 타임라인 프레임 배열 (0번 프레임부터 6000번 프레임까지 순차 축적)
+  // 타임라인 프레임 배열 (0번 프레임부터 6000번(0:00) 프레임, 이어서 정착 구간 프레임까지 순차 축적, 12-15)
   // 외부에는 읽기 전용으로만 공개 (기록 오염 방지). reset() 시 새 배열로 교체되므로
   // UI는 참조를 보관하지 말고 매번 engine.timeline / getFrame()으로 새로 읽을 것
   private frames: TimelineFrame[] = [];
@@ -747,11 +741,21 @@ export class SimulationEngine {
    * 원래 타임라인 배열은 건드리지 않으므로 그대로 보존된다 (분기 틱 이후 프레임 포함). 반환 = 새 타임라인
    */
   public forkTimeline(tick: number): EngineTimeline {
-    const target = clamp(Math.floor(Number.isFinite(tick) ? tick : 0), 0, this.frames.length - 1);
+    // 0:00(6000틱) 이후에는 입력이 없으므로 분기는 5999틱까지 (12-15: 6000틱 = 입력 끝, 정착 구간은 그 뒤 파생 프레임)
+    const target = clamp(Math.floor(Number.isFinite(tick) ? tick : 0), 0, Math.min(this.frames.length - 1, MATCH_TICKS - 1));
     this.frames = this.frames.slice(0, target + 1);
     this.rngStates = this.rngStates.slice(0, target + 1);
     this.scrubTo(target);
     return this.currentTimeline;
+  }
+
+  /**
+   * 판정 프레임 (12-15): 정착 구간 마지막 프레임 = 득점 내역이 있는 유일한 프레임. 경기가 0:00에 닿지 않았으면 undefined.
+   * 0:00 프레임은 getFrame(MATCH_TICKS), 판정 틱은 endFrame.tick (= MATCH_TICKS + 정착 틱 수)
+   */
+  public get endFrame(): DeepReadonly<TimelineFrame> | undefined {
+    const last = this.frames[this.frames.length - 1];
+    return last?.scoreBreakdown ? last : undefined;
   }
 
   /** 가지 전환 (10-5): 보관해 둔 타임라인을 설치하고 그 머리(마지막 기록 틱) 상태로 복원 */
@@ -788,7 +792,7 @@ export class SimulationEngine {
   private totalScore = 0;
   private rpAchieved: RPState = { swarm: false, pollinator1: false, pollinator2: false };
   private scoreBreakdown: ScoreBreakdown | null = null; // 종료 틱에만 기록 (그 외 null)
-  private settling = false; // 종료 정착 진행 중 (휴먼 플레이어 NECTAR 투입 없음)
+  private settling = false; // 0:00 틱 / 정착 구간 진행 중 (완료 동작 · 휴먼 플레이어 NECTAR 투입 없음)
 
   constructor(
     r1Config: RobotConfig,
@@ -966,7 +970,8 @@ export class SimulationEngine {
 
   /**
    * 외부 조작 입력을 주입받아 다음 1틱(0.02초)을 계산하고 새 프레임을 타임라인에 추가.
-   * 경기 종료(Tick 6000) 이후에는 마지막 프레임을 그대로 반환.
+   * 6000틱(0:00)을 만드는 호출은 이어서 정착 구간 프레임까지 한 번에 기록하고 판정 프레임을 반환한다 (12-15).
+   * 경기 종료 이후(currentTick ≥ 6000)에는 마지막 프레임을 그대로 반환.
    */
   public step(r1Input?: RobotDriveInput, r2Input?: RobotDriveInput): DeepReadonly<TimelineFrame> {
     if (this.currentTick >= MATCH_TICKS) return this.frames[this.frames.length - 1];
@@ -980,11 +985,10 @@ export class SimulationEngine {
     const in1 = r1Input ?? DEFAULT_INPUT;
     const in2 = r2Input ?? DEFAULT_INPUT;
     this.currentTick++;
+    // 0:00 틱: 이 틱에 끝나는 발사 / 흡입 / FLOWER 투입과 휴먼 플레이어 NECTAR 투입은 하지 않음 (0:00 전에 끝난 것만 인정, 12-15)
+    this.settling = this.currentTick >= MATCH_TICKS;
 
-    // 가든에 안착한 공도 물리 연산(밀림/흡입) 대상이 되도록 ON_FIELD로 활성화
-    for (const piece of this.pieces) {
-      if (piece.state === 'IN_GARDEN') piece.state = 'ON_FIELD';
-    }
+    this.activateGardenPieces();
 
     // Step 1: 행동 요청 반영 + 기구학 적분 + Stationary Lock 제동/타이머
     this.r1 = this.stepRobotMotion(this.applyActionRequest(this.r1, in1, this.r1Config), in1, this.r1Config);
@@ -994,33 +998,43 @@ export class SimulationEngine {
     this.stepWorld();
 
     // --- 게임 룰 인터랙션 ---
-    this.processIntake('r1');
-    this.processIntake('r2');
-    this.processActionCompletion('r1', in1);
-    this.processActionCompletion('r2', in2);
+    if (!this.settling) {
+      this.processIntake('r1');
+      this.processIntake('r2');
+      this.processActionCompletion('r1', in1);
+      this.processActionCompletion('r2', in2);
 
-    if (this.currentTick >= ENDGAME_START_TICK && this.field.matchPhase === 'TELEOP') {
-      this.field.matchPhase = 'ENDGAME';
-      this.releaseHumanNectar(this.field.nectarStock);
-    }
-    // 로딩 존이 막혀 대기 중인 휴먼 플레이어 NECTAR는 빈 자리가 생기는 즉시 투입
-    this.placePendingHumanNectar();
-
-    this.syncCarriedPieces();
-    this.classifyGardenPieces();
-
-    // 점수: 진행 중에는 HIVE Tip만 실시간 (득점 내역 없음), 종료 틱에 정착 판정으로 전 항목 확정 + 득점 내역
-    if (this.currentTick >= MATCH_TICKS) {
-      this.settleAndFinalize();
-    } else {
-      this.totalScore = this.field.hive.tipCount * HIVE_TIP_POINTS;
-      this.scoreBreakdown = null;
+      if (this.currentTick >= ENDGAME_START_TICK && this.field.matchPhase === 'TELEOP') {
+        this.field.matchPhase = 'ENDGAME';
+        this.releaseHumanNectar(this.field.nectarStock);
+      }
+      // 로딩 존이 막혀 대기 중인 휴먼 플레이어 NECTAR는 빈 자리가 생기는 즉시 투입
+      this.placePendingHumanNectar();
     }
 
+    this.finishTick();
+
+    // 점수: 진행 중에는 HIVE Tip만 실시간 (득점 내역 없음). 0:00에 닿으면 정착 구간을 이어 기록하고 마지막 프레임에서 판정
+    if (this.currentTick >= MATCH_TICKS) return this.settleAndFinalize();
+    this.totalScore = this.field.hive.tipCount * HIVE_TIP_POINTS;
+    this.scoreBreakdown = null;
     return this.recordFrame();
   }
 
-  // 로봇 기구학 뒤의 물리 단계 (경기 틱 / 종료 정착 공용)
+  // 틱 앞처리 (경기 틱 / 정착 구간 공용): 가든에 안착한 공도 물리 연산(밀림 / 흡입) 대상이 되도록 ON_FIELD로 활성화
+  private activateGardenPieces(): void {
+    for (const piece of this.pieces) {
+      if (piece.state === 'IN_GARDEN') piece.state = 'ON_FIELD';
+    }
+  }
+
+  // 틱 뒤처리 (경기 틱 / 정착 구간 공용): 적재 기물 좌표 동기화 → GARDEN 안착 분류
+  private finishTick(): void {
+    this.syncCarriedPieces();
+    this.classifyGardenPieces();
+  }
+
+  // 로봇 기구학 뒤의 물리 단계 (경기 틱 / 종료 정착 구간 공용)
   private stepWorld(): void {
     // Step 2: 로봇 충돌 (1차 환경 → 로봇 상호 → 2차 환경)
     this.resolveRobotCollisions();
@@ -1783,44 +1797,30 @@ export class SimulationEngine {
     }
   }
 
-  // 종료 정착 판정 (12-14, 룰북 10.5 — TIP / CELL / FLOWER / GARDEN은 모두 멈춘 뒤 판정, G404 — 0:00 뒤 동력 동작 없음):
-  // 6000틱 상태에서 내부로 더 진행해 판정하고 6000틱 상태로 되돌린다 (타임라인은 6000틱에서 끝, 정착 상태는 내역에만).
-  // - 0:00에 끝나지 않은 행동은 버림: 발사 딜레이 중인 공은 나가지 않고, 흡입 / FLOWER 투입 / 리프트도 멈춘 채 중립 입력으로 제동
+  // 종료 정착 구간 (12-14 / 12-15, 룰북 10.5 — TIP / CELL / FLOWER / GARDEN은 모두 멈춘 뒤 판정, G404 — 0:00 뒤 동력 동작 없음):
+  // 0:00(6000틱) 프레임부터 모두 멈출 때까지 틱마다 프레임을 기록하고, 마지막 프레임(판정 프레임)에만 득점 내역을 둔다.
+  // - 0:00에 끝나지 않은 행동은 버림: 두 로봇 IDLE (발사 딜레이 중인 공은 나가지 않고 로봇에 남음, 흡입 / FLOWER 투입 / 리프트도 멈춤),
+  //   중립 입력으로 자기 가감속 한계대로 제동. 휴먼 플레이어 NECTAR 투입 없음 (정착 중 TIP에도)
   // - 이미 날아간 공은 도착(명중이면 CELL에 담겨 TIP 가능), 굴러가는 기물은 멈출 때까지, TIP 낙하는 끝까지
-  // - 모두 멈추거나 SETTLE_MAX_TICKS(10초)에 닿으면 그 상태로 finalizeScore
-  private settleAndFinalize(): void {
-    const atEnd = cloneSnapshot({ r1: this.r1, r2: this.r2, field: this.field, pieces: this.pieces }, this.pieceIndex);
-    const rngAtEnd = this.rngState;
-    this.settling = true;
+  // - 모두 멈추거나 SETTLE_MAX_TICKS(10초)에 닿은 프레임에서 finalizeScore
+  private settleAndFinalize(): DeepReadonly<TimelineFrame> {
     this.r1 = this.toIdleState(this.r1);
     this.r2 = this.toIdleState(this.r2);
-    let ticks = 0;
-    while (ticks < SETTLE_MAX_TICKS && !this.isSettled()) {
-      this.currentTick++; // 비행 도착 틱 비교용
-      for (const piece of this.pieces) {
-        if (piece.state === 'IN_GARDEN') piece.state = 'ON_FIELD';
-      }
+    for (let ticks = 0; ticks < SETTLE_MAX_TICKS && !this.isSettled(); ticks++) {
+      this.totalScore = this.field.hive.tipCount * HIVE_TIP_POINTS;
+      this.scoreBreakdown = null;
+      this.recordFrame();
+      this.currentTick++;
+      this.activateGardenPieces();
       this.r1 = this.stepRobotMotion(this.r1, DEFAULT_INPUT, this.r1Config);
       this.r2 = this.stepRobotMotion(this.r2, DEFAULT_INPUT, this.r2Config);
       this.stepWorld();
-      this.syncCarriedPieces();
-      this.classifyGardenPieces();
-      ticks++;
+      this.finishTick();
     }
     this.finalizeScore();
-    const settle = this.settledMoves(atEnd, ticks);
-    const owners = this.field.flowers.map((f) => ({ owner: f.owner, bottomBonus: f.bottomBonus }));
-
+    const frame = this.recordFrame();
     this.settling = false;
-    this.currentTick = MATCH_TICKS;
-    this.r1 = atEnd.r1;
-    this.r2 = atEnd.r2;
-    this.field = atEnd.field;
-    this.pieces = atEnd.pieces;
-    this.rngState = rngAtEnd;
-    // FLOWER 소유권 표시는 종료 프레임에 (정착 중 FLOWER 내용은 바뀌지 않음 — 투입 / 추출 없음)
-    this.field.flowers.forEach((f, i) => Object.assign(f, owners[i]));
-    this.scoreBreakdown = { ...this.scoreBreakdown!, settle };
+    return frame;
   }
 
   // 정착: 두 로봇 정지, 비행 / TIP 낙하 없음, 바닥 기물 모두 속도 0
@@ -1834,26 +1834,7 @@ export class SimulationEngine {
     );
   }
 
-  // 정착 위치 기록: 0:00 뒤 움직인 로봇 / 바닥 기물(0:00에 바닥에 없던 비행 · TIP 낙하 기물 포함)만
-  private settledMoves(atEnd: SimSnapshot, ticks: number): ScoreBreakdown['settle'] {
-    const robots = this.robotBodies()
-      .filter(({ state }, i) => {
-        const before = i === 0 ? atEnd.r1 : atEnd.r2;
-        return Math.hypot(state.x - before.x, state.y - before.y) >= SETTLE_MOVE_EPSILON || Math.abs(normalizeAngle(state.heading - before.heading)) >= SETTLE_TURN_EPSILON;
-      })
-      .map(({ state, config }) => ({ id: config.id, x: state.x, y: state.y, heading: state.heading }));
-    const onFloor = (p: GamePiece) => p.state === 'ON_FIELD' || p.state === 'IN_GARDEN';
-    const pieces = this.pieces
-      .filter((p) => {
-        if (!onFloor(p)) return false;
-        const before = atEnd.pieces[this.pieceIndex.get(p.id)!];
-        return !onFloor(before) || Math.hypot(p.x - before.x, p.y - before.y) >= SETTLE_MOVE_EPSILON;
-      })
-      .map((p) => ({ id: p.id, type: p.type, x: p.x, y: p.y }));
-    return { ticks, robots, pieces };
-  }
-
-  // 정착 상태(12-14): HIVE + CELL + FLOWER + GARDEN + PARK 일괄 합산 및 RP 판정, 항목별 득점 내역과 인정 근거 기록
+  // 판정 프레임(12-15): HIVE + CELL + FLOWER + GARDEN + PARK 일괄 합산 및 RP 판정, 항목별 득점 내역과 인정 근거 기록
   private finalizeScore(): void {
     const alliance = this.field.allianceColor;
     const hiveScore = this.field.hive.tipCount * HIVE_TIP_POINTS;
@@ -1903,8 +1884,6 @@ export class SimulationEngine {
       gardenPieces,
       parkedRobots,
       cellPieces,
-      teleopTips: this.field.hive.tipCount,
-      settle: { ticks: 0, robots: [], pieces: [] },
     };
     // RP (12-5): 기준값은 시나리오 값. SWARM = 오토 이동 점수 + TELEOP PARK 점수, POLLINATOR = 오토 + 텔레옵 팁 합산 (점수는 텔레옵 팁만)
     const rp = resolveRPThresholds(this.scenario);
