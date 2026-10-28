@@ -146,6 +146,7 @@ export function autoMovementPoints(scenario: Pick<ScenarioConfig, 'r1AutoMovemen
 }
 const FLOWER_POINTS_PER_PIECE = 2;
 const FLOWER_BOTTOM_BONUS = 5;
+const CELL_POINTS_PER_PIECE = 2; // 종료 시 상향 셀에 남은 NECTAR · POLLEN 1개당 (12-13, 룰북 10.5.1 / 표 10-2)
 
 // 자율주행 잔여 공 산포 최대 시도 횟수
 const MAX_SCATTER_ATTEMPTS = 200;
@@ -672,6 +673,7 @@ function cloneScoreBreakdown(src: ScoreBreakdown | null): ScoreBreakdown | null 
     flowers: src.flowers.map((f) => ({ ...f })),
     gardenPieceIds: [...src.gardenPieceIds],
     parkedRobots: [...src.parkedRobots],
+    cellPieces: { ...src.cellPieces },
   };
 }
 
@@ -1766,6 +1768,9 @@ export class SimulationEngine {
   private finalizeScore(): void {
     const alliance = this.field.allianceColor;
     const hiveScore = this.field.hive.tipCount * HIVE_TIP_POINTS;
+    // CELL: 상향 셀에 남은 기물 (팁 직후 새 상향 셀은 0부터 다시 셈 — tipHive)
+    const cellPieces = { nectar: this.field.hive.nectarInUpwardCell, pollen: this.field.hive.pollenInUpwardCell };
+    const cellScore = (cellPieces.nectar + cellPieces.pollen) * CELL_POINTS_PER_PIECE;
 
     const flowers = this.field.flowers.map((flower) => {
       const volume = flower.pieces.slice(1).filter((p): p is GamePiece => p !== null);
@@ -1793,15 +1798,17 @@ export class SimulationEngine {
     const parked = parkedRobots.length;
     const parkScore = parked * PARK_POINTS;
 
-    this.totalScore = hiveScore + flowerScore + gardenScore + parkScore;
+    this.totalScore = hiveScore + cellScore + flowerScore + gardenScore + parkScore;
     this.scoreBreakdown = {
       hive: hiveScore,
+      cell: cellScore,
       flower: flowerScore,
       garden: gardenScore,
       park: parkScore,
       flowers,
       gardenPieceIds,
       parkedRobots,
+      cellPieces,
     };
     // RP (12-5): 기준값은 시나리오 값. SWARM = 오토 이동 점수 + TELEOP PARK 점수, POLLINATOR = 오토 + 텔레옵 팁 합산 (점수는 텔레옵 팁만)
     const rp = resolveRPThresholds(this.scenario);

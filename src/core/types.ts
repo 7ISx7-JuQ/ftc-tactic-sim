@@ -363,10 +363,11 @@ export type DeepReadonly<T> = T extends (infer U)[]
     ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
     : T;
 
-// 경기 종료(Tick 6000) 득점 내역 (명세서 3.2, 08-3). hive + flower + garden + park = totalScore
+// 경기 종료(Tick 6000) 득점 내역 (명세서 3.2, 08-3). hive + cell + flower + garden + park = totalScore
 // 렌더러 / 스코어보드는 이 기록만 읽고 득점 규칙을 다시 계산하지 않음 (규칙의 단일 출처 = 엔진)
 export interface ScoreBreakdown {
   hive: number;   // 텔레옵 팁 × 20
+  cell: number;   // 종료 시 상향 셀에 남은 NECTAR · POLLEN 수 × 2 (12-13, 룰북 10.5.1)
   flower: number; // 득점 FLOWER의 (slot[1..N] 기물 수 × 2 + 하단 보너스 5) 합
   garden: number; // 아군 GARDEN 인정 기물 수 × 1
   park: number;   // 주차 인정 로봇 수 × 5
@@ -374,6 +375,7 @@ export interface ScoreBreakdown {
   flowers: { id: string; scoringPieces: number; owned: boolean; points: number }[];
   gardenPieceIds: string[];              // 득점 인정 GARDEN 기물 id
   parkedRobots: ('robot1' | 'robot2')[]; // 주차 인정 로봇
+  cellPieces: { nectar: number; pollen: number }; // 상향 셀에 남은 기물 수 (cell 근거)
 }
 
 // 6. 타임라인 프레임 스냅샷

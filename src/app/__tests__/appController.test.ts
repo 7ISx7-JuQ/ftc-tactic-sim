@@ -346,7 +346,7 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     assert(s.endSeq === 1, 'end signal (endSeq) once at the real end (09-7c)');
     const r = s.result!;
     const b = r.breakdown;
-    assert(r.total === b.hive + b.flower + b.garden + b.park && r.total === s.score, 'result total = breakdown sum = final score');
+    assert(r.total === b.hive + b.cell + b.flower + b.garden + b.park && r.total === s.score, 'result total = breakdown sum = final score');
     // 14-3: RP 카드 재료 = 이 경기 기준값 + 오토 이동 점수 (기본 LEAVE · LEAVE = 6)
     assert(r.thresholds.swarmPoints === 16 && r.thresholds.pollinator2Tips === 7 && r.autoMovementPoints === 6, 'result carries thresholds / auto movement points');
     assert(r.rp.swarm === r.autoMovementPoints + b.park >= r.thresholds.swarmPoints, 'SWARM = auto movement + TELEOP PARK >= threshold');

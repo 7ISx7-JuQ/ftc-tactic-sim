@@ -167,12 +167,14 @@ describe('E. 경기 종료 연출 (09-7c)', () => {
     expect(timerIsFinalCountdown({ phase: 'SETUP', remainingSec: 5 })).toBe(false);
   });
 
-  it('점수 집계: 종료 직전 점수 = 최종 − 종료 시 더해진 항목, 칩은 0점 제외 FLOWER → GARDEN → PARK', () => {
-    const tally = endScoreTally({ total: 69, breakdown: { flower: 0, garden: 4, park: 5 } });
+  it('점수 집계: 종료 직전 점수 = 최종 − 종료 시 더해진 항목, 칩은 0점 제외 CELL → FLOWER → GARDEN → PARK', () => {
+    const tally = endScoreTally({ total: 69, breakdown: { cell: 0, flower: 0, garden: 4, park: 5 } });
     expect(tally).toEqual({ from: 60, to: 69, chips: [{ label: 'GARDEN', points: 4 }, { label: 'PARK', points: 5 }] });
-    const all = endScoreTally({ total: 30, breakdown: { flower: 11, garden: 9, park: 10 } });
-    expect(all.from === 0 && all.chips.map(c => c.label).join() === 'FLOWER,GARDEN,PARK').toBe(true);
-    expect(endScoreTally({ total: 40, breakdown: { flower: 0, garden: 0, park: 0 } })).toEqual({ from: 40, to: 40, chips: [] });
+    const all = endScoreTally({ total: 36, breakdown: { cell: 6, flower: 11, garden: 9, park: 10 } });
+    expect(all.from === 0 && all.chips.map(c => c.label).join() === 'CELL,FLOWER,GARDEN,PARK').toBe(true);
+    // CELL 잔여 점수(12-13)도 종료 때 더해지는 항목 — 종료 직전 점수에서 뺌
+    expect(endScoreTally({ total: 26, breakdown: { cell: 6, flower: 0, garden: 0, park: 0 } })).toEqual({ from: 20, to: 26, chips: [{ label: 'CELL', points: 6 }] });
+    expect(endScoreTally({ total: 40, breakdown: { cell: 0, flower: 0, garden: 0, park: 0 } })).toEqual({ from: 40, to: 40, chips: [] });
   });
 
   it('카운트업 값: 시작 = 이전 점수, 끝 = 최종, 단조 증가 정수, 비정상 입력은 최종 값', () => {

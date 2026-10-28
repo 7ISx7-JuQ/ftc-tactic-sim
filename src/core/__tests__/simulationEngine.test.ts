@@ -185,12 +185,12 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       for (const [y, expect] of cases) {
         const e = endState((x) => redGarden(x).forEach(p => { p.y = y; }));
         const f = e.getFrame(6000)!;
-        assert(f.totalScore === (expect ? 4 : 0), `POLLEN center y=${y} -> ${expect ? 'counted' : 'not counted'} (score ${f.totalScore})`);
+        assert(f.scoreBreakdown!.garden === (expect ? 4 : 0), `POLLEN center y=${y} -> ${expect ? 'counted' : 'not counted'} (garden ${f.scoreBreakdown!.garden})`);
       }
       // x 방향 측면 걸침: 중심 x=24.3 (가든 끝 23 + 1.3) 걸침 인정, x=24.4 (접함) 불인정
       for (const [x, expect] of [[24.3, 1], [24.41, 0]] as [number, number][]) {
         const e = endState((en) => { const g = redGarden(en); g.slice(1).forEach(p => { p.state = 'OUT_OF_BOUNDS'; p.x = -10; p.y = -10; }); g[0].x = x; });
-        assert(e.getFrame(6000)!.totalScore === expect, `side overlap x=${x} -> ${expect}`);
+        assert(e.getFrame(6000)!.scoreBreakdown!.garden === expect, `side overlap x=${x} -> ${expect}`);
       }
       // NECTAR (반지름 1.8): 중심 y=140.3 걸침 인정, 140.2 접함 불인정
       for (const [y, expect] of [[140.3, 1], [140.19, 0]] as [number, number][]) {
@@ -201,14 +201,14 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
         // 엔드게임에 대기 NECTAR가 로딩 존에 스폰되므로 가든 점수만 분리 확인
         const f = e.getFrame(6000)!;
         const n = f.pieces.filter(p => p.type === 'NECTAR' && p.x === 10 && p.y === y)[0];
-        assert(f.totalScore === expect && n.state === (expect ? 'IN_GARDEN' : 'ON_FIELD'), `NECTAR center y=${y} -> ${expect}`);
+        assert(f.scoreBreakdown!.garden === expect && n.state === (expect ? 'IN_GARDEN' : 'ON_FIELD'), `NECTAR center y=${y} -> ${expect}`);
       }
       // 상대 GARDEN (BLUE, y 0~2) 공은 IN_GARDEN 상태지만 아군 점수 제외
       {
         const e = endState(() => {});
         const f = e.getFrame(6000)!;
         const blue = f.pieces.filter(p => p.state === 'IN_GARDEN' && p.y < 10).length;
-        assert(blue === 4 && f.totalScore === 4, `opponent garden labeled (${blue}) but only ally scored (${f.totalScore})`);
+        assert(blue === 4 && f.scoreBreakdown!.garden === 4, `opponent garden labeled (${blue}) but only ally scored (${f.scoreBreakdown!.garden})`);
       }
       // 경기 중 점수 미반영 + 틱마다 재판정 (로봇이 가든 공을 밀어내면 해제)
       {
@@ -1046,6 +1046,7 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
 
   it('U. 경기 종료 득점 내역 (scoreBreakdown, 08-3)', () => {
     // 기본 경기 (입력 없음): 두 진영 모두 R1이 로딩 존 스폰(주차, BLUE 기본 = RED 기본의 점대칭 — 14-1a) / 아군 GARDEN 4개, 팁 / FLOWER 없음
+    // 상향 셀에는 오토 기본 배치 NECTAR 3개가 남음 (CELL 3 × 2 = 6, 12-13)
     for (const alliance of ['RED', 'BLUE'] as const) {
       const e = eng({ allianceColor: alliance });
       e.runFullMatch();
@@ -1053,11 +1054,12 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       const b = last.scoreBreakdown!;
       const allyGarden = e.pieces.filter(p => p.state === 'IN_GARDEN' && testCircleVsAABB({ center: { x: p.x, y: p.y }, radius: PIECE_PHYSICS[p.type].radius }, GARDEN_AABB[alliance]).colliding).map(p => p.id);
       assert(e.timeline.slice(0, 6000).every(f => f.scoreBreakdown === null), `${alliance}: no breakdown before the final tick`);
-      assert(b !== null && b.hive === 0 && b.flower === 0 && b.garden === 4 && b.park === 5 && last.totalScore === 9, `${alliance}: garden 4 + park 5 = 9`);
+      assert(b !== null && b.hive === 0 && b.flower === 0 && b.garden === 4 && b.park === 5 && b.cell === 6 && last.totalScore === 15, `${alliance}: garden 4 + park 5 + cell 6 = 15`);
+      assert(b.cellPieces.nectar === 3 && b.cellPieces.pollen === 0, `${alliance}: 3 staged NECTAR left in the upward CELL`);
       assert(b.parkedRobots.join() === 'robot1' && b.gardenPieceIds.slice().sort().join() === allyGarden.sort().join(), `${alliance}: parked robot / counted garden pieces identified`);
       assert(b.flowers.map(f => f.id).join() === e.field.flowers.map(f => f.id).join() && b.flowers.every(f => !f.owned && f.points === 0 && f.scoringPieces === 3), `${alliance}: 4 FLOWERs (POLLEN only, slot[1..] 3) not owned`);
     }
-    // 전 항목: 팁 1회(20) + FLOWER 1개 소유(slot[1..] 2개 × 2 + 5 = 9) + GARDEN 4 + 주차 1대(5) = 38
+    // 전 항목: 팁 1회(20) + FLOWER 1개 소유(slot[1..] 2개 × 2 + 5 = 9) + GARDEN 4 + 주차 1대(5) = 38, 팁 후 새 상향 셀은 비어 CELL 0
     const build = () => {
       const aim = hiveCellAimPoint('RED', 'AUDIENCE_CELL');
       const e = eng({
@@ -1078,7 +1080,8 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
     assert(b.flowers[0].owned && b.flowers[0].scoringPieces === 2 && b.flowers[0].points === 9 && b.flower === 9 && b.flowers.slice(1).every(f => !f.owned && f.points === 0),
       `FLOWER 1 owned: 2 × 2 + 5 = 9, others 0 (${b.flowers.map(f => f.points)})`);
     assert(b.garden === 4 && b.park === 5 && b.parkedRobots.join() === 'robot2', `garden ${b.garden}, park ${b.park} (${b.parkedRobots})`);
-    assert(b.hive + b.flower + b.garden + b.park === last.totalScore && last.totalScore === 38, `items sum to totalScore (${last.totalScore})`);
+    assert(b.cell === 0 && b.cellPieces.nectar === 0 && b.cellPieces.pollen === 0, `tip resets the new upward CELL -> cell 0 (${b.cell})`);
+    assert(b.hive + b.cell + b.flower + b.garden + b.park === last.totalScore && last.totalScore === 38, `items sum to totalScore (${last.totalScore})`);
     assert(last.field.flowers[0].owner === 'RED' && last.field.flowers[1].owner === 'NONE', 'FLOWER owner set only for the scored FLOWER');
     // 스크러빙: 종료 전으로 되감으면 내역 없음, 같은 입력으로 재시뮬레이션하면 종료 프레임 동일, 종료 프레임으로 되감으면 복원
     {
@@ -1705,5 +1708,32 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
     // 경고 경계: 26점까지는 도달 가능
     expect(scenarioWarnings({ rpThresholds: th(26) })).toEqual([]);
     expect(scenarioWarnings({ rpThresholds: th(27) })).toEqual(['SWARM_UNREACHABLE']);
+  }, TEST_TIMEOUT_MS);
+
+  it('AF. CELL 잔여 기물 (12-13): 종료 시 상향 셀의 NECTAR · POLLEN 1개당 2점, 경기 중 점수 미반영, 팁 후 새 상향 셀부터 다시 셈', () => {
+    // 로봇은 HIVE와 먼 곳 (R1 주차 없음), 입력 없음 → 점수 = GARDEN 4 + CELL
+    const end = (hive: { nectarCount: number; pollenCount: number }) => {
+      const e = eng({ r1Spawn: pose(60, 30), r2Spawn: pose(100, 30), hiveInitialPieces: hive });
+      e.runFullMatch();
+      return e;
+    };
+    for (const [nectar, pollen] of [[0, 0], [3, 0], [1, 2], [0, 4]] as [number, number][]) {
+      const e = end({ nectarCount: nectar, pollenCount: pollen });
+      const f = e.getFrame(6000)!;
+      const b = f.scoreBreakdown!;
+      assert(b.cell === (nectar + pollen) * 2 && b.cellPieces.nectar === nectar && b.cellPieces.pollen === pollen, `NECTAR ${nectar} + POLLEN ${pollen} -> cell ${b.cell}`);
+      assert(f.totalScore === b.hive + b.cell + b.flower + b.garden + b.park && f.totalScore === 4 + (nectar + pollen) * 2, `total includes cell (${f.totalScore})`);
+      // 경기 중 (종료 전) 점수는 팁 점수만 — 셀 잔여는 종료 판정에서만
+      assert(e.getFrame(5999)!.totalScore === 0 && e.getFrame(5999)!.scoreBreakdown === null, 'mid-match score excludes the CELL');
+    }
+    // 텔레옵 중 상향 셀로 발사한 기물도 종료 시 남아 있으면 득점 (팁 미달)
+    const aim = hiveCellAimPoint('RED', 'AUDIENCE_CELL');
+    const e = eng({
+      r1Spawn: pose(60.5, 130.5, bearingTo(60.5, 130.5, aim.x, aim.y)), r2Spawn: pose(100, 30), r1Loadout: ['POLLEN'],
+      hiveInitialPieces: { nectarCount: 1, pollenCount: 0 },
+    });
+    while (e.currentTick < 6000) e.step(e.currentTick < 15 ? SHOOT : undefined);
+    const b = e.getFrame(6000)!.scoreBreakdown!;
+    assert(e.field.hive.tipCount === 0 && b.cellPieces.nectar === 1 && b.cellPieces.pollen === 1 && b.cell === 4, `launched POLLEN stays in the upward CELL -> cell 4 (${b.cell})`);
   }, TEST_TIMEOUT_MS);
 });

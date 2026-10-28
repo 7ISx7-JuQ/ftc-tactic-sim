@@ -21,9 +21,10 @@ import type { MatchImportError } from '../matchFile';
 import { t } from '../i18n';
 
 const result: MatchResult = {
-  total: 38,
+  total: 42,
   breakdown: {
     hive: 20,
+    cell: 4,
     flower: 9,
     garden: 4,
     park: 5,
@@ -35,6 +36,7 @@ const result: MatchResult = {
     ],
     gardenPieceIds: ['pollen-1', 'pollen-2', 'pollen-3', 'pollen-4'],
     parkedRobots: ['robot1'],
+    cellPieces: { nectar: 1, pollen: 1 },
   },
   rp: { swarm: false, pollinator1: true, pollinator2: false },
   tips: 6,
@@ -167,8 +169,9 @@ describe('경기 파일 화면 규칙 (10-4)', () => {
         'FTC TacticSim · TELEOP MATCH COMPLETED',
         '2026-09-30 14:32 · RED · Branch 3',
         'R1 #12345 Bumblebots · R2 Hive Mind',
-        'TOTAL SCORE 38',
+        'TOTAL SCORE 42',
         'HIVE    20  TELEOP TIP 1 × 20 · auto TIP 5 counts for RP only',
+        'CELL     4  2 left in upward CELL × 2 (NECTAR 1 · POLLEN 1)',
         'FLOWER   9  FLOWER 2: 2 × 2 + bottom bonus 5',
         'GARDEN   4  POLLEN 4 × 1',
         'PARK     5  R1 parked × 5 · auto LEAVE / PARK 6 counts for RP only',
@@ -182,9 +185,10 @@ describe('경기 파일 화면 규칙 (10-4)', () => {
     expect(lines[0]).toBe('FTC TacticSim · TELEOP 경기 종료');
     expect(lines[1]).toBe('2026-09-30 14:32 · BLUE');
     expect(lines[2]).toBe('R1 · R2 Hive Mind');
-    expect(lines[3]).toBe('총점 38');
+    expect(lines[3]).toBe('총점 42');
     expect(lines[4]).toContain('TELEOP TIP 1회 × 20');
-    expect(lines[7]).toBe('PARK     5  R1 주차 × 5 · 오토 LEAVE · PARK 6점은 RP에만');
-    expect(lines[9]).toBe(`시드 7 · 엔진 v${ENGINE_VERSION} · 탄도 모델 v${BALLISTICS_MODEL_VERSION}`);
+    expect(lines[5]).toBe('CELL     4  상향 CELL에 남은 2개 × 2 (NECTAR 1 · POLLEN 1)');
+    expect(lines[8]).toBe('PARK     5  R1 주차 × 5 · 오토 LEAVE · PARK 6점은 RP에만');
+    expect(lines[10]).toBe(`시드 7 · 엔진 v${ENGINE_VERSION} · 탄도 모델 v${BALLISTICS_MODEL_VERSION}`);
   });
 });

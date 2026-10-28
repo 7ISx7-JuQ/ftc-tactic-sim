@@ -952,6 +952,9 @@ describe('경기 흐름', () => {
       const currentChip = () => document.querySelector('.result-compare-chip[aria-current="true"] .result-compare-name')?.textContent;
       expect(header()).toBe('Plan B');
       expect(currentChip()).toBe('Plan B');
+      // 항목 줄 (12-13): HIVE 다음 CELL 잔여 기물 줄, 근거 = 상향 CELL 기물 수
+      expect([...document.querySelectorAll('.result-row-name')].map(e => e.textContent)).toEqual(['HIVE', 'CELL', 'FLOWER', 'GARDEN', 'PARK']);
+      expect(document.querySelectorAll('.result-row-basis')[1].textContent).toMatch(/upward CELL|Upward CELL empty/);
 
       // 원본 칩 → 팝업은 그대로, 헤더 / 강조 칩이 원본으로
       await userEvent.click(popup.getByRole('button', { name: /Main/ }));

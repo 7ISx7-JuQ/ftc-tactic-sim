@@ -10,7 +10,7 @@ import { fixedRateShotJudge } from '../ballistics';
 import type { DriveInputProvider, RobotDriveInput } from '../simulationEngine';
 import type { RobotConfig } from '../types';
 
-const EXPECTED = { engineVersion: 2, final: 'b0b64cdc', all: 'b997883e' };
+const EXPECTED = { engineVersion: 2, final: '7fb66457', all: '314fbe7f' };
 
 const cfg = (id: 'robot1' | 'robot2', over: Partial<RobotConfig> = {}): RobotConfig => ({
   id, name: id, width: 18, length: 18, maxSpeed: 60, maxTurnRate: 4, maxLinearAccel: 120, maxAngularAccel: 10,
