@@ -29,7 +29,7 @@ import {
 } from './collision';
 import type { AABB, Circle, OBB, RobotBody, Vector2D } from './collision';
 import { DEFAULT_SHOOTER_BALLISTICS, nextFireablePieceIndex, nominalShot, planShotFlight, planVoidedHitBounce, shooterFor, shotNoiseOf } from './ballistics';
-import { isLiftState, liftDriveRatio, stepRobotKinematics } from './kinematics';
+import { isLiftState, liftDriveRatio, normalizeAngle, stepRobotKinematics } from './kinematics';
 import {
   FLOWER_DEQ_GRAVITY_COOLDOWN,
   FLOWER_MAX_NECTAR_CAPACITY,
@@ -78,6 +78,11 @@ const EPSILON = 1e-9;
 
 // Stationary Lock 완전 정지 각속도 임계치 (rad/s)
 const ANGULAR_STOP_THRESHOLD = 0.05;
+
+// 경기 종료 정착 판정 (12-14, 룰북 10.5): 0:00 뒤 모든 기물 / 로봇이 멈출 때까지(최대 10초) 내부로 더 진행해 그 상태로 득점을 판정
+export const SETTLE_MAX_TICKS = 500;
+const SETTLE_MOVE_EPSILON = 0.25;  // in — 정착 위치 기록 대상 (이보다 덜 움직인 로봇 / 기물은 생략)
+const SETTLE_TURN_EPSILON = 0.01;  // rad
 
 // 기물 총량 및 시작 상황 룰 (명세서 2.4)
 export const TOTAL_POLLEN = 32;
@@ -674,6 +679,11 @@ function cloneScoreBreakdown(src: ScoreBreakdown | null): ScoreBreakdown | null 
     gardenPieceIds: [...src.gardenPieceIds],
     parkedRobots: [...src.parkedRobots],
     cellPieces: { ...src.cellPieces },
+    settle: {
+      ticks: src.settle.ticks,
+      robots: src.settle.robots.map((r) => ({ ...r })),
+      pieces: src.settle.pieces.map((p) => ({ ...p })),
+    },
   };
 }
 
@@ -777,6 +787,7 @@ export class SimulationEngine {
   private totalScore = 0;
   private rpAchieved: RPState = { swarm: false, pollinator1: false, pollinator2: false };
   private scoreBreakdown: ScoreBreakdown | null = null; // 종료 틱에만 기록 (그 외 null)
+  private settling = false; // 종료 정착 진행 중 (휴먼 플레이어 NECTAR 투입 없음)
 
   constructor(
     r1Config: RobotConfig,
@@ -978,6 +989,38 @@ export class SimulationEngine {
     this.r1 = this.stepRobotMotion(this.applyActionRequest(this.r1, in1, this.r1Config), in1, this.r1Config);
     this.r2 = this.stepRobotMotion(this.applyActionRequest(this.r2, in2, this.r2Config), in2, this.r2Config);
 
+    // Step 2 ~ 5-2: 충돌 / 기물 동역학 / TIP 낙하 / 발사 비행 도착
+    this.stepWorld();
+
+    // --- 게임 룰 인터랙션 ---
+    this.processIntake('r1');
+    this.processIntake('r2');
+    this.processActionCompletion('r1', in1);
+    this.processActionCompletion('r2', in2);
+
+    if (this.currentTick >= ENDGAME_START_TICK && this.field.matchPhase === 'TELEOP') {
+      this.field.matchPhase = 'ENDGAME';
+      this.releaseHumanNectar(this.field.nectarStock);
+    }
+    // 로딩 존이 막혀 대기 중인 휴먼 플레이어 NECTAR는 빈 자리가 생기는 즉시 투입
+    this.placePendingHumanNectar();
+
+    this.syncCarriedPieces();
+    this.classifyGardenPieces();
+
+    // 점수: 진행 중에는 HIVE Tip만 실시간 (득점 내역 없음), 종료 틱에 정착 판정으로 전 항목 확정 + 득점 내역
+    if (this.currentTick >= MATCH_TICKS) {
+      this.settleAndFinalize();
+    } else {
+      this.totalScore = this.field.hive.tipCount * HIVE_TIP_POINTS;
+      this.scoreBreakdown = null;
+    }
+
+    return this.recordFrame();
+  }
+
+  // 로봇 기구학 뒤의 물리 단계 (경기 틱 / 종료 정착 공용)
+  private stepWorld(): void {
     // Step 2: 로봇 충돌 (1차 환경 → 로봇 상호 → 2차 환경)
     this.resolveRobotCollisions();
 
@@ -1000,32 +1043,6 @@ export class SimulationEngine {
 
     // Step 5-2: 발사 비행 도착 (명중 반영 / HIVE 반사 방출 / 바닥 착지)
     this.stepShotArrivals();
-
-    // --- 게임 룰 인터랙션 ---
-    this.processIntake('r1');
-    this.processIntake('r2');
-    this.processActionCompletion('r1', in1);
-    this.processActionCompletion('r2', in2);
-
-    if (this.currentTick >= ENDGAME_START_TICK && this.field.matchPhase === 'TELEOP') {
-      this.field.matchPhase = 'ENDGAME';
-      this.releaseHumanNectar(this.field.nectarStock);
-    }
-    // 로딩 존이 막혀 대기 중인 휴먼 플레이어 NECTAR는 빈 자리가 생기는 즉시 투입
-    this.placePendingHumanNectar();
-
-    this.syncCarriedPieces();
-    this.classifyGardenPieces();
-
-    // 점수: 진행 중에는 HIVE Tip만 실시간 (득점 내역 없음), 종료 틱에 전 항목 확정 + 득점 내역
-    if (this.currentTick >= MATCH_TICKS) {
-      this.finalizeScore();
-    } else {
-      this.totalScore = this.field.hive.tipCount * HIVE_TIP_POINTS;
-      this.scoreBreakdown = null;
-    }
-
-    return this.recordFrame();
   }
 
   /** 0틱부터 6000틱까지 기본/스케줄된 입력(inputProvider)으로 일괄 시뮬레이션 실행 */
@@ -1737,7 +1754,8 @@ export class SimulationEngine {
     hive.pollenInUpwardCell = 0;
     if (hive.pendingDrops.length === 0) hive.isTipping = false;
 
-    this.releaseHumanNectar(1);
+    // 경기가 끝난 뒤(정착 중) TIP은 점수만 — 휴먼 플레이어는 더 넣지 않음
+    if (!this.settling) this.releaseHumanNectar(1);
   }
 
   // ------------------------------------------------------------
@@ -1764,7 +1782,77 @@ export class SimulationEngine {
     }
   }
 
-  // Tick 6000: HIVE + FLOWER + GARDEN + PARK 일괄 합산 및 RP 판정, 항목별 득점 내역과 인정 근거 기록
+  // 종료 정착 판정 (12-14, 룰북 10.5 — TIP / CELL / FLOWER / GARDEN은 모두 멈춘 뒤 판정, G404 — 0:00 뒤 동력 동작 없음):
+  // 6000틱 상태에서 내부로 더 진행해 판정하고 6000틱 상태로 되돌린다 (타임라인은 6000틱에서 끝, 정착 상태는 내역에만).
+  // - 0:00에 끝나지 않은 행동은 버림: 발사 딜레이 중인 공은 나가지 않고, 흡입 / FLOWER 투입 / 리프트도 멈춘 채 중립 입력으로 제동
+  // - 이미 날아간 공은 도착(명중이면 CELL에 담겨 TIP 가능), 굴러가는 기물은 멈출 때까지, TIP 낙하는 끝까지
+  // - 모두 멈추거나 SETTLE_MAX_TICKS(10초)에 닿으면 그 상태로 finalizeScore
+  private settleAndFinalize(): void {
+    const atEnd = cloneSnapshot({ r1: this.r1, r2: this.r2, field: this.field, pieces: this.pieces }, this.pieceIndex);
+    const rngAtEnd = this.rngState;
+    this.settling = true;
+    this.r1 = this.toIdleState(this.r1);
+    this.r2 = this.toIdleState(this.r2);
+    let ticks = 0;
+    while (ticks < SETTLE_MAX_TICKS && !this.isSettled()) {
+      this.currentTick++; // 비행 도착 틱 비교용
+      for (const piece of this.pieces) {
+        if (piece.state === 'IN_GARDEN') piece.state = 'ON_FIELD';
+      }
+      this.r1 = this.stepRobotMotion(this.r1, DEFAULT_INPUT, this.r1Config);
+      this.r2 = this.stepRobotMotion(this.r2, DEFAULT_INPUT, this.r2Config);
+      this.stepWorld();
+      this.syncCarriedPieces();
+      this.classifyGardenPieces();
+      ticks++;
+    }
+    this.finalizeScore();
+    const settle = this.settledMoves(atEnd, ticks);
+    const owners = this.field.flowers.map((f) => ({ owner: f.owner, bottomBonus: f.bottomBonus }));
+
+    this.settling = false;
+    this.currentTick = MATCH_TICKS;
+    this.r1 = atEnd.r1;
+    this.r2 = atEnd.r2;
+    this.field = atEnd.field;
+    this.pieces = atEnd.pieces;
+    this.rngState = rngAtEnd;
+    // FLOWER 소유권 표시는 종료 프레임에 (정착 중 FLOWER 내용은 바뀌지 않음 — 투입 / 추출 없음)
+    this.field.flowers.forEach((f, i) => Object.assign(f, owners[i]));
+    this.scoreBreakdown = { ...this.scoreBreakdown!, settle };
+  }
+
+  // 정착: 두 로봇 정지, 비행 / TIP 낙하 없음, 바닥 기물 모두 속도 0
+  private isSettled(): boolean {
+    return (
+      isRobotStationary(this.r1) &&
+      isRobotStationary(this.r2) &&
+      this.field.pendingShots.length === 0 &&
+      !this.field.hive.isTipping &&
+      this.pieces.every((p) => (p.state !== 'ON_FIELD' && p.state !== 'IN_GARDEN') || (p.vx === 0 && p.vy === 0))
+    );
+  }
+
+  // 정착 위치 기록: 0:00 뒤 움직인 로봇 / 바닥 기물(0:00에 바닥에 없던 비행 · TIP 낙하 기물 포함)만
+  private settledMoves(atEnd: SimSnapshot, ticks: number): ScoreBreakdown['settle'] {
+    const robots = this.robotBodies()
+      .filter(({ state }, i) => {
+        const before = i === 0 ? atEnd.r1 : atEnd.r2;
+        return Math.hypot(state.x - before.x, state.y - before.y) >= SETTLE_MOVE_EPSILON || Math.abs(normalizeAngle(state.heading - before.heading)) >= SETTLE_TURN_EPSILON;
+      })
+      .map(({ state, config }) => ({ id: config.id, x: state.x, y: state.y, heading: state.heading }));
+    const onFloor = (p: GamePiece) => p.state === 'ON_FIELD' || p.state === 'IN_GARDEN';
+    const pieces = this.pieces
+      .filter((p) => {
+        if (!onFloor(p)) return false;
+        const before = atEnd.pieces[this.pieceIndex.get(p.id)!];
+        return !onFloor(before) || Math.hypot(p.x - before.x, p.y - before.y) >= SETTLE_MOVE_EPSILON;
+      })
+      .map((p) => ({ id: p.id, type: p.type, x: p.x, y: p.y }));
+    return { ticks, robots, pieces };
+  }
+
+  // 정착 상태(12-14): HIVE + CELL + FLOWER + GARDEN + PARK 일괄 합산 및 RP 판정, 항목별 득점 내역과 인정 근거 기록
   private finalizeScore(): void {
     const alliance = this.field.allianceColor;
     const hiveScore = this.field.hive.tipCount * HIVE_TIP_POINTS;
@@ -1809,6 +1897,8 @@ export class SimulationEngine {
       gardenPieceIds,
       parkedRobots,
       cellPieces,
+      teleopTips: this.field.hive.tipCount,
+      settle: { ticks: 0, robots: [], pieces: [] },
     };
     // RP (12-5): 기준값은 시나리오 값. SWARM = 오토 이동 점수 + TELEOP PARK 점수, POLLINATOR = 오토 + 텔레옵 팁 합산 (점수는 텔레옵 팁만)
     const rp = resolveRPThresholds(this.scenario);

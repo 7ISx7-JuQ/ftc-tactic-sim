@@ -12,7 +12,7 @@ const result = (patch: Partial<MatchResult> = {}, breakdown: Partial<MatchResult
   thresholds: { swarmPoints: 16, pollinator1Tips: 4, pollinator2Tips: 7 },
   autoMovementPoints: 6,
   ...patch,
-  breakdown: { hive: 0, cell: 0, flower: 0, garden: 0, park: 0, flowers: [], gardenPieceIds: [], parkedRobots: [], cellPieces: { nectar: 0, pollen: 0 }, ...breakdown },
+  breakdown: { hive: 0, cell: 0, flower: 0, garden: 0, park: 0, flowers: [], gardenPieceIds: [], parkedRobots: [], cellPieces: { nectar: 0, pollen: 0 }, teleopTips: 0, settle: { ticks: 0, robots: [], pieces: [] }, ...breakdown },
 });
 
 describe('결과 팝업 표시 (09-12)', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SimulationEngine, DEFAULT_RNG_SEED, DEFAULT_SPAWN_POSES, validateScenario, validateRobotPlacement, PLACEMENT_TOLERANCE, HIVE_SHOOT_TOLERANCE, isRobotUnderHive, getCarryCapacity, DT, DEFAULT_RP_THRESHOLDS, AUTO_MOVEMENT_POINTS, SWARM_MAX_POINTS, autoMovementParks, autoMovementPoints, resolveAutoMovement, resolveRPThresholds, scenarioWarnings, acceptedFloorPieces, isFloorPiecePositionValid, findLandingSpot, LANDING_SEARCH_STEP, LANDING_SEARCH_MAX_RADIUS } from '../simulationEngine';
+import { SimulationEngine, DEFAULT_RNG_SEED, DEFAULT_SPAWN_POSES, validateScenario, validateRobotPlacement, PLACEMENT_TOLERANCE, HIVE_SHOOT_TOLERANCE, isRobotUnderHive, getCarryCapacity, DT, DEFAULT_RP_THRESHOLDS, AUTO_MOVEMENT_POINTS, SWARM_MAX_POINTS, autoMovementParks, autoMovementPoints, resolveAutoMovement, resolveRPThresholds, scenarioWarnings, acceptedFloorPieces, isFloorPiecePositionValid, findLandingSpot, LANDING_SEARCH_STEP, LANDING_SEARCH_MAX_RADIUS, SETTLE_MAX_TICKS } from '../simulationEngine';
 import type { RobotDriveInput } from '../simulationEngine';
 import type { BumperZone, RobotConfig, RobotPose, RobotState, ScenarioConfig, ShotJudge, ShotJudgement } from '../types';
 import { liftDriveRatio, stepRobotKinematics } from '../kinematics';
@@ -1735,5 +1735,105 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
     while (e.currentTick < 6000) e.step(e.currentTick < 15 ? SHOOT : undefined);
     const b = e.getFrame(6000)!.scoreBreakdown!;
     assert(e.field.hive.tipCount === 0 && b.cellPieces.nectar === 1 && b.cellPieces.pollen === 1 && b.cell === 4, `launched POLLEN stays in the upward CELL -> cell 4 (${b.cell})`);
+  }, TEST_TIMEOUT_MS);
+
+  it('AG. 종료 정착 판정 (12-14): 0:00 뒤 모두 멈출 때까지 내부 진행 → 그 상태로 판정, 타임라인은 6000틱 그대로, 0:00에 딜레이 중인 발사는 안 나감', () => {
+    expect(SETTLE_MAX_TICKS).toBe(500); // 최대 10초
+    // 0:00에 모두 멈춰 있으면 더 진행하지 않음 (기존 판정과 같음)
+    {
+      const e = eng();
+      e.runFullMatch();
+      const st = e.getFrame(6000)!.scoreBreakdown!.settle;
+      assert(st.ticks === 0 && st.robots.length === 0 && st.pieces.length === 0, `at rest at 0:00 -> no settle ticks (${st.ticks})`);
+      assert(e.timeline.length === 6001 && e.currentTick === 6000, 'timeline still ends at tick 6000');
+    }
+
+    // PARK: 0:00에 LOADING ZONE 안에서 움직이던 로봇 → 제동 후 멈춘 자리로 판정 (기존: 움직이는 중이라 불인정)
+    {
+      const e = eng({ r2Spawn: pose(100, 30) });
+      while (e.currentTick < 6000) e.step(e.currentTick >= 5980 ? inp('IDLE', 0, 20) : undefined);
+      const f = e.getFrame(6000)!;
+      const b = f.scoreBreakdown!;
+      const moved = b.settle.robots.find(r => r.id === 'robot1');
+      assert(Math.hypot(f.r1.vx, f.r1.vy) > 1, `R1 still moving at 0:00 (${Math.hypot(f.r1.vx, f.r1.vy).toFixed(2)} in/s)`);
+      assert(b.parkedRobots.join() === 'robot1' && b.park === 5, `R1 parked after braking (${b.parkedRobots})`);
+      assert(b.settle.ticks > 0 && !!moved && moved.y > f.r1.y && b.settle.robots.length === 1, `settled R1 pose recorded ahead of the 0:00 pose (${moved?.y.toFixed(2)} > ${f.r1.y.toFixed(2)})`);
+      assert(f.r1.y === e.r1.y && e.currentTick === 6000, 'frame 6000 / engine keep the 0:00 pose');
+    }
+
+    // 발사: 발사 틱 / 비행 틱 측정 (요청 시작 → 발사)
+    const aim = hiveCellAimPoint('RED', 'AUDIENCE_CELL');
+    const shooter = (hive: { nectarCount: number; pollenCount: number }) => eng({
+      r1Spawn: pose(60.5, 130.5, bearingTo(60.5, 130.5, aim.x, aim.y)), r2Spawn: pose(100, 30), r1Loadout: ['POLLEN'], hiveInitialPieces: hive,
+    });
+    const probe = shooter({ nectarCount: 1, pollenCount: 0 });
+    while (probe.field.pendingShots.length === 0 && probe.currentTick < 300) probe.step(SHOOT);
+    const launchAfter = probe.currentTick; // 요청 첫 틱부터 발사 틱까지
+    const flight = arrivalOf(probe, launchAfter) - launchAfter;
+    assert(launchAfter > 2 && flight > 4, `probe: launch ${launchAfter} ticks after the request, flight ${flight} ticks`);
+    const shootAt = (e: SimulationEngine, start: number) => { while (e.currentTick < 6000) e.step(e.currentTick >= start && e.currentTick < start + 15 ? SHOOT : undefined); };
+    const midFlightStart = 6000 - launchAfter - Math.floor(flight / 2);
+
+    // 0:00에 날고 있던 공은 도착해 CELL에 남음 → CELL 점수
+    {
+      const e = shooter({ nectarCount: 1, pollenCount: 0 });
+      shootAt(e, midFlightStart);
+      const f = e.getFrame(6000)!;
+      const b = f.scoreBreakdown!;
+      assert(f.field.pendingShots.length === 1 && f.field.hive.pollenInUpwardCell === 0, 'POLLEN in flight at 0:00');
+      assert(b.cellPieces.pollen === 1 && b.cell === 4, `in-flight POLLEN counted in the CELL after landing (cell ${b.cell})`);
+    }
+    // 0:00에 아직 발사 딜레이 중이면 나가지 않음 (0:00에 끝난 것만 인정). R2가 움직이고 있어 정착 진행은 함
+    {
+      const e = shooter({ nectarCount: 1, pollenCount: 0 });
+      const start = 6000 - launchAfter + 2;
+      while (e.currentTick < 6000) e.step(e.currentTick >= start ? SHOOT : undefined, e.currentTick >= 5980 ? inp('IDLE', 20, 0) : undefined);
+      const f = e.getFrame(6000)!;
+      const b = f.scoreBreakdown!;
+      assert(f.r1.actionState === 'SHOOTING' && f.field.pendingShots.length === 0 && f.r1.controlledPieces.length === 1, 'shot still in its delay at 0:00');
+      assert(b.settle.ticks > 0 && b.cellPieces.pollen === 0 && b.cell === 2, `delayed shot never fires while settling ${b.settle.ticks} ticks (cell ${b.cell})`);
+    }
+    // 0:00 뒤 도착한 공으로 TIP → 점수 / RP TIP 수에 포함, TIP 낙하 기물 정착 위치 기록, 휴먼 플레이어 NECTAR 없음
+    {
+      const build = () => shooter({ nectarCount: 3, pollenCount: 3 });
+      const e = build();
+      shootAt(e, midFlightStart);
+      const f = e.getFrame(6000)!;
+      const b = f.scoreBreakdown!;
+      const inHive = f.pieces.filter(p => p.state === 'IN_HIVE').map(p => p.id);
+      assert(f.field.hive.tipCount === 0 && !f.field.hive.isTipping && f.field.pendingShots.length === 1, 'no TIP yet at 0:00');
+      assert(b.hive === 20 && b.teleopTips === 1 && b.cell === 0, `TIP after 0:00 counted, new upward CELL empty (hive ${b.hive}, cell ${b.cell})`);
+      const flying = f.field.pendingShots[0].pieceId;
+      assert(b.settle.pieces.length === inHive.length + 1 && b.settle.pieces.every(p => inHive.includes(p.id) || p.id === flying),
+        `settled spots = dropped HIVE pieces + the landed shot, no human NECTAR (${b.settle.pieces.length})`);
+      assert(f.totalScore === b.hive + b.cell + b.flower + b.garden + b.park, 'total = settled items');
+      // 스크러빙 후 같은 입력으로 재시뮬레이션해도 같은 종료 프레임 (정착은 6000틱 상태 / 난수 상태를 바꾸지 않음)
+      const original = JSON.stringify(f);
+      e.scrubTo(5990);
+      while (e.currentTick < 6000) e.step();
+      assert(JSON.stringify(e.getFrame(6000)) === original, 're-simulated final frame identical');
+      const again = build();
+      shootAt(again, midFlightStart);
+      assert(JSON.stringify(again.getFrame(6000)) === original, 'deterministic across engines');
+    }
+
+    // GARDEN: 0:00에 굴러가던 기물이 멈춘 자리로 판정
+    {
+      const e = eng({ r1Spawn: pose(60, 30), r2Spawn: pose(100, 30) });
+      while (e.currentTick < 5999) e.step();
+      const garden = e.pieces.filter(p => p.state === 'IN_GARDEN' && p.y > 100);
+      garden.slice(1).forEach(p => { p.state = 'OUT_OF_BOUNDS'; p.x = -10; p.y = -10; });
+      // y 132에서 GARDEN(y 142 ~ 144) 쪽으로: 멈출 때까지 v² / 2a = 9 in → 중심 y ≈ 141 (걸침)
+      const roll = garden[0];
+      Object.assign(roll, { state: 'ON_FIELD', x: 11.5, y: 132, vx: 0, vy: Math.sqrt(2 * PIECE_PHYSICS.POLLEN.frictionDecel * 9) });
+      e.step();
+      const f = e.getFrame(6000)!;
+      const b = f.scoreBreakdown!;
+      const at = f.pieces.find(p => p.id === roll.id)!;
+      const spot = b.settle.pieces.find(p => p.id === roll.id);
+      assert(at.state === 'ON_FIELD' && at.y < 140, `rolling POLLEN outside the GARDEN at 0:00 (y ${at.y.toFixed(2)})`);
+      assert(b.gardenPieceIds.join() === roll.id && b.garden === 1, `counted where it stops (${b.gardenPieceIds})`);
+      assert(!!spot && spot.y > 140.6 && spot.type === 'POLLEN', `settled spot recorded (y ${spot?.y.toFixed(2)})`);
+    }
   }, TEST_TIMEOUT_MS);
 });

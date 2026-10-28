@@ -791,7 +791,7 @@ export class AppController {
       result: head >= MATCH_TICKS ? this.matchResult() : null,
       remainingSec: Math.max(0, (MATCH_TICKS - frame.tick) * DT),
       score: frame.totalScore,
-      tipCount: hive.tipCount,
+      tipCount: frame.scoreBreakdown?.teleopTips ?? hive.tipCount, // 종료 프레임은 정착 판정 값 (0:00 뒤 TIP 포함, 12-14)
       autoTipCount: hive.autoTipCount,
       rpThresholds: resolveRPThresholds(this.setup.scenario),
       rp: { ...frame.rpAchieved },
@@ -841,13 +841,15 @@ export class AppController {
     const end = this.engine.getFrame(MATCH_TICKS);
     if (!end?.scoreBreakdown) return null;
     const { hive } = end.field;
+    // 텔레옵 TIP은 정착 판정 값 (0:00 뒤 도착한 공의 TIP 포함, 12-14)
+    const teleopTips = end.scoreBreakdown.teleopTips;
     return {
       total: end.totalScore,
       breakdown: end.scoreBreakdown,
       rp: { ...end.rpAchieved },
-      tips: hive.autoTipCount + hive.tipCount,
+      tips: hive.autoTipCount + teleopTips,
       autoTips: hive.autoTipCount,
-      teleopTips: hive.tipCount,
+      teleopTips,
       thresholds: resolveRPThresholds(this.setup.scenario),
       autoMovementPoints: autoMovementPoints(this.setup.scenario),
     };
