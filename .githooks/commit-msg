@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# 커밋 제목 형식 검사 (CLAUDE.md "커밋 메시지 형식"). 세션 시작 훅이 core.hooksPath = .githooks로 켠다.
+# 사용: commit-msg <메시지 파일> — 맞으면 0, 틀리면 이유를 출력하고 1
+export LC_ALL=C.UTF-8
+title=$(grep -v '^#' "$1" | sed '/^[[:space:]]*$/d' | head -n 1)
+
+# git이 만드는 제목은 통과
+if printf '%s' "$title" | grep -Eq '^(Merge |Revert |fixup! |squash! |amend! )'; then exit 0; fi
+
+ID='[0-9]+-[0-9]+[a-z]?(-[0-9]+[a-z]?)?'
+ok=1
+if printf '%s' "$title" | grep -Eq "^${ID}\. [^ ]"; then ok=0                                  # 12-14. 제목
+elif printf '%s' "$title" | grep -Eq "^${ID}( / ${ID})* (보완|수정|정정): [^ ]"; then ok=0     # 18-3 보완: 제목
+elif printf '%s' "$title" | grep -Eq '^[^0-9 :][^:]*[^0-9 :]: [^ ]' \
+  && ! printf '%s' "$title" | grep -Eq '^Step '; then ok=0                                     # 명세서: 제목
+fi
+
+if [ "$ok" -ne 0 ]; then
+  cat >&2 <<MSG
+커밋 제목 형식이 CLAUDE.md "커밋 메시지 형식"과 다릅니다:
+  $title
+  - Step 번호로 시작: 번호 바로 뒤에 '.'          예) 12-14. 종료 정착 판정: …
+  - 번호 + 보완 / 수정 / 정정: 그 글자 뒤에 ':'   예) 18-3 보완: …
+  - 글자로 시작: 머리말 글자 뒤에 ':'             예) 명세서: … / 도움말: …
+  - 쓰지 않음: 'Step 12-14: …', '19-2b-1: …', '13-6 사출구 …'
+MSG
+  exit 1
+fi
+exit 0
