@@ -12,11 +12,11 @@ const result = (patch: Partial<MatchResult> = {}, breakdown: Partial<MatchResult
   thresholds: { swarmPoints: 16, pollinator1Tips: 4, pollinator2Tips: 7 },
   autoMovementPoints: 6,
   ...patch,
-  breakdown: { hive: 0, cell: 0, flower: 0, garden: 0, park: 0, flowers: [], gardenPieceIds: [], parkedRobots: [], cellPieces: { nectar: 0, pollen: 0 }, teleopTips: 0, settle: { ticks: 0, robots: [], pieces: [] }, ...breakdown },
+  breakdown: { hive: 0, cell: 0, flower: 0, garden: 0, park: 0, flowers: [], gardenPieceIds: [], gardenPieces: { nectar: 0, pollen: 0 }, parkedRobots: [], cellPieces: { nectar: 0, pollen: 0 }, teleopTips: 0, settle: { ticks: 0, robots: [], pieces: [] }, ...breakdown },
 });
 
 describe('결과 팝업 표시 (09-12)', () => {
-  it('A. 항목 근거: HIVE 텔레옵 TIP / 오토 TIP, CELL 잔여 기물 (12-13), 소유 FLOWER만 (기물 × 2 + 하단 보너스), GARDEN 인정 수, PARK 로봇 (R1 → R2)', () => {
+  it('A. 항목 근거: HIVE 텔레옵 TIP / 오토 TIP, CELL 잔여 기물 (12-13), 소유 FLOWER만 (기물 × 2 + 하단 보너스), GARDEN 인정 수 (NECTAR · POLLEN 내역), PARK 로봇 (R1 → R2)', () => {
     const rows = resultRows(
       result(
         { autoTips: 2, teleopTips: 3 },
@@ -33,6 +33,7 @@ describe('결과 팝업 표시 (09-12)', () => {
             { id: 'flower4', scoringPieces: 1, owned: true, points: 2 },
           ],
           gardenPieceIds: ['p1', 'p2', 'p3'],
+          gardenPieces: { nectar: 1, pollen: 2 },
           parkedRobots: ['robot2', 'robot1'],
           cellPieces: { nectar: 3, pollen: 2 },
         },
@@ -42,12 +43,17 @@ describe('결과 팝업 표시 (09-12)', () => {
       { key: 'HIVE', points: 60, teleopTips: 3, autoTips: 2 },
       { key: 'CELL', points: 10, nectar: 3, pollen: 2 },
       { key: 'FLOWER', points: 14, flowers: [{ number: 1, pieces: 3, bonus: 5 }, { number: 4, pieces: 1, bonus: 0 }] },
-      { key: 'GARDEN', points: 3, pieces: 3 },
+      { key: 'GARDEN', points: 3, pieces: 3, nectar: 1, pollen: 2 },
       { key: 'PARK', points: 10, robots: ['robot1', 'robot2'], autoPoints: 6 },
     ]);
     expect(resultRows(result())[2]).toEqual({ key: 'FLOWER', points: 0, flowers: [] });
     expect(resultRows(result({ autoMovementPoints: 0 }))[4]).toEqual({ key: 'PARK', points: 0, robots: [], autoPoints: 0 });
     // PARK 근거: 오토 이동 점수는 RP에만 (14-3, 0점이면 안내 없음)
+    // GARDEN 근거: 인정 수 × 1 (NECTAR · POLLEN 내역, 룰북 10.5.3 — 둘 다 1점), 없으면 안내
+    expect(resultBasisText(rows[3], 'en')).toBe('3 counted in GARDEN × 1 (NECTAR 1 · POLLEN 2)');
+    expect(resultBasisText(rows[3], 'ko')).toBe('GARDEN에 인정된 3개 × 1 (NECTAR 1 · POLLEN 2)');
+    expect(resultBasisText(resultRows(result())[3], 'en')).toBe('No pieces counted in GARDEN');
+    expect(resultBasisText(resultRows(result())[3], 'ko')).toBe('GARDEN에 인정된 기물 없음');
     // CELL 근거: 남은 수 × 2 (NECTAR · POLLEN 내역), 비면 안내
     expect(resultBasisText(rows[1], 'en')).toBe('5 left in upward CELL × 2 (NECTAR 3 · POLLEN 2)');
     expect(resultBasisText(rows[1], 'ko')).toBe('상향 CELL에 남은 5개 × 2 (NECTAR 3 · POLLEN 2)');

@@ -202,6 +202,7 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
         const f = e.getFrame(6000)!;
         const n = f.pieces.filter(p => p.type === 'NECTAR' && p.x === 10 && p.y === y)[0];
         assert(f.scoreBreakdown!.garden === expect && n.state === (expect ? 'IN_GARDEN' : 'ON_FIELD'), `NECTAR center y=${y} -> ${expect}`);
+        assert(f.scoreBreakdown!.gardenPieces.nectar === expect && f.scoreBreakdown!.gardenPieces.pollen === 0, `NECTAR counted by type (${JSON.stringify(f.scoreBreakdown!.gardenPieces)})`);
       }
       // 상대 GARDEN (BLUE, y 0~2) 공은 IN_GARDEN 상태지만 아군 점수 제외
       {
@@ -1056,6 +1057,7 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       assert(e.timeline.slice(0, 6000).every(f => f.scoreBreakdown === null), `${alliance}: no breakdown before the final tick`);
       assert(b !== null && b.hive === 0 && b.flower === 0 && b.garden === 4 && b.park === 5 && b.cell === 6 && last.totalScore === 15, `${alliance}: garden 4 + park 5 + cell 6 = 15`);
       assert(b.cellPieces.nectar === 3 && b.cellPieces.pollen === 0, `${alliance}: 3 staged NECTAR left in the upward CELL`);
+      assert(b.gardenPieces.nectar === 0 && b.gardenPieces.pollen === 4, `${alliance}: GARDEN pieces by type (4 staged POLLEN)`);
       assert(b.parkedRobots.join() === 'robot1' && b.gardenPieceIds.slice().sort().join() === allyGarden.sort().join(), `${alliance}: parked robot / counted garden pieces identified`);
       assert(b.flowers.map(f => f.id).join() === e.field.flowers.map(f => f.id).join() && b.flowers.every(f => !f.owned && f.points === 0 && f.scoringPieces === 3), `${alliance}: 4 FLOWERs (POLLEN only, slot[1..] 3) not owned`);
     }

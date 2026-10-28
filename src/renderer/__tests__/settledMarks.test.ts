@@ -4,7 +4,7 @@ import type { ScoreBreakdown } from '../../core/types';
 import { settledView } from '../settledMarks';
 
 const breakdown = (settle: ScoreBreakdown['settle'], patch: Partial<ScoreBreakdown> = {}): ScoreBreakdown => ({
-  hive: 0, cell: 0, flower: 0, garden: 0, park: 0, flowers: [], gardenPieceIds: [], parkedRobots: [],
+  hive: 0, cell: 0, flower: 0, garden: 0, park: 0, flowers: [], gardenPieceIds: [], gardenPieces: { nectar: 0, pollen: 0 }, parkedRobots: [],
   cellPieces: { nectar: 0, pollen: 0 }, teleopTips: 0, settle, ...patch,
 });
 

@@ -1,7 +1,7 @@
 // 결과 팝업 표시 규칙 (명세서 3.8 경기 종료와 결과 팝업, 09-12 확정): React / DOM 비의존 순수 함수
 // 값은 종료 프레임 결과(MatchResult: scoreBreakdown / RP / TIP)만 읽는다 (3.2항 실시간 / 확정 분리).
 // - 항목별 득점 + 한 줄 근거: HIVE = 텔레옵 TIP × 20 (오토 TIP은 RP에만), CELL = 종료 시 상향 셀에 남은 NECTAR · POLLEN × 2 (12-13), FLOWER = 소유한 FLOWER별 기물 × 2 (+ 하단 보너스 5),
-//   GARDEN = 인정 POLLEN × 1, PARK = 주차 인정 로봇 × 5.
+//   GARDEN = 인정 기물(POLLEN · NECTAR) × 1, PARK = 주차 인정 로봇 × 5.
 // - RP 카드: 조건 + 지금 값 (14-3: 이 경기 시나리오의 기준값) — SWARM = "AUTO 오토 이동 + PARK TELEOP 주차 = 합 / 기준",
 //   POLLINATOR 1 · 2 = "TIP 오토 + 텔레옵 / 기준". PARK 근거에 오토 이동 점수는 RP에만이라는 안내.
 
@@ -18,7 +18,7 @@ export type ResultRow =
   | { key: 'HIVE'; points: number; teleopTips: number; autoTips: number }
   | { key: 'CELL'; points: number; nectar: number; pollen: number }
   | { key: 'FLOWER'; points: number; flowers: { number: number; pieces: number; bonus: number }[] }
-  | { key: 'GARDEN'; points: number; pieces: number }
+  | { key: 'GARDEN'; points: number; pieces: number; nectar: number; pollen: number }
   | { key: 'PARK'; points: number; robots: ('robot1' | 'robot2')[]; autoPoints: number };
 
 /** RP 카드: SWARM = 오토 이동 점수(auto) + TELEOP PARK 점수(park) = current / target, POLLINATOR = TIP current / target */
@@ -36,7 +36,7 @@ export function resultRows(result: MatchResult): ResultRow[] {
     { key: 'HIVE', points: b.hive, teleopTips: result.teleopTips, autoTips: result.autoTips },
     { key: 'CELL', points: b.cell, nectar: b.cellPieces.nectar, pollen: b.cellPieces.pollen },
     { key: 'FLOWER', points: b.flower, flowers },
-    { key: 'GARDEN', points: b.garden, pieces: b.gardenPieceIds.length },
+    { key: 'GARDEN', points: b.garden, pieces: b.gardenPieceIds.length, nectar: b.gardenPieces.nectar, pollen: b.gardenPieces.pollen },
     { key: 'PARK', points: b.park, robots: [...b.parkedRobots].sort(), autoPoints: result.autoMovementPoints },
   ];
 }
@@ -77,7 +77,9 @@ export function resultBasisText(row: ResultRow, lang: Language): string {
         .map(f => t(lang, 'result.basis.flower', { number: f.number, pieces: f.pieces }) + (f.bonus > 0 ? t(lang, 'result.basis.flowerBonus', { bonus: f.bonus }) : ''))
         .join(' · ');
     case 'GARDEN':
-      return t(lang, 'result.basis.garden', { count: row.pieces });
+      return row.pieces === 0
+        ? t(lang, 'result.basis.gardenNone')
+        : t(lang, 'result.basis.garden', { count: row.pieces, nectarCount: row.nectar, pollenCount: row.pollen });
     case 'PARK': {
       const parts = [row.robots.length === 0 ? t(lang, 'result.basis.parkNone') : t(lang, 'result.basis.park', { robots: row.robots.map(r => SHORT[r]).join(' · ') })];
       if (row.autoPoints > 0) parts.push(t(lang, 'result.basis.parkAuto', { points: row.autoPoints }));

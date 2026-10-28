@@ -31,7 +31,7 @@ function frame(settle: ScoreBreakdown['settle'] | null, parked: ('robot1' | 'rob
   const f = new SimulationEngine(C1, C2, fixedRateShotJudge(0.5), 'RED', { allianceColor: 'RED' }).getFrame(0)!;
   const pieces = f.pieces.filter(p => p.state !== 'ON_FIELD');
   const scoreBreakdown: ScoreBreakdown | null = settle && {
-    hive: 0, cell: 0, flower: 0, garden: 0, park: parked.length * 5, flowers: [], gardenPieceIds: [], parkedRobots: parked,
+    hive: 0, cell: 0, flower: 0, garden: 0, park: parked.length * 5, flowers: [], gardenPieceIds: [], gardenPieces: { nectar: 0, pollen: 0 }, parkedRobots: parked,
     cellPieces: { nectar: 0, pollen: 0 }, teleopTips: 0, settle,
   };
   return { ...f, pieces, scoreBreakdown };

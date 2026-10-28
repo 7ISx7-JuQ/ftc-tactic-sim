@@ -374,6 +374,7 @@ export interface ScoreBreakdown {
   // FLOWER별 (FLOWER_IDS 순서): scoringPieces = slot[1..N] 기물 수 (소유 여부와 무관), owned = 아군 NECTAR 존재, points = 그 FLOWER 점수
   flowers: { id: string; scoringPieces: number; owned: boolean; points: number }[];
   gardenPieceIds: string[];              // 득점 인정 GARDEN 기물 id
+  gardenPieces: { nectar: number; pollen: number }; // 득점 인정 GARDEN 기물 종류별 수 (garden 근거)
   parkedRobots: ('robot1' | 'robot2')[]; // 주차 인정 로봇
   cellPieces: { nectar: number; pollen: number }; // 상향 셀에 남은 기물 수 (cell 근거)
   teleopTips: number; // 판정한 텔레옵 TIP 수 (hive = × 20) — 정착 중 TIP 포함이라 종료 프레임 field.hive.tipCount보다 클 수 있음

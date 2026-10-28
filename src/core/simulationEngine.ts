@@ -677,6 +677,7 @@ function cloneScoreBreakdown(src: ScoreBreakdown | null): ScoreBreakdown | null 
     ...src,
     flowers: src.flowers.map((f) => ({ ...f })),
     gardenPieceIds: [...src.gardenPieceIds],
+    gardenPieces: { ...src.gardenPieces },
     parkedRobots: [...src.parkedRobots],
     cellPieces: { ...src.cellPieces },
     settle: {
@@ -1873,9 +1874,13 @@ export class SimulationEngine {
     const flowerScore = flowers.reduce((sum, f) => sum + f.points, 0);
 
     const garden = GARDEN_AABB[alliance];
-    const gardenPieceIds = this.pieces
-      .filter((p) => p.state === 'IN_GARDEN' && p.vx === 0 && p.vy === 0 && pieceOverlapsAABB(p, garden))
-      .map((p) => p.id);
+    const gardenScored = this.pieces.filter((p) => p.state === 'IN_GARDEN' && p.vx === 0 && p.vy === 0 && pieceOverlapsAABB(p, garden));
+    const gardenPieceIds = gardenScored.map((p) => p.id);
+    // 종류별 개수 (결과 근거 — POLLEN · NECTAR 모두 1점, 룰북 10.5.3)
+    const gardenPieces = {
+      nectar: gardenScored.filter((p) => p.type === 'NECTAR').length,
+      pollen: gardenScored.filter((p) => p.type === 'POLLEN').length,
+    };
     const gardenScore = gardenPieceIds.length;
 
     // PARK: 차체 일부라도 아군 LOADING ZONE과 겹친 채 정지한 로봇 (FTC 룰: 부분 진입 인정)
@@ -1895,6 +1900,7 @@ export class SimulationEngine {
       park: parkScore,
       flowers,
       gardenPieceIds,
+      gardenPieces,
       parkedRobots,
       cellPieces,
       teleopTips: this.field.hive.tipCount,

@@ -459,7 +459,7 @@ FTC BioBuzz TELEOP 2D 전술 시뮬레이터의 게임 규칙, 물리 모델, �
     - **정착 위치 (`ScoreBreakdown.settle`):** 진행한 틱 수와, 0:00 뒤 0.25 in 이상 움직인(로봇은 0.01 rad 이상 돈 것 포함) 로봇의 정착 자세 / 바닥 기물의 정착 위치(0:00에 비행 / TIP 낙하 중이던 기물 포함). 렌더러가 경기 종료 강조에 흐린 윤곽으로 그린다 (3.7항).
     - 정착 진행은 6000틱 상태 / 난수 상태를 바꾸지 않으므로(되돌림) 스크러빙 후 재시뮬레이션해도 종료 프레임이 같다 (결정론).
     - **CELL 잔여 기물 (12-13):** 종료 시 HIVE 상향 셀에 남은 NECTAR · POLLEN 1개당 2점 (`CELL_POINTS_PER_PIECE`, 룰북 10.5.1 / 표 10-2 "POLLEN and/or NECTAR remaining in CELL"). 오토 배치 NECTAR(기본 3개)와 TIP에 못 미친 채 남은 발사 기물이 모두 들어간다. TIP이 일어나면 새 상향 셀은 0부터 다시 세므로(2.6.1항) 넘어간 셀의 기물은 들어가지 않는다. 개수는 `ScoreBreakdown.cellPieces`(NECTAR / POLLEN 따로)에 기록한다.
-    - **GARDEN:** 기물을 바닥(xy 평면)에 수직 정사영한 원(기물 반지름)이 우리 GARDEN AABB와 일부라도 겹친 채 완전히 멈춰(`speed === 0`, `state === 'IN_GARDEN'`) 있으면 개당 1점. 중심점이 구역 밖이어도 걸쳐 있으면 인정하고, 경계에 접하기만 한 경우(겹침 깊이 0)는 인정하지 않는다 (`collision.ts`의 `testCircleVsAABB`).
+    - **GARDEN:** POLLEN · NECTAR(어느 진영 NECTAR든, 룰북 10.5.3) 모두 기물을 바닥(xy 평면)에 수직 정사영한 원(기물 반지름)이 우리 GARDEN AABB와 일부라도 겹친 채 완전히 멈춰(`speed === 0`, `state === 'IN_GARDEN'`) 있으면 개당 1점. 중심점이 구역 밖이어도 걸쳐 있으면 인정하고, 경계에 접하기만 한 경우(겹침 깊이 0)는 인정하지 않는다 (`collision.ts`의 `testCircleVsAABB`).
     - **PARK:** 우리 LOADING ZONE AABB와 차체(OBB)가 일부라도 겹친 채 멈춘 로봇당 5점 (FTC 룰상 부분 진입도 주차로 인정). 0:00에 움직이던 로봇은 제동해 멈춘 자리로 판정한다 (12-14).
 
 #### 2.6.5 랭킹 포인트 (RP)
@@ -956,7 +956,7 @@ PAUSED / REVIEW ──BRANCH(보는 틱 < 머리, 확인창)──▶ RUNNING  (
         - `HIVE` "TELEOP TIP n × 20" (오토 TIP이 있으면 "오토 TIP n회는 RP에만")
         - `CELL` "상향 CELL에 남은 n개 × 2 (NECTAR a · POLLEN b)" (없으면 "상향 CELL 비어 있음", 12-13 — 2.6.4항)
         - `FLOWER` 소유한 FLOWER별 "FLOWER k: 기물 × 2 (+ 하단 보너스 5)" (없으면 "소유한 FLOWER 없음")
-        - `GARDEN` "POLLEN n × 1"
+        - `GARDEN` "GARDEN에 인정된 n개 × 1 (NECTAR a · POLLEN b)" (없으면 "GARDEN에 인정된 기물 없음" — POLLEN · NECTAR 모두 1점, 룰북 10.5.3, 2.6.4항)
         - `PARK` "R1 · R2 주차 × 5" (없으면 "주차한 로봇 없음") + 오토 이동 점수가 있으면 "오토 LEAVE · PARK n점은 RP에만" (14-3)
     - `RP` 카드 3개: 이름 + 조건과 지금 값 — 이 경기 시나리오의 기준값과 오토 이동 점수 (14-3, `rpCards` / `rpCardProgressText`): `SWARM` "AUTO 6 + PARK 10 = 16 / 16"(오토 이동 + TELEOP PARK = 합 / 기준), `POLLINATOR 1` "TIP 5 / 4", `POLLINATOR 2` "TIP 5 / 7" (TIP은 오토 포함). 달성은 엔진 판정 그대로 초록 체크.
     - 가지가 2개 이상 끝났으면 `BRANCHES` 비교 줄 — 칩을 누르면 팝업이 열린 채 그 가지의 결과로 바뀐다 (16-1, 3.9항).
@@ -1362,10 +1362,11 @@ config 창의 편집 버튼을 누르면 메인 필드가 그 편집 모드로 �
     FTC TacticSim · TELEOP MATCH COMPLETED
     2026-09-30 14:32 · RED · Branch 3
     R1 #12345 Bumblebots · R2 Hive Mind
-    TOTAL SCORE 38
+    TOTAL SCORE 42
     HIVE    20  TELEOP TIP 1 × 20 · auto TIP 5 counts for RP only
+    CELL     4  2 left in upward CELL × 2 (NECTAR 1 · POLLEN 1)
     FLOWER   9  FLOWER 2: 2 × 2 + bottom bonus 5
-    GARDEN   4  POLLEN 4 × 1
+    GARDEN   4  4 counted in GARDEN × 1 (NECTAR 1 · POLLEN 3)
     PARK     5  R1 parked × 5 · auto LEAVE / PARK 6 counts for RP only
     RP  SWARM AUTO 6 + PARK 5 = 11 / 16 · POLLINATOR 1 ✓ TIP 6 / 4 · POLLINATOR 2 TIP 6 / 7
     SEED 12194135 · ENGINE v2 · BALLISTICS v1
@@ -1790,6 +1791,7 @@ export interface ScoreBreakdown {
   // FLOWER별 (FLOWER_IDS 순서): scoringPieces = slot[1..N] 기물 수 (소유 여부와 무관), owned = 아군 NECTAR 존재, points = 그 FLOWER 점수
   flowers: { id: string; scoringPieces: number; owned: boolean; points: number }[];
   gardenPieceIds: string[];               // 득점 인정 GARDEN 기물 id
+  gardenPieces: { nectar: number; pollen: number }; // 득점 인정 GARDEN 기물 종류별 수 (garden 근거)
   parkedRobots: ('robot1' | 'robot2')[];  // 주차 인정 로봇
   cellPieces: { nectar: number; pollen: number }; // 상향 셀에 남은 기물 수 (cell 근거)
   teleopTips: number; // 판정한 텔레옵 TIP 수 (hive = × 20, 정착 중 TIP 포함 — 12-14)
