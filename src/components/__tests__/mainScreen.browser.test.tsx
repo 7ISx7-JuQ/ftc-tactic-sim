@@ -15,6 +15,7 @@ import { buildMatchRecipe, serializeMatchRecipe, timelineRecord } from '../../ap
 import { createMemoryAutosave } from '../../app/matchAutosave';
 import { createMemoryLibrary } from '../../app/libraryStore';
 import { MATCH_TICKS, SimulationEngine } from '../../core/simulationEngine';
+import { createInputRecordProvider } from '../../input/inputLog';
 import '../../index.css';
 
 // 바로 준비되는 명중 확률표: 어떤 요청이든 캐시 적중 (기준 LUT = 전 격자 0.5)
@@ -764,6 +765,26 @@ function neutralRecipeText(branches: { number: number; parent: number | null; fo
   );
 }
 
+// 끝까지 간 원본 하나: R1이 0:00까지 왕복 주행 → 0:00에 움직이는 중이라 정착 구간(13-7)이 생김
+function drivingRecipeText(): string {
+  const setup = setupFromDrafts(DEFAULT_DRAFT_VALUES);
+  const engine = new SimulationEngine(setup.r1Config, setup.r2Config, setup.shotJudge, 'RED', setup.scenario, setup.shooters);
+  const robot1 = new Int8Array(MATCH_TICKS * 4);
+  for (let t = 0; t < MATCH_TICKS; t++) robot1.set([t % 200 < 100 ? 100 : -100, 0, 0, 0], t * 4);
+  const inputs = { robot1, robot2: new Int8Array(MATCH_TICKS * 4) };
+  engine.inputProvider = createInputRecordProvider(inputs);
+  engine.runFullMatch();
+  return serializeMatchRecipe(
+    buildMatchRecipe({
+      setup: DEFAULT_DRAFT_VALUES,
+      branches: [{ number: 1, parent: null, forkTick: 0, name: null, inputs, record: timelineRecord(engine.timeline) }],
+      current: 1,
+      nextNumber: 2,
+      createdAt: new Date(),
+    }),
+  );
+}
+
 // 파일 선택창 가로채기: 주어진 글자를 고른 것으로. 반환 = 되돌리기
 function interceptFilePick(text: string): () => void {
   const inputClick = HTMLInputElement.prototype.click;
@@ -970,6 +991,46 @@ describe('경기 흐름', () => {
       await userEvent.click(button('REVIEW'));
       await expect.element(popup).not.toBeInTheDocument();
       await expect.element(page.getByRole('button', { name: /Main/ })).toBeVisible();
+    } finally {
+      restore();
+    }
+  });
+
+  it('정착 구간 화면 (13-7): 0:00까지 움직인 경기 → 스크러버 끝 정착 꼬리, 꼬리 안 = 시계 SETTLING + BRANCH 비활성, 0:00 전 = BRANCH', async () => {
+    const restore = interceptFilePick(drivingRecipeText());
+    try {
+      await expect.element(button('START')).toBeEnabled();
+      await userEvent.click(button('Open settings'));
+      await userEvent.click(page.getByRole('tab', { name: 'SETTINGS' }));
+      await userEvent.click(page.getByRole('button', { name: 'IMPORT', exact: true }).last());
+      await expect.poll(() => document.querySelector('[role="alertdialog"]') !== null).toBe(true);
+      await userEvent.keyboard('{Enter}');
+      await expect.element(button('RESULT'), { timeout: 10000 }).toBeEnabled(); // 불러온 끝난 경기 = 복기(0틱)
+
+      const slider = document.querySelector<HTMLElement>('.timeline')!;
+      const tail = document.querySelector<HTMLElement>('.timeline-settle');
+      expect(tail).not.toBeNull();
+      expect(tail!.getBoundingClientRect().width).toBeGreaterThan(0);
+      expect(Number(slider.getAttribute('aria-valuemax'))).toBeGreaterThan(MATCH_TICKS + 2);
+      expect(document.querySelector('.timeline-settle-slot')).not.toBeNull();
+
+      // 0:00 눈금 근처를 누르고 화살표(1틱)로 0:00 + 2틱 → 정착 구간
+      const track = document.querySelector<HTMLElement>('.timeline-track')!.getBoundingClientRect();
+      const box = slider.getBoundingClientRect();
+      await userEvent.click(page.getByRole('slider'), { position: { x: track.left - box.left + track.width * (MATCH_TICKS / 6500), y: box.height / 2 } });
+      const now = () => Number(slider.getAttribute('aria-valuenow'));
+      const goTo = async (tick: number) => {
+        for (let i = 0; i < 40 && now() !== tick; i++) await userEvent.keyboard(now() < tick ? '{ArrowRight}' : '{ArrowLeft}');
+        expect(now()).toBe(tick);
+      };
+      await goTo(MATCH_TICKS + 2);
+      await expect.poll(() => document.querySelector('.timer-settling')?.textContent).toBe('SETTLING');
+      expect(slider.getAttribute('aria-valuetext')).toBe('0:00.0 SETTLING'); // 마지막 10초는 0.1초 단위 (3.8항 타이머)
+      await expect.element(button('BRANCH')).toBeDisabled();
+      // 0:00 전(5999틱) = 분기 가능, 시계 표시 없음
+      await goTo(MATCH_TICKS - 1);
+      await expect.element(button('BRANCH')).toBeEnabled();
+      expect(document.querySelector('.timer-settling')).toBeNull();
     } finally {
       restore();
     }

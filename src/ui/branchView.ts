@@ -10,6 +10,7 @@ import { DT, MATCH_TICKS } from '../core/simulationEngine';
 import { t } from './i18n';
 import type { Language } from './i18n';
 import { formatMatchTime } from './units';
+import { TIMELINE_TICKS } from './mainScreenModel';
 
 type Tree = Pick<AppStatus, 'branches' | 'currentBranchId'>;
 
@@ -67,7 +68,7 @@ export function forkMarks(lang: Language, tree: Tree): { fraction: number; title
   for (let b = currentBranchInfo(tree); b && b.parentId !== null; b = find(tree, b.parentId)) {
     const parent = find(tree, b.parentId);
     if (!parent) break;
-    out.push({ fraction: b.forkTick / MATCH_TICKS, title: t(lang, 'branch.markTip', { name: branchLabel(lang, b), parent: branchLabel(lang, parent), time: clock(b.forkTick) }) });
+    out.push({ fraction: b.forkTick / TIMELINE_TICKS, title: t(lang, 'branch.markTip', { name: branchLabel(lang, b), parent: branchLabel(lang, parent), time: clock(b.forkTick) }) });
   }
   return out.sort((a, b) => a.fraction - b.fraction);
 }

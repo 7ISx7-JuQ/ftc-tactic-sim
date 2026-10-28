@@ -64,10 +64,10 @@ describe('분기 트리 화면 규칙 (10-6)', () => {
 
   it('D. 타임라인 분기 표식: 지금 가지와 그 조상이 갈라진 틱 (앞 틱부터), 원본이면 없음', () => {
     expect(forkMarks('en', tree(3))).toEqual([
-      { fraction: 1000 / 6000, title: 'Plan B · from Main at 1:40' },
-      { fraction: 2000 / 6000, title: 'Branch 3 · from Plan B at 1:20' },
+      { fraction: 1000 / 6500, title: 'Plan B · from Main at 1:40' }, // 스크러버 축 = 120초 + 정착 자리 10초 (13-7)
+      { fraction: 2000 / 6500, title: 'Branch 3 · from Plan B at 1:20' },
     ]);
-    expect(forkMarks('ko', tree(4))).toEqual([{ fraction: 0.75, title: '가지 4 · 원본의 0:30에서' }]);
+    expect(forkMarks('ko', tree(4))).toEqual([{ fraction: 4500 / 6500, title: '가지 4 · 원본의 0:30에서' }]);
     expect(forkMarks('en', tree(1))).toEqual([]);
   });
 

@@ -8,7 +8,7 @@ import { ALLIANCE_COLORS } from '../renderer/canvasRenderer';
 import { t } from '../ui/i18n';
 import type { Language } from '../ui/i18n';
 import { formatMatchTime } from '../ui/units';
-import { END_CHIP_STAGGER_MS, END_TALLY_MS, endScoreTally, formatPercent, robotLabel, tallyValue, timerIsEndgame, timerIsFinalCountdown, tipDisplay } from '../ui/mainScreenModel';
+import { END_CHIP_STAGGER_MS, END_TALLY_MS, endScoreTally, formatPercent, robotLabel, tallyValue, timerIsEndgame, timerIsFinalCountdown, timerSettling, tipDisplay } from '../ui/mainScreenModel';
 import type { EndTally } from '../ui/mainScreenModel';
 import HiveIcon from './HiveIcon';
 
@@ -67,6 +67,8 @@ export default function LeftPanel({ status, lang, teams }: { status: AppStatus; 
             {formatMatchTime(status.remainingSec)}
           </span>
         </div>
+        {/* 0:00 뒤 정착 구간을 보는 중 (13-7) */}
+        {timerSettling(status) && <div className="timer-settling">{t(lang, 'panel.settling')}</div>}
       </section>
 
       <section className="panel-box score-box" style={{ background: colors.base, borderColor: colors.dark }} aria-label={t(lang, 'panel.score')}>

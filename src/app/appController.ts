@@ -5,7 +5,7 @@
 // 경기 흐름 (명세서 3.8 앱 상태 흐름, 09-7a):
 //   SETUP(관중석 시점, 설정 교체 가능) → 시작 → ROTATING_IN(보기 회전, 루프 READY 유지) → 회전 완료 프레임에 loop.start() → MATCH
 //   → NEW(리셋) → ROTATING_OUT(관중석 시점으로 회전, 같은 설정으로 0틱 새 엔진) → SETUP
-//   MATCH 안: 진행(RUNNING) ⇄ 일시정지(PAUSED) / 재생(PLAYBACK, 기록 불변) / 6000틱 → 종료 강조 5초 → 결과 → 복기(REVIEW)
+//   MATCH 안: 진행(RUNNING) ⇄ 일시정지(PAUSED) / 재생(PLAYBACK, 기록 불변) / 6000틱 → 정착 재생(13-7) → 종료 강조 5초 → 결과 → 복기(REVIEW)
 // 보는 틱(viewTick)과 엔진 머리(headTick)를 구분한다: 일시정지 중 틱 이동 / 재생 / 타임라인은 보는 틱만 바꾸고 그 프레임을 그린다.
 // 12-16: 머리는 둘 — 입력 머리(≤ 6000, 재개 / 분기 / 가지 목록 / 경기 파일)와 프레임 끝(0:00 뒤 정착 구간 끝 = 판정 틱, 스크러빙 / 재생 범위).
 //   정착 구간(6000틱 이후)은 입력 없이 엔진이 따라 만드는 프레임이라 분기할 수 없고, 결과는 판정 프레임(engine.endFrame)에서 읽는다.
@@ -71,8 +71,11 @@ export interface MatchSetup {
 
 export type AppPhase = 'SETUP' | 'ROTATING_IN' | 'MATCH' | 'ROTATING_OUT';
 
-/** 경기 종료 단계: NONE(종료 전) → HIGHLIGHT(필드 종료 강조 5초, 클릭 / Space로 건너뜀) → RESULT(결과 팝업) → REVIEW(복기) */
-export type EndStage = 'NONE' | 'HIGHLIGHT' | 'RESULT' | 'REVIEW';
+/**
+ * 경기 종료 단계: NONE(종료 전) → SETTLE(0:00 뒤 정착 구간 실시간 재생, 13-7 — 정착 0틱이면 건너뜀) → HIGHLIGHT(필드 종료 강조 5초)
+ * → RESULT(결과 팝업) → REVIEW(복기). SETTLE / HIGHLIGHT는 클릭 / Space로 다음 단계로 건너뛴다
+ */
+export type EndStage = 'NONE' | 'SETTLE' | 'HIGHLIGHT' | 'RESULT' | 'REVIEW';
 export const END_HIGHLIGHT_MS = 5000;
 
 /** 재생 배속 (재생에만 적용, 조종은 항상 1×) */
@@ -234,6 +237,7 @@ export interface MatchResult {
   tips: number;                 // 오토 + 텔레옵 TIP 횟수 (RP 카드용, 점수에는 오토 미포함)
   autoTips: number;             // 오토 TIP 횟수 (결과 팝업 근거: RP에만 합산, 09-12)
   teleopTips: number;           // 텔레옵 TIP 횟수 (HIVE 점수 = × 20)
+  settleTips: number;           // 그중 0:00 뒤 정착 구간에서 난 TIP 수 (종료 점수 칩 +HIVE, 13-7)
   thresholds: RPThresholds;     // 이 경기 RP 기준값 (엔진 판정과 같은 값, 14-3: RP 카드)
   autoMovementPoints: number;   // 오토 이동 점수 (LEAVE 3 / PARK 5 / LEAVE_PARK 8 합, RP에만 — SWARM = 이 점수 + TELEOP PARK, 14-3)
 }
@@ -291,6 +295,8 @@ export class AppController {
   private playbackLast: number | null = null;
   private endStage: EndStage = 'NONE';
   private endStageAt = 0;
+  private settlePos = 0;                 // 정착 재생 위치 (틱, 소수 — 13-7)
+  private settleLast: number | null = null;
   private endSeq = 0;
   private tree!: BranchTree<BranchData>;
   private readonly leftRecords = new WeakMap<BranchInputs, Record<RobotId, Int8Array>>(); // 떠난 가지 입력 사본 → 적용 입력 기록 (recipeSource)
@@ -703,10 +709,14 @@ export class AppController {
 
   // ---------------- 경기 종료 → 결과 → 복기 ----------------
 
-  /** 종료 강조 5초 대기 건너뛰기 (필드 클릭 / Space) */
+  /** 종료 연출 건너뛰기 (필드 클릭 / Space): 정착 재생 중이면 판정 틱으로 → 종료 강조, 종료 강조 중이면 결과 팝업 */
   skipHighlight(): void {
-    if (this.endStage !== 'HIGHLIGHT') return;
-    this.setEndStage('RESULT');
+    if (this.endStage === 'SETTLE') {
+      this.viewTick = this.headTick();
+      this.setEndStage('HIGHLIGHT');
+    } else if (this.endStage === 'HIGHLIGHT') {
+      this.setEndStage('RESULT');
+    }
   }
 
   /** 결과 팝업 닫기 → 복기 */
@@ -857,6 +867,7 @@ export class AppController {
       tips: hive.autoTipCount + hive.tipCount,
       autoTips: hive.autoTipCount,
       teleopTips: hive.tipCount,
+      settleTips: hive.tipCount - (this.engine.getFrame(MATCH_TICKS)?.field.hive.tipCount ?? hive.tipCount),
       thresholds: resolveRPThresholds(this.setup.scenario),
       autoMovementPoints: autoMovementPoints(this.setup.scenario),
     };
@@ -878,7 +889,7 @@ export class AppController {
   }
 
   private endBusy(): boolean {
-    return this.endStage === 'HIGHLIGHT' || this.endStage === 'RESULT';
+    return this.endStage === 'SETTLE' || this.endStage === 'HIGHLIGHT' || this.endStage === 'RESULT';
   }
 
   /** 보는 틱을 움직일 수 있는 상태: 경기 중 + 진행 중 아님 + 종료 강조 / 결과 팝업 아님 */
@@ -967,12 +978,15 @@ export class AppController {
             return;
           }
           if (state === 'RUNNING') this.runStartTick = this.engine.currentTick;
-          // 진행이 멈추면 보는 틱 = 멈춘 틱. 6000틱 도달 → 종료 강조 시작
+          // 진행이 멈추면 보는 틱 = 멈춘 틱. 6000틱 도달 → 0:00에서 정착 구간 재생(13-7, 정착 0틱이면 바로 종료 강조)
           if (state !== 'RUNNING') this.viewTick = this.engine.currentTick;
           this.autoPauseReason = state === 'PAUSED' && reason !== null && reason !== 'USER' ? reason : null;
           if (state === 'ENDED') {
             this.endSeq++;
-            this.setEndStage('HIGHLIGHT');
+            this.viewTick = Math.min(this.viewTick, MATCH_TICKS);
+            this.settlePos = this.viewTick;
+            this.settleLast = null;
+            this.setEndStage(this.viewTick < this.headTick() ? 'SETTLE' : 'HIGHLIGHT');
           }
           this.emitStatus(true);
           this.requestRender();
@@ -1021,7 +1035,7 @@ export class AppController {
 
   private onSpace(): void {
     if (this.phase !== 'MATCH') return;
-    if (this.endStage === 'HIGHLIGHT') this.skipHighlight();
+    if (this.endStage === 'SETTLE' || this.endStage === 'HIGHLIGHT') this.skipHighlight();
     else if (this.endStage === 'RESULT') return;
     else if (this.loop.state === 'RUNNING') this.pause();
     else if (this.playing) this.stopPlayback();
@@ -1073,7 +1087,7 @@ export class AppController {
     this.renderHandle = this.scheduler.request(now => {
       this.renderHandle = null;
       this.advancePlayback(now);
-      this.advanceEndStage();
+      this.advanceEndStage(now);
       this.renderNow();
     });
   }
@@ -1094,8 +1108,23 @@ export class AppController {
     }
   }
 
-  /** 종료 강조 5초가 지나면 결과 팝업 */
-  private advanceEndStage(): void {
+  /** 정착 재생: 벽시계 × 50틱/초(1배속)로 보는 틱을 판정 틱까지 옮기고 닿으면 종료 강조 (13-7). 종료 강조 5초가 지나면 결과 팝업 */
+  private advanceEndStage(now = this.now()): void {
+    if (this.endStage === 'SETTLE') {
+      const elapsed = this.settleLast === null || !Number.isFinite(now) ? 0 : Math.max(0, now - this.settleLast);
+      if (Number.isFinite(now)) this.settleLast = now;
+      const end = this.headTick();
+      this.settlePos = Math.min(end, this.settlePos + elapsed / (DT * 1000));
+      const tick = Math.floor(this.settlePos);
+      if (tick >= end) {
+        this.viewTick = end;
+        this.setEndStage('HIGHLIGHT');
+      } else if (tick !== this.viewTick) {
+        this.viewTick = tick;
+        this.emitStatus(false);
+      }
+      return;
+    }
     if (this.endStage === 'HIGHLIGHT' && this.now() - this.endStageAt >= END_HIGHLIGHT_MS) this.setEndStage('RESULT');
   }
 
@@ -1115,6 +1144,10 @@ export class AppController {
     if (this.playing && this.viewTick < this.headTick()) {
       return between(frame, this.engine.getFrame(this.viewTick + 1)!, this.playbackPos - this.viewTick);
     }
+    // 정착 재생 (13-7): 기록 재생처럼 보는 틱 ~ 다음 틱 사이
+    if (this.endStage === 'SETTLE' && this.viewTick < this.headTick()) {
+      return between(frame, this.engine.getFrame(this.viewTick + 1)!, this.settlePos - this.viewTick);
+    }
     return { frame, tickOffset: 0 };
   }
 
@@ -1132,7 +1165,7 @@ export class AppController {
       renderScene(this.ctx, { frame, r1Config: this.setup.r1Config, r2Config: this.setup.r2Config, view, options: this.options, shooters: this.setup.shooters, paths, tickOffset }, this.dpr);
     }
 
-    if (!view.done || this.playing || this.endStage === 'HIGHLIGHT') {
+    if (!view.done || this.playing || this.endStage === 'SETTLE' || this.endStage === 'HIGHLIGHT') {
       this.requestRender(); // 보기 애니메이션 / 재생 / 종료 강조 대기 중 (루프가 돌면 onFrame이 이어서 그림)
     } else if (this.phase === 'ROTATING_IN') {
       this.phase = 'MATCH';

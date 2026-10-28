@@ -1,7 +1,7 @@
 // 메인 화면 표시 규칙 (명세서 3.8 화면 구성, 09-6d): React 컴포넌트가 쓰는 순수 계산. DOM / React 비의존
 import type { AppStatus } from '../app/appController';
 import type { GamepadSlotStatus } from '../input/browserInput';
-import { DEFAULT_RP_THRESHOLDS } from '../core/simulationEngine';
+import { DEFAULT_RP_THRESHOLDS, MATCH_TICKS, SETTLE_MAX_TICKS } from '../core/simulationEngine';
 import type { RPThresholds } from '../core/types';
 
 // ------------------------------------------------------------
@@ -89,17 +89,19 @@ export const END_TALLY_MS = 1500;       // 점수 카운트업 시간
 export const END_CHIP_STAGGER_MS = 350; // 칩이 하나씩 뜨는 간격
 
 export interface EndTally {
-  from: number; // 종료 직전 점수 (텔레옵 TIP × 20 = HIVE)
-  to: number;   // 최종 점수
-  chips: { label: 'CELL' | 'FLOWER' | 'GARDEN' | 'PARK'; points: number }[]; // 종료 시 더해진 항목 (0점 항목 제외, 결과 팝업 순서)
+  from: number; // 0:00 점수 (그때까지의 텔레옵 TIP × 20)
+  to: number;   // 최종 점수 (판정 프레임)
+  chips: { label: 'HIVE' | 'CELL' | 'FLOWER' | 'GARDEN' | 'PARK'; points: number }[]; // 0:00 뒤 더해진 항목 (0점 제외, 결과 팝업 순서)
 }
 
-export function endScoreTally(result: { total: number; breakdown: { cell: number; flower: number; garden: number; park: number } }): EndTally {
+/** 종료 점수 집계: HIVE = 0:00 뒤 정착 구간에서 난 TIP × 20 (13-7), 나머지는 판정 프레임에서 더해진 항목 */
+export function endScoreTally(result: { total: number; settleTips: number; breakdown: { cell: number; flower: number; garden: number; park: number } }): EndTally {
   const { cell, flower, garden, park } = result.breakdown;
-  const chips = ([['CELL', cell], ['FLOWER', flower], ['GARDEN', garden], ['PARK', park]] as const)
+  const hive = Math.max(0, result.settleTips) * 20;
+  const chips = ([['HIVE', hive], ['CELL', cell], ['FLOWER', flower], ['GARDEN', garden], ['PARK', park]] as const)
     .filter(([, points]) => points > 0)
     .map(([label, points]) => ({ label, points }));
-  return { from: result.total - cell - flower - garden - park, to: result.total, chips };
+  return { from: result.total - hive - cell - flower - garden - park, to: result.total, chips };
 }
 
 /** 카운트업 표시 값: 처음 빠르고 끝에서 느려지는 곡선(easeOutCubic), 정수, 끝나면 정확히 최종 값 */
@@ -134,24 +136,35 @@ export function mainButton(
 // 스크러버 줄 타임라인 막대 (09-6d: 표시만 — 끌어서 이동은 09-7)
 // ------------------------------------------------------------
 
-/** 0 ~ 6000틱에서 현재 틱 위치 비율 [0, 1] */
+/**
+ * 스크러버 축 (13-7): 120초(0 ~ 6000틱) + 0:00 뒤 정착 구간 자리(최대 SETTLE_MAX_TICKS)를 늘 같은 폭으로 둔다
+ * (경기 / 가지마다 정착 길이가 달라도 120초 부분과 분기 표식 위치가 흔들리지 않음)
+ */
+export const TIMELINE_TICKS = MATCH_TICKS + SETTLE_MAX_TICKS;
+
+/** 정착 구간을 보는 중 (13-7, 시계 "정착 중"): 경기가 끝났고 보는 틱이 0:00 ~ 판정 틱 전 */
+export function timerSettling(status: Pick<AppStatus, 'phase' | 'matchEnded' | 'tick' | 'endTick'>): boolean {
+  return status.phase === 'MATCH' && status.matchEnded && status.tick >= MATCH_TICKS && status.tick < status.endTick;
+}
+
+/** 축(0 ~ axisTicks틱)에서 현재 틱 위치 비율 [0, 1] */
 export function timelineFraction(tick: number, matchTicks: number): number {
   if (!(matchTicks > 0) || !Number.isFinite(tick)) return 0;
   return Math.min(1, Math.max(0, tick / matchTicks));
 }
 
-/** 타임라인 클릭 / 끌기 위치 → 틱 (막대 안 비율 × 6000, 반올림, [0, 6000] 제한 — 기록 밖이면 컨트롤러가 마지막 기록 틱에 붙임) */
+/** 타임라인 클릭 / 끌기 위치 → 틱 (막대 안 비율 × 축 틱 수, 반올림, [0, 축] 제한 — 기록 밖이면 컨트롤러가 마지막 기록 틱에 붙임) */
 export function timelineTickAt(clientX: number, trackLeft: number, trackWidth: number, matchTicks: number): number {
   if (!(trackWidth > 0) || !Number.isFinite(clientX)) return 0;
   return Math.round(Math.min(1, Math.max(0, (clientX - trackLeft) / trackWidth)) * matchTicks);
 }
 
-/** 타임라인 눈금: 10초마다 (0, 500, …, 6000틱), ENDGAME 시작(남은 60초) 눈금은 major */
-export function timelineMarks(matchTicks: number, ticksPerSecond: number, endgameSec = 60): { fraction: number; major: boolean }[] {
+/** 타임라인 눈금: 경기 시간 10초마다 (0, 500, …, 6000틱 = 0:00), ENDGAME 시작(남은 60초) 눈금은 major. 위치 = 축(axisTicks, 13-7) 비율 */
+export function timelineMarks(matchTicks: number, ticksPerSecond: number, endgameSec = 60, axisTicks = matchTicks): { fraction: number; major: boolean }[] {
   const step = 10 * ticksPerSecond;
   const endgameTick = matchTicks - endgameSec * ticksPerSecond;
   const marks: { fraction: number; major: boolean }[] = [];
-  for (let tick = 0; tick <= matchTicks; tick += step) marks.push({ fraction: tick / matchTicks, major: tick === endgameTick });
+  for (let tick = 0; tick <= matchTicks; tick += step) marks.push({ fraction: tick / axisTicks, major: tick === endgameTick });
   return marks;
 }
 

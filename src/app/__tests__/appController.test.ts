@@ -397,6 +397,52 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     h.dispose();
   });
 
+  it('F3. (13-7) 정착 재생: 0:00에 움직이던 경기 → 0:00 프레임부터 판정 틱까지 실시간(50 Hz) → 종료 강조 5초, 클릭 / Space = 판정 틱으로 건너뛰기', () => {
+    const { h, frames, win } = setup();
+    // 0:00 20틱 전부터 R2(키보드) 전진 → 0:00에 움직이는 중 (정착 구간 = 제동)
+    const runToEndDriving = () => {
+      for (let i = 0; i < 1300 && h.status().headTick < MATCH_TICKS - 20; i++) frames.advance(100, 100);
+      win.dispatchEvent(key('keydown', KEYBOARD_BINDINGS.forward));
+      for (let i = 0; i < 200 && h.status().loopState !== 'ENDED'; i++) frames.advance(20, 20);
+      win.dispatchEvent(key('keyup', KEYBOARD_BINDINGS.forward));
+    };
+    h.start();
+    frames.advance(VIEW_ANIMATION_MS + 50);
+    runToEndDriving();
+    let s = h.status();
+    const end = s.endTick;
+    assert(s.loopState === 'ENDED' && s.endStage === 'SETTLE' && s.tick === MATCH_TICKS && end > MATCH_TICKS && s.endSeq === 1, `settle playback starts at 0:00 (judged tick ${end})`);
+    assert(!s.canScrub && !s.canResume && !s.canBranch && !!s.result && s.score === s.tipCount * 20, 'settling: controls locked, live score, result ready');
+    frames.advance(100, 20);
+    s = h.status();
+    assert(s.endStage === 'SETTLE' && s.tick > MATCH_TICKS && s.tick <= MATCH_TICKS + 6, `real-time (50 Hz): ${s.tick - MATCH_TICKS} ticks after 0.1 s`);
+    for (let i = 0; i < 600 && h.status().endStage === 'SETTLE'; i++) frames.advance(20, 20);
+    s = h.status();
+    assert(s.endStage === 'HIGHLIGHT' && s.tick === end && s.score === s.result!.total, 'reaching the judged tick -> end highlight on the judged frame');
+    frames.advance(END_HIGHLIGHT_MS - 200, 20);
+    assert(h.status().endStage === 'HIGHLIGHT', 'highlight lasts 5 s from the end of settling');
+    frames.advance(400, 20);
+    assert(h.status().endStage === 'RESULT', 'then the result popup');
+
+    // 분기해 다시 끝까지 → Space = 판정 틱으로 건너뛰고 종료 강조, 다시 Space = 결과
+    h.closeResult();
+    h.setViewTick(MATCH_TICKS - 100);
+    h.branch();
+    runToEndDriving();
+    s = h.status();
+    assert(s.endStage === 'SETTLE' && s.endSeq === 2, 'branched run ended while moving -> settle again');
+    assert(press(win, 'Space') && h.status().endStage === 'HIGHLIGHT' && h.status().tick === h.status().endTick, 'Space during settling -> judged tick + highlight');
+    assert(press(win, 'Space') && h.status().endStage === 'RESULT', 'Space again -> result');
+    // 필드 클릭(skipHighlight)도 같은 순서
+    h.closeResult();
+    h.setViewTick(MATCH_TICKS - 100);
+    h.branch();
+    runToEndDriving();
+    h.skipHighlight();
+    assert(h.status().endStage === 'HIGHLIGHT' && h.status().tick === h.status().endTick, 'click during settling -> judged tick + highlight');
+    h.dispose();
+  }, FULL_MATCH_TIMEOUT_MS);
+
   it('F2. (16-1) 결과 팝업 가지 비교 → 종료한 가지로 전환: 팝업 유지 · 그 가지의 결과, 미종료 / 지금 가지 / 종료 강조 중은 거부, 종료 신호 불변', () => {
     const { h, frames, win } = setup();
     h.start();
@@ -412,10 +458,13 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     h.setViewTick(MATCH_TICKS - 100);
     h.branch();
     win.dispatchEvent(key('keydown', KEYBOARD_BINDINGS.forward));
-    frames.advance(2500, 20);
+    for (let i = 0; i < 200 && h.status().loopState !== 'ENDED'; i++) frames.advance(20, 20);
     win.dispatchEvent(key('keyup', KEYBOARD_BINDINGS.forward));
     let s = h.status();
-    assert(s.endStage === 'HIGHLIGHT' && s.endSeq === 2 && !h.switchBranch(1), 'highlight: switch refused');
+    // 0:00에 움직이던 가지면 정착 재생(13-7)부터 — 정착 재생 / 종료 강조 중에는 전환 불가
+    assert(s.endStage === (s.endTick > MATCH_TICKS ? 'SETTLE' : 'HIGHLIGHT') && s.endSeq === 2 && !h.switchBranch(1), 'settle / highlight: switch refused');
+    if (s.endStage === 'SETTLE') h.skipHighlight();
+    assert(h.status().endStage === 'HIGHLIGHT' && !h.switchBranch(1), 'highlight: switch refused');
     h.skipHighlight();
     const sideEnd = JSON.stringify(h.currentFrame());
     assert(sideEnd !== rootEnd, 'branch 2 ends in a different state');

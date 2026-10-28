@@ -1,6 +1,7 @@
 // 스크러버 줄 (명세서 3.8 화면 구성, 09-7a): 주 버튼(START / PAUSE / RESUME / BRANCH), 1초 · 1틱 이동(길게 누르면 반복),
 // 재생 / 배속, VIEW, NEW, RESULT. 타임라인 막대: 보는 틱 + 기록 구간, 클릭 / 끌기로 보는 틱 이동 (09-7b, 끄는 동안 시간 표시).
 // 10-6: 주 버튼 옆 가지 버튼 + 목록(BranchMenu), 타임라인에 지금 가지와 그 조상의 분기 표식(마우스 올리면 설명).
+// 13-7: 축 = 120초 + 오른쪽 끝 정착 구간 자리(최대 10초, 점선 틀). 끝난 경기는 0:00 ~ 판정 틱을 빗금 꼬리로 (입력 없음 / 분기 불가).
 import { useEffect, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import { ChevronLeft, ChevronRight, CirclePause, CirclePlay, FastForward, Gamepad2, GitBranch, Pause, Play, Rewind, RotateCcw, SwitchCamera, Trophy } from 'lucide-react';
@@ -10,7 +11,7 @@ import { DT, MATCH_TICKS } from '../core/simulationEngine';
 import { t } from '../ui/i18n';
 import type { Language, MessageKey } from '../ui/i18n';
 import { formatMatchTime } from '../ui/units';
-import { mainButton, timelineFraction, timelineMarks, timelineTickAt } from '../ui/mainScreenModel';
+import { TIMELINE_TICKS, mainButton, timelineFraction, timelineMarks, timelineTickAt, timerSettling } from '../ui/mainScreenModel';
 import { forkMarks } from '../ui/branchView';
 import BranchMenu from './BranchMenu';
 import type { BranchActions } from './BranchMenu';
@@ -29,7 +30,8 @@ export interface ScrubberActions {
   openResult: () => void;
 }
 
-const MARKS = timelineMarks(MATCH_TICKS, TICKS_PER_SECOND);
+const MARKS = timelineMarks(MATCH_TICKS, TICKS_PER_SECOND, 60, TIMELINE_TICKS);
+const ZERO_FRACTION = MATCH_TICKS / TIMELINE_TICKS; // 0:00 위치 (정착 구간 자리 시작)
 const REPEAT_DELAY_MS = 400;
 const REPEAT_INTERVAL_MS = 66;
 
@@ -106,7 +108,7 @@ export default function ScrubberBar({
   const [dragging, setDragging] = useState(false);
   const seek = (clientX: number) => {
     const rect = trackRef.current?.getBoundingClientRect();
-    if (rect) actions.setViewTick(timelineTickAt(clientX, rect.left, rect.width, MATCH_TICKS));
+    if (rect) actions.setViewTick(timelineTickAt(clientX, rect.left, rect.width, TIMELINE_TICKS));
   };
   const isDragging = dragging && status.canScrub; // 끄는 도중 조작 불가 상태가 되면 끌기 무효
   const main = mainButton(status);
@@ -117,8 +119,11 @@ export default function ScrubberBar({
     BRANCH: { key: 'control.branch', icon: <GitBranch />, action: actions.branch },
   };
   const spec = mainSpec[main.kind];
-  const viewFraction = timelineFraction(status.tick, MATCH_TICKS);
-  const headFraction = status.phase === 'MATCH' ? timelineFraction(status.headTick, MATCH_TICKS) : 0;
+  const viewFraction = timelineFraction(status.tick, TIMELINE_TICKS);
+  const headFraction = status.phase === 'MATCH' ? timelineFraction(status.headTick, TIMELINE_TICKS) : 0;
+  // 정착 구간 꼬리 (13-7): 끝난 경기의 0:00 ~ 판정 틱
+  const settleFraction = status.phase === 'MATCH' && status.matchEnded ? timelineFraction(status.endTick, TIMELINE_TICKS) - ZERO_FRACTION : 0;
+  const timeText = `${formatMatchTime((MATCH_TICKS - status.tick) * DT)}${timerSettling(status) ? ` ${t(lang, 'panel.settling')}` : ''}`;
   const viewKey: MessageKey = status.matchView === 'DRIVER' ? 'view.driver' : 'view.audience';
   const scrubDisabled = !status.canScrub;
 
@@ -140,9 +145,9 @@ export default function ScrubberBar({
         role="slider"
         aria-label={t(lang, 'control.timeline')}
         aria-valuemin={0}
-        aria-valuemax={MATCH_TICKS}
+        aria-valuemax={Math.max(MATCH_TICKS, status.endTick)}
         aria-valuenow={status.tick}
-        aria-valuetext={formatMatchTime((MATCH_TICKS - status.tick) * DT)}
+        aria-valuetext={timeText}
         aria-disabled={!status.canScrub}
         onPointerDown={e => {
           if (!status.canScrub || e.button !== 0) return;
@@ -162,14 +167,16 @@ export default function ScrubberBar({
         onPointerCancel={() => setDragging(false)}
       >
         <div className="timeline-track" ref={trackRef}>
+          <div className="timeline-settle-slot" title={t(lang, 'timeline.settleTip')} style={{ left: `${ZERO_FRACTION * 100}%` }} />
           <div className="timeline-recorded" style={{ width: `${headFraction * 100}%` }} />
+          {settleFraction > 0 && <div className="timeline-settle" title={t(lang, 'timeline.settleTip')} style={{ left: `${ZERO_FRACTION * 100}%`, width: `${settleFraction * 100}%` }} />}
           {MARKS.map(m => (
             <span key={m.fraction} className={`timeline-mark${m.major ? ' is-major' : ''}`} style={{ left: `${m.fraction * 100}%` }} />
           ))}
           {status.phase === 'MATCH' &&
             forkMarks(lang, status).map(m => <span key={m.title} className="timeline-fork" title={m.title} style={{ left: `${m.fraction * 100}%` }} />)}
           <span className="timeline-thumb" style={{ left: `${viewFraction * 100}%` }}>
-            {isDragging && <span className="timeline-time">{formatMatchTime((MATCH_TICKS - status.tick) * DT)}</span>}
+            {isDragging && <span className="timeline-time">{timeText}</span>}
           </span>
         </div>
       </div>

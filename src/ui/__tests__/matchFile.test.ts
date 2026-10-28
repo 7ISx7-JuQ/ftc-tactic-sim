@@ -44,6 +44,7 @@ const result: MatchResult = {
   tips: 6,
   autoTips: 5,
   teleopTips: 1,
+  settleTips: 0,
   thresholds: { swarmPoints: 16, pollinator1Tips: 4, pollinator2Tips: 7 },
   autoMovementPoints: 6,
 };

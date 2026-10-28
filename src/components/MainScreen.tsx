@@ -1134,7 +1134,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
   const onFieldClick = (e: ReactMouseEvent) => {
     if (scenarioEdit) return;
     if (!spotEdit) {
-      c()?.skipHighlight(); // 종료 강조 5초 중 필드를 누르면 건너뛰기
+      c()?.skipHighlight(); // 정착 재생 / 종료 강조 5초 중 필드를 누르면 건너뛰기 (13-7)
       return;
     }
     // 강조된 칸 그대로 찍음 (클릭 좌표는 정수로 반올림되어 칸 경계에서 포인터 이동 좌표와 다른 칸이 될 수 있음)
@@ -1420,7 +1420,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
             lang={lang}
           />
         )}
-        {status?.endStage === 'HIGHLIGHT' && <EndOverlay key={status.endSeq} lang={lang} />}
+        {(status?.endStage === 'SETTLE' || status?.endStage === 'HIGHLIGHT') && <EndOverlay key={status.endSeq} lang={lang} settling={status.endStage === 'SETTLE'} />}
       </div>
       {status &&
         (configOpen ? (

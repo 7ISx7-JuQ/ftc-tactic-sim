@@ -77,6 +77,14 @@
 .timer-value.is-endgame {
   color: var(--accent);
 }
+.timer-settling {
+  margin-top: calc(var(--u) * 2);
+  font-size: calc(var(--u) * 13);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-align: center;
+  color: var(--accent);
+}
 
 .score-box {
   color: #ffffff;
@@ -357,6 +365,22 @@
   inset: 0 auto 0 0;
   border-radius: inherit;
   background: #6b7280;
+}
+/* 13-7: 0:00 뒤 정착 구간 자리(점선 틀) + 끝난 경기의 정착 꼬리(빗금, 입력 없음 / 분기 불가) */
+.timeline-settle-slot {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  border: calc(var(--u) * 1) dashed rgba(255, 255, 255, 0.28);
+  border-left: none;
+  border-radius: 0 999px 999px 0;
+}
+.timeline-settle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(135deg, #6b7280 0 calc(var(--u) * 3), rgba(107, 114, 128, 0.35) calc(var(--u) * 3) calc(var(--u) * 6));
 }
 .timeline-mark {
   position: absolute;

@@ -26,7 +26,7 @@ What changed in 2.0: see the [changelog](CHANGELOG.md).
 ![Editing the scenario on the field](docs/images/scenario-edit.png)
 
 3. **START** — by default gamepad slot 0 drives R1, slot 1 (or the keyboard) drives R2; change this under **SETTINGS → Devices** (e.g. **SWAP R1 ↔ R2** to drive R2 with a single gamepad). Press a gamepad button once so the browser detects it.
-4. After 2:00 the result popup shows the score breakdown and RP. **SAVE MATCH** keeps the match in this browser; **EXPORT MATCH** saves a replay file to share.
+4. After 2:00 the robots stop and the match plays on until everything comes to rest (balls already in the air still land); scoring is judged then, as in the rulebook. The result popup shows the score breakdown and RP. **SAVE MATCH** keeps the match in this browser; **EXPORT MATCH** saves a replay file to share.
 
 The **?** button on the right edge opens the in-app help (controls, branches, files).
 
@@ -91,7 +91,7 @@ Free for **non-commercial** use under the [PolyForm Noncommercial License 1.0.0]
 ![필드에서 시나리오 편집](docs/images/scenario-edit.png)
 
 3. **시작** — 기본으로 게임패드 슬롯 0은 R1, 슬롯 1(또는 키보드)은 R2를 조종합니다. **환경 및 조작 → 장치**에서 바꿀 수 있습니다 (예: 패드 1개로 R2를 조종하려면 **R1 ↔ R2 바꾸기**). 게임패드는 버튼을 한 번 눌러야 브라우저가 인식합니다.
-4. 2:00이 지나면 결과 팝업에 항목별 점수와 RP가 나옵니다. **경기 저장**은 이 브라우저에 경기를 두고, **경기 내보내기**는 공유용 재생 파일을 저장합니다.
+4. 2:00이 지나면 로봇은 멈추고, 모든 것이 멈출 때까지 경기가 이어집니다 (이미 날아간 공은 끝까지 날아감). 득점은 룰북대로 그때 판정합니다. 결과 팝업에 항목별 점수와 RP가 나옵니다. **경기 저장**은 이 브라우저에 경기를 두고, **경기 내보내기**는 공유용 재생 파일을 저장합니다.
 
 화면 오른쪽 끝의 **?** 버튼을 누르면 앱 안 도움말(조작, 가지, 파일)이 열립니다.
 

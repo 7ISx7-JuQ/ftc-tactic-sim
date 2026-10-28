@@ -152,7 +152,7 @@ function resetValue<T extends DraftTab>(state: ConfigDrafts, tab: T, defaults: D
 export function configCanOpen(status: Pick<AppStatus, 'phase' | 'loopState' | 'playing' | 'endStage'>): boolean {
   if (status.phase === 'SETUP') return true;
   if (status.phase !== 'MATCH') return false;
-  return status.loopState !== 'RUNNING' && !status.playing && status.endStage !== 'HIGHLIGHT' && status.endStage !== 'RESULT';
+  return status.loopState !== 'RUNNING' && !status.playing && status.endStage !== 'SETTLE' && status.endStage !== 'HIGHLIGHT' && status.endStage !== 'RESULT';
 }
 
 /** R1 / R2 / SCENARIO 탭 읽기 전용: 경기가 존재하는 동안 (경기 전 SETUP이 아니면) */

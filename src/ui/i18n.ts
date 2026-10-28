@@ -337,7 +337,7 @@ const en = {
   'help.start.1': 'R1 / R2 tabs: enter each robot’s size, speed, intake zones and shooters (setup — none / POLLEN only / shared / one per piece — then launch height, angle and sweet spot), then APPLY. The hit map is built automatically — the first time takes about 10–90 s depending on the PC, then it is cached. Save robots by name at the top of the tab.',
   'help.start.2': 'SCENARIO tab: pick the ALLIANCE and set what autonomous left behind (HIVE, FLOWERS, GARDENS, loadouts, floor pieces, auto TIPs and moves) and the start poses, then APPLY. EDIT ON FIELD lets you drag and click them on the field. Save scenarios you reuse (one per auto routine) at the top of the tab.',
   'help.start.3': 'Press START. Each device drives its assigned robot (gamepad slot 0: {pad0}, slot 1: {pad1}, keyboard: {keyboard}; change under SETTINGS → Devices). Press any gamepad button once so the browser detects it.',
-  'help.start.4': 'At 0:00 the result popup shows the score breakdown and RP. REVIEW closes it so you can go through the match.',
+  'help.start.4': 'At 0:00 the robots stop, but the match plays on until everything comes to rest (balls already in the air still land) — scoring is judged then, as in the rulebook. The result popup shows the score breakdown and RP. REVIEW closes it so you can go through the match.',
   'help.controls.title': 'Controls',
   'help.controls.action': 'Action',
   'help.controls.gamepad': 'Gamepad',
@@ -370,6 +370,7 @@ const en = {
   // 경기 종료 연출 (09-7c)
   'end.banner': 'MATCH COMPLETE',
   'end.skipHint': 'Click or press Space to see the results',
+  'end.settleHint': 'Settling… click or press Space to skip',
 
   // 결과 팝업 (3.8 경기 종료와 결과 팝업, 09-7a 기본형)
   'result.title': 'TELEOP MATCH COMPLETED',
@@ -394,6 +395,8 @@ const en = {
 
   // 좌측 득점 패널
   'panel.timeRemaining': 'Time remaining',
+  'panel.settling': 'SETTLING',
+  'timeline.settleTip': 'After 0:00: settling until everything stops (no inputs, no BRANCH)',
   'panel.score': 'Score',
   'panel.tip': 'TIP',
   'panel.hitProbability': 'Hit probability',
@@ -892,7 +895,7 @@ const ko: Record<MessageKey, string> = {
   'help.start.1': 'R1 / R2 탭: 로봇 크기, 속도, 흡입 구역, 슈터(구성 — 없음 / POLLEN 전용 / 공용 1개 / 기물별 2개 — 와 발사구 높이 · 발사각 · 스윗스팟)를 입력하고 적용. 명중 확률표는 자동으로 만들어지며 처음에는 PC에 따라 약 10 ~ 90초, 이후에는 저장된 표를 씁니다. 탭 맨 위에서 로봇을 이름 붙여 저장할 수 있습니다.',
   'help.start.2': '시나리오 탭: ALLIANCE(진영)와 오토가 남긴 상태(HIVE, FLOWER, GARDEN, 적재물, 바닥 기물, 오토 TIP · 이동), 시작 자세를 정하고 적용. 필드에서 편집을 누르면 필드 위에서 끌고 눌러 정할 수 있습니다. 자주 쓰는 시나리오(오토 루틴별)는 탭 맨 위에 이름 붙여 저장하세요.',
   'help.start.3': '시작을 누르면 장치마다 배정된 로봇을 조종합니다 (게임패드 슬롯 0: {pad0}, 슬롯 1: {pad1}, 키보드: {keyboard} — SETTINGS → 장치에서 바꿈). 게임패드는 버튼을 한 번 눌러야 브라우저가 인식합니다.',
-  'help.start.4': '0:00이 되면 결과 팝업에 항목별 점수와 RP가 나옵니다. 복기를 누르면 경기를 다시 살펴볼 수 있습니다.',
+  'help.start.4': '0:00이 되면 로봇은 멈추지만, 모든 것이 멈출 때까지 경기가 이어집니다 (이미 날아간 공은 끝까지 날아감). 득점은 룰북대로 그때 판정합니다. 결과 팝업에 항목별 점수와 RP가 나오고, 복기를 누르면 경기를 다시 살펴볼 수 있습니다.',
   'help.controls.title': '조작',
   'help.controls.action': '동작',
   'help.controls.gamepad': '게임패드',
@@ -924,6 +927,7 @@ const ko: Record<MessageKey, string> = {
 
   'end.banner': '경기 종료',
   'end.skipHint': '클릭 / Space로 결과 바로 보기',
+  'end.settleHint': '정착 중 — 클릭 / Space로 건너뛰기',
 
   'result.title': 'TELEOP 경기 종료',
   'result.total': '총점',
@@ -946,6 +950,8 @@ const ko: Record<MessageKey, string> = {
   'result.rp.tips': 'TIP {current} / {target}',
 
   'panel.timeRemaining': '남은 시간',
+  'panel.settling': '정착 중',
+  'timeline.settleTip': '0:00 뒤 정착 구간: 모두 멈출 때까지 (입력 없음, 분기 불가)',
   'panel.score': '점수',
   'panel.tip': 'TIP',
   'panel.hitProbability': '명중 확률',
