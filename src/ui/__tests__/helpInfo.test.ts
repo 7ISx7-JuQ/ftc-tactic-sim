@@ -11,7 +11,7 @@ describe('도움말 / 버그 리포트 (v1.0.0)', () => {
   it('A. 앱 버전 = package.json version, 받는 사람 주소', () => {
     const pkg = JSON.parse(packageJson) as { version: string };
     expect(APP_VERSION).toBe(pkg.version);
-    expect(APP_VERSION).toBe('1.0.0');
+    expect(APP_VERSION).toBe('2.0.0-dev'); // v2.0.0 개발판 실사용 표시 (출시 22-2에서 2.0.0)
     expect(BUG_REPORT_EMAIL).toBe('7isx7juq@gmail.com');
   });
 
