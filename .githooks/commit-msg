@@ -11,7 +11,7 @@ ID='[0-9]+-[0-9]+[a-z]?(-[0-9]+[a-z]?)?'
 ok=1
 if printf '%s' "$title" | grep -Eq "^${ID}\. [^ ]"; then ok=0                                  # 12-14. 제목
 elif printf '%s' "$title" | grep -Eq "^${ID}( / ${ID})* (보완|수정|정정): [^ ]"; then ok=0     # 18-3 보완: 제목
-elif printf '%s' "$title" | grep -Eq '^[^0-9 :][^:]*[^0-9 :]: [^ ]' \
+elif printf '%s' "$title" | grep -Eq '^[^0-9 :]([^:]*[^ :])?: [^ ]' \
   && ! printf '%s' "$title" | grep -Eq '^Step '; then ok=0                                     # 명세서: 제목
 fi
 
