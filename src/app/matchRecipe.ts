@@ -174,7 +174,7 @@ export function timelineRecord(timeline: readonly DeepReadonly<TimelineFrame>[])
   return {
     headTick,
     checksums: timelineCheckpoints(timeline),
-    result: headTick >= MATCH_TICKS && last ? { totalScore: last.totalScore, rp: { ...last.rpAchieved } } : null,
+    result: headTick >= MATCH_TICKS && last?.scoreBreakdown ? { totalScore: last.totalScore, rp: { ...last.rpAchieved } } : null, // 판정 프레임(득점 내역 있음)일 때만
   };
 }
 
@@ -528,7 +528,23 @@ export function recipeWarnings(recipe: Pick<MatchRecipe, 'engineVersion' | 'ball
   return out;
 }
 
-/** 재계산한 가지 타임라인이 그 가지의 체크포인트와 같은지 (어긋나면 처음 달라진 구간) */
-export function verifyRecipe(branch: Pick<RecipeBranch, 'checksums'>, timeline: readonly DeepReadonly<TimelineFrame>[]): CheckpointComparison {
-  return compareCheckpoints(branch.checksums, timelineCheckpoints(timeline));
+/**
+ * 불러온 가지 비교 결과 (12-16): 체크포인트 비교, 또는 체크포인트는 같고 판정 결과만 다름(정착 구간 — 파일 점수 / 다시 계산한 점수)
+ */
+export type MatchComparison = CheckpointComparison | { match: false; settle: { file: number | null; now: number | null } };
+
+/**
+ * 다시 계산한 가지 기록이 파일의 그 가지와 같은지 (12-16): 체크포인트(0 ~ 6000틱)를 먼저 보고(어긋나면 처음 달라진 구간),
+ * 같으면 판정 결과(총점 · RP)를 비교한다. 정착 구간(0:00 뒤)은 입력 없이 다시 계산되어 체크포인트에 들어가지 않으므로,
+ * 그 구간만 어긋나면 결과로만 드러난다
+ */
+export function verifyRecipe(file: Pick<RecipeBranch, 'checksums' | 'result'>, loaded: Pick<BranchRecord, 'checksums' | 'result'>): MatchComparison {
+  const checkpoints = compareCheckpoints(file.checksums, loaded.checksums);
+  if (!checkpoints.match) return checkpoints;
+  const a = file.result;
+  const b = loaded.result;
+  const same = a === null || b === null
+    ? a === b
+    : a.totalScore === b.totalScore && a.rp.swarm === b.rp.swarm && a.rp.pollinator1 === b.rp.pollinator1 && a.rp.pollinator2 === b.rp.pollinator2;
+  return same ? checkpoints : { match: false, settle: { file: a?.totalScore ?? null, now: b?.totalScore ?? null } };
 }

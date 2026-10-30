@@ -31,8 +31,8 @@ import type { LUTWorkerLike } from '../workers/lutManager';
 import { PENDING_LUT_VIEW, lutInputsChanged, startBlocker } from '../ui/lutView';
 import type { RobotLutView } from '../ui/lutView';
 import { DEFAULT_RNG_SEED } from '../core/simulationEngine';
-import { RecipeInputCache, buildMatchRecipe, parseMatchRecipe, recipeLoadTree, serializeMatchRecipe } from '../app/matchRecipe';
-import type { MatchRecipe, RecipeWarning } from '../app/matchRecipe';
+import { RecipeInputCache, buildMatchRecipe, parseMatchRecipe, recipeLoadTree, serializeMatchRecipe, verifyRecipe } from '../app/matchRecipe';
+import type { MatchComparison, MatchRecipe, RecipeWarning } from '../app/matchRecipe';
 import { AutosaveScheduler, autosaveSignature, createBrowserAutosave } from '../app/matchAutosave';
 import type { AutosaveStore } from '../app/matchAutosave';
 import { LIBRARY_KINDS, createBrowserLibrary, newLibraryId } from '../app/libraryStore';
@@ -52,8 +52,8 @@ import {
 import type { LibrarySummary } from '../ui/library';
 import LibrarySection from './LibrarySection';
 import type { LibrarySectionKind } from './LibrarySection';
-import { autosaveRestoreMessage, compareLoadedBranch, matchComputingText, matchFileName, matchImportConfirmMessage, matchImportErrorMessage, matchImportProgress, matchSummaryText, mismatchBanner, summaryFileName } from '../ui/matchFile';
-import type { MatchComparison, MatchImportError } from '../ui/matchFile';
+import { autosaveRestoreMessage, matchComputingText, matchFileName, matchImportConfirmMessage, matchImportErrorMessage, matchImportProgress, matchSummaryText, mismatchBanner, summaryFileName } from '../ui/matchFile';
+import type { MatchImportError } from '../ui/matchFile';
 import { t } from '../ui/i18n';
 import type { Language } from '../ui/i18n';
 import { DEFAULT_SETTINGS, browserSettingsStorage, loadStoredConfig, saveStoredConfig } from '../ui/settings';
@@ -764,7 +764,7 @@ export default function MainScreen({ services = BROWSER_SERVICES }: { services?:
           const mismatches = loaded
             .map(b => {
               const branch = recipe.branches.find(r => r.number === b.number)!;
-              return { branch, comparison: compareLoadedBranch(branch, b) };
+              return { branch, comparison: verifyRecipe(branch, b) };
             })
             .filter(m => !m.comparison.match);
           const first = mismatches[0];

@@ -180,13 +180,13 @@ describe('저장 레시피 (10-3)', () => {
     const replay = engineFor(parsed.recipe.setup);
     replay.inputProvider = createInputRecordProvider(records);
     replay.runFullMatch();
-    expect(verifyRecipe(parsed.recipe.branches[0], replay.timeline)).toEqual({ match: true });
+    expect(verifyRecipe(parsed.recipe.branches[0], timelineRecord(replay.timeline))).toEqual({ match: true });
     expect(JSON.stringify(replay.getFrame(6000))).toBe(JSON.stringify(engine.getFrame(6000)));
     // 시드가 다르면 결과가 달라지고 체크섬이 그 구간을 잡는다
     const other = engineFor({ ...parsed.recipe.setup, scenario: { ...parsed.recipe.setup.scenario, rngSeed: 1 } });
     other.inputProvider = createInputRecordProvider(records);
     other.runFullMatch();
-    expect(verifyRecipe(parsed.recipe.branches[0], other.timeline)).toMatchObject({ match: false });
+    expect(verifyRecipe(parsed.recipe.branches[0], timelineRecord(other.timeline))).toMatchObject({ match: false });
   }, TEST_TIMEOUT_MS);
 
   it('D. 만들기: 입력 부족 / 트리 구조가 틀리면 오류, 끝나지 않은 가지도 저장, 시드가 비어 있으면 엔진 기본 시드, 로컬 시각 + 시간대', () => {
@@ -215,7 +215,7 @@ describe('저장 레시피 (10-3)', () => {
     const replay = engineFor(parsed.recipe.setup);
     replay.inputProvider = createInputRecordProvider(branchInputRecords(parsed.recipe, 1)!);
     replay.runFullMatch();
-    expect(verifyRecipe(parsed.recipe.branches[0], replay.timeline)).toEqual({ match: true });
+    expect(verifyRecipe(parsed.recipe.branches[0], timelineRecord(replay.timeline))).toEqual({ match: true });
   }, TEST_TIMEOUT_MS);
 
   it('E. 거부: 파일 형식 / 형식 버전 / 항목 누락 · 형식 틀림(기본값으로 채우지 않음) / 입력 / 체크포인트 / 설정 검증', () => {
@@ -398,7 +398,7 @@ describe('저장 레시피 (10-3)', () => {
       expect(Array.from(joined.robot1)).toEqual(Array.from(records.robot1));
       expect(Array.from(joined.robot2)).toEqual(Array.from(records.robot2));
       const branch = parsed.recipe.branches.find(b => b.number === Number(number))!;
-      expect(verifyRecipe(branch, run(joined, branch.headTick))).toEqual({ match: true });
+      expect(verifyRecipe(branch, timelineRecord(run(joined, branch.headTick)))).toEqual({ match: true });
     }
     expect(branchInputRecords(parsed.recipe, 3)).toBeNull();
 
@@ -437,6 +437,33 @@ describe('저장 레시피 (10-3)', () => {
     expect(worstText.length).toBeLessThan(MAX_IMPORT_BYTES);
     expect(parse(worstText).ok).toBe(true);
   }, TEST_TIMEOUT_MS);
+
+  it('K. (12-16) 불러온 가지 비교 verifyRecipe: 체크포인트가 먼저, 같으면 판정 결과(정착 구간). 기록 요약 결과 = 판정 프레임일 때만', () => {
+    const sums = ['a', 'b', 'c'];
+    const res = (totalScore: number, swarm = false) => ({ totalScore, rp: { swarm, pollinator1: false, pollinator2: false } });
+    expect(verifyRecipe({ checksums: sums, result: res(42) }, { checksums: [...sums], result: res(42) })).toEqual({ match: true });
+    expect(verifyRecipe({ checksums: sums, result: null }, { checksums: sums, result: null })).toEqual({ match: true }); // 미종료 가지
+    // 체크포인트가 다르면 그쪽이 먼저 (결과도 다르더라도)
+    expect(verifyRecipe({ checksums: sums, result: res(42) }, { checksums: ['a', 'x', 'c'], result: res(47) })).toEqual({ match: false, index: 1, lastMatchTick: 0, firstMismatchTick: 50 });
+    // 체크포인트는 같고 판정만 다름 (총점 / RP / 한쪽만 결과)
+    expect(verifyRecipe({ checksums: sums, result: res(42) }, { checksums: sums, result: res(47) })).toEqual({ match: false, settle: { file: 42, now: 47 } });
+    expect(verifyRecipe({ checksums: sums, result: res(42) }, { checksums: sums, result: res(42, true) })).toEqual({ match: false, settle: { file: 42, now: 42 } });
+    expect(verifyRecipe({ checksums: sums, result: null }, { checksums: sums, result: res(42) })).toEqual({ match: false, settle: { file: null, now: 42 } });
+
+    // 0:00에 움직이던 경기: 6000틱에서 자른 타임라인(판정 전 0:00 프레임)은 결과 없음, 전체 타임라인은 판정 프레임 결과
+    const e = engineFor(defaults);
+    while (e.currentTick < MATCH_TICKS) {
+      const go = e.currentTick >= MATCH_TICKS - 30 ? { targetVx: 40, targetVy: 0, targetOmega: 0, actionState: 'IDLE' as const } : undefined;
+      e.step(go, go);
+    }
+    const end = e.endFrame!;
+    expect(end.tick > MATCH_TICKS && e.getFrame(MATCH_TICKS)!.scoreBreakdown === null).toBe(true); // 정착 구간 있음
+    const cut = timelineRecord(e.timeline.slice(0, MATCH_TICKS + 1));
+    expect([cut.headTick, cut.result]).toEqual([MATCH_TICKS, null]);
+    const full = timelineRecord(e.timeline);
+    expect([full.headTick, full.result]).toEqual([MATCH_TICKS, { totalScore: end.totalScore, rp: { ...end.rpAchieved } }]);
+    expect(cut.checksums).toEqual(full.checksums); // 체크포인트는 0 ~ 6000틱이라 같음
+  });
 
   it('J. 가지 입력 재료 캐시 (자동 저장): 글자는 캐시 없이와 같음, 같은 입력 배열 + 같은 분기 · 머리 틱이면 재사용, 머리가 자라거나 배열이 바뀌면 다시 만듦', () => {
     const data = (seed: number) => Int8Array.from({ length: MATCH_TICKS * 4 }, (_, i) => (i % 4 === 3 ? ((i >> 2) + seed) % 5 : ((i * 37 + seed * 11) % 255) - 127));

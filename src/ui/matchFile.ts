@@ -6,10 +6,8 @@
 
 import type { MatchResult } from '../app/appController';
 import { MAX_BRANCHES } from '../app/branchTree';
-import type { MatchRecipe, RecipeError, RecipeResult, RecipeWarning } from '../app/matchRecipe';
+import type { MatchComparison, MatchRecipe, RecipeError, RecipeWarning } from '../app/matchRecipe';
 import { BALLISTICS_MODEL_VERSION } from '../core/ballistics';
-import { compareCheckpoints } from '../core/checksum';
-import type { CheckpointComparison } from '../core/checksum';
 import { DT, ENGINE_VERSION, MATCH_TICKS } from '../core/simulationEngine';
 import type { RobotId } from '../input/inputConfig';
 import { t } from './i18n';
@@ -99,26 +97,6 @@ export function matchComputingText(lang: Language, done: number, total: number):
 export interface MismatchBranch {
   label: string;
   others: number;
-}
-
-/**
- * 불러온 가지 비교 (12-16): 체크포인트(0 ~ 6000틱)를 먼저 보고, 같으면 판정 결과(총점 · RP)를 비교한다.
- * 정착 구간(0:00 뒤)은 입력 없이 다시 계산되어 체크포인트에 들어가지 않으므로, 그 구간만 어긋나면 결과로만 드러난다
- */
-export type MatchComparison = CheckpointComparison | { match: false; settle: { file: number | null; now: number | null } };
-
-export function compareLoadedBranch(
-  file: { checksums: readonly string[]; result: RecipeResult | null },
-  loaded: { checksums: readonly string[]; result: RecipeResult | null },
-): MatchComparison {
-  const checkpoints = compareCheckpoints(file.checksums, loaded.checksums);
-  if (!checkpoints.match) return checkpoints;
-  const a = file.result;
-  const b = loaded.result;
-  const same = a === null || b === null
-    ? a === b
-    : a.totalScore === b.totalScore && a.rp.swarm === b.rp.swarm && a.rp.pollinator1 === b.rp.pollinator1 && a.rp.pollinator2 === b.rp.pollinator2;
-  return same ? checkpoints : { match: false, settle: { file: a?.totalScore ?? null, now: b?.totalScore ?? null } };
 }
 
 /**
