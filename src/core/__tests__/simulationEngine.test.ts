@@ -1750,6 +1750,10 @@ describe('SimulationEngine 통합 회귀 테스트', () => {
       const end = judged(e);
       assert(e.timeline.length === end.tick + 1 && e.currentTick === end.tick && end.tick - 6000 <= SETTLE_MAX_TICKS, `${label}: judged frame is the last (tick ${end.tick})`);
       assert(e.timeline.slice(6000, end.tick).every(f => f.scoreBreakdown === null && f.totalScore === f.field.hive.tipCount * 20), `${label}: settle frames carry live TIP score only`);
+      // 판정 때 더해지는 것은 CELL / FLOWER / GARDEN / PARK뿐 — HIVE는 직전 프레임 점수에 이미 들어 있음 (종료 점수 집계 출발점, 13-7 수정)
+      const { cell, flower, garden, park } = end.scoreBreakdown!;
+      const before = end.tick > 6000 ? e.timeline[end.tick - 1].totalScore : end.field.hive.tipCount * 20;
+      assert(end.totalScore - cell - flower - garden - park === before, `${label}: judged total = previous frame score + judged items`);
     };
 
     // 0:00에 모두 멈춰 있으면 정착 구간 없음: 6000틱 프레임이 곧 판정 프레임

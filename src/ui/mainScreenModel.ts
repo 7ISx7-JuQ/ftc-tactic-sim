@@ -89,19 +89,18 @@ export const END_TALLY_MS = 1500;       // 점수 카운트업 시간
 export const END_CHIP_STAGGER_MS = 350; // 칩이 하나씩 뜨는 간격
 
 export interface EndTally {
-  from: number; // 0:00 점수 (그때까지의 텔레옵 TIP × 20)
+  from: number; // 판정 직전 점수 (TIP × 20 — 정착 구간에서 난 TIP 포함, 정착 재생 마지막 프레임의 점수와 같음)
   to: number;   // 최종 점수 (판정 프레임)
-  chips: { label: 'HIVE' | 'CELL' | 'FLOWER' | 'GARDEN' | 'PARK'; points: number }[]; // 0:00 뒤 더해진 항목 (0점 제외, 결과 팝업 순서)
+  chips: { label: 'CELL' | 'FLOWER' | 'GARDEN' | 'PARK'; points: number }[]; // 판정 때 더해진 항목 (0점 제외, 결과 팝업 순서)
 }
 
-/** 종료 점수 집계: HIVE = 0:00 뒤 정착 구간에서 난 TIP × 20 (13-7), 나머지는 판정 프레임에서 더해진 항목 */
-export function endScoreTally(result: { total: number; settleTips: number; breakdown: { cell: number; flower: number; garden: number; park: number } }): EndTally {
+/** 종료 점수 집계: 판정 프레임에서 더해진 항목만 칩으로. HIVE(TIP)는 정착 중 TIP까지 프레임 점수에 실시간으로 이미 들어 있어 칩 없음 (13-7 수정) */
+export function endScoreTally(result: { total: number; breakdown: { cell: number; flower: number; garden: number; park: number } }): EndTally {
   const { cell, flower, garden, park } = result.breakdown;
-  const hive = Math.max(0, result.settleTips) * 20;
-  const chips = ([['HIVE', hive], ['CELL', cell], ['FLOWER', flower], ['GARDEN', garden], ['PARK', park]] as const)
+  const chips = ([['CELL', cell], ['FLOWER', flower], ['GARDEN', garden], ['PARK', park]] as const)
     .filter(([, points]) => points > 0)
     .map(([label, points]) => ({ label, points }));
-  return { from: result.total - hive - cell - flower - garden - park, to: result.total, chips };
+  return { from: result.total - cell - flower - garden - park, to: result.total, chips };
 }
 
 /** 카운트업 표시 값: 처음 빠르고 끝에서 느려지는 곡선(easeOutCubic), 정수, 끝나면 정확히 최종 값 */

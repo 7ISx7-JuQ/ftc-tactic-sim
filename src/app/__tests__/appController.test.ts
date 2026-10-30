@@ -17,6 +17,7 @@ import { DEFAULT_DRAFT_VALUES } from '../defaultSetup';
 import type { AppStatus, LiftToast, MatchSetup } from '../appController';
 import type { EditScene } from '../../renderer/editSceneRenderer';
 import type { ScenePaths } from '../../renderer/robotPath';
+import { endScoreTally } from '../../ui/mainScreenModel';
 
 // 편집 모드 장면 그리기 기록 (09-10b): 실제 그리기 대신 받은 장면만 모음
 const editRenders = vi.hoisted(() => [] as unknown[]);
@@ -416,9 +417,15 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     frames.advance(100, 20);
     s = h.status();
     assert(s.endStage === 'SETTLE' && s.tick > MATCH_TICKS && s.tick <= MATCH_TICKS + 6, `real-time (50 Hz): ${s.tick - MATCH_TICKS} ticks after 0.1 s`);
-    for (let i = 0; i < 600 && h.status().endStage === 'SETTLE'; i++) frames.advance(20, 20);
+    let lastSettleScore = s.score;
+    for (let i = 0; i < 600 && h.status().endStage === 'SETTLE'; i++) {
+      lastSettleScore = h.status().score;
+      frames.advance(20, 20);
+    }
     s = h.status();
     assert(s.endStage === 'HIGHLIGHT' && s.tick === end && s.score === s.result!.total, 'reaching the judged tick -> end highlight on the judged frame');
+    // 13-7 수정: 종료 점수 집계는 정착 재생 마지막 점수에서 출발 (뒤로 가지 않음)
+    assert(endScoreTally(s.result!).from === lastSettleScore, `tally starts at the last settle score (${lastSettleScore})`);
     frames.advance(END_HIGHLIGHT_MS - 200, 20);
     assert(h.status().endStage === 'HIGHLIGHT', 'highlight lasts 5 s from the end of settling');
     frames.advance(400, 20);

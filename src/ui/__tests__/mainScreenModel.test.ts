@@ -184,16 +184,15 @@ describe('E. 경기 종료 연출 (09-7c)', () => {
     expect(timerIsFinalCountdown({ phase: 'SETUP', remainingSec: 5 })).toBe(false);
   });
 
-  it('점수 집계: 0:00 점수 = 최종 − 0:00 뒤 더해진 항목, 칩은 0점 제외 HIVE(정착 중 TIP, 13-7) → CELL → FLOWER → GARDEN → PARK', () => {
-    const tally = endScoreTally({ total: 69, settleTips: 0, breakdown: { cell: 0, flower: 0, garden: 4, park: 5 } });
+  it('점수 집계: 출발 = 최종 − 판정 때 더해진 항목, 칩은 0점 제외 CELL → FLOWER → GARDEN → PARK (HIVE 칩 없음, 13-7 수정)', () => {
+    const tally = endScoreTally({ total: 69, breakdown: { cell: 0, flower: 0, garden: 4, park: 5 } });
     expect(tally).toEqual({ from: 60, to: 69, chips: [{ label: 'GARDEN', points: 4 }, { label: 'PARK', points: 5 }] });
-    const all = endScoreTally({ total: 56, settleTips: 1, breakdown: { cell: 6, flower: 11, garden: 9, park: 10 } });
-    expect(all.from === 0 && all.chips.map(c => c.label).join() === 'HIVE,CELL,FLOWER,GARDEN,PARK').toBe(true);
-    // CELL 잔여 점수(12-13)도 종료 때 더해지는 항목 — 종료 직전 점수에서 뺌
-    expect(endScoreTally({ total: 26, settleTips: 0, breakdown: { cell: 6, flower: 0, garden: 0, park: 0 } })).toEqual({ from: 20, to: 26, chips: [{ label: 'CELL', points: 6 }] });
-    // 0:00 뒤 도착한 공으로 난 TIP: 0:00 점수(20)에서 +20 HIVE (판정 HIVE 40)
-    expect(endScoreTally({ total: 40, settleTips: 1, breakdown: { cell: 0, flower: 0, garden: 0, park: 0 } })).toEqual({ from: 20, to: 40, chips: [{ label: 'HIVE', points: 20 }] });
-    expect(endScoreTally({ total: 40, settleTips: 0, breakdown: { cell: 0, flower: 0, garden: 0, park: 0 } })).toEqual({ from: 40, to: 40, chips: [] });
+    const all = endScoreTally({ total: 56, breakdown: { cell: 6, flower: 11, garden: 9, park: 10 } });
+    expect(all.from === 20 && all.chips.map(c => c.label).join() === 'CELL,FLOWER,GARDEN,PARK').toBe(true);
+    // CELL 잔여 점수(12-13)도 판정 때 더해지는 항목 — 판정 직전 점수에서 뺌
+    expect(endScoreTally({ total: 26, breakdown: { cell: 6, flower: 0, garden: 0, park: 0 } })).toEqual({ from: 20, to: 26, chips: [{ label: 'CELL', points: 6 }] });
+    // 0:00 뒤 도착한 공으로 난 TIP(판정 HIVE 40): 정착 재생 중 점수가 이미 40이므로 40에서 출발, 칩 없음 (되감겨 보이지 않음)
+    expect(endScoreTally({ total: 40, breakdown: { cell: 0, flower: 0, garden: 0, park: 0 } })).toEqual({ from: 40, to: 40, chips: [] });
   });
 
   it('카운트업 값: 시작 = 이전 점수, 끝 = 최종, 단조 증가 정수, 비정상 입력은 최종 값', () => {

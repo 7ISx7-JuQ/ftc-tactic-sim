@@ -237,7 +237,6 @@ export interface MatchResult {
   tips: number;                 // 오토 + 텔레옵 TIP 횟수 (RP 카드용, 점수에는 오토 미포함)
   autoTips: number;             // 오토 TIP 횟수 (결과 팝업 근거: RP에만 합산, 09-12)
   teleopTips: number;           // 텔레옵 TIP 횟수 (HIVE 점수 = × 20)
-  settleTips: number;           // 그중 0:00 뒤 정착 구간에서 난 TIP 수 (종료 점수 칩 +HIVE, 13-7)
   thresholds: RPThresholds;     // 이 경기 RP 기준값 (엔진 판정과 같은 값, 14-3: RP 카드)
   autoMovementPoints: number;   // 오토 이동 점수 (LEAVE 3 / PARK 5 / LEAVE_PARK 8 합, RP에만 — SWARM = 이 점수 + TELEOP PARK, 14-3)
 }
@@ -867,7 +866,6 @@ export class AppController {
       tips: hive.autoTipCount + hive.tipCount,
       autoTips: hive.autoTipCount,
       teleopTips: hive.tipCount,
-      settleTips: hive.tipCount - (this.engine.getFrame(MATCH_TICKS)?.field.hive.tipCount ?? hive.tipCount),
       thresholds: resolveRPThresholds(this.setup.scenario),
       autoMovementPoints: autoMovementPoints(this.setup.scenario),
     };
