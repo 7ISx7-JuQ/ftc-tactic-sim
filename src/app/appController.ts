@@ -1049,7 +1049,7 @@ export class AppController {
   private checkLiftToasts(stepped: number): void {
     if (stepped <= 0) return;
     const now = this.now();
-    const end = this.engine.currentTick;
+    const end = this.inputHeadTick(); // 0:00을 넘는 프레임: 엔진 현재 틱은 판정 틱(정착 구간 끝)이라 입력 머리(6000)까지만 검사
     for (const robot of ['robot1', 'robot2'] as const) {
       if (this.inputs.sources[robot] !== 'LIVE' || now - this.lastToastAt[robot] < LIFT_TOAST_COOLDOWN_MS) continue;
       if (liftDriveRatio(robot === 'robot1' ? this.setup.r1Config : this.setup.r2Config) > 0) continue;

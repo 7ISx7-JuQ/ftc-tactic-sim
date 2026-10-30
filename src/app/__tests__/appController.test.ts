@@ -61,8 +61,13 @@ const fakeEnv = () => {
   const doc = Object.assign(new EventTarget(), { visibilityState: 'visible' });
   const pads: (GamepadLike | null)[] = [];
   const env: BrowserInputEnv = { window: win, document: doc, navigator: { getGamepads: () => pads } };
-  return { env, win };
+  return { env, win, pads };
 };
+// 가짜 게임패드 (표준 매핑, 축 = [왼쪽 X, 왼쪽 Y, 오른쪽 X, 오른쪽 Y])
+const gamepad = (index: number, axes = [0, 0, 0, 0]): GamepadLike => ({
+  index, id: `Pad ${index}`, mapping: 'standard', connected: true, axes,
+  buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })),
+});
 const key = (type: 'keydown' | 'keyup', code: string, shiftKey = false) => Object.assign(new Event(type, { cancelable: true }), { code, repeat: false, shiftKey });
 // 단축키 1회 누름 (keydown + keyup)
 const press = (win: EventTarget, code: string, shiftKey = false) => {
@@ -134,12 +139,12 @@ const makeSetup = (alliance: 'RED' | 'BLUE', scenario: Partial<ScenarioConfig> =
 
 const setup = (initial: MatchSetup = makeSetup('RED')) => {
   const frames = new FakeFrames();
-  const { env, win } = fakeEnv();
+  const { env, win, pads } = fakeEnv();
   const { ctx, counter } = countingCtx();
   const statuses: AppStatus[] = [];
   const toasts: LiftToast[] = [];
   const h = new AppController({ ctx, setup: initial, env, scheduler: frames, now: () => frames.time, onStatus: s => statuses.push(s), onToast: t => toasts.push(t) });
-  return { h, frames, win, counter, statuses, toasts };
+  return { h, frames, win, pads, counter, statuses, toasts };
 };
 
 describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이전)', () => {
@@ -501,6 +506,31 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     h.closeResult();
     s = h.status();
     assert(s.endStage === 'REVIEW' && s.currentBranchId === 2 && s.canScrub, 'close -> review of branch 2');
+    h.dispose();
+  }, FULL_MATCH_TIMEOUT_MS);
+
+  it('G2. 경고 토스트: 0:00을 넘는 프레임의 리프트 중 주행 입력도 경고 (정착 구간 프레임이 아니라 진행한 입력 틱을 검사, 12-16 수정)', () => {
+    const { h, frames, win, pads, toasts } = setup();
+    pads[0] = gamepad(0); // R1 게임패드: 시작 때 연결 (중립)
+    h.start();
+    frames.advance(VIEW_ANIMATION_MS + 50);
+    // R2(키보드) 리프트 올림 → 올린 채 대기
+    win.dispatchEvent(key('keydown', KEYBOARD_BINDINGS.lift));
+    frames.advance(60, 20);
+    win.dispatchEvent(key('keyup', KEYBOARD_BINDINGS.lift));
+    for (let i = 0; i < 1300 && h.status().headTick < MATCH_TICKS - 100; i++) frames.advance(100, 100);
+    // R1(게임패드 0) 전진 → 0:00에 움직이는 중이라 정착 구간이 생김
+    pads[0] = gamepad(0, [0, -1, 0, 0]);
+    for (let i = 0; i < 200 && h.status().headTick < MATCH_TICKS - 4; i++) frames.advance(20, 20);
+    const lift = h.currentFrame().r2.actionState;
+    assert((lift === 'FLOWER_SETUP' || lift === 'FLOWER_READY') && toasts.length === 0, `R2 still lifted near 0:00 (${lift}), no toast yet`);
+    // 마지막 몇 틱 + 0:00을 한 프레임에 진행하며 R2 W
+    win.dispatchEvent(key('keydown', KEYBOARD_BINDINGS.forward));
+    frames.advance(100, 100);
+    win.dispatchEvent(key('keyup', KEYBOARD_BINDINGS.forward));
+    const s = h.status();
+    assert(s.loopState === 'ENDED' && s.endTick > MATCH_TICKS, `match ended while R1 was moving (judged tick ${s.endTick})`);
+    assert(toasts.length === 1 && toasts[0].robot === 'robot2', 'drive input in the frame crossing 0:00 -> toast for R2');
     h.dispose();
   }, FULL_MATCH_TIMEOUT_MS);
 
