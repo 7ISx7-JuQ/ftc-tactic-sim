@@ -1016,6 +1016,11 @@ export class SimulationEngine {
 
     // 점수: 진행 중에는 HIVE Tip만 실시간 (득점 내역 없음). 0:00에 닿으면 정착 구간을 이어 기록하고 마지막 프레임에서 판정
     if (this.currentTick >= MATCH_TICKS) return this.settleAndFinalize();
+    return this.recordLiveFrame();
+  }
+
+  // 판정 전 프레임 기록 (경기 틱 / 정착 구간 공용): 점수는 HIVE Tip만 실시간, 득점 내역 없음 (판정 프레임만 finalizeScore)
+  private recordLiveFrame(): TimelineFrame {
     this.totalScore = this.field.hive.tipCount * HIVE_TIP_POINTS;
     this.scoreBreakdown = null;
     return this.recordFrame();
@@ -1807,9 +1812,7 @@ export class SimulationEngine {
     this.r1 = this.toIdleState(this.r1);
     this.r2 = this.toIdleState(this.r2);
     for (let ticks = 0; ticks < SETTLE_MAX_TICKS && !this.isSettled(); ticks++) {
-      this.totalScore = this.field.hive.tipCount * HIVE_TIP_POINTS;
-      this.scoreBreakdown = null;
-      this.recordFrame();
+      this.recordLiveFrame();
       this.currentTick++;
       this.activateGardenPieces();
       this.r1 = this.stepRobotMotion(this.r1, DEFAULT_INPUT, this.r1Config);
