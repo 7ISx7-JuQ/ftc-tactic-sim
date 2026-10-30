@@ -7,7 +7,7 @@ import { DEFAULT_GAMEPAD_MAPPING, DEVICE_ASSIGNMENT, KEYBOARD_BINDINGS, swapAssi
 import type { FrameScheduler } from '../../input/realtimeLoop';
 import { DEFAULT_RENDER_OPTIONS } from '../../renderer/renderOptions';
 import { VIEW_ANIMATION_MS, viewAngle } from '../../renderer/viewTransform';
-import { MATCH_TICKS, SimulationEngine } from '../../core/simulationEngine';
+import { MATCH_TICKS, SETTLE_MAX_TICKS, SimulationEngine } from '../../core/simulationEngine';
 import { createInputRecordProvider } from '../../input/inputLog';
 import { AppController, END_HIGHLIGHT_MS, LIFT_TOAST_COOLDOWN_MS } from '../appController';
 import { buildMatchRecipe, recipeLoadTree } from '../matchRecipe';
@@ -496,6 +496,8 @@ describe('앱 컨트롤러 (명세서 3.8, 09-6c — 08-7 하네스 흐름 이�
     h.openResult();
     assert(!h.switchBranch(b3) && h.status().currentBranchId === 2, 'result popup: unfinished branch refused');
     assert(!h.switchBranch(2), 'result popup: current branch refused');
+    // 끝난 가지로 전환하는 비용 = 머리(6000) − 갈라진 틱(5900) + 정착 구간 최대치, 미종료 가지(원본 100틱에서)는 머리 − 100 (12-16 수정)
+    assert(h.switchCost(1) === 100 + SETTLE_MAX_TICKS && h.switchCost(b3) === h.status().branches.find(b => b.id === b3)!.headTick - 100, `switch cost to the ended root includes settling (${h.switchCost(1)})`);
     assert(h.switchBranch(1), 'result popup: switch to the ended root');
     s = h.status();
     assert(s.endStage === 'RESULT' && s.currentBranchId === 1 && s.tick === MATCH_TICKS && s.endSeq === 2, 'popup stays open on the root, no new end signal');

@@ -22,7 +22,7 @@
 // 시계 / 프레임 스케줄러 / 브라우저 환경을 주입받아 Node에서 가짜 시간으로 테스트한다.
 
 import { liftDriveRatio } from '../core/kinematics';
-import { DT, MATCH_TICKS, SimulationEngine, autoMovementPoints, resolveRPThresholds } from '../core/simulationEngine';
+import { DT, MATCH_TICKS, SETTLE_MAX_TICKS, SimulationEngine, autoMovementPoints, resolveRPThresholds } from '../core/simulationEngine';
 import type { EngineTimeline } from '../core/simulationEngine';
 import type {
   DeepReadonly,
@@ -571,9 +571,10 @@ export class AppController {
   branch(): boolean {
     if (!this.canBranch() || !canFork(this.tree)) return false;
     this.stopPlayback();
-    const tick = this.viewTick;
     this.tree = setBranchData(this.tree, this.tree.currentId, this.leavingBranchData());
-    this.engine.forkTimeline(tick);
+    this.engine.forkTimeline(this.viewTick);
+    // 엔진이 실제로 자른 틱 (0:00 뒤는 5999로 자름 — canBranch가 막지만, 트리 · 입력 기록이 엔진 프레임과 어긋나지 않게)
+    const tick = this.engine.currentTick;
     this.tree = forkBranch(this.tree, tick, CURRENT_BRANCH_DATA)!;
     this.applyInputChoices(); // 분기부터 새 출처 (REPLAY로 바꾼 로봇은 기록 유지 = 녹화 덧입히기)
     for (const robot of ['robot1', 'robot2'] as const) {
@@ -617,11 +618,15 @@ export class AppController {
     return true;
   }
 
-  /** 가지 전환에 다시 계산할 틱 수 (16-2, 화면의 계산 중 표시용). 지금 가지 / 없는 가지면 0 */
+  /**
+   * 가지 전환에 다시 계산할 틱 수 (16-2, 화면의 계산 중 표시용). 지금 가지 / 없는 가지면 0.
+   * 끝난 가지는 0:00 뒤 정착 구간도 다시 계산하므로 최대치(SETTLE_MAX_TICKS)를 더한다 (기록 요약에는 정착 길이가 없음, 12-16 수정)
+   */
   switchCost(id: number): number {
     const target = findBranch(this.tree, id);
     if (!target || id === this.tree.currentId || !target.data.record) return 0;
-    return target.data.record.headTick - this.sharedTick(id);
+    const { headTick } = target.data.record;
+    return headTick - this.sharedTick(id) + (headTick >= MATCH_TICKS ? SETTLE_MAX_TICKS : 0);
   }
 
   /** 가지 삭제에 다시 계산할 틱 수 (지금 가지가 지워져 부모로 전환할 때만, 16-2). 그 밖에는 0 */
