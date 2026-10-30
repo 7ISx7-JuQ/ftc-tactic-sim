@@ -12,7 +12,7 @@ ok=1
 if printf '%s' "$title" | grep -Eq "^${ID}\. [^ ]"; then ok=0                                  # 12-14. 제목
 elif printf '%s' "$title" | grep -Eq "^${ID}( / ${ID})* (보완|수정|정정): [^ ]"; then ok=0     # 18-3 보완: 제목
 elif printf '%s' "$title" | grep -Eq '^[^0-9 :]([^:]*[^ :])?: [^ ]' \
-  && ! printf '%s' "$title" | grep -Eq '^Step '; then ok=0                                     # 명세서: 제목
+  && ! printf '%s' "$title" | grep -Eiq '^step([ _-]|[0-9])'; then ok=0                         # 명세서: 제목 (영어 Step 머리말은 대소문자 · 띄어쓰기 무관 거부)
 fi
 
 if [ "$ok" -ne 0 ]; then
