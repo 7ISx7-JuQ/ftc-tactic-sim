@@ -389,7 +389,7 @@ export interface TimelineFrame {
   pieces: GamePiece[];
   totalScore: number;
   rpAchieved: RPState;
-  scoreBreakdown: ScoreBreakdown | null; // 종료 프레임(Tick 6000)만 기록, 그 외 null
+  scoreBreakdown: ScoreBreakdown | null; // 판정 프레임(0:00 뒤 정착 구간의 마지막 프레임, 정착 0틱이면 Tick 6000)만 기록, 그 외 null (12-15)
 }
 
 // ==========================================

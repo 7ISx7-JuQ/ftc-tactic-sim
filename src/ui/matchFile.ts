@@ -102,10 +102,6 @@ export interface MismatchBranch {
 }
 
 /**
- * 체크섬 불일치 배너: 제목 + (가지가 2개 이상인 트리면 처음 어긋난 가지 이름) 처음 달라진 구간(경기 타이머 표시)
- * + 그 밖에 어긋난 가지 수 + 버전이 달랐으면 그 사유. 일치하면 null
- */
-/**
  * 불러온 가지 비교 (12-16): 체크포인트(0 ~ 6000틱)를 먼저 보고, 같으면 판정 결과(총점 · RP)를 비교한다.
  * 정착 구간(0:00 뒤)은 입력 없이 다시 계산되어 체크포인트에 들어가지 않으므로, 그 구간만 어긋나면 결과로만 드러난다
  */
@@ -125,6 +121,10 @@ export function compareLoadedBranch(
   return same ? checkpoints : { match: false, settle: { file: a?.totalScore ?? null, now: b?.totalScore ?? null } };
 }
 
+/**
+ * 체크섬 불일치 배너: 제목 + (가지가 2개 이상인 트리면 처음 어긋난 가지 이름) 처음 달라진 구간(경기 타이머 표시)
+ * 또는 정착 구간 판정 결과 차이(파일 점수 → 다시 계산한 점수, 12-16) + 그 밖에 어긋난 가지 수 + 버전이 달랐으면 그 사유. 일치하면 null
+ */
 export function mismatchBanner(
   lang: Language,
   comparison: MatchComparison,
