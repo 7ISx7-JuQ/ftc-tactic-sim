@@ -66,8 +66,8 @@ import type {
 // 엔진 결과 버전 (명세서 3.9, 10-3): 같은 시나리오 / 시드 / 입력에 대해 프레임 결과가 달라지는 커밋마다 +1
 // (엔진 규칙, 충돌 / 동역학 상수, 시나리오 초기화, 난수 사용 순서, 프레임 형식). 저장 레시피에 기록되며,
 // 고정 입력 경기의 체크포인트 기대값 테스트(__tests__/engineVersion.test.ts)가 올림 누락을 잡는다
-// 2 = v2.0.0 (12-1 HIVE 터널부터. v2.0.0 개발 중에는 한 번만 올리고 이후 Step은 기대값만 갱신, CLAUDE.md)
-export const ENGINE_VERSION = 2;
+// 2 = v2.0.0 개발 (12-1 HIVE 터널부터 13-7까지 기대값만 갱신), 3 = 21-1 정정 TIP 임계 (개발판 실사용 뒤 첫 결과 변경, CLAUDE.md)
+export const ENGINE_VERSION = 3;
 
 export const DT = 0.02;               // 고정 틱 간격 (초)
 export const MATCH_TICKS = 6000;      // 120초 × 50Hz

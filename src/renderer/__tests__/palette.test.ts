@@ -78,7 +78,7 @@ describe('진영 공식 색 / 캔버스 글자 / 경기 종료 강조 (09-6b)', 
   it('B. 캔버스 글자: 이름표 없음 (HIVE 셀 알약 / 로봇 번호 / 배지만), 한국어 없음', () => {
     const startRec = draw(engine({ allianceColor: 'RED' }).getFrame(0)!);
     const start = startRec.texts;
-    assert(start.join('|') === '▲ N3 P0/4|1|2', `start frame texts: ${start.join(' | ')}`);
+    assert(start.join('|') === '▲ N3 P0/3|1|2', `start frame texts: ${start.join(' | ')}`);
     // 상향 셀 안 NECTAR 3개: 흰 윤곽선 2.25 px (셀 바탕과 같은 진영색이라 굵게)
     const cellNectar = startRec.strokes.filter(st => st.style === '#ffffff' && st.width === 2.25);
     assert(cellNectar.length === 3, `cell NECTAR outlines 2.25 px (${cellNectar.length})`);

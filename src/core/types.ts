@@ -399,15 +399,16 @@ export interface TimelineFrame {
 /**
  * HIVE 팁(전복) 임계 테이블: 상향 셀 NECTAR 개수별 팁이 발동하는 POLLEN 개수
  * Key: NECTAR 개수, Value: 팁 발동 POLLEN 개수 (FLOWER_MAX_POLLEN_BY_NECTAR와 같은 구조)
- * 임계 조합 {NECTAR, POLLEN}: {0,8} {1,7} {2,5} {3,4} {4,2} {5,0}
+ * 임계 조합 {NECTAR, POLLEN}: {0,8} {1,7} {2,5} {3,3} {4,2} {5,0}
  * NECTAR가 테이블 최대 키(5) 이상이면 POLLEN 0개로 즉시 팁
- * (21-1: 지역 워크샵 실측값. HIVE 보정(calibration) 상태에 따라 달라질 수 있어 경기장에서 재확인 예정, 명세서 2.6.1)
+ * (21-1 정정: FIRST 공식 HIVE 보정 조건(Event Field Setup Guide 12장, Field Acceptance Checklist 2.3 ~ 2.6 — NECTAR 3 + POLLEN 3,
+ *  POLLEN 8에서 던져 넣으면 넘어감)이 허용하는 범위에서 칸마다 가장 많은 POLLEN이 드는 표. 명세서 2.6.1)
  */
 export const HIVE_TIP_POLLEN_BY_NECTAR: Record<number, number> = {
   0: 8,
   1: 7,
   2: 5,
-  3: 4,
+  3: 3,
   4: 2,
   5: 0,
 };

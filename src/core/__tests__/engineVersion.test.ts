@@ -11,7 +11,7 @@ import type { DriveInputProvider, RobotDriveInput } from '../simulationEngine';
 import type { RobotConfig } from '../types';
 
 // final = 0:00(6000틱) 프레임, judged = 판정 프레임 (0:00 뒤 정착 구간 끝 — 체크포인트에 들어가지 않아 따로, 12-15)
-const EXPECTED = { engineVersion: 2, final: 'c40804aa', all: 'fabd7ae9', judged: 'e5cc30e3' };
+const EXPECTED = { engineVersion: 3, final: 'e7d19311', all: '1aaf58ed', judged: '6fe5f8b5' };
 
 const cfg = (id: 'robot1' | 'robot2', over: Partial<RobotConfig> = {}): RobotConfig => ({
   id, name: id, width: 18, length: 18, maxSpeed: 60, maxTurnRate: 4, maxLinearAccel: 120, maxAngularAccel: 10,
@@ -47,7 +47,7 @@ describe('엔진 결과 버전 (10-3)', () => {
     const moved = last.pieces.filter((p, i) => p.x !== first.pieces[i].x || p.y !== first.pieces[i].y || p.state !== first.pieces[i].state).length;
     expect(moved).toBeGreaterThan(5);
     expect(Math.hypot(last.r1.x - first.r1.x, last.r1.y - first.r1.y)).toBeGreaterThan(1);
-    expect(last.field.hive.tipCount).toBe(2); // HIVE TIP 2회 (12-11: 명중률 0.8 고정 결과 판정, 21-1 워크샵 TIP 임계)
+    expect(last.field.hive.tipCount).toBe(3); // HIVE TIP 3회 (12-11: 명중률 0.8 고정 결과 판정, 21-1 정정 공식 보정 TIP 임계)
     expect(sums).toHaveLength(121);
     expect({ engineVersion: ENGINE_VERSION, final: sums[120], all: fnv1a32(sums.join('')), judged: frameChecksum(engine.endFrame!) }).toEqual(EXPECTED);
   }, 120_000);

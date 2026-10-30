@@ -12,7 +12,7 @@ Match results differ from 1.x: the engine rules and several field values changed
 - **Shots are judged by their actual path:** every shot gets its own random spread, and it scores if that path goes through the opening. Fixed shooters no longer have an aim tolerance; the left panel shows the expected hit rate for the current pose.
 - **Wall bounces:** pieces in the air bounce off the field walls (and then off the HIVE or the opposite wall).
 - **Landing spots:** a piece that lands on a robot or another piece is moved to the nearest free spot.
-- **Measured tables:** FLOWER capacity (measured) and HIVE TIP thresholds (from a local workshop; may change with HIVE calibration). With 3 NECTAR in the upward CELL a TIP now takes 4 POLLEN.
+- **Field tables:** FLOWER capacity (measured) and HIVE TIP thresholds set from FIRST's official HIVE calibration (Event Field Setup Guide, Field Acceptance Checklist): {NECTAR: POLLEN} = {0: 8, 1: 7, 2: 5, 3: 3, 4: 2, 5: 0}, the most demanding table those checks allow.
 - **BLUE default start poses** mirror the RED ones.
 - **CELL points:** each NECTAR or POLLEN left in the upward CELL at the end of the match scores 2 points (its own line in the results).
 - **Scoring after everything stops:** end-of-match scoring (TIP, CELL, FLOWER, GARDEN, PARK) is judged once all pieces and robots have come to rest after 0:00, as the rulebook says. Balls already in the air still land (and can TIP the HIVE); a shot still in its delay at 0:00 is not fired. A shot whose delay ends at 0:00 or later is not fired either. The seconds until everything stops play right after 0:00 (click or Space to skip) and stay in the match as a hatched tail on the timeline (no BRANCH there).
@@ -74,7 +74,7 @@ First release.
 - **실제 궤적으로 명중 판정:** 발사마다 편차를 준 궤적을 하나 뽑아, 그 궤적이 투입구를 지나면 득점합니다. 고정형 슈터의 허용 조준 오차가 없어졌고, 좌측 패널에 지금 자세의 기대 명중률이 나옵니다.
 - **벽 반사:** 공중의 기물이 필드 벽에 맞고 튕깁니다 (그 뒤 HIVE나 반대쪽 벽에도).
 - **착지 자리:** 로봇이나 다른 기물 위에 떨어진 기물은 가장 가까운 빈 자리로 옮겨집니다.
-- **실측 테이블:** FLOWER 수용 한도(실측)와 HIVE TIP 임계(지역 워크샵 값, HIVE 보정 상태에 따라 바뀔 수 있음). 상향 셀에 NECTAR 3개면 이제 POLLEN 4개에서 TIP합니다.
+- **필드 테이블:** FLOWER 수용 한도(실측)와, FIRST 공식 HIVE 보정 기준(Event Field Setup Guide, Field Acceptance Checklist)으로 정한 HIVE TIP 임계 {NECTAR: POLLEN} = {0: 8, 1: 7, 2: 5, 3: 3, 4: 2, 5: 0} — 그 기준이 허용하는 가장 많이 드는 표입니다.
 - **BLUE 기본 시작 자세**가 RED와 대칭이 됩니다.
 - **CELL 점수:** 경기가 끝날 때 상향 CELL에 남은 NECTAR · POLLEN 1개당 2점 (결과에 따로 한 줄).
 - **모두 멈춘 뒤 판정:** 경기 종료 득점(TIP, CELL, FLOWER, GARDEN, PARK)을 룰북대로 0:00 뒤 모든 기물과 로봇이 멈춘 상태로 판정합니다. 이미 날아간 공은 끝까지 날아가고(HIVE TIP도 가능), 0:00에 아직 발사 딜레이 중인 공은 나가지 않습니다. 0:00에 딜레이가 끝나는 공도 나가지 않습니다. 모두 멈출 때까지의 몇 초는 0:00 직후 이어서 재생되고(클릭 / Space로 건너뛰기), 타임라인 끝의 빗금 꼬리로 경기에 남습니다 (그 구간에서는 분기 불가).
