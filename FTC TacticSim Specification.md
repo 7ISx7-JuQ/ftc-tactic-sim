@@ -1468,7 +1468,7 @@ config 창의 편집 버튼을 누르면 메인 필드가 그 편집 모드로 �
 - **버그 리포트 (폼 없이 메일):** 받는 사람 `7isx7juq@gmail.com`(`BUG_REPORT_EMAIL`). 주 버튼 = Gmail 쓰기 창 링크 `https://mail.google.com/mail/?view=cm&fs=1&to=…&su=…&body=…`(새 탭), 보조 = 기본 메일 앱 `mailto:` 링크, 그 아래 주소 글자.
     - 제목 `[FTC TacticSim {버전}] Bug report`, 본문 = 지금 화면 언어의 작성 틀(무슨 일 / 재현 순서 / 기대 결과 / 첨부 안내) + 앱 버전 · 브라우저(User-Agent) · 화면(가로 × 세로 @배율) · 언어.
     - 앱은 메일을 보내지 않고 링크만 연다 (서버 없음).
-- **배포:** 정적 사이트(`npm run build` → `dist/`)라 어떤 정적 호스팅에도 올릴 수 있다. 명중 확률표 캐시(`crypto.subtle`)는 HTTPS에서만 동작하므로 HTTPS로 제공한다. 빌드에는 Node.js 22.12 이상이 필요하다.
+- **배포:** 정적 사이트(`npm run build` → `dist/`)라 어떤 정적 호스팅에도 올릴 수 있다. 명중 확률표 캐시(`crypto.subtle`)는 HTTPS에서만 동작하므로 HTTPS로 제공한다. 빌드에는 Node.js 22.12 이상이 필요하다. 배포 주소(Cloudflare Workers `biobuzz-tacticsim`)는 `main`에 올리면 Cloudflare가 `npm run build` 뒤 `npx wrangler deploy`로 올린다. 저장소의 `wrangler.jsonc`는 `dist/`를 정적 자산으로만 올리는 설정이다 — 이 파일이 없으면 wrangler가 자동 설정(패키지 설치 · 설정 파일 생성)을 하다 실패할 수 있다.
 
 ## 4. 데이터 인터페이스 (`types.ts`)
 
